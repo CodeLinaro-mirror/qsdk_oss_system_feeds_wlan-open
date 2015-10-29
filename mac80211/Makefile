@@ -59,7 +59,7 @@ define KernelPackage/mac80211
   TITLE:=Linux 802.11 Wireless Networking Stack
   DEPENDS+= @TARGET_ipq806x||TARGET_ar71xx \
 	+kmod-crypto-arc4 +kmod-crypto-aes +kmod-cfg80211 +hostapd-common
-  PKG_BUILD_DEPENDS+=kmod-qca-nss-drv
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
