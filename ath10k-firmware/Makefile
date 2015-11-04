@@ -7,7 +7,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=ath10k-firmware
 PKG_FW_VERSION:=10.2.4.97-1
 PKG_BL_FW_VERSION:=10.4.1.00030-1
-PKG_DK_FW_VERSION:=3.0.r3-00008-S-1
+PKG_DK_FW_VERSION:=3.0.r3-00008-S-2
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 PKG_RELEASE:=1
 
@@ -49,6 +49,9 @@ define Package/$(PKG_NAME)/install
 	$(1)/lib/firmware/ath10k/QCA99X0/hw2.0/
 	$(INSTALL_BIN) \
 		$(PKG_BUILD_DIR)/ath10k/QCA99X0/hw2.0/board-pci-0006-0001.bin  \
+	$(1)/lib/firmware/ath10k/QCA99X0/hw2.0/
+	$(INSTALL_BIN) \
+		$(PKG_BUILD_DIR)/ath10k/QCA99X0/hw2.0/board-2.bin  \
 	$(1)/lib/firmware/ath10k/QCA99X0/hw2.0/
 	$(INSTALL_BIN) \
 		$(PKG_BUILD_DIR)/10.4/firmware-5.bin_$(PKG_BL_FW_VERSION) \
