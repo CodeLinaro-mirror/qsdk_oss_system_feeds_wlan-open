@@ -77,6 +77,9 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) \
 		$(PKG_BUILD_DIR)/10.5/firmware-5.bin_$(PKG_DK_FW_VERSION) \
 	$(1)/lib/firmware/ath10k/QCA40XX/hw1.0/firmware-5.bin
+	$(INSTALL_BIN) \
+		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-2.bin  \
+	$(1)/lib/firmware/ath10k/QCA40XX/hw1.0/
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))

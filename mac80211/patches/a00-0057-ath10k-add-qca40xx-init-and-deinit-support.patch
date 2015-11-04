@@ -1,17 +1,526 @@
-diff --git a/.local-symbols b/.local-symbols
-index 892cf47..7c854b4 100644
---- a/.local-symbols
-+++ b/.local-symbols
-@@ -126,6 +126,7 @@ WIL6210_ISR_COR=
- WIL6210_TRACING=
- ATH10K=
- ATH10K_PCI=
-+ATH10K_AHB=
- ATH10K_DEBUG=
- ATH10K_DEBUGFS=
- ATH10K_TRACING=
-diff --git a/drivers/net/wireless/ath/ath10k/Kconfig b/drivers/net/wireless/ath/ath10k/Kconfig
-index cab4e17..87a342f 100644
+--- a/drivers/net/wireless/ath/ath10k/pci.c
++++ b/drivers/net/wireless/ath/ath10k/pci.c
+@@ -98,7 +98,6 @@ static const struct ath10k_pci_supp_chip
+ static void ath10k_pci_buffer_cleanup(struct ath10k *ar);
+ static int ath10k_pci_cold_reset(struct ath10k *ar);
+ static int ath10k_pci_safe_chip_reset(struct ath10k *ar);
+-static int ath10k_pci_wait_for_target_init(struct ath10k *ar);
+ static int ath10k_pci_init_irq(struct ath10k *ar);
+ static int ath10k_pci_deinit_irq(struct ath10k *ar);
+ static int ath10k_pci_request_irq(struct ath10k *ar);
+@@ -620,7 +619,7 @@ static void ath10k_pci_sleep_sync(struct
+ 	spin_unlock_irqrestore(&ar_pci->ps_lock, flags);
+ }
+ 
+-void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value)
++static void ath10k_bus_pci_write32(struct ath10k *ar, u32 offset, u32 value)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	int ret;
+@@ -642,7 +641,7 @@ void ath10k_pci_write32(struct ath10k *a
+ 	ath10k_pci_sleep(ar);
+ }
+ 
+-u32 ath10k_pci_read32(struct ath10k *ar, u32 offset)
++static u32 ath10k_bus_pci_read32(struct ath10k *ar, u32 offset)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	u32 val;
+@@ -667,6 +666,20 @@ u32 ath10k_pci_read32(struct ath10k *ar,
+ 	return val;
+ }
+ 
++inline void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value)
++{
++	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
++
++	ar_pci->bus_ops->write32(ar, offset, value);
++}
++
++inline u32 ath10k_pci_read32(struct ath10k *ar, u32 offset)
++{
++	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
++
++	return ar_pci->bus_ops->read32(ar, offset);
++}
++
+ u32 ath10k_pci_soc_read32(struct ath10k *ar, u32 addr)
+ {
+ 	return ath10k_pci_read32(ar, RTC_SOC_BASE_ADDRESS + addr);
+@@ -700,7 +713,7 @@ static bool ath10k_pci_irq_pending(struc
+ 	return false;
+ }
+ 
+-static void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar)
++void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar)
+ {
+ 	/* IMPORTANT: INTR_CLR register has to be set after
+ 	 * INTR_ENABLE is set to 0, otherwise interrupt can not be
+@@ -716,7 +729,7 @@ static void ath10k_pci_disable_and_clear
+ 				PCIE_INTR_ENABLE_ADDRESS);
+ }
+ 
+-static void ath10k_pci_enable_legacy_irq(struct ath10k *ar)
++void ath10k_pci_enable_legacy_irq(struct ath10k *ar)
+ {
+ 	ath10k_pci_write32(ar, SOC_CORE_BASE_ADDRESS +
+ 			   PCIE_INTR_ENABLE_ADDRESS,
+@@ -809,7 +822,7 @@ static void ath10k_pci_rx_post_pipe(stru
+ 	}
+ }
+ 
+-static void ath10k_pci_rx_post(struct ath10k *ar)
++void ath10k_pci_rx_post(struct ath10k *ar)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	int i;
+@@ -818,7 +831,7 @@ static void ath10k_pci_rx_post(struct at
+ 		ath10k_pci_rx_post_pipe(&ar_pci->pipe_info[i]);
+ }
+ 
+-static void ath10k_pci_rx_replenish_retry(unsigned long ptr)
++void ath10k_pci_rx_replenish_retry(unsigned long ptr)
+ {
+ 	struct ath10k *ar = (void *)ptr;
+ 
+@@ -838,6 +851,7 @@ static u32 ath10k_pci_targ_cpu_to_ce_add
+ 		       0x7ff) << 21;
+ 		break;
+ 	case ATH10K_HW_QCA99X0:
++	case ATH10K_HW_QCA40XX:
+ 		val = ath10k_pci_read32(ar, PCIE_BAR_REG_ADDRESS);
+ 		break;
+ 	}
+@@ -1007,8 +1021,8 @@ static int __ath10k_pci_diag_read_hi(str
+ #define ath10k_pci_diag_read_hi(ar, dest, src, len)		\
+ 	__ath10k_pci_diag_read_hi(ar, dest, HI_ITEM(src), len)
+ 
+-static int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
+-				     const void *data, int nbytes)
++int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
++			      const void *data, int nbytes)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	int ret = 0;
+@@ -1253,8 +1267,8 @@ static void ath10k_pci_htt_rx_cb(struct
+ 	ath10k_pci_process_rx_cb(ce_state, ath10k_pci_htt_rx_deliver);
+ }
+ 
+-static int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
+-				struct ath10k_hif_sg_item *items, int n_items)
++int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
++			 struct ath10k_hif_sg_item *items, int n_items)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	struct ath10k_pci_pipe *pci_pipe = &ar_pci->pipe_info[pipe_id];
+@@ -1322,13 +1336,13 @@ err:
+ 	return err;
+ }
+ 
+-static int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
+-				    size_t buf_len)
++int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
++			     size_t buf_len)
+ {
+ 	return ath10k_pci_diag_read_mem(ar, address, buf, buf_len);
+ }
+ 
+-static u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe)
++u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 
+@@ -1396,8 +1410,8 @@ static void ath10k_pci_fw_crashed_dump(s
+ 	queue_work(ar->workqueue, &ar->restart_work);
+ }
+ 
+-static void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
+-					       int force)
++void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
++					int force)
+ {
+ 	ath10k_dbg(ar, ATH10K_DBG_PCI, "pci hif send complete check\n");
+ 
+@@ -1422,7 +1436,7 @@ static void ath10k_pci_hif_send_complete
+ 	ath10k_ce_per_engine_service(ar, pipe);
+ }
+ 
+-static void ath10k_pci_kill_tasklet(struct ath10k *ar)
++void ath10k_pci_kill_tasklet(struct ath10k *ar)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	int i;
+@@ -1436,8 +1450,8 @@ static void ath10k_pci_kill_tasklet(stru
+ 	del_timer_sync(&ar_pci->rx_post_retry);
+ }
+ 
+-static int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
+-					      u8 *ul_pipe, u8 *dl_pipe)
++int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
++				       u8 *ul_pipe, u8 *dl_pipe)
+ {
+ 	const struct service_to_pipe *entry;
+ 	bool ul_set = false, dl_set = false;
+@@ -1481,8 +1495,8 @@ static int ath10k_pci_hif_map_service_to
+ 	return 0;
+ }
+ 
+-static void ath10k_pci_hif_get_default_pipe(struct ath10k *ar,
+-					    u8 *ul_pipe, u8 *dl_pipe)
++void ath10k_pci_hif_get_default_pipe(struct ath10k *ar,
++				     u8 *ul_pipe, u8 *dl_pipe)
+ {
+ 	ath10k_dbg(ar, ATH10K_DBG_PCI, "pci hif get default pipe\n");
+ 
+@@ -1506,6 +1520,7 @@ static void ath10k_pci_irq_msi_fw_mask(s
+ 				   CORE_CTRL_ADDRESS, val);
+ 		break;
+ 	case ATH10K_HW_QCA99X0:
++	case ATH10K_HW_QCA40XX:
+ 		/* TODO: Find appropriate register configuration for QCA99X0
+ 		 *  to mask irq/MSI.
+ 		 */
+@@ -1528,6 +1543,7 @@ static void ath10k_pci_irq_msi_fw_unmask
+ 				   CORE_CTRL_ADDRESS, val);
+ 		break;
+ 	case ATH10K_HW_QCA99X0:
++	case ATH10K_HW_QCA40XX:
+ 		/* TODO: Find appropriate register configuration for QCA99X0
+ 		 *  to unmask irq/MSI.
+ 		 */
+@@ -1658,7 +1674,7 @@ static void ath10k_pci_buffer_cleanup(st
+ 	}
+ }
+ 
+-static void ath10k_pci_ce_deinit(struct ath10k *ar)
++void ath10k_pci_ce_deinit(struct ath10k *ar)
+ {
+ 	int i;
+ 
+@@ -1666,7 +1682,7 @@ static void ath10k_pci_ce_deinit(struct
+ 		ath10k_ce_deinit_pipe(ar, i);
+ }
+ 
+-static void ath10k_pci_flush(struct ath10k *ar)
++void ath10k_pci_flush(struct ath10k *ar)
+ {
+ 	ath10k_pci_kill_tasklet(ar);
+ 	ath10k_pci_buffer_cleanup(ar);
+@@ -1701,9 +1717,9 @@ static void ath10k_pci_hif_stop(struct a
+ 	spin_unlock_irqrestore(&ar_pci->ps_lock, flags);
+ }
+ 
+-static int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar,
+-					   void *req, u32 req_len,
+-					   void *resp, u32 *resp_len)
++int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar,
++				    void *req, u32 req_len,
++				    void *resp, u32 *resp_len)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	struct ath10k_pci_pipe *pci_tx = &ar_pci->pipe_info[BMI_CE_NUM_TO_TARG];
+@@ -1897,7 +1913,14 @@ static int ath10k_pci_get_num_banks(stru
+ 	return 1;
+ }
+ 
+-static int ath10k_pci_init_config(struct ath10k *ar)
++static int ath10k_bus_get_num_banks(struct ath10k *ar)
++{
++	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
++
++	return ar_pci->bus_ops->get_num_banks(ar);
++}
++
++int ath10k_pci_init_config(struct ath10k *ar)
+ {
+ 	u32 interconnect_targ_addr;
+ 	u32 pcie_state_targ_addr = 0;
+@@ -2008,7 +2031,7 @@ static int ath10k_pci_init_config(struct
+ 	/* first bank is switched to IRAM */
+ 	ealloc_value |= ((HI_EARLY_ALLOC_MAGIC << HI_EARLY_ALLOC_MAGIC_SHIFT) &
+ 			 HI_EARLY_ALLOC_MAGIC_MASK);
+-	ealloc_value |= ((ath10k_pci_get_num_banks(ar) <<
++	ealloc_value |= ((ath10k_bus_get_num_banks(ar) <<
+ 			  HI_EARLY_ALLOC_IRAM_BANKS_SHIFT) &
+ 			 HI_EARLY_ALLOC_IRAM_BANKS_MASK);
+ 
+@@ -2038,7 +2061,7 @@ static int ath10k_pci_init_config(struct
+ 	return 0;
+ }
+ 
+-static int ath10k_pci_alloc_pipes(struct ath10k *ar)
++int ath10k_pci_alloc_pipes(struct ath10k *ar)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	struct ath10k_pci_pipe *pipe;
+@@ -2069,7 +2092,7 @@ static int ath10k_pci_alloc_pipes(struct
+ 	return 0;
+ }
+ 
+-static void ath10k_pci_free_pipes(struct ath10k *ar)
++void ath10k_pci_free_pipes(struct ath10k *ar)
+ {
+ 	int i;
+ 
+@@ -2077,7 +2100,7 @@ static void ath10k_pci_free_pipes(struct
+ 		ath10k_ce_free_pipe(ar, i);
+ }
+ 
+-static int ath10k_pci_init_pipes(struct ath10k *ar)
++int ath10k_pci_init_pipes(struct ath10k *ar)
+ {
+ 	int i, ret;
+ 
+@@ -2420,7 +2443,7 @@ err_sleep:
+ 	return ret;
+ }
+ 
+-static void ath10k_pci_hif_power_down(struct ath10k *ar)
++void ath10k_pci_hif_power_down(struct ath10k *ar)
+ {
+ 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot hif power down\n");
+ 
+@@ -2556,7 +2579,7 @@ static irqreturn_t ath10k_pci_msi_fw_han
+  * When a block of MSI interrupts is allocated, this top-level handler
+  * is not used; instead, we directly call the correct sub-handler.
+  */
+-static irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg)
++irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg)
+ {
+ 	struct ath10k *ar = arg;
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+@@ -2694,7 +2717,7 @@ static void ath10k_pci_free_irq(struct a
+ 		free_irq(ar_pci->pdev->irq + i, ar);
+ }
+ 
+-static void ath10k_pci_init_irq_tasklets(struct ath10k *ar)
++void ath10k_pci_init_irq_tasklets(struct ath10k *ar)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	int i;
+@@ -2780,7 +2803,7 @@ static int ath10k_pci_deinit_irq(struct
+ 	return 0;
+ }
+ 
+-static int ath10k_pci_wait_for_target_init(struct ath10k *ar)
++int ath10k_pci_wait_for_target_init(struct ath10k *ar)
+ {
+ 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
+ 	unsigned long timeout;
+@@ -2961,6 +2984,40 @@ static bool ath10k_pci_chip_is_supported
+ 	return false;
+ }
+ 
++int ath10k_pci_setup_resource(struct ath10k *ar)
++{
++	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
++	int ret;
++
++	spin_lock_init(&ar_pci->ce_lock);
++	spin_lock_init(&ar_pci->ps_lock);
++
++	setup_timer(&ar_pci->rx_post_retry, ath10k_pci_rx_replenish_retry,
++		    (unsigned long)ar);
++
++	ret = ath10k_pci_alloc_pipes(ar);
++	if (ret) {
++		ath10k_err(ar, "failed to allocate copy engine pipes: %d\n",
++			   ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++void ath10k_pci_release_resource(struct ath10k *ar)
++{
++	ath10k_pci_kill_tasklet(ar);
++	ath10k_pci_ce_deinit(ar);
++	ath10k_pci_free_pipes(ar);
++}
++
++static const struct ath10k_bus_ops ath10k_pci_bus_ops = {
++	.read32		= ath10k_bus_pci_read32,
++	.write32	= ath10k_bus_pci_write32,
++	.get_num_banks	= ath10k_pci_get_num_banks,
++};
++
+ static int ath10k_pci_probe(struct pci_dev *pdev,
+ 			    const struct pci_device_id *pci_dev)
+ {
+@@ -3011,31 +3068,26 @@ static int ath10k_pci_probe(struct pci_d
+ 	ar_pci->ar = ar;
+ 	ar->dev_id = pci_dev->device;
+ 	ar_pci->pci_ps = pci_ps;
++	ar_pci->bus_ops = &ath10k_pci_bus_ops;
+ 
+ 	ar->id.vendor = pdev->vendor;
+ 	ar->id.device = pdev->device;
+ 	ar->id.subsystem_vendor = pdev->subsystem_vendor;
+ 	ar->id.subsystem_device = pdev->subsystem_device;
+ 
+-	spin_lock_init(&ar_pci->ce_lock);
+-	spin_lock_init(&ar_pci->ps_lock);
+-
+-	setup_timer(&ar_pci->rx_post_retry, ath10k_pci_rx_replenish_retry,
+-		    (unsigned long)ar);
+ 	setup_timer(&ar_pci->ps_timer, ath10k_pci_ps_timer,
+ 		    (unsigned long)ar);
+ 
+-	ret = ath10k_pci_claim(ar);
++	ret = ath10k_pci_setup_resource(ar);
+ 	if (ret) {
+-		ath10k_err(ar, "failed to claim device: %d\n", ret);
++		ath10k_err(ar, "failed to setup resource: %d\n", ret);
+ 		goto err_core_destroy;
+ 	}
+ 
+-	ret = ath10k_pci_alloc_pipes(ar);
++	ret = ath10k_pci_claim(ar);
+ 	if (ret) {
+-		ath10k_err(ar, "failed to allocate copy engine pipes: %d\n",
+-			   ret);
+-		goto err_sleep;
++		ath10k_err(ar, "failed to claim device: %d\n", ret);
++		goto err_free_pipes;
+ 	}
+ 
+ 	ath10k_pci_ce_deinit(ar);
+@@ -3052,7 +3104,7 @@ static int ath10k_pci_probe(struct pci_d
+ 	ret = ath10k_pci_init_irq(ar);
+ 	if (ret) {
+ 		ath10k_err(ar, "failed to init irqs: %d\n", ret);
+-		goto err_free_pipes;
++		goto err_sleep;
+ 	}
+ 
+ 	ath10k_info(ar, "pci irq %s interrupts %d irq_mode %d reset_mode %d\n",
+@@ -3098,13 +3150,13 @@ err_free_irq:
+ err_deinit_irq:
+ 	ath10k_pci_deinit_irq(ar);
+ 
+-err_free_pipes:
+-	ath10k_pci_free_pipes(ar);
+-
+ err_sleep:
+ 	ath10k_pci_sleep_sync(ar);
+ 	ath10k_pci_release(ar);
+ 
++err_free_pipes:
++	ath10k_pci_free_pipes(ar);
++
+ err_core_destroy:
+ 	ath10k_core_destroy(ar);
+ 
+@@ -3128,10 +3180,8 @@ static void ath10k_pci_remove(struct pci
+ 
+ 	ath10k_core_unregister(ar);
+ 	ath10k_pci_free_irq(ar);
+-	ath10k_pci_kill_tasklet(ar);
+ 	ath10k_pci_deinit_irq(ar);
+-	ath10k_pci_ce_deinit(ar);
+-	ath10k_pci_free_pipes(ar);
++	ath10k_pci_release_resource(ar);
+ 	ath10k_pci_sleep_sync(ar);
+ 	ath10k_pci_release(ar);
+ 	ath10k_core_destroy(ar);
+@@ -3155,6 +3205,10 @@ static int __init ath10k_pci_init(void)
+ 		printk(KERN_ERR "failed to register ath10k pci driver: %d\n",
+ 		       ret);
+ 
++	ret = ath10k_ahb_init();
++	if (ret)
++		printk(KERN_ERR "ahb init failed: %d\n", ret);
++
+ 	return ret;
+ }
+ module_init(ath10k_pci_init);
+@@ -3162,6 +3216,7 @@ module_init(ath10k_pci_init);
+ static void __exit ath10k_pci_exit(void)
+ {
+ 	pci_unregister_driver(&ath10k_pci_driver);
++	ath10k_ahb_exit();
+ }
+ 
+ module_exit(ath10k_pci_exit);
+--- a/drivers/net/wireless/ath/ath10k/pci.h
++++ b/drivers/net/wireless/ath/ath10k/pci.h
+@@ -22,6 +22,7 @@
+ 
+ #include "hw.h"
+ #include "ce.h"
++#include "ahb.h"
+ 
+ /*
+  * maximum number of bytes that can be handled atomically by DiagRead/DiagWrite
+@@ -157,6 +158,12 @@ struct ath10k_pci_supp_chip {
+ 	u32 rev_id;
+ };
+ 
++struct ath10k_bus_ops {
++	u32 (*read32)(struct ath10k *ar, u32 offset);
++	void (*write32)(struct ath10k *ar, u32 offset, u32 value);
++	int (*get_num_banks)(struct ath10k *ar);
++};
++
+ struct ath10k_pci {
+ 	struct pci_dev *pdev;
+ 	struct device *dev;
+@@ -225,6 +232,13 @@ struct ath10k_pci {
+ 	 * on MMIO read/write.
+ 	 */
+ 	bool pci_ps;
++	const struct ath10k_bus_ops *bus_ops;
++
++	/* Keep this entry in the last, memory for struct ath10k_ahb is
++	 * allocated (ahb support enabled case) in the continuation of
++	 * this struct.
++	 */
++	struct ath10k_ahb ahb[0];
+ };
+ 
+ static inline struct ath10k_pci *ath10k_pci_priv(struct ath10k *ar)
+@@ -253,6 +267,40 @@ u32 ath10k_pci_read32(struct ath10k *ar,
+ u32 ath10k_pci_soc_read32(struct ath10k *ar, u32 addr);
+ u32 ath10k_pci_reg_read32(struct ath10k *ar, u32 addr);
+ 
++int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
++			 struct ath10k_hif_sg_item *items, int n_items);
++int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
++			     size_t buf_len);
++int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
++			      const void *data, int nbytes);
++int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar, void *req, u32 req_len,
++				    void *resp, u32 *resp_len);
++int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
++				       u8 *ul_pipe, u8 *dl_pipe);
++void ath10k_pci_hif_get_default_pipe(struct ath10k *ar, u8 *ul_pipe,
++				     u8 *dl_pipe);
++void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
++					int force);
++u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe);
++void ath10k_pci_hif_power_down(struct ath10k *ar);
++irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg);
++int ath10k_pci_alloc_pipes(struct ath10k *ar);
++void ath10k_pci_free_pipes(struct ath10k *ar);
++void ath10k_pci_free_pipes(struct ath10k *ar);
++void ath10k_pci_rx_replenish_retry(unsigned long ptr);
++void ath10k_pci_ce_deinit(struct ath10k *ar);
++void ath10k_pci_init_irq_tasklets(struct ath10k *ar);
++void ath10k_pci_kill_tasklet(struct ath10k *ar);
++int ath10k_pci_init_pipes(struct ath10k *ar);
++int ath10k_pci_init_config(struct ath10k *ar);
++void ath10k_pci_rx_post(struct ath10k *ar);
++void ath10k_pci_flush(struct ath10k *ar);
++void ath10k_pci_enable_legacy_irq(struct ath10k *ar);
++void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar);
++int ath10k_pci_wait_for_target_init(struct ath10k *ar);
++int ath10k_pci_setup_resource(struct ath10k *ar);
++void ath10k_pci_release_resource(struct ath10k *ar);
++
+ /* QCA6174 is known to have Tx/Rx issues when SOC_WAKE register is poked too
+  * frequently. To avoid this put SoC to sleep after a very conservative grace
+  * period. Adjust with great care.
 --- a/drivers/net/wireless/ath/ath10k/Kconfig
 +++ b/drivers/net/wireless/ath/ath10k/Kconfig
 @@ -16,6 +16,12 @@ config ATH10K_PCI
@@ -27,8 +536,6 @@ index cab4e17..87a342f 100644
  config ATH10K_DEBUG
  	bool "Atheros ath10k debugging"
  	depends on ATH10K
-diff --git a/drivers/net/wireless/ath/ath10k/Makefile b/drivers/net/wireless/ath/ath10k/Makefile
-index 2e2a71b..4a33176 100644
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
 @@ -28,5 +28,7 @@ obj-$(CPTCFG_ATH10K_PCI) += ath10k_pci.o
@@ -39,12 +546,9 @@ index 2e2a71b..4a33176 100644
 +
  # for tracing framework to find trace.h
  CFLAGS_trace.o := -I$(src)
-diff --git a/drivers/net/wireless/ath/ath10k/ahb.c b/drivers/net/wireless/ath/ath10k/ahb.c
-new file mode 100644
-index 0000000..966a9c6
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/ahb.c
-@@ -0,0 +1,930 @@
+@@ -0,0 +1,927 @@
 +/*
 + * Copyright (c) 2015, The Linux Foundation. All rights reserved.
 + *
@@ -851,6 +1355,13 @@ index 0000000..966a9c6
 +	ar_ahb->pdev = pdev;
 +	platform_set_drvdata(pdev, ar);
 +
++	/* ahb uses irq handler available in pci.c. pci irq handler does
++	 * force pci link wakeup based in pci_ps flag value on every
++	 * interrupt. Avoid such pci specific link wake up by setting
++	 * pci_ps flag to 1.
++	 */
++	ar_pci->pci_ps = 1;
++
 +	ret = ath10k_ahb_resource_init(ar);
 +	if (ret)
 +		goto err_core_destroy;
@@ -859,16 +1370,6 @@ index 0000000..966a9c6
 +	ar_pci->mem_len = ar_ahb->mem_len;
 +	ar_pci->ar = ar;
 +	ar_pci->bus_ops = &ath10k_ahb_bus_ops;
-+
-+	/* ahb uses irq handler available in pci.c. pci irq handler does
-+	 * force pci link wakeup based in pci_ps flag value on every
-+	 * interrupt. Avoid such pci specific link wake up by setting
-+	 * pci_ps flag to 1.
-+	 */
-+	ar_pci->pci_ps = 1;
-+
-+	if (QCA_REV_40XX(ar))
-+		ar->board_id_from_otp = true;
 +
 +	ret = ath10k_pci_setup_resource(ar);
 +	if (ret) {
@@ -975,9 +1476,6 @@ index 0000000..966a9c6
 +{
 +	platform_driver_unregister(&ath10k_ahb_driver);
 +}
-diff --git a/drivers/net/wireless/ath/ath10k/ahb.h b/drivers/net/wireless/ath/ath10k/ahb.h
-new file mode 100644
-index 0000000..8ac3c96
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/ahb.h
 @@ -0,0 +1,86 @@
@@ -1067,84 +1565,6 @@ index 0000000..8ac3c96
 +#endif /* CPTCFG_ATH10K_AHB */
 +
 +#endif /* _AHB_H_ */
-diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
-index df4fbc2..783c468 100644
---- a/drivers/net/wireless/ath/ath10k/core.c
-+++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -62,6 +62,7 @@ MODULE_PARM_DESC(bt_coex, "The BT-coex feature with external BT modules");
- static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 	{
- 		.id = QCA988X_HW_2_0_VERSION,
-+		.type = QCA988X_HW_DEV_TYPE,
- 		.name = "qca988x hw2.0",
- 		.patch_load_addr = QCA988X_HW_2_0_PATCH_LOAD_ADDR,
- 		.uart_pin = 7,
-@@ -80,6 +81,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 	},
- 	{
- 		.id = QCA6174_HW_2_1_VERSION,
-+		.type = QCA6174_HW_DEV_TYPE,
- 		.name = "qca6174 hw2.1",
- 		.patch_load_addr = QCA6174_HW_2_1_PATCH_LOAD_ADDR,
- 		.uart_pin = 6,
-@@ -97,6 +99,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 	},
- 	{
- 		.id = QCA6174_HW_3_0_VERSION,
-+		.type = QCA6174_HW_DEV_TYPE,
- 		.name = "qca6174 hw3.0",
- 		.patch_load_addr = QCA6174_HW_3_0_PATCH_LOAD_ADDR,
- 		.uart_pin = 6,
-@@ -114,6 +117,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 	},
- 	{
- 		.id = QCA6174_HW_3_2_VERSION,
-+		.type = QCA6174_HW_DEV_TYPE,
- 		.name = "qca6174 hw3.2",
- 		.patch_load_addr = QCA6174_HW_3_0_PATCH_LOAD_ADDR,
- 		.uart_pin = 6,
-@@ -132,6 +136,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 	},
- 	{
- 		.id = QCA99X0_HW_2_0_DEV_VERSION,
-+		.type = QCA99X0_HW_DEV_TYPE,
- 		.name = "qca99x0 hw2.0",
- 		.patch_load_addr = QCA99X0_HW_2_0_PATCH_LOAD_ADDR,
- 		.uart_pin = 7,
-@@ -1092,8 +1097,10 @@ static int ath10k_init_hw_params(struct ath10k *ar)
- 	for (i = 0; i < ARRAY_SIZE(ath10k_hw_params_list); i++) {
- 		hw_params = &ath10k_hw_params_list[i];
- 
--		if (hw_params->id == ar->target_version)
--			break;
-+		if (hw_params->id == ar->target_version &&
-+		    hw_params->type == ar->target_type) {
-+				break;
-+		}
- 	}
- 
- 	if (i == ARRAY_SIZE(ath10k_hw_params_list)) {
-@@ -1558,6 +1565,7 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
- 	}
- 
- 	ar->target_version = target_info.version;
-+	ar->target_type = target_info.type;
- 	ar->hw->wiphy->hw_version = target_info.version;
- 
- 	ret = ath10k_init_hw_params(ar);
-@@ -1750,6 +1758,10 @@ struct ath10k *ath10k_core_create(size_t priv_size, struct device *dev,
- 		ar->regs = &qca99x0_regs;
- 		ar->hw_values = &qca99x0_values;
- 		break;
-+	case ATH10K_HW_QCA40XX:
-+		ar->regs = &qca40xx_regs;
-+		ar->hw_values = &qca40xx_values;
-+		break;
- 	default:
- 		ath10k_err(ar, "unsupported core hardware revision %d\n",
- 			   hw_rev);
-diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
-index abbeec5..e6043af 100644
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
 @@ -72,6 +72,7 @@ struct ath10k;
@@ -1155,7 +1575,7 @@ index abbeec5..e6043af 100644
  };
  
  static inline const char *ath10k_bus_str(enum ath10k_bus bus)
-@@ -79,6 +80,8 @@ static inline const char *ath10k_bus_str(enum ath10k_bus bus)
+@@ -79,6 +80,8 @@ static inline const char *ath10k_bus_str
  	switch (bus) {
  	case ATH10K_BUS_PCI:
  		return "pci";
@@ -1164,25 +1584,6 @@ index abbeec5..e6043af 100644
  	}
  
  	return "unknown";
-@@ -623,6 +626,7 @@ struct ath10k {
- 	u16 dev_id;
- 	u32 chip_id;
- 	u32 target_version;
-+	u32 target_type;
- 	u8 fw_version_major;
- 	u32 fw_version_minor;
- 	u16 fw_version_release;
-@@ -658,6 +662,8 @@ struct ath10k {
- 
- 	struct ath10k_hw_params {
- 		u32 id;
-+		u32 type;
-+
- 		const char *name;
- 		u32 patch_load_addr;
- 		int uart_pin;
-diff --git a/drivers/net/wireless/ath/ath10k/debug.h b/drivers/net/wireless/ath/ath10k/debug.h
-index ce8a015..f6c9ac2 100644
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
 @@ -38,6 +38,7 @@ enum ath10k_debug_mask {
@@ -1193,11 +1594,64 @@ index ce8a015..f6c9ac2 100644
  	ATH10K_DBG_ANY		= 0xffffffff,
  };
  
-diff --git a/drivers/net/wireless/ath/ath10k/hw.c b/drivers/net/wireless/ath/ath10k/hw.c
-index 7b84d08..d20e4f2 100644
+--- a/drivers/net/wireless/ath/ath10k/hw.h
++++ b/drivers/net/wireless/ath/ath10k/hw.h
+@@ -188,6 +188,7 @@ enum ath10k_hw_rev {
+ 	ATH10K_HW_QCA6174,
+ 	ATH10K_HW_QCA99X0,
+ 	ATH10K_HW_QCA9377,
++	ATH10K_HW_QCA40XX,
+ };
+ 
+ struct ath10k_hw_regs {
+@@ -220,6 +221,7 @@ struct ath10k_hw_regs {
+ extern const struct ath10k_hw_regs qca988x_regs;
+ extern const struct ath10k_hw_regs qca6174_regs;
+ extern const struct ath10k_hw_regs qca99x0_regs;
++extern const struct ath10k_hw_regs qca40xx_regs;
+ 
+ struct ath10k_hw_values {
+ 	u32 rtc_state_val_on;
+@@ -233,6 +235,7 @@ struct ath10k_hw_values {
+ extern const struct ath10k_hw_values qca988x_values;
+ extern const struct ath10k_hw_values qca6174_values;
+ extern const struct ath10k_hw_values qca99x0_values;
++extern const struct ath10k_hw_values qca40xx_values;
+ 
+ void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
+ 				u32 cc, u32 rcc, u32 cc_prev, u32 rcc_prev);
+@@ -241,6 +244,7 @@ void ath10k_hw_fill_survey_time(struct a
+ #define QCA_REV_6174(ar) ((ar)->hw_rev == ATH10K_HW_QCA6174)
+ #define QCA_REV_99X0(ar) ((ar)->hw_rev == ATH10K_HW_QCA99X0)
+ #define QCA_REV_9377(ar) ((ar)->hw_rev == ATH10K_HW_QCA9377)
++#define QCA_REV_40XX(ar) ((ar)->hw_rev == ATH10K_HW_QCA40XX)
+ 
+ /* Known pecularities:
+  *  - raw appears in nwifi decap, raw and nwifi appear in ethernet decap
+@@ -590,6 +594,7 @@ enum ath10k_hw_rate_cck {
+ #define FW_INDICATOR_ADDRESS			ar->regs->fw_indicator_address
+ #define FW_IND_EVENT_PENDING			1
+ #define FW_IND_INITIALIZED			2
++#define FW_IND_HOST_READY			0x80000000
+ 
+ /* HOST_REG interrupt from firmware */
+ #define PCIE_INTR_FIRMWARE_MASK			ar->regs->pcie_intr_fw_mask
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -1963,6 +1963,10 @@ struct ath10k *ath10k_core_create(size_t
+ 		ar->regs = &qca99x0_regs;
+ 		ar->hw_values = &qca99x0_values;
+ 		break;
++	case ATH10K_HW_QCA40XX:
++		ar->regs = &qca40xx_regs;
++		ar->hw_values = &qca40xx_values;
++		break;
+ 	default:
+ 		ath10k_err(ar, "unsupported core hardware revision %d\n",
+ 			   hw_rev);
 --- a/drivers/net/wireless/ath/ath10k/hw.c
 +++ b/drivers/net/wireless/ath/ath10k/hw.c
-@@ -109,6 +109,38 @@ const struct ath10k_hw_regs qca99x0_regs = {
+@@ -109,6 +109,38 @@ const struct ath10k_hw_regs qca99x0_regs
  	.pcie_intr_clr_address			= 0x00000010,
  };
  
@@ -1236,7 +1690,7 @@ index 7b84d08..d20e4f2 100644
  const struct ath10k_hw_values qca988x_values = {
  	.rtc_state_val_on		= 3,
  	.ce_count			= 8,
-@@ -136,6 +168,13 @@ const struct ath10k_hw_values qca99x0_values = {
+@@ -136,6 +168,13 @@ const struct ath10k_hw_values qca99x0_va
  	.ce_desc_meta_data_lsb		= 4,
  };
  
@@ -1250,604 +1704,13 @@ index 7b84d08..d20e4f2 100644
  void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
  				u32 cc, u32 rcc, u32 cc_prev, u32 rcc_prev)
  {
-diff --git a/drivers/net/wireless/ath/ath10k/hw.h b/drivers/net/wireless/ath/ath10k/hw.h
-index f4ebbd9..07cbfa0 100644
---- a/drivers/net/wireless/ath/ath10k/hw.h
-+++ b/drivers/net/wireless/ath/ath10k/hw.h
-@@ -27,6 +27,7 @@
- 
- /* QCA988X 2.0 definitions */
- #define QCA988X_HW_2_0_VERSION		0x4100016c
-+#define QCA988X_HW_DEV_TYPE		0x7
- #define QCA988X_HW_2_0_CHIP_ID_REV	0x2
- #define QCA988X_HW_2_0_FW_DIR		ATH10K_FW_DIR "/QCA988X/hw2.0"
- #define QCA988X_HW_2_0_FW_FILE		"firmware.bin"
-@@ -41,6 +42,7 @@
- #define QCA6174_HW_2_1_VERSION		0x05010000
- #define QCA6174_HW_3_0_VERSION		0x05020000
- #define QCA6174_HW_3_2_VERSION		0x05030000
-+#define QCA6174_HW_DEV_TYPE		0x8
- 
- enum qca6174_pci_rev {
- 	QCA6174_PCI_REV_1_1 = 0x11,
-@@ -77,6 +79,7 @@ enum qca6174_chip_id_rev {
- 
- /* QCA99X0 2.0 definitions */
- #define QCA99X0_HW_2_0_DEV_VERSION     0x01000000
-+#define QCA99X0_HW_DEV_TYPE            0x9
- #define QCA99X0_HW_2_0_CHIP_ID_REV     0x1
- #define QCA99X0_HW_2_0_FW_DIR          ATH10K_FW_DIR "/QCA99X0/hw2.0"
- #define QCA99X0_HW_2_0_FW_FILE         "firmware.bin"
-@@ -165,6 +168,7 @@ enum ath10k_hw_rev {
- 	ATH10K_HW_QCA988X,
- 	ATH10K_HW_QCA6174,
- 	ATH10K_HW_QCA99X0,
-+	ATH10K_HW_QCA40XX,
- };
- 
- struct ath10k_hw_regs {
-@@ -197,6 +201,7 @@ struct ath10k_hw_regs {
- extern const struct ath10k_hw_regs qca988x_regs;
- extern const struct ath10k_hw_regs qca6174_regs;
- extern const struct ath10k_hw_regs qca99x0_regs;
-+extern const struct ath10k_hw_regs qca40xx_regs;
- 
- struct ath10k_hw_values {
- 	u32 rtc_state_val_on;
-@@ -210,6 +215,7 @@ struct ath10k_hw_values {
- extern const struct ath10k_hw_values qca988x_values;
- extern const struct ath10k_hw_values qca6174_values;
- extern const struct ath10k_hw_values qca99x0_values;
-+extern const struct ath10k_hw_values qca40xx_values;
- 
- void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
- 				u32 cc, u32 rcc, u32 cc_prev, u32 rcc_prev);
-@@ -217,6 +223,7 @@ void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
- #define QCA_REV_988X(ar) ((ar)->hw_rev == ATH10K_HW_QCA988X)
- #define QCA_REV_6174(ar) ((ar)->hw_rev == ATH10K_HW_QCA6174)
- #define QCA_REV_99X0(ar) ((ar)->hw_rev == ATH10K_HW_QCA99X0)
-+#define QCA_REV_40XX(ar) ((ar)->hw_rev == ATH10K_HW_QCA40XX)
- 
- /* Known pecularities:
-  *  - raw appears in nwifi decap, raw and nwifi appear in ethernet decap
-@@ -576,6 +583,7 @@ enum ath10k_hw_rate_cck {
- #define FW_INDICATOR_ADDRESS			ar->regs->fw_indicator_address
- #define FW_IND_EVENT_PENDING			1
- #define FW_IND_INITIALIZED			2
-+#define FW_IND_HOST_READY			0x80000000
- 
- /* HOST_REG interrupt from firmware */
- #define PCIE_INTR_FIRMWARE_MASK			ar->regs->pcie_intr_fw_mask
-diff --git a/drivers/net/wireless/ath/ath10k/pci.c b/drivers/net/wireless/ath/ath10k/pci.c
-index 8766ceb..a856516 100644
---- a/drivers/net/wireless/ath/ath10k/pci.c
-+++ b/drivers/net/wireless/ath/ath10k/pci.c
-@@ -95,7 +95,6 @@ static const struct ath10k_pci_supp_chip ath10k_pci_supp_chips[] = {
- static void ath10k_pci_buffer_cleanup(struct ath10k *ar);
- static int ath10k_pci_cold_reset(struct ath10k *ar);
- static int ath10k_pci_safe_chip_reset(struct ath10k *ar);
--static int ath10k_pci_wait_for_target_init(struct ath10k *ar);
- static int ath10k_pci_init_irq(struct ath10k *ar);
- static int ath10k_pci_deinit_irq(struct ath10k *ar);
- static int ath10k_pci_request_irq(struct ath10k *ar);
-@@ -605,7 +604,7 @@ static void ath10k_pci_sleep_sync(struct ath10k *ar)
- 	spin_unlock_irqrestore(&ar_pci->ps_lock, flags);
- }
- 
--void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value)
-+static void ath10k_bus_pci_write32(struct ath10k *ar, u32 offset, u32 value)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	int ret;
-@@ -627,7 +626,7 @@ void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value)
- 	ath10k_pci_sleep(ar);
- }
- 
--u32 ath10k_pci_read32(struct ath10k *ar, u32 offset)
-+static u32 ath10k_bus_pci_read32(struct ath10k *ar, u32 offset)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	u32 val;
-@@ -652,6 +651,20 @@ u32 ath10k_pci_read32(struct ath10k *ar, u32 offset)
- 	return val;
- }
- 
-+inline void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value)
-+{
-+	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-+
-+	ar_pci->bus_ops->write32(ar, offset, value);
-+}
-+
-+inline u32 ath10k_pci_read32(struct ath10k *ar, u32 offset)
-+{
-+	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-+
-+	return ar_pci->bus_ops->read32(ar, offset);
-+}
-+
- u32 ath10k_pci_soc_read32(struct ath10k *ar, u32 addr)
- {
- 	return ath10k_pci_read32(ar, RTC_SOC_BASE_ADDRESS + addr);
-@@ -685,7 +698,7 @@ static bool ath10k_pci_irq_pending(struct ath10k *ar)
- 	return false;
- }
- 
--static void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar)
-+void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar)
- {
- 	/* IMPORTANT: INTR_CLR register has to be set after
- 	 * INTR_ENABLE is set to 0, otherwise interrupt can not be
-@@ -701,7 +714,7 @@ static void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar)
- 				PCIE_INTR_ENABLE_ADDRESS);
- }
- 
--static void ath10k_pci_enable_legacy_irq(struct ath10k *ar)
-+void ath10k_pci_enable_legacy_irq(struct ath10k *ar)
- {
- 	ath10k_pci_write32(ar, SOC_CORE_BASE_ADDRESS +
- 			   PCIE_INTR_ENABLE_ADDRESS,
-@@ -803,7 +816,7 @@ static void ath10k_pci_rx_post_pipe(struct ath10k_pci_pipe *pipe)
- 	spin_unlock_bh(&ar_pci->ce_lock);
- }
- 
--static void ath10k_pci_rx_post(struct ath10k *ar)
-+void ath10k_pci_rx_post(struct ath10k *ar)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	int i;
-@@ -814,7 +827,7 @@ static void ath10k_pci_rx_post(struct ath10k *ar)
- 	spin_unlock_bh(&ar_pci->ce_lock);
- }
- 
--static void ath10k_pci_rx_replenish_retry(unsigned long ptr)
-+void ath10k_pci_rx_replenish_retry(unsigned long ptr)
- {
- 	struct ath10k *ar = (void *)ptr;
- 
-@@ -833,6 +846,7 @@ static u32 ath10k_pci_targ_cpu_to_ce_addr(struct ath10k *ar, u32 addr)
- 		       0x7ff) << 21;
- 		break;
- 	case ATH10K_HW_QCA99X0:
-+	case ATH10K_HW_QCA40XX:
- 		val = ath10k_pci_read32(ar, PCIE_BAR_REG_ADDRESS);
- 		break;
- 	}
-@@ -1013,8 +1027,8 @@ static int __ath10k_pci_diag_read_hi(struct ath10k *ar, void *dest,
- #define ath10k_pci_diag_read_hi(ar, dest, src, len)		\
- 	__ath10k_pci_diag_read_hi(ar, dest, HI_ITEM(src), len)
- 
--static int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
--				     const void *data, int nbytes)
-+int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
-+			      const void *data, int nbytes)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	int ret = 0;
-@@ -1279,8 +1293,8 @@ static void ath10k_pci_htt_rx_cb(struct ath10k_ce_pipe *ce_state)
- 	ath10k_pci_htt_tx_cb(ce_state);
- }
- 
--static int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
--				struct ath10k_hif_sg_item *items, int n_items)
-+int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
-+			 struct ath10k_hif_sg_item *items, int n_items)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	struct ath10k_pci_pipe *pci_pipe = &ar_pci->pipe_info[pipe_id];
-@@ -1348,13 +1362,13 @@ err:
- 	return err;
- }
- 
--static int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
--				    size_t buf_len)
-+int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
-+			     size_t buf_len)
- {
- 	return ath10k_pci_diag_read_mem(ar, address, buf, buf_len);
- }
- 
--static u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe)
-+u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 
-@@ -1422,8 +1436,8 @@ static void ath10k_pci_fw_crashed_dump(struct ath10k *ar)
- 	queue_work(ar->workqueue, &ar->restart_work);
- }
- 
--static void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
--					       int force)
-+void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
-+					int force)
- {
- 	ath10k_dbg(ar, ATH10K_DBG_PCI, "pci hif send complete check\n");
- 
-@@ -1459,7 +1473,7 @@ static void ath10k_pci_hif_set_pktlog_callbacks(struct ath10k *ar,
- 	       sizeof(ar_pci->pktlog_msg_callback));
- }
- 
--static void ath10k_pci_kill_tasklet(struct ath10k *ar)
-+void ath10k_pci_kill_tasklet(struct ath10k *ar)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	int i;
-@@ -1473,8 +1487,8 @@ static void ath10k_pci_kill_tasklet(struct ath10k *ar)
- 	del_timer_sync(&ar_pci->rx_post_retry);
- }
- 
--static int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
--					      u8 *ul_pipe, u8 *dl_pipe)
-+int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
-+				       u8 *ul_pipe, u8 *dl_pipe)
- {
- 	const struct service_to_pipe *entry;
- 	bool ul_set = false, dl_set = false;
-@@ -1518,8 +1532,8 @@ static int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
- 	return 0;
- }
- 
--static void ath10k_pci_hif_get_default_pipe(struct ath10k *ar,
--					    u8 *ul_pipe, u8 *dl_pipe)
-+void ath10k_pci_hif_get_default_pipe(struct ath10k *ar,
-+				     u8 *ul_pipe, u8 *dl_pipe)
- {
- 	ath10k_dbg(ar, ATH10K_DBG_PCI, "pci hif get default pipe\n");
- 
-@@ -1542,6 +1556,7 @@ static void ath10k_pci_irq_msi_fw_mask(struct ath10k *ar)
- 				   CORE_CTRL_ADDRESS, val);
- 		break;
- 	case ATH10K_HW_QCA99X0:
-+	case ATH10K_HW_QCA40XX:
- 		/* TODO: Find appropriate register configuration for QCA99X0
- 		 *  to mask irq/MSI.
- 		 */
-@@ -1563,6 +1578,7 @@ static void ath10k_pci_irq_msi_fw_unmask(struct ath10k *ar)
- 				   CORE_CTRL_ADDRESS, val);
- 		break;
- 	case ATH10K_HW_QCA99X0:
-+	case ATH10K_HW_QCA40XX:
- 		/* TODO: Find appropriate register configuration for QCA99X0
- 		 *  to unmask irq/MSI.
- 		 */
-@@ -1697,7 +1713,7 @@ static void ath10k_pci_buffer_cleanup(struct ath10k *ar)
- 	}
- }
- 
--static void ath10k_pci_ce_deinit(struct ath10k *ar)
-+void ath10k_pci_ce_deinit(struct ath10k *ar)
- {
- 	int i;
- 
-@@ -1705,7 +1721,7 @@ static void ath10k_pci_ce_deinit(struct ath10k *ar)
- 		ath10k_ce_deinit_pipe(ar, i);
- }
- 
--static void ath10k_pci_flush(struct ath10k *ar)
-+void ath10k_pci_flush(struct ath10k *ar)
- {
- 	ath10k_pci_kill_tasklet(ar);
- 	ath10k_pci_buffer_cleanup(ar);
-@@ -1740,9 +1756,9 @@ static void ath10k_pci_hif_stop(struct ath10k *ar)
- 	spin_unlock_irqrestore(&ar_pci->ps_lock, flags);
- }
- 
--static int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar,
--					   void *req, u32 req_len,
--					   void *resp, u32 *resp_len)
-+int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar,
-+				    void *req, u32 req_len,
-+				    void *resp, u32 *resp_len)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	struct ath10k_pci_pipe *pci_tx = &ar_pci->pipe_info[BMI_CE_NUM_TO_TARG];
-@@ -1938,7 +1954,14 @@ static int ath10k_pci_get_num_banks(struct ath10k *ar)
- 	return 1;
- }
- 
--static int ath10k_pci_init_config(struct ath10k *ar)
-+static int ath10k_bus_get_num_banks(struct ath10k *ar)
-+{
-+	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-+
-+	return ar_pci->bus_ops->get_num_banks(ar);
-+}
-+
-+int ath10k_pci_init_config(struct ath10k *ar)
- {
- 	u32 interconnect_targ_addr;
- 	u32 pcie_state_targ_addr = 0;
-@@ -2049,7 +2072,7 @@ static int ath10k_pci_init_config(struct ath10k *ar)
- 	/* first bank is switched to IRAM */
- 	ealloc_value |= ((HI_EARLY_ALLOC_MAGIC << HI_EARLY_ALLOC_MAGIC_SHIFT) &
- 			 HI_EARLY_ALLOC_MAGIC_MASK);
--	ealloc_value |= ((ath10k_pci_get_num_banks(ar) <<
-+	ealloc_value |= ((ath10k_bus_get_num_banks(ar) <<
- 			  HI_EARLY_ALLOC_IRAM_BANKS_SHIFT) &
- 			 HI_EARLY_ALLOC_IRAM_BANKS_MASK);
- 
-@@ -2079,7 +2102,7 @@ static int ath10k_pci_init_config(struct ath10k *ar)
- 	return 0;
- }
- 
--static int ath10k_pci_alloc_pipes(struct ath10k *ar)
-+int ath10k_pci_alloc_pipes(struct ath10k *ar)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	struct ath10k_pci_pipe *pipe;
-@@ -2110,7 +2133,7 @@ static int ath10k_pci_alloc_pipes(struct ath10k *ar)
- 	return 0;
- }
- 
--static void ath10k_pci_free_pipes(struct ath10k *ar)
-+void ath10k_pci_free_pipes(struct ath10k *ar)
- {
- 	int i;
- 
-@@ -2118,7 +2141,7 @@ static void ath10k_pci_free_pipes(struct ath10k *ar)
- 		ath10k_ce_free_pipe(ar, i);
- }
- 
--static int ath10k_pci_init_pipes(struct ath10k *ar)
-+int ath10k_pci_init_pipes(struct ath10k *ar)
- {
- 	int i, ret;
- 
-@@ -2459,7 +2482,7 @@ err_sleep:
- 	return ret;
- }
- 
--static void ath10k_pci_hif_power_down(struct ath10k *ar)
-+void ath10k_pci_hif_power_down(struct ath10k *ar)
- {
- 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot hif power down\n");
- 
-@@ -2590,7 +2613,7 @@ static irqreturn_t ath10k_pci_msi_fw_handler(int irq, void *arg)
-  * When a block of MSI interrupts is allocated, this top-level handler
-  * is not used; instead, we directly call the correct sub-handler.
-  */
--static irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg)
-+irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg)
- {
- 	struct ath10k *ar = arg;
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-@@ -2724,7 +2747,7 @@ static void ath10k_pci_free_irq(struct ath10k *ar)
- 		free_irq(ar_pci->pdev->irq + i, ar);
- }
- 
--static void ath10k_pci_init_irq_tasklets(struct ath10k *ar)
-+void ath10k_pci_init_irq_tasklets(struct ath10k *ar)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	int i;
-@@ -2815,7 +2838,7 @@ static int ath10k_pci_deinit_irq(struct ath10k *ar)
- 	return -EINVAL;
- }
- 
--static int ath10k_pci_wait_for_target_init(struct ath10k *ar)
-+int ath10k_pci_wait_for_target_init(struct ath10k *ar)
- {
- 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
- 	unsigned long timeout;
-@@ -2996,6 +3019,40 @@ static bool ath10k_pci_chip_is_supported(u32 dev_id, u32 chip_id)
- 	return false;
- }
- 
-+int ath10k_pci_setup_resource(struct ath10k *ar)
-+{
-+	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-+	int ret;
-+
-+	spin_lock_init(&ar_pci->ce_lock);
-+	spin_lock_init(&ar_pci->ps_lock);
-+
-+	setup_timer(&ar_pci->rx_post_retry, ath10k_pci_rx_replenish_retry,
-+		    (unsigned long)ar);
-+
-+	ret = ath10k_pci_alloc_pipes(ar);
-+	if (ret) {
-+		ath10k_err(ar, "failed to allocate copy engine pipes: %d\n",
-+			   ret);
-+		return ret;
-+	}
-+
-+	return 0;
-+}
-+
-+void ath10k_pci_release_resource(struct ath10k *ar)
-+{
-+	ath10k_pci_kill_tasklet(ar);
-+	ath10k_pci_ce_deinit(ar);
-+	ath10k_pci_free_pipes(ar);
-+}
-+
-+static const struct ath10k_bus_ops ath10k_pci_bus_ops = {
-+	.read32		= ath10k_bus_pci_read32,
-+	.write32	= ath10k_bus_pci_write32,
-+	.get_num_banks	= ath10k_pci_get_num_banks,
-+};
-+
- static int ath10k_pci_probe(struct pci_dev *pdev,
- 			    const struct pci_device_id *pci_dev)
- {
-@@ -3040,6 +3097,7 @@ static int ath10k_pci_probe(struct pci_dev *pdev,
- 	ar_pci->ar = ar;
- 	ar_pci->pci_ps = pci_ps;
- 	ar->dev_id = pci_dev->device;
-+	ar_pci->bus_ops = &ath10k_pci_bus_ops;
- 
- 	if (QCA_REV_99X0(ar))
- 		ar->board_id_from_otp = true;
-@@ -3052,25 +3110,19 @@ static int ath10k_pci_probe(struct pci_dev *pdev,
- 			  pdev->subsystem_vendor, pdev->subsystem_device);
- 	}
- 
--	spin_lock_init(&ar_pci->ce_lock);
--	spin_lock_init(&ar_pci->ps_lock);
--
--	setup_timer(&ar_pci->rx_post_retry, ath10k_pci_rx_replenish_retry,
--		    (unsigned long)ar);
- 	setup_timer(&ar_pci->ps_timer, ath10k_pci_ps_timer,
- 		    (unsigned long)ar);
- 
--	ret = ath10k_pci_claim(ar);
-+	ret = ath10k_pci_setup_resource(ar);
- 	if (ret) {
--		ath10k_err(ar, "failed to claim device: %d\n", ret);
-+		ath10k_err(ar, "failed to setup resource: %d\n", ret);
- 		goto err_core_destroy;
- 	}
- 
--	ret = ath10k_pci_alloc_pipes(ar);
-+	ret = ath10k_pci_claim(ar);
- 	if (ret) {
--		ath10k_err(ar, "failed to allocate copy engine pipes: %d\n",
--			   ret);
--		goto err_sleep;
-+		ath10k_err(ar, "failed to claim device: %d\n", ret);
-+		goto err_free_pipes;
- 	}
- 
- 	ath10k_pci_ce_deinit(ar);
-@@ -3079,7 +3131,7 @@ static int ath10k_pci_probe(struct pci_dev *pdev,
- 	ret = ath10k_pci_init_irq(ar);
- 	if (ret) {
- 		ath10k_err(ar, "failed to init irqs: %d\n", ret);
--		goto err_free_pipes;
-+		goto err_sleep;
- 	}
- 
- 	ath10k_info(ar, "pci irq %s interrupts %d irq_mode %d reset_mode %d\n",
-@@ -3128,13 +3180,13 @@ err_free_irq:
- err_deinit_irq:
- 	ath10k_pci_deinit_irq(ar);
- 
--err_free_pipes:
--	ath10k_pci_free_pipes(ar);
--
- err_sleep:
- 	ath10k_pci_sleep_sync(ar);
- 	ath10k_pci_release(ar);
- 
-+err_free_pipes:
-+	ath10k_pci_free_pipes(ar);
-+
- err_core_destroy:
- 	ath10k_core_destroy(ar);
- 
-@@ -3158,10 +3210,8 @@ static void ath10k_pci_remove(struct pci_dev *pdev)
- 
- 	ath10k_core_unregister(ar);
- 	ath10k_pci_free_irq(ar);
--	ath10k_pci_kill_tasklet(ar);
- 	ath10k_pci_deinit_irq(ar);
--	ath10k_pci_ce_deinit(ar);
--	ath10k_pci_free_pipes(ar);
-+	ath10k_pci_release_resource(ar);
- 	ath10k_pci_sleep_sync(ar);
- 	ath10k_pci_release(ar);
- 	ath10k_core_destroy(ar);
-@@ -3185,6 +3235,10 @@ static int __init ath10k_pci_init(void)
- 		printk(KERN_ERR "failed to register ath10k pci driver: %d\n",
- 		       ret);
- 
-+	ret = ath10k_ahb_init();
-+	if (ret)
-+		printk(KERN_ERR "ahb init failed: %d\n", ret);
-+
- 	return ret;
- }
- module_init(ath10k_pci_init);
-@@ -3192,6 +3246,7 @@ module_init(ath10k_pci_init);
- static void __exit ath10k_pci_exit(void)
- {
- 	pci_unregister_driver(&ath10k_pci_driver);
-+	ath10k_ahb_exit();
- }
- 
- module_exit(ath10k_pci_exit);
-diff --git a/drivers/net/wireless/ath/ath10k/pci.h b/drivers/net/wireless/ath/ath10k/pci.h
-index 6f90d43..5caf7c4 100644
---- a/drivers/net/wireless/ath/ath10k/pci.h
-+++ b/drivers/net/wireless/ath/ath10k/pci.h
-@@ -22,6 +22,7 @@
- 
- #include "hw.h"
- #include "ce.h"
-+#include "ahb.h"
- 
- /*
-  * maximum number of bytes that can be handled atomically by DiagRead/DiagWrite
-@@ -157,6 +158,12 @@ struct ath10k_pci_supp_chip {
- 	u32 rev_id;
- };
- 
-+struct ath10k_bus_ops {
-+	u32 (*read32)(struct ath10k *ar, u32 offset);
-+	void (*write32)(struct ath10k *ar, u32 offset, u32 value);
-+	int (*get_num_banks)(struct ath10k *ar);
-+};
-+
- struct ath10k_pci {
- 	struct pci_dev *pdev;
- 	struct device *dev;
-@@ -223,6 +230,14 @@ struct ath10k_pci {
- 	bool ps_awake;
- 
- 	u8 pci_ps;
-+
-+	const struct ath10k_bus_ops *bus_ops;
-+
-+	/* Keep this entry in the last, memory for struct ath10k_ahb is
-+	 * allocated (ahb support enabled case) in the continuation of
-+	 * this struct.
-+	 */
-+	struct ath10k_ahb ahb[0];
- };
- 
- static inline struct ath10k_pci *ath10k_pci_priv(struct ath10k *ar)
-@@ -250,6 +265,41 @@ u32 ath10k_pci_read32(struct ath10k *ar, u32 offset);
- u32 ath10k_pci_soc_read32(struct ath10k *ar, u32 addr);
- u32 ath10k_pci_reg_read32(struct ath10k *ar, u32 addr);
- 
-+int ath10k_pci_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
-+			 struct ath10k_hif_sg_item *items, int n_items);
-+int ath10k_pci_hif_diag_read(struct ath10k *ar, u32 address, void *buf,
-+			     size_t buf_len);
-+int ath10k_pci_diag_write_mem(struct ath10k *ar, u32 address,
-+			      const void *data, int nbytes);
-+int ath10k_pci_hif_exchange_bmi_msg(struct ath10k *ar, void *req, u32 req_len,
-+				    void *resp, u32 *resp_len);
-+int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar,
-+				       u16 service_id, u8 *ul_pipe,
-+				       u8 *dl_pipe);
-+void ath10k_pci_hif_get_default_pipe(struct ath10k *ar, u8 *ul_pipe,
-+				     u8 *dl_pipe);
-+void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
-+					int force);
-+u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe);
-+void ath10k_pci_hif_power_down(struct ath10k *ar);
-+irqreturn_t ath10k_pci_interrupt_handler(int irq, void *arg);
-+int ath10k_pci_alloc_pipes(struct ath10k *ar);
-+void ath10k_pci_free_pipes(struct ath10k *ar);
-+void ath10k_pci_free_pipes(struct ath10k *ar);
-+void ath10k_pci_rx_replenish_retry(unsigned long ptr);
-+void ath10k_pci_ce_deinit(struct ath10k *ar);
-+void ath10k_pci_init_irq_tasklets(struct ath10k *ar);
-+void ath10k_pci_kill_tasklet(struct ath10k *ar);
-+int ath10k_pci_init_pipes(struct ath10k *ar);
-+int ath10k_pci_init_config(struct ath10k *ar);
-+void ath10k_pci_rx_post(struct ath10k *ar);
-+void ath10k_pci_flush(struct ath10k *ar);
-+void ath10k_pci_enable_legacy_irq(struct ath10k *ar);
-+void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar);
-+int ath10k_pci_wait_for_target_init(struct ath10k *ar);
-+int ath10k_pci_setup_resource(struct ath10k *ar);
-+void ath10k_pci_release_resource(struct ath10k *ar);
-+
- /* QCA6174 is known to have Tx/Rx issues when SOC_WAKE register is poked too
-  * frequently. To avoid this put SoC to sleep after a very conservative grace
-  * period. Adjust with great care.
--- 
-2.2.2
-
+--- a/.local-symbols
++++ b/.local-symbols
+@@ -126,6 +126,7 @@ WIL6210_ISR_COR=
+ WIL6210_TRACING=
+ ATH10K=
+ ATH10K_PCI=
++ATH10K_AHB=
+ ATH10K_DEBUG=
+ ATH10K_DEBUGFS=
+ ATH10K_TRACING=

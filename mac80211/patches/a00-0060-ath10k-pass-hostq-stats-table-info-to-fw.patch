@@ -1,36 +1,20 @@
-diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
-index e12cd37..b5bb985 100644
---- a/drivers/net/wireless/ath/ath10k/core.c
-+++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -174,6 +174,7 @@ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
- 		.continuous_frag_desc = true,
- 		.htt_tx_dword_fmt_peerid = true,
- 		.platform_type = WMI_HOST_PLATFORM_LOW_PERF,
-+		.htt_tx_push_pull_support = true,
- 		.pktlog_ce_found = true,
- 		.pktlog_ce = 8,
- 		.channel_counters_freq_hz = 125000,
-diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
-index 59ef36e..368feef 100644
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -701,6 +701,11 @@ struct ath10k {
- 
- 		enum wmi_host_platform_type platform_type;
- 
+@@ -703,6 +703,11 @@ struct ath10k {
+ 			size_t board_size;
+ 			size_t board_ext_size;
+ 		} fw;
++
 +		/* Flag to say whether push pull model in tx path
 +		 * is supported or not.
 +		 */
 +		bool htt_tx_push_pull_support;
-+
- 		/* Specifies dedicated copy engine number info (if any) used
- 		 * for pktlog.
- 		 */
-diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
-index 5e1bb39..d618d1e 100644
+ 	} hw_params;
+ 
+ 	const struct firmware *board;
 --- a/drivers/net/wireless/ath/ath10k/htt.h
 +++ b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -1357,12 +1357,26 @@ struct htt_frag_desc_bank_id {
+@@ -1315,12 +1315,26 @@ struct htt_frag_desc_bank_id {
  #define HTT_FRAG_DESC_BANK_CFG_INFO_PDEV_ID_LSB  0
  #define HTT_FRAG_DESC_BANK_CFG_INFO_SWAP         (1 << 2)
  
@@ -57,10 +41,10 @@ index 5e1bb39..d618d1e 100644
  } __packed;
  
  union htt_rx_pn_t {
-@@ -1561,6 +1575,11 @@ struct ath10k_htt {
+@@ -1523,6 +1537,11 @@ struct ath10k_htt {
  		dma_addr_t paddr;
- 		struct htt_msdu_ext_desc *vaddr;
- 	} frag_desc;
+ 		struct ath10k_htt_txbuf *vaddr;
+ 	} txbuf;
 +
 +	struct {
 +		dma_addr_t paddr;
@@ -69,11 +53,9 @@ index 5e1bb39..d618d1e 100644
  };
  
  #define RX_HTT_HDR_STATUS_LEN 64
-diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
-index d209334..79818d9 100644
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -798,10 +798,10 @@ ath10k_htt_rx_h_peer_channel(struct ath10k *ar, struct htt_rx_desc *rxd)
+@@ -798,10 +798,10 @@ ath10k_htt_rx_h_peer_channel(struct ath1
  		return NULL;
  
  	arvif = ath10k_get_arvif(ar, peer->vdev_id);
@@ -86,11 +68,9 @@ index d209334..79818d9 100644
  		return NULL;
  
  	return def.chan;
-diff --git a/drivers/net/wireless/ath/ath10k/htt_tx.c b/drivers/net/wireless/ath/ath10k/htt_tx.c
-index 501e363..f43cb9c 100644
 --- a/drivers/net/wireless/ath/ath10k/htt_tx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
-@@ -129,8 +129,28 @@ int ath10k_htt_tx_alloc(struct ath10k_htt *htt)
+@@ -132,6 +132,23 @@ int ath10k_htt_tx_alloc(struct ath10k_ht
  	}
  
  skip_frag_desc_alloc:
@@ -104,22 +84,17 @@ index 501e363..f43cb9c 100644
 +	if (!htt->hostq_stats_tbl.vaddr) {
 +		ath10k_warn(ar, "failed to alloc hostq stats table memory\n");
 +		ret = -ENOMEM;
-+		goto free_frag_desc_mem;
++		goto free_txbuf;
 +	}
 +
 +	memset(htt->hostq_stats_tbl.vaddr, 0, ATH10K_HOSTQ_STATS_TBL_SIZE);
 +
 +skip_hostq_stats_tbl_alloc:
++
  	return 0;
  
-+free_frag_desc_mem:
-+	if (htt->frag_desc.vaddr)
-+		dma_free_coherent(ar->dev, size, htt->frag_desc.vaddr,
-+				  htt->frag_desc.paddr);
- free_tx_pool:
- 	dma_pool_destroy(htt->tx_pool);
- free_idr_pending_tx:
-@@ -168,6 +188,11 @@ void ath10k_htt_tx_free(struct ath10k_htt *htt)
+ free_txbuf:
+@@ -180,6 +197,11 @@ void ath10k_htt_tx_free(struct ath10k_ht
  		dma_free_coherent(htt->ar->dev, size, htt->frag_desc.vaddr,
  				  htt->frag_desc.paddr);
  	}
@@ -131,7 +106,7 @@ index 501e363..f43cb9c 100644
  }
  
  void ath10k_htt_htc_tx_complete(struct ath10k *ar, struct sk_buff *skb)
-@@ -289,6 +314,16 @@ int ath10k_htt_send_frag_desc_bank_cfg(struct ath10k_htt *htt)
+@@ -301,6 +323,16 @@ int ath10k_htt_send_frag_desc_bank_cfg(s
  	cmd->frag_desc_bank_cfg.bank_id[0].bank_max_id =
  				__cpu_to_le16(htt->max_num_pending_tx - 1);
  
@@ -148,22 +123,20 @@ index 501e363..f43cb9c 100644
  	ret = ath10k_htc_send(&htt->ar->htc, htt->eid, skb);
  	if (ret) {
  		ath10k_warn(ar, "failed to send frag desc bank cfg request: %d\n",
-diff --git a/drivers/net/wireless/ath/ath10k/wmi-ops.h b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-index 0268f3d..82e9588 100644
 --- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-@@ -205,6 +205,8 @@ struct wmi_ops {
- 						   u32 param);
- 	struct sk_buff *(*gen_ext_resource_config)(struct ath10k *ar,
- 						   enum wmi_host_platform_type type);
+@@ -203,6 +203,8 @@ struct wmi_ops {
+ 	struct sk_buff *(*gen_peer_set_smart_ant_train_info)(struct ath10k *ar,
+ 				u32 vdev_id, const u8 *mac_addr,
+ 				const struct wmi_peer_sant_set_train_arg *arg);
 +	struct sk_buff *(*gen_set_fwtest_param)(struct ath10k *ar,
 +						       u32 id, u32 value);
  };
  
  int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1466,4 +1468,21 @@ ath10k_wmi_ext_resource_config(struct ath10k *ar,
+@@ -1448,4 +1450,21 @@ ath10k_wmi_peer_set_smart_ant_train_info
  	return ath10k_wmi_cmd_send(ar, skb,
- 				   ar->wmi.cmd->ext_resource_cfg_cmdid);
+ 			ar->wmi.cmd->peer_set_smart_ant_train_info_cmdid);
  }
 +
 +static inline int
@@ -183,11 +156,9 @@ index 0268f3d..82e9588 100644
 +				   ar->wmi.cmd->fwtest_cmdid);
 +}
  #endif
-diff --git a/drivers/net/wireless/ath/ath10k/wmi.c b/drivers/net/wireless/ath/ath10k/wmi.c
-index bc4b752..c1c4bad 100644
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -4952,6 +4952,15 @@ int ath10k_wmi_event_ready(struct ath10k *ar, struct sk_buff *skb)
+@@ -4715,6 +4715,15 @@ int ath10k_wmi_event_ready(struct ath10k
  		   __le32_to_cpu(arg.status));
  
  	ether_addr_copy(ar->mac_addr, arg.mac_addr);
@@ -203,12 +174,12 @@ index bc4b752..c1c4bad 100644
  	complete(&ar->wmi.unified_ready);
  	return 0;
  }
-@@ -7442,6 +7451,25 @@ ath10k_wmi_10_5_op_gen_ext_resource_config(struct ath10k *ar,
+@@ -7606,6 +7615,25 @@ ath10k_wmi_op_gen_set_smart_ant_train_in
  	return skb;
  }
  
 +static struct sk_buff *
-+ath10k_wmi_10_5_gen_set_fwtest_param(struct ath10k *ar, u32 id, u32 value)
++ath10k_wmi_10_4_gen_set_fwtest_param(struct ath10k *ar, u32 id, u32 value)
 +{
 +	struct wmi_fwtest_set_param_cmd *cmd;
 +	struct sk_buff *skb;
@@ -229,20 +200,18 @@ index bc4b752..c1c4bad 100644
  static const struct wmi_ops wmi_ops = {
  	.rx = ath10k_wmi_op_rx,
  	.map_svc = wmi_main_svc_map,
-@@ -7851,6 +7879,7 @@ static const struct wmi_ops wmi_10_5_ops = {
+@@ -7955,6 +7983,7 @@ static const struct wmi_ops wmi_10_4_ops
  	.gen_addba_set_resp = ath10k_wmi_op_gen_addba_set_resp,
  	.gen_delba_send = ath10k_wmi_op_gen_delba_send,
- 	.gen_ext_resource_config = ath10k_wmi_10_5_op_gen_ext_resource_config,
-+	.gen_set_fwtest_param = ath10k_wmi_10_5_gen_set_fwtest_param,
- };
+ 	.fw_stats_fill = ath10k_wmi_10_4_op_fw_stats_fill,
++	.gen_set_fwtest_param = ath10k_wmi_10_4_gen_set_fwtest_param,
  
- int ath10k_wmi_attach(struct ath10k *ar)
-diff --git a/drivers/net/wireless/ath/ath10k/wmi.h b/drivers/net/wireless/ath/ath10k/wmi.h
-index a2e16be..ad5599e 100644
+ 	/* shared with 10.2 */
+ 	.gen_peer_assoc = ath10k_wmi_10_2_op_gen_peer_assoc,
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -6750,6 +6750,11 @@ struct wmi_ext_resource_config {
- 	__le32 host_platform_config;
+@@ -6442,6 +6442,11 @@ struct wmi_peer_ratecode_list_event {
+ 	struct wmi_peer_rate_info peer_rate_info;
  } __packed;
  
 +struct wmi_fwtest_set_param_cmd {
@@ -253,3 +222,13 @@ index a2e16be..ad5599e 100644
  struct ath10k;
  struct ath10k_vif;
  struct ath10k_fw_stats_pdev;
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -184,6 +184,7 @@ static const struct ath10k_hw_params ath
+ 		.continuous_frag_desc = true,
+ 		.channel_counters_freq_hz = 125000,
+ 		.max_probe_resp_desc_thres = 24,
++		.htt_tx_push_pull_support = true,
+ 		.fw = {
+ 			.dir = QCA40XX_HW_1_0_FW_DIR,
+ 			.fw = QCA40XX_HW_1_0_FW_FILE,

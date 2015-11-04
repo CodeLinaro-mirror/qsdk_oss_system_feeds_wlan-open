@@ -40,7 +40,7 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -387,6 +388,11 @@ struct ath10k_debug {
+@@ -428,6 +429,11 @@ struct ath10k_debug {
  	u32 nf_cal_period;
  
  	struct ath10k_fw_crash_data *fw_crash_data;
@@ -54,15 +54,15 @@
  enum ath10k_state {
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2112,6 +2112,7 @@ void ath10k_debug_destroy(struct ath10k
+@@ -2156,6 +2156,7 @@ void ath10k_debug_destroy(struct ath10k
  	ar->debug.fw_crash_data = NULL;
  
  	ath10k_debug_fw_stats_reset(ar);
 +	ath10k_deinit_pktlog(ar);
- }
  
- int ath10k_debug_register(struct ath10k *ar)
-@@ -2192,6 +2193,7 @@ int ath10k_debug_register(struct ath10k
+ 	kfree(ar->debug.tpc_stats);
+ }
+@@ -2239,6 +2240,7 @@ int ath10k_debug_register(struct ath10k
  
  	debugfs_create_file("pktlog_filter", S_IRUGO | S_IWUSR,
  			    ar->debug.debugfs_phy, ar, &fops_pktlog_filter);
@@ -70,7 +70,7 @@
  
  	debugfs_create_file("quiet_period", S_IRUGO | S_IWUSR,
  			    ar->debug.debugfs_phy, ar, &fops_quiet_period);
-@@ -2202,6 +2204,7 @@ int ath10k_debug_register(struct ath10k
+@@ -2256,6 +2258,7 @@ int ath10k_debug_register(struct ath10k
  void ath10k_debug_unregister(struct ath10k *ar)
  {
  	cancel_delayed_work_sync(&ar->debug.htt_stats_dwork);
@@ -96,28 +96,17 @@
  		break;
  	}
  	case HTT_T2H_MSG_TYPE_RX_FLUSH: {
---- a/drivers/net/wireless/ath/ath10k/hw.h
-+++ b/drivers/net/wireless/ath/ath10k/hw.h
-@@ -248,6 +248,16 @@ struct ath10k_pktlog_hdr {
- 	u8 payload[0];
- } __packed;
+@@ -2135,6 +2137,7 @@ void ath10k_htt_rx_pktlog_completion_han
  
-+struct ath10k_pktlog_10_4_hdr {
-+	__le16 flags;
-+	__le16 missed_cnt;
-+	__le16 log_type;
-+	__le16 size;
-+	__le32 timestamp;
-+	__le32 type_specific_data;
-+	u8 payload[0];
-+} __packed;
-+
- enum ath10k_hw_rate_ofdm {
- 	ATH10K_HW_RATE_OFDM_48M = 0,
- 	ATH10K_HW_RATE_OFDM_24M,
+ 	trace_ath10k_htt_pktlog(ar, hdr->payload,
+ 				sizeof(*hdr) + __le16_to_cpu(hdr->size));
++	ath10k_process_pktlog(ar, skb->data);
+ 	dev_kfree_skb_any(skb);
+ }
+ EXPORT_SYMBOL(ath10k_htt_rx_pktlog_completion_handler);
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/pktlog.c
-@@ -0,0 +1,981 @@
+@@ -0,0 +1,957 @@
 +/*
 + * Copyright (c) 2015, The Linux Foundation. All rights reserved.
 + *
@@ -624,21 +613,6 @@
 +	}
 +}
 +
-+static int ath10k_pktlog_rx_completion_handler(struct ath10k *ar,
-+					    struct sk_buff *skb)
-+{
-+	struct ath10k_pktlog_10_4_hdr *hdr =
-+			(struct ath10k_pktlog_10_4_hdr *)skb->data;
-+
-+	trace_ath10k_htt_pktlog(ar, hdr->payload,
-+				sizeof(*hdr) + __le16_to_cpu(hdr->size));
-+
-+	ath10k_process_pktlog(ar, skb->data);
-+	dev_kfree_skb_any(skb);
-+
-+	return 0;
-+}
-+
 +static int ath_pktlog_10_4_op_pull_hdr(struct ath_pktlog_hdr_arg *arg,
 +				       u8 *data)
 +{
@@ -917,16 +891,7 @@
 +
 +void ath10k_pktlog_prepare_callbacks(struct ath10k *ar)
 +{
-+	struct ath10k_hif_cb pktlog_callbacks;
 +	struct ath_pktlog *pktlog = &ar->debug.pktlog;
-+
-+	if (ar->hw_params.pktlog_ce_found) {
-+		/* setup hif layer callbacks for pktlog */
-+		pktlog_callbacks.rx_completion =
-+				ath10k_pktlog_rx_completion_handler;
-+		pktlog_callbacks.tx_completion = NULL;
-+		ath10k_hif_set_pktlog_callbacks(ar, &pktlog_callbacks);
-+	}
 +
 +	switch (ar->wmi.op_version) {
 +	case ATH10K_FW_WMI_OP_VERSION_10_4:

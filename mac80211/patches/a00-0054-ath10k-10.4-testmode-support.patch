@@ -1,16 +1,16 @@
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -139,6 +139,7 @@ static const struct ath10k_hw_params ath
+@@ -136,6 +136,7 @@ static const struct ath10k_hw_params ath
  		.continuous_frag_desc = true,
  		.channel_counters_freq_hz = 150000,
  		.max_probe_resp_desc_thres = 24,
 +		.utf_codeswap_support = true,
- 		.pktlog_ce_found = true,
- 		.pktlog_ce = 8,
  		.fw = {
-@@ -529,6 +530,14 @@ static int ath10k_download_fw(struct ath
- 		data = ar->testmode.utf->data;
- 		data_len = ar->testmode.utf->size;
+ 			.dir = QCA99X0_HW_2_0_FW_DIR,
+ 			.fw = QCA99X0_HW_2_0_FW_FILE,
+@@ -596,6 +597,14 @@ static int ath10k_download_fw(struct ath
+ 		data = ar->testmode.utf_firmware_data;
+ 		data_len = ar->testmode.utf_firmware_len;
  		mode_name = "utf";
 +		ret = ath10k_swap_code_seg_configure(ar,
 +				ATH10K_SWAP_CODE_SEG_BIN_TYPE_UTF);
@@ -23,7 +23,7 @@
  		break;
  	default:
  		ath10k_err(ar, "unknown firmware mode: %d\n", mode);
-@@ -1570,7 +1579,7 @@ static int ath10k_core_probe_fw(struct a
+@@ -1781,7 +1790,7 @@ static int ath10k_core_probe_fw(struct a
  		goto err_free_firmware_files;
  	}
  
@@ -34,9 +34,9 @@
  			   ret);
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -662,6 +662,11 @@ struct ath10k {
- 		u8 pktlog_ce;
- 		bool pktlog_ce_found;
+@@ -683,6 +683,11 @@ struct ath10k {
+ 		 */
+ 		u32 max_probe_resp_desc_thres;
  
 +		/* QCA99X0 chip uses utf codeswap binary in addition
 +		 * to utf.bin in testmode
@@ -46,27 +46,26 @@
  		struct ath10k_hw_params_fw {
  			const char *dir;
  			const char *fw;
-@@ -826,6 +831,12 @@ struct ath10k {
+@@ -855,6 +860,12 @@ struct ath10k {
  		DECLARE_BITMAP(orig_fw_features, ATH10K_FW_FEATURE_COUNT);
  		enum ath10k_fw_wmi_op_version orig_wmi_op_version;
- 
+ 		enum ath10k_fw_wmi_op_version op_version;
++
 +		const struct firmware *utf_codeswap;
 +		const void *utf_codeswap_data;
 +		size_t utf_codeswap_len;
 +
 +		struct ath10k_swap_code_seg_info *utf_code_swap_seg_info;
-+
  		/* protected by data_lock */
  		bool utf_monitor;
  	} testmode;
 --- a/drivers/net/wireless/ath/ath10k/hw.h
 +++ b/drivers/net/wireless/ath/ath10k/hw.h
-@@ -94,6 +94,8 @@ enum qca6174_chip_id_rev {
- #define ATH10K_FW_API5_FILE		"firmware-5.bin"
+@@ -104,6 +104,7 @@ enum qca6174_chip_id_rev {
  
  #define ATH10K_FW_UTF_FILE		"utf.bin"
+ #define ATH10K_FW_UTF_API2_FILE		"utf-2.bin"
 +#define ATH10K_FW_UTF_CODESWAP_FILE	"utf.codeswap.bin"
-+
  
  /* includes also the null byte */
  #define ATH10K_FIRMWARE_MAGIC               "QCA-ATH10K"
@@ -186,8 +185,8 @@
  
  #include "testmode_i.h"
  
-@@ -139,6 +140,56 @@ static int ath10k_tm_cmd_get_version(str
- 	return cfg80211_testmode_reply(skb);
+@@ -309,6 +310,56 @@ static int ath10k_tm_fetch_firmware(stru
+ 	return 0;
  }
  
 +static void ath10k_tm_free_utf_codeswap(struct ath10k *ar)
@@ -242,8 +241,8 @@
 +
  static int ath10k_tm_cmd_utf_start(struct ath10k *ar, struct nlattr *tb[])
  {
- 	char filename[100];
-@@ -176,6 +227,16 @@ static int ath10k_tm_cmd_utf_start(struc
+ 	const char *ver;
+@@ -341,6 +392,16 @@ static int ath10k_tm_cmd_utf_start(struc
  		goto err;
  	}
  
@@ -258,9 +257,9 @@
 +	}
 +
  	spin_lock_bh(&ar->data_lock);
- 
  	ar->testmode.utf_monitor = true;
-@@ -226,7 +287,10 @@ err_fw_features:
+ 	spin_unlock_bh(&ar->data_lock);
+@@ -392,7 +453,10 @@ err_fw_features:
  	memcpy(ar->fw_features, ar->testmode.orig_fw_features,
  	       sizeof(ar->fw_features));
  	ar->wmi.op_version = ar->testmode.orig_wmi_op_version;
@@ -271,7 +270,7 @@
  	release_firmware(ar->testmode.utf);
  	ar->testmode.utf = NULL;
  
-@@ -257,6 +321,9 @@ static void __ath10k_tm_cmd_utf_stop(str
+@@ -423,6 +487,9 @@ static void __ath10k_tm_cmd_utf_stop(str
  	release_firmware(ar->testmode.utf);
  	ar->testmode.utf = NULL;
  
