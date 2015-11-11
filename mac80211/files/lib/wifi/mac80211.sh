@@ -96,6 +96,7 @@ detect_mac80211() {
 			[ "$(($ht_cap & 16384))" -eq 16384 ] && append ht_capab "$list	40-INTOLERANT" "$N"
 		}
 		iw phy "$dev" info | grep -q '2412 MHz' || { mode_band="a"; channel="36"; }
+		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
 
 		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
 
