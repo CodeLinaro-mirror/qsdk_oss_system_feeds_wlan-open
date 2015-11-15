@@ -1,0 +1,435 @@
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index 10546e40a228..659a247feae4 100644
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -2113,8 +2113,11 @@ struct ath10k *ath10k_core_create(size_t priv_size, struct device *dev,
+ 
+ 	mutex_init(&ar->conf_mutex);
+ 	spin_lock_init(&ar->data_lock);
++	spin_lock_init(&ar->pending_txqs_lock);
+ 
++	INIT_LIST_HEAD(&ar->pending_txqs);
+ 	INIT_LIST_HEAD(&ar->peers);
++
+ 	init_waitqueue_head(&ar->peer_mapping_wq);
+ 	init_waitqueue_head(&ar->htt.empty_tx_wq);
+ 	init_waitqueue_head(&ar->wmi.tx_credits_wq);
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index b9d892c38574..ff04090cd98c 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -97,7 +97,7 @@ struct ath10k_skb_cb {
+ 	u8 flags;
+ 	u8 eid;
+ 	u16 msdu_id;
+-	struct ieee80211_vif *vif;
++	struct ieee80211_txq *txq;
+ } __packed;
+ 
+ struct ath10k_skb_rxcb {
+@@ -329,6 +329,10 @@ enum ath10k_beacon_state {
+ 	ATH10K_BEACON_SENT,
+ };
+ 
++struct ath10k_txq {
++	struct list_head pending;
++};
++
+ struct ath10k_vif {
+ 	struct list_head list;
+ 
+@@ -774,7 +778,9 @@ struct ath10k {
+ 
+ 	/* protects shared structure data */
+ 	spinlock_t data_lock;
++	spinlock_t pending_txqs_lock;
+ 
++	struct list_head pending_txqs;
+ 	struct list_head arvifs;
+ 	struct list_head peers;
+ 	wait_queue_head_t peer_mapping_wq;
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 2b049e42b911..ffdd25f2cb5a 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1698,6 +1698,7 @@ static void ath10k_htt_rx_frm_tx_compl(struct ath10k *ar,
+ 		msdu_id = resp->data_tx_completion.msdus[i];
+ 		tx_done.msdu_id = __le16_to_cpu(msdu_id);
+ 		ath10k_txrx_tx_unref(htt, &tx_done);
++		ath10k_mac_txq_push_pending(ar);
+ 	}
+ }
+ 
+@@ -2039,6 +2040,7 @@ void ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
+ 		}
+ 
+ 		ath10k_txrx_tx_unref(htt, &tx_done);
++		ath10k_mac_txq_push_pending(ar);
+ 		break;
+ 	}
+ 	case HTT_T2H_MSG_TYPE_TX_COMPL_IND:
+diff --git a/drivers/net/wireless/ath/ath10k/htt_tx.c b/drivers/net/wireless/ath/ath10k/htt_tx.c
+index 46254bcdf2e0..89da798ba527 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_tx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
+@@ -434,11 +434,16 @@ static u8 ath10k_htt_tx_get_vdev_id(struct ath10k *ar, struct sk_buff *skb)
+ {
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(skb);
+-	struct ath10k_vif *arvif = (void *)cb->vif->drv_priv;
++	struct ath10k_vif *arvif;
++
++	if (cb->txq && cb->txq->vif)
++		arvif = (void *)cb->txq->vif->drv_priv;
++	else
++		arvif = NULL;
+ 
+ 	if (info->flags & IEEE80211_TX_CTL_TX_OFFCHAN)
+ 		return ar->scan.vdev_id;
+-	else if (cb->vif)
++	else if (arvif)
+ 		return arvif->vdev_id;
+ 	else if (ar->monitor_started)
+ 		return ar->monitor_vdev_id;
+diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
+index 1d20542e2f53..36783648db39 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -3279,10 +3279,11 @@ static void ath10k_tx_h_add_p2p_noa_ie(struct ath10k *ar,
+ }
+ 
+ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+-				    struct ieee80211_vif *vif,
++				    struct ieee80211_txq *txq,
+ 				    struct sk_buff *skb)
+ {
+ 	struct ieee80211_hdr *hdr = (void *)skb->data;
++	struct ieee80211_vif *vif = txq->vif;
+ 	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(skb);
+ 
+ 	cb->flags = 0;
+@@ -3295,7 +3296,7 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+ 	if (ieee80211_is_data_qos(hdr->frame_control))
+ 		cb->flags |= ATH10K_SKB_F_QOS;
+ 
+-	cb->vif = vif;
++	cb->txq = txq;
+ }
+ 
+ bool ath10k_mac_tx_frm_has_freq(struct ath10k *ar)
+@@ -3445,6 +3446,111 @@ static int ath10k_mac_tx(struct ath10k *ar,
+ 	return 0;
+ }
+ 
++static void ath10k_mac_txq_push(struct ieee80211_hw *hw,
++				struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++	struct ath10k_htt *htt = &ar->htt;
++	struct ath10k_txq *artxq = (void *)txq->drv_priv;
++	struct ieee80211_vif *vif = txq->vif;
++	struct ieee80211_sta *sta = txq->sta;
++	enum ath10k_hw_txrx_mode txmode;
++	enum ath10k_mac_tx_path txpath;
++	struct sk_buff *skb;
++	bool is_mgmt = false;
++	bool is_presp = false;
++	int ret;
++
++	lockdep_assert_held(&ar->pending_txqs_lock);
++
++	for (;;) {
++		spin_lock_bh(&ar->htt.tx_lock);
++
++		ret = ath10k_htt_tx_inc_pending(htt, is_mgmt, is_presp);
++		if (ret) {
++			if (list_empty(&artxq->pending) && txq->qdepth > 0)
++				list_move_tail(&artxq->pending,
++					       &ar->pending_txqs);
++			spin_unlock_bh(&ar->htt.tx_lock);
++			break;
++		}
++
++		spin_unlock_bh(&ar->htt.tx_lock);
++
++		skb = ieee80211_tx_dequeue(hw, txq);
++		if (!skb) {
++			spin_lock_bh(&ar->htt.tx_lock);
++			if (!list_empty(&artxq->pending))
++				list_del_init(&artxq->pending);
++			ath10k_htt_tx_dec_pending(htt, is_mgmt);
++			spin_unlock_bh(&ar->htt.tx_lock);
++			break;
++		}
++
++		ath10k_mac_tx_h_fill_cb(ar, txq, skb);
++
++		txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
++		txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
++
++		ret = ath10k_mac_tx(ar, vif, sta, txmode, txpath, skb);
++		if (ret) {
++			ath10k_warn(ar, "failed to transmit queued frame: %d\n",
++				    ret);
++			spin_lock_bh(&ar->htt.tx_lock);
++			ath10k_htt_tx_dec_pending(htt, is_mgmt);
++			spin_unlock_bh(&ar->htt.tx_lock);
++			continue;
++		}
++	}
++}
++
++void ath10k_mac_txq_push_pending(struct ath10k *ar)
++{
++	struct ieee80211_hw *hw = ar->hw;
++	struct ieee80211_txq *txq;
++	struct ath10k_txq *artxq, *tmp;
++	struct list_head list;
++
++	INIT_LIST_HEAD(&list);
++
++	rcu_read_lock();
++	spin_lock_bh(&ar->pending_txqs_lock);
++
++	/* FIXME: This can probably be simplified/optimized */
++
++	list_for_each_entry_safe(artxq, tmp, &ar->pending_txqs, pending) {
++		txq = container_of((void *)artxq, struct ieee80211_txq,
++				   drv_priv);
++		list_move_tail(&artxq->pending, &list);
++	}
++
++	list_for_each_entry_safe(artxq, tmp, &list, pending) {
++		txq = container_of((void *)artxq, struct ieee80211_txq,
++				   drv_priv);
++		list_del_init(&artxq->pending);
++		ath10k_mac_txq_push(hw, txq);
++	}
++
++	spin_unlock_bh(&ar->pending_txqs_lock);
++	rcu_read_unlock();
++}
++
++static void ath10k_mac_txq_cleanup(struct ath10k *ar,
++				   struct ieee80211_txq *txq)
++{
++	struct ath10k_skb_cb *cb;
++	struct sk_buff *msdu;
++	int msdu_id;
++
++	lockdep_assert_held(&ar->htt.tx_lock);
++
++	idr_for_each_entry(&ar->htt.pending_tx, msdu, msdu_id) {
++		cb = ATH10K_SKB_CB(msdu);
++		if (cb->txq == txq)
++			cb->txq = NULL;
++	}
++}
++
+ void ath10k_offchan_tx_purge(struct ath10k *ar)
+ {
+ 	struct sk_buff *skb;
+@@ -3763,6 +3869,7 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 	struct ieee80211_vif *vif = info->control.vif;
+ 	struct ieee80211_sta *sta = control->sta;
++	struct ieee80211_txq *txq;
+ 	struct ieee80211_hdr *hdr = (void *)skb->data;
+ 	enum ath10k_hw_txrx_mode txmode;
+ 	enum ath10k_mac_tx_path txpath;
+@@ -3771,7 +3878,14 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+ 	bool is_presp;
+ 	int ret;
+ 
+-	ath10k_mac_tx_h_fill_cb(ar, vif, skb);
++	if (sta && sta->wme)
++		txq = sta->txq[skb->priority % IEEE80211_QOS_CTL_TID_MASK];
++	else if (vif)
++		txq = vif->txq;
++	else
++		txq = NULL;
++
++	ath10k_mac_tx_h_fill_cb(ar, txq, skb);
+ 
+ 	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
+ 	txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
+@@ -3808,6 +3922,16 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+ 	}
+ }
+ 
++static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
++					struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++
++	spin_lock_bh(&ar->pending_txqs_lock);
++	ath10k_mac_txq_push(hw, txq);
++	spin_unlock_bh(&ar->pending_txqs_lock);
++}
++
+ /* Must not be called with conf_mutex held as workers can use that also. */
+ void ath10k_drain_tx(struct ath10k *ar)
+ {
+@@ -3838,6 +3962,8 @@ void ath10k_halt(struct ath10k *ar)
+ 	ar->monitor_started = false;
+ 	ar->tx_paused = 0;
+ 
++	INIT_LIST_HEAD(&ar->pending_txqs);
++
+ 	ath10k_scan_finish(ar);
+ 	ath10k_peer_cleanup_all(ar);
+ 	ath10k_core_stop(ar);
+@@ -4406,6 +4532,7 @@ static int ath10k_add_interface(struct ieee80211_hw *hw,
+ {
+ 	struct ath10k *ar = hw->priv;
+ 	struct ath10k_vif *arvif = ath10k_vif_to_arvif(vif);
++	struct ath10k_txq *artxq = (void *)vif->txq->drv_priv;
+ 	enum wmi_sta_powersave_param param;
+ 	int ret = 0;
+ 	u32 value;
+@@ -4422,6 +4549,9 @@ static int ath10k_add_interface(struct ieee80211_hw *hw,
+ 	arvif->ar = ar;
+ 	arvif->vif = vif;
+ 
++	if (vif->txq)
++		INIT_LIST_HEAD(&artxq->pending);
++
+ 	INIT_LIST_HEAD(&arvif->list);
+ 	INIT_WORK(&arvif->ap_csa_work, ath10k_mac_vif_ap_csa_work);
+ 	INIT_DELAYED_WORK(&arvif->connection_loss_work,
+@@ -4708,6 +4838,7 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
+ {
+ 	struct ath10k *ar = hw->priv;
+ 	struct ath10k_vif *arvif = ath10k_vif_to_arvif(vif);
++	struct ath10k_txq *artxq = (void *)vif->txq->drv_priv;
+ 	int ret;
+ 
+ 	cancel_work_sync(&arvif->ap_csa_work);
+@@ -4727,6 +4858,19 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
+ 	ar->free_vdev_map |= 1LL << arvif->vdev_id;
+ 	list_del(&arvif->list);
+ 
++	if (vif->txq) {
++		spin_lock_bh(&ar->pending_txqs_lock);
++		spin_lock_bh(&ar->htt.tx_lock);
++
++		if (!list_empty(&artxq->pending))
++			list_del_init(&artxq->pending);
++
++		ath10k_mac_txq_cleanup(ar, vif->txq);
++
++		spin_unlock_bh(&ar->htt.tx_lock);
++		spin_unlock_bh(&ar->pending_txqs_lock);
++	}
++
+ 	if (arvif->vdev_type == WMI_VDEV_TYPE_AP ||
+ 	    arvif->vdev_type == WMI_VDEV_TYPE_IBSS) {
+ 		ret = ath10k_wmi_peer_delete(arvif->ar, arvif->vdev_id,
+@@ -5479,7 +5623,9 @@ static int ath10k_sta_state(struct ieee80211_hw *hw,
+ 	struct ath10k *ar = hw->priv;
+ 	struct ath10k_vif *arvif = ath10k_vif_to_arvif(vif);
+ 	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
++	struct ath10k_txq *artxq;
+ 	int ret = 0;
++	int i;
+ 
+ 	if (old_state == IEEE80211_STA_NOTEXIST &&
+ 	    new_state == IEEE80211_STA_NONE) {
+@@ -5529,6 +5675,11 @@ static int ath10k_sta_state(struct ieee80211_hw *hw,
+ 			goto exit;
+ 		}
+ 
++		for (i = 0; i < ARRAY_SIZE(sta->txq); i++) {
++			artxq = (void *)sta->txq[i]->drv_priv;
++			INIT_LIST_HEAD(&artxq->pending);
++		}
++
+ 		if (!sta->tdls)
+ 			goto exit;
+ 
+@@ -5591,6 +5742,24 @@ static int ath10k_sta_state(struct ieee80211_hw *hw,
+ 
+ 		ath10k_mac_dec_num_stations(arvif, sta);
+ 
++		spin_lock_bh(&ar->pending_txqs_lock);
++		spin_lock_bh(&ar->htt.tx_lock);
++
++		for (i = 0; i < ARRAY_SIZE(sta->txq); i++) {
++			if (!sta->txq)
++				continue;
++
++			artxq = (void *)sta->txq[i]->drv_priv;
++
++			if (!list_empty(&artxq->pending))
++				list_del_init(&artxq->pending);
++
++			ath10k_mac_txq_cleanup(ar, sta->txq[i]);
++		}
++
++		spin_unlock_bh(&ar->htt.tx_lock);
++		spin_unlock_bh(&ar->pending_txqs_lock);
++
+ 		if (!sta->tdls)
+ 			goto exit;
+ 
+@@ -6893,6 +7062,7 @@ ath10k_mac_op_switch_vif_chanctx(struct ieee80211_hw *hw,
+ 
+ static const struct ieee80211_ops ath10k_ops = {
+ 	.tx				= ath10k_mac_op_tx,
++	.wake_tx_queue			= ath10k_mac_op_wake_tx_queue,
+ 	.start				= ath10k_start,
+ 	.stop				= ath10k_stop,
+ 	.config				= ath10k_config,
+@@ -7343,6 +7513,7 @@ int ath10k_mac_register(struct ath10k *ar)
+ 
+ 	ar->hw->vif_data_size = sizeof(struct ath10k_vif);
+ 	ar->hw->sta_data_size = sizeof(struct ath10k_sta);
++	ar->hw->txq_data_size = sizeof(struct ath10k_txq);
+ 
+ 	ar->hw->max_listen_interval = ATH10K_MAX_HW_LISTEN_INTERVAL;
+ 
+diff --git a/drivers/net/wireless/ath/ath10k/mac.h b/drivers/net/wireless/ath/ath10k/mac.h
+index f5048049b870..32c508c6334b 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.h
++++ b/drivers/net/wireless/ath/ath10k/mac.h
+@@ -75,6 +75,7 @@ void ath10k_mac_tx_unlock(struct ath10k *ar, int reason);
+ void ath10k_mac_vif_tx_lock(struct ath10k_vif *arvif, int reason);
+ void ath10k_mac_vif_tx_unlock(struct ath10k_vif *arvif, int reason);
+ bool ath10k_mac_tx_frm_has_freq(struct ath10k *ar);
++void ath10k_mac_txq_push_pending(struct ath10k *ar);
+ 
+ static inline struct ath10k_vif *ath10k_vif_to_arvif(struct ieee80211_vif *vif)
+ {
+diff --git a/drivers/net/wireless/ath/ath10k/wmi.c b/drivers/net/wireless/ath/ath10k/wmi.c
+index 0c9d8e3dd67a..bd2f516ba3d7 100644
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -1815,7 +1815,7 @@ static struct sk_buff *
+ ath10k_wmi_op_gen_mgmt_tx(struct ath10k *ar, struct sk_buff *msdu)
+ {
+ 	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(msdu);
+-	struct ath10k_vif *arvif = (void *)cb->vif->drv_priv;
++	struct ath10k_vif *arvif;
+ 	struct wmi_mgmt_tx_cmd *cmd;
+ 	struct ieee80211_hdr *hdr;
+ 	struct sk_buff *skb;
+@@ -1824,10 +1824,15 @@ ath10k_wmi_op_gen_mgmt_tx(struct ath10k *ar, struct sk_buff *msdu)
+ 	u32 buf_len = msdu->len;
+ 	u16 fc;
+ 
++	if (cb->txq && cb->txq->vif)
++		arvif = (void *)cb->txq->vif->drv_priv;
++	else
++		arvif = NULL;
++
+ 	hdr = (struct ieee80211_hdr *)msdu->data;
+ 	fc = le16_to_cpu(hdr->frame_control);
+ 
+-	if (cb->vif)
++	if (arvif)
+ 		vdev_id = arvif->vdev_id;
+ 	else
+ 		vdev_id = 0;
+-- 
+2.1.4
+

@@ -1,0 +1,504 @@
+diff --git a/net/mac80211/agg-tx.c b/net/mac80211/agg-tx.c
+index a758eb84e8f0..1040a8bcb47a 100644
+--- a/net/mac80211/agg-tx.c
++++ b/net/mac80211/agg-tx.c
+@@ -193,17 +193,24 @@ static void
+ ieee80211_agg_stop_txq(struct sta_info *sta, int tid)
+ {
+ 	struct ieee80211_txq *txq = sta->sta.txq[tid];
++	struct ieee80211_vif *vif;
++	struct ieee80211_sub_if_data *sdata;
++	struct ieee80211_local *local;
+ 	struct txq_info *txqi;
++	unsigned long flags;
+ 
+ 	if (!txq)
+ 		return;
+ 
+ 	txqi = to_txq_info(txq);
++	vif = txq->vif;
++	sdata = vif_to_sdata(vif);
++	local = sdata->local;
+ 
+ 	/* Lock here to protect against further seqno updates on dequeue */
+-	spin_lock_bh(&txqi->queue.lock);
++	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+ 	set_bit(IEEE80211_TXQ_STOP, &txqi->flags);
+-	spin_unlock_bh(&txqi->queue.lock);
++	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
+ }
+ 
+ static void
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index 62f2a97cd2a6..76e5adc8013f 100644
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -47,6 +47,16 @@ struct ieee80211_local;
+  * frame can be up to about 2 kB long. */
+ #define TOTAL_MAX_TX_BUFFER 512
+ 
++/* The number of stations exposed via netdev queues. First 4 netdev queues are
++ * mapped to vif's ACs. Subsequent ones, in groups of 4, are ACs for stations.
++ * NUM_NDEV_STA + 1 station is wrapped around to 1st station. f.e. netdev queue
++ * 5 corresponds to AC1 of STA0, STA63, STA126, ... and queue 8 corresponds
++ * to AC0 of STA1, STA64, STA127, ...
++ *
++ * This is used only when driver implements wake_tx_queues() op.
++ */
++#define IEEE80211_NUM_NDEV_STA 63
++
+ /* Required encryption head and tailroom */
+ #define IEEE80211_ENCRYPT_HEADROOM 8
+ #define IEEE80211_ENCRYPT_TAILROOM 18
+@@ -855,7 +865,11 @@ struct ieee80211_sub_if_data {
+ 	bool control_port_no_encrypt;
+ 	int encrypt_headroom;
+ 
+-	atomic_t txqs_len[IEEE80211_NUM_ACS];
++	spinlock_t ndev_lock;
++	struct list_head ndev_sta_q[IEEE80211_NUM_ACS * IEEE80211_NUM_NDEV_STA];
++	struct idr ndev_sta_idr;
++	unsigned long txqs_len[IEEE80211_NUM_ACS];
++
+ 	struct ieee80211_tx_queue_params tx_conf[IEEE80211_NUM_ACS];
+ 	struct mac80211_qos_map __rcu *qos_map;
+ 
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index f848c75518a2..b3d7de243793 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -975,7 +975,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
+ 		struct txq_info *txqi = to_txq_info(sdata->vif.txq);
+ 
+ 		ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
+-		atomic_set(&sdata->txqs_len[txqi->txq.ac], 0);
++		sdata->txqs_len[txqi->txq.ac] = 0;
+ 	}
+ 
+ 	if (local->open_count == 0)
+@@ -1356,6 +1356,7 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
+ {
+ 	static const u8 bssid_wildcard[ETH_ALEN] = {0xff, 0xff, 0xff,
+ 						    0xff, 0xff, 0xff};
++	int i;
+ 
+ 	/* clear type-dependent union */
+ 	memset(&sdata->u, 0, sizeof(sdata->u));
+@@ -1385,6 +1386,9 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
+ 	INIT_LIST_HEAD(&sdata->assigned_chanctx_list);
+ 	INIT_LIST_HEAD(&sdata->reserved_chanctx_list);
+ 
++	for (i = 0; i < ARRAY_SIZE(sdata->ndev_sta_q); i++)
++		INIT_LIST_HEAD(&sdata->ndev_sta_q[i]);
++
+ 	switch (type) {
+ 	case NL80211_IFTYPE_P2P_GO:
+ 		type = NL80211_IFTYPE_AP;
+@@ -1717,9 +1721,14 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 			txq_size += sizeof(struct txq_info) +
+ 				    local->hw.txq_data_size;
+ 
+-		if (local->hw.queues >= IEEE80211_NUM_ACS)
++		if (local->hw.queues >= IEEE80211_NUM_ACS) {
+ 			txqs = IEEE80211_NUM_ACS;
+ 
++			if (local->ops->wake_tx_queue)
++				txqs += IEEE80211_NUM_NDEV_STA *
++					IEEE80211_NUM_ACS;
++		}
++
+ 		ndev = alloc_netdev_mqs(size + txq_size,
+ 					name, name_assign_type,
+ 					ieee80211_if_setup, txqs, 1);
+@@ -1814,6 +1823,9 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 
+ 	sdata->encrypt_headroom = IEEE80211_ENCRYPT_HEADROOM;
+ 
++	spin_lock_init(&sdata->ndev_lock);
++	idr_init(&sdata->ndev_sta_idr);
++
+ 	/* setup type-dependent data */
+ 	ieee80211_setup_sdata(sdata, type);
+ 
+@@ -1853,6 +1865,8 @@ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata)
+ 	list_del_rcu(&sdata->list);
+ 	mutex_unlock(&sdata->local->iflist_mtx);
+ 
++	idr_destroy(&sdata->ndev_sta_idr);
++
+ 	synchronize_rcu();
+ 
+ 	if (sdata->dev) {
+diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
+index f91d1873218c..de0a85f33af2 100644
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -111,10 +111,9 @@ static void __cleanup_single_sta(struct sta_info *sta)
+ 	if (sta->sta.txq[0]) {
+ 		for (i = 0; i < ARRAY_SIZE(sta->sta.txq); i++) {
+ 			struct txq_info *txqi = to_txq_info(sta->sta.txq[i]);
+-			int n = skb_queue_len(&txqi->queue);
+ 
+ 			ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
+-			atomic_sub(n, &sdata->txqs_len[txqi->txq.ac]);
++			sta->txqs_len[txqi->txq.ac] = 0;
+ 		}
+ 	}
+ 
+@@ -241,6 +240,8 @@ struct sta_info *sta_info_get_by_idx(struct ieee80211_sub_if_data *sdata,
+  */
+ void sta_info_free(struct ieee80211_local *local, struct sta_info *sta)
+ {
++	struct ieee80211_sub_if_data *sdata = sta->sdata;
++
+ 	if (sta->rate_ctrl)
+ 		rate_control_free_sta(sta);
+ 
+@@ -252,6 +253,11 @@ void sta_info_free(struct ieee80211_local *local, struct sta_info *sta)
+ #ifdef CPTCFG_MAC80211_MESH
+ 	kfree(sta->mesh);
+ #endif
++
++	spin_lock_bh(&sdata->ndev_lock);
++	idr_remove(&sta->sdata->ndev_sta_idr, sta->sta_id);
++	spin_unlock_bh(&sdata->ndev_lock);
++
+ 	kfree(sta);
+ }
+ 
+@@ -303,6 +309,8 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
+ 	struct ieee80211_local *local = sdata->local;
+ 	struct ieee80211_hw *hw = &local->hw;
+ 	struct sta_info *sta;
++	unsigned long flags;
++	int q;
+ 	int i;
+ 
+ 	sta = kzalloc(sizeof(*sta) + hw->sta_data_size, gfp);
+@@ -327,6 +335,37 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
+ 	}
+ #endif
+ 
++	spin_lock_bh(&sdata->ndev_lock);
++	i = idr_alloc(&sdata->ndev_sta_idr, sta, 0,
++		      BIT(sizeof(sta->sta_id) * 8) - 1,
++		      GFP_ATOMIC);
++	spin_unlock_bh(&sdata->ndev_lock);
++
++	if (i < 0)
++		goto free;
++
++	sta->sta_id = i;
++	sta->sta_id_off = (sta->sta_id % IEEE80211_NUM_NDEV_STA) *
++			  IEEE80211_NUM_ACS;
++
++	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
++	for (i = 0; i < ARRAY_SIZE(sta->ndev_sta_q_list); i++) {
++		INIT_LIST_HEAD(&sta->ndev_sta_q_list[i]);
++		sta->txqs_len[i] = 0;
++
++		q = sta->sta_id_off + IEEE80211_NUM_ACS + i;
++
++		if (sdata->txqs_len[i] >= local->hw.txq_ac_max_pending ||
++		    (sdata->vif.cab_queue != IEEE80211_INVAL_HW_QUEUE &&
++		     local->queue_stop_reasons[sdata->vif.cab_queue]) ||
++		    (sdata->vif.hw_queue[i] != IEEE80211_INVAL_HW_QUEUE &&
++		     local->queue_stop_reasons[sdata->vif.hw_queue[i]]))
++			netif_stop_subqueue(sdata->dev, q);
++		else
++			netif_wake_subqueue(sdata->dev, q);
++	}
++	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
++
+ 	memcpy(sta->addr, addr, ETH_ALEN);
+ 	memcpy(sta->sta.addr, addr, ETH_ALEN);
+ 	sta->local = local;
+@@ -350,7 +389,7 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
+ 
+ 		txq_data = kcalloc(ARRAY_SIZE(sta->sta.txq), size, gfp);
+ 		if (!txq_data)
+-			goto free;
++			goto free_idr;
+ 
+ 		for (i = 0; i < ARRAY_SIZE(sta->sta.txq); i++) {
+ 			struct txq_info *txq = txq_data + i * size;
+@@ -411,6 +450,10 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
+ free_txq:
+ 	if (sta->sta.txq[0])
+ 		kfree(to_txq_info(sta->sta.txq[0]));
++free_idr:
++	spin_lock_bh(&sdata->ndev_lock);
++	idr_remove(&sdata->ndev_sta_idr, sta->sta_id);
++	spin_unlock_bh(&sdata->ndev_lock);
+ free:
+ #ifdef CPTCFG_MAC80211_MESH
+ 	kfree(sta->mesh);
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index 2cafb21b422f..6cc65674ceaf 100644
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -403,6 +403,11 @@ struct sta_info {
+ 
+ 	struct ieee80211_fast_tx __rcu *fast_tx;
+ 
++	struct list_head ndev_sta_q_list[IEEE80211_NUM_ACS];
++	unsigned long txqs_len[IEEE80211_NUM_ACS];
++	u16 sta_id;
++	u16 sta_id_off;
++
+ #ifdef CPTCFG_MAC80211_MESH
+ 	struct mesh_sta *mesh;
+ #endif
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 2607e5bef4c9..7a64f492e62f 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -1246,6 +1246,11 @@ static void ieee80211_drv_tx(struct ieee80211_local *local,
+ 	};
+ 	struct ieee80211_txq *txq = NULL;
+ 	struct txq_info *txqi;
++	struct sta_info *sta;
++	unsigned long flags;
++	unsigned long pending;
++	int q_max;
++	int q;
+ 	u8 ac;
+ 
+ 	if (info->control.flags & IEEE80211_TX_CTRL_PS_RESPONSE)
+@@ -1267,11 +1272,41 @@ static void ieee80211_drv_tx(struct ieee80211_local *local,
+ 
+ 	ac = txq->ac;
+ 	txqi = to_txq_info(txq);
+-	atomic_inc(&sdata->txqs_len[ac]);
+-	if (atomic_read(&sdata->txqs_len[ac]) >= local->hw.txq_ac_max_pending)
+-		netif_stop_subqueue(sdata->dev, ac);
+ 
+-	skb_queue_tail(&txqi->queue, skb);
++	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
++
++	if (pubsta) {
++		sta = container_of(pubsta, struct sta_info, sta);
++		pending = ++sta->txqs_len[ac];
++	} else {
++		pending = ++sdata->txqs_len[ac];
++	}
++
++	if (pending >= local->hw.txq_ac_max_pending) {
++		q = ac;
++
++		if (pubsta) {
++			q += sta->sta_id_off;
++
++			if (list_empty(&sta->ndev_sta_q_list[ac]))
++				list_add(&sta->ndev_sta_q_list[ac],
++					 &sdata->ndev_sta_q[q]);
++
++			q += IEEE80211_NUM_ACS;
++			netif_stop_subqueue(sdata->dev, q);
++		} else {
++			q_max = (1 + IEEE80211_NUM_NDEV_STA) *
++				IEEE80211_NUM_ACS;
++
++			for (q = ac; q < q_max; q += IEEE80211_NUM_ACS)
++				netif_stop_subqueue(sdata->dev, q);
++		}
++	}
++
++	__skb_queue_tail(&txqi->queue, skb);
++
++	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
++
+ 	drv_wake_tx_queue(local, txqi);
+ 
+ 	return;
+@@ -1286,11 +1321,16 @@ struct sk_buff *ieee80211_tx_dequeue(struct ieee80211_hw *hw,
+ 	struct ieee80211_local *local = hw_to_local(hw);
+ 	struct ieee80211_sub_if_data *sdata = vif_to_sdata(txq->vif);
+ 	struct txq_info *txqi = container_of(txq, struct txq_info, txq);
++	struct sta_info *sta = NULL;
+ 	struct ieee80211_hdr *hdr;
+ 	struct sk_buff *skb = NULL;
++	unsigned long flags;
+ 	u8 ac = txq->ac;
++	int nq;
++	int q;
+ 
+-	spin_lock_bh(&txqi->queue.lock);
++	rcu_read_lock();
++	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+ 
+ 	if (test_bit(IEEE80211_TXQ_STOP, &txqi->flags))
+ 		goto out;
+@@ -1299,14 +1339,32 @@ struct sk_buff *ieee80211_tx_dequeue(struct ieee80211_hw *hw,
+ 	if (!skb)
+ 		goto out;
+ 
+-	atomic_dec(&sdata->txqs_len[ac]);
+-	if (__netif_subqueue_stopped(sdata->dev, ac))
+-		ieee80211_propagate_queue_wake(local, sdata->vif.hw_queue[ac]);
++	if (txq->sta) {
++		sta = container_of(txq->sta, struct sta_info, sta);
++		sta->txqs_len[ac]--;
++
++		if (sta->txqs_len[ac] < local->hw.txq_ac_max_pending) {
++			if (!list_empty(&sta->ndev_sta_q_list[ac]))
++				list_del_init(&sta->ndev_sta_q_list[ac]);
++
++			q = sdata->vif.hw_queue[ac];
++			nq = IEEE80211_NUM_ACS + sta->sta_id_off + ac;
++			if (local->queue_stop_reasons[q] == 0 &&
++			    __netif_subqueue_stopped(sdata->dev, nq))
++				ieee80211_propagate_queue_wake(local, q);
++		}
++	} else {
++		sdata->txqs_len[ac]--;
++
++		q = sdata->vif.hw_queue[ac];
++		if (sdata->txqs_len[ac] < local->hw.txq_ac_max_pending &&
++		    local->queue_stop_reasons[q] == 0 &&
++		    __netif_subqueue_stopped(sdata->dev, ac))
++			ieee80211_propagate_queue_wake(local, q);
++	}
+ 
+ 	hdr = (struct ieee80211_hdr *)skb->data;
+-	if (txq->sta && ieee80211_is_data_qos(hdr->frame_control)) {
+-		struct sta_info *sta = container_of(txq->sta, struct sta_info,
+-						    sta);
++	if (sta && ieee80211_is_data_qos(hdr->frame_control)) {
+ 		struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 
+ 		hdr->seq_ctrl = ieee80211_tx_next_seq(sta, txq->tid);
+@@ -1317,7 +1375,8 @@ struct sk_buff *ieee80211_tx_dequeue(struct ieee80211_hw *hw,
+ 	}
+ 
+ out:
+-	spin_unlock_bh(&txqi->queue.lock);
++	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
++	rcu_read_unlock();
+ 
+ 	return skb;
+ }
+@@ -2940,6 +2999,15 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
+ netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
+ 				       struct net_device *dev)
+ {
++	u16 ac;
++
++	/* ndo_select_queue() can alter the queue mapping for per-station
++	 * stop/wake queue control purposes. Undo it to prevent confusing
++	 * underlying mac80211 drivers.
++	 */
++	ac = skb_get_queue_mapping(skb) % IEEE80211_NUM_ACS;
++	skb_set_queue_mapping(skb, ac);
++
+ #ifdef CPTCFG_MAC80211_NSS_SUPPORT
+ 	/* Packets from NSS does not have valid protocol, priority and other
+ 	 * network stack values. Derive required parameters (priority
+@@ -2963,6 +3031,7 @@ netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
+ #endif
+ 
+ 	__ieee80211_subif_start_xmit(skb, dev, 0);
++
+ 	return NETDEV_TX_OK;
+ }
+ 
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index 8274c86296f9..937d7be8ea6c 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -238,6 +238,22 @@ __le16 ieee80211_ctstoself_duration(struct ieee80211_hw *hw,
+ }
+ EXPORT_SYMBOL(ieee80211_ctstoself_duration);
+ 
++static void
++ieee80211_propagate_sta_queue_wake(struct ieee80211_sub_if_data *sdata,
++				   int ac)
++{
++	struct ieee80211_local *local = sdata->local;
++	int q = ac;
++	int q_max = ARRAY_SIZE(sdata->ndev_sta_q);
++
++	if (!local->ops->wake_tx_queue)
++		return;
++
++	for (q = ac; q < q_max; q += IEEE80211_NUM_ACS)
++		if (list_empty(&sdata->ndev_sta_q[q]))
++			netif_wake_subqueue(sdata->dev, q + IEEE80211_NUM_ACS);
++}
++
+ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
+ {
+ 	struct ieee80211_sub_if_data *sdata;
+@@ -260,15 +276,17 @@ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
+ 			int ac_queue = sdata->vif.hw_queue[ac];
+ 
+ 			if (local->ops->wake_tx_queue &&
+-			    (atomic_read(&sdata->txqs_len[ac]) >
++			    (sdata->txqs_len[ac] >=
+ 			     local->hw.txq_ac_max_pending))
+ 				continue;
+ 
+ 			if (ac_queue == queue ||
+ 			    (sdata->vif.cab_queue == queue &&
+ 			     local->queue_stop_reasons[ac_queue] == 0 &&
+-			     skb_queue_empty(&local->pending[ac_queue])))
++			     skb_queue_empty(&local->pending[ac_queue]))) {
+ 				netif_wake_subqueue(sdata->dev, ac);
++				ieee80211_propagate_sta_queue_wake(sdata, ac);
++			}
+ 		}
+ 	}
+ }
+@@ -334,6 +352,8 @@ static void __ieee80211_stop_queue(struct ieee80211_hw *hw, int queue,
+ 	struct ieee80211_local *local = hw_to_local(hw);
+ 	struct ieee80211_sub_if_data *sdata;
+ 	int n_acs = IEEE80211_NUM_ACS;
++	int q_max;
++	int q;
+ 
+ 	trace_stop_queue(local, queue, reason);
+ 
+@@ -351,6 +371,11 @@ static void __ieee80211_stop_queue(struct ieee80211_hw *hw, int queue,
+ 	if (local->hw.queues < IEEE80211_NUM_ACS)
+ 		n_acs = 1;
+ 
++	if (local->ops->wake_tx_queue)
++		q_max = IEEE80211_NUM_ACS * (IEEE80211_NUM_NDEV_STA + 1);
++	else
++		q_max = IEEE80211_NUM_ACS;
++
+ 	rcu_read_lock();
+ 	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
+ 		int ac;
+@@ -360,8 +385,10 @@ static void __ieee80211_stop_queue(struct ieee80211_hw *hw, int queue,
+ 
+ 		for (ac = 0; ac < n_acs; ac++) {
+ 			if (sdata->vif.hw_queue[ac] == queue ||
+-			    sdata->vif.cab_queue == queue)
+-				netif_stop_subqueue(sdata->dev, ac);
++			    sdata->vif.cab_queue == queue) {
++				for (q = ac; q < q_max; q += IEEE80211_NUM_ACS)
++					netif_stop_subqueue(sdata->dev, q);
++			}
+ 		}
+ 	}
+ 	rcu_read_unlock();
+diff --git a/net/mac80211/wme.c b/net/mac80211/wme.c
+index 9eb0aee9105b..0950f8383e3d 100644
+--- a/net/mac80211/wme.c
++++ b/net/mac80211/wme.c
+@@ -221,6 +221,11 @@ u16 ieee80211_select_queue(struct ieee80211_sub_if_data *sdata,
+  downgrade:
+ 	ret = ieee80211_downgrade_queue(sdata, sta, skb);
+  out:
++	if (local->ops->wake_tx_queue && sta) {
++		ret += IEEE80211_NUM_ACS;
++		ret += sta->sta_id_off;
++	}
++
+ 	rcu_read_unlock();
+ 	return ret;
+ }
+-- 
+2.1.4
+

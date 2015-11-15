@@ -1,0 +1,81 @@
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 4b9dd070aeb9..e4c9b515a9e6 100644
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -1731,6 +1731,8 @@ struct ieee80211_tx_control {
+  *
+  * @vif: &struct ieee80211_vif pointer from the add_interface callback.
+  * @sta: station table entry, %NULL for per-vif queue
++ * @qdepth: number of pending frames
++ * @qsize: number of pending bytes
+  * @tid: the TID for this queue (unused for per-vif queue)
+  * @ac: the AC for this queue
+  * @drv_priv: driver private area, sized by hw->txq_data_size
+@@ -1741,6 +1743,8 @@ struct ieee80211_tx_control {
+ struct ieee80211_txq {
+ 	struct ieee80211_vif *vif;
+ 	struct ieee80211_sta *sta;
++	int qdepth;
++	int qsize;
+ 	u8 tid;
+ 	u8 ac;
+ 
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index b3d7de243793..012d83b92d7b 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -976,6 +976,8 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
+ 
+ 		ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
+ 		sdata->txqs_len[txqi->txq.ac] = 0;
++		txqi->txq.qdepth = 0;
++		txqi->txq.qsize = 0;
+ 	}
+ 
+ 	if (local->open_count == 0)
+diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
+index de0a85f33af2..c744c510a2fd 100644
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -114,6 +114,8 @@ static void __cleanup_single_sta(struct sta_info *sta)
+ 
+ 			ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
+ 			sta->txqs_len[txqi->txq.ac] = 0;
++			txqi->txq.qdepth = 0;
++			txqi->txq.qsize = 0;
+ 		}
+ 	}
+ 
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 7a64f492e62f..74684b86bbf7 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -1275,6 +1275,9 @@ static void ieee80211_drv_tx(struct ieee80211_local *local,
+ 
+ 	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+ 
++	txq->qdepth++;
++	txq->qsize += skb->len;
++
+ 	if (pubsta) {
+ 		sta = container_of(pubsta, struct sta_info, sta);
+ 		pending = ++sta->txqs_len[ac];
+@@ -1339,6 +1342,15 @@ struct sk_buff *ieee80211_tx_dequeue(struct ieee80211_hw *hw,
+ 	if (!skb)
+ 		goto out;
+ 
++	txq->qdepth--;
++	txq->qsize -= skb->len;
++
++	if (WARN_ON_ONCE(txq->qdepth < 0))
++		txq->qdepth = 0;
++
++	if (WARN_ON_ONCE(txq->qsize < 0))
++		txq->qsize = 0;
++
+ 	if (txq->sta) {
+ 		sta = container_of(txq->sta, struct sta_info, sta);
+ 		sta->txqs_len[ac]--;
+-- 
+2.1.4
+

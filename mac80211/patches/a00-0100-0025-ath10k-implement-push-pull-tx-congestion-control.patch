@@ -1,0 +1,687 @@
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index 2b5241416111..72db6c495132 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -336,6 +336,7 @@ enum ath10k_beacon_state {
+ struct ath10k_txq {
+ 	struct list_head pending;
+ 	unsigned long num_fw_queued;
++	unsigned long num_push_threshold;
+ };
+ 
+ struct ath10k_vif {
+diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
+index 04d5344d61fd..aab1f5c5b360 100644
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -1666,11 +1666,15 @@ struct ath10k_htt {
+ 	} txbuf;
+ 
+ 	struct {
++		bool enabled;
+ 		struct htt_q_state *vaddr;
+ 		dma_addr_t paddr;
++		u16 threshold;
+ 		u16 num_peers;
+ 		u16 num_tids;
++		enum htt_tx_mode_switch_mode mode;
+ 		enum htt_q_depth_type type;
++		struct idr resp_ids;
+ 	} tx_q_state;
+ };
+ 
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 6185f8e2aa4a..55fa3c33f2f3 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1986,22 +1986,28 @@ static void ath10k_htt_rx_tx_fetch_resp_id_confirm(struct ath10k *ar,
+ 		ath10k_dbg(ar, ATH10K_DBG_HTT, "htt rx tx fetch confirm resp_id %u\n",
+ 			   resp_id);
+ 
+-		/* TODO: free resp_id */
++		idr_remove(&ar->htt.tx_q_state.resp_ids, resp_id);
+ 	}
+ }
+ 
+ static void ath10k_htt_rx_tx_fetch_ind(struct ath10k *ar, struct sk_buff *skb)
+ {
++	struct ieee80211_hw *hw = ar->hw;
++	struct ieee80211_txq *txq;
+ 	struct htt_resp *resp = (struct htt_resp *)skb->data;
+ 	struct htt_tx_fetch_record *record;
+ 	size_t len;
+ 	size_t max_num_bytes;
+ 	size_t max_num_msdus;
++	size_t num_bytes;
++	size_t num_msdus;
+ 	const __le32 *resp_ids;
+ 	u16 num_records;
+ 	u16 num_resp_ids;
+ 	u16 peer_id;
+ 	u8 tid;
++	bool htt_requested = true;
++	int ret;
+ 	int i;
+ 
+ 	ath10k_dbg(ar, ATH10K_DBG_HTT, "htt rx tx fetch ind\n");
+@@ -2027,7 +2033,13 @@ static void ath10k_htt_rx_tx_fetch_ind(struct ath10k *ar, struct sk_buff *skb)
+ 		   num_records, num_resp_ids,
+ 		   le16_to_cpu(resp->tx_fetch_ind.fetch_seq_num));
+ 
+-	/* TODO: runtime sanity checks */
++	if (ar->htt.tx_q_state.mode == HTT_TX_MODE_SWITCH_PUSH) {
++		ath10k_warn(ar, "received unexpected tx_fetch_ind event: in push mode\n");
++		return;
++	}
++
++	spin_lock_bh(&ar->pending_txqs_lock);
++	rcu_read_lock();
+ 
+ 	for (i = 0; i < num_records; i++) {
+ 		record = &resp->tx_fetch_ind.records[i];
+@@ -2048,13 +2060,54 @@ static void ath10k_htt_rx_tx_fetch_ind(struct ath10k *ar, struct sk_buff *skb)
+ 			continue;
+ 		}
+ 
+-		/* TODO: dequeue and submit tx to device */
++		spin_lock_bh(&ar->data_lock);
++		txq = ath10k_mac_txq_lookup(ar, peer_id, tid);
++		spin_unlock_bh(&ar->data_lock);
++
++		if (!txq) {
++			ath10k_warn(ar, "failed to lookup txq for peer_id %hu tid %hhu\n",
++				    peer_id, tid);
++			continue;
++		}
++
++		num_msdus = 0;
++		num_bytes = 0;
++
++		while (num_msdus < max_num_msdus &&
++		       num_bytes < max_num_bytes) {
++			ret = ath10k_mac_txq_push_one(hw, txq, htt_requested);
++			if (ret < 0)
++				break;
++
++			num_msdus++;
++			num_bytes += ret;
++		}
++
++		/* Re-use the indication buffer to generate response records */
++		record->num_msdus = cpu_to_le16(num_msdus);
++		record->num_bytes = cpu_to_le32(num_bytes);
++
++		ath10k_mac_txq_state_update(hw, txq);
+ 	}
+ 
++	rcu_read_unlock();
++	spin_unlock_bh(&ar->pending_txqs_lock);
++
+ 	resp_ids = ath10k_htt_get_tx_fetch_ind_resp_ids(&resp->tx_fetch_ind);
+ 	ath10k_htt_rx_tx_fetch_resp_id_confirm(ar, resp_ids, num_resp_ids);
+ 
+-	/* TODO: generate and send fetch response to device */
++	ret = ath10k_htt_tx_fetch_resp(ar,
++				       resp->tx_fetch_ind.token,
++				       resp->tx_fetch_ind.fetch_seq_num,
++				       resp->tx_fetch_ind.records,
++				       num_records);
++	if (unlikely(ret)) {
++		ath10k_warn(ar, "failed to submit tx fetch resp for token 0x%08x: %d\n",
++			    le32_to_cpu(resp->tx_fetch_ind.token), ret);
++		/* FIXME: request fw restart */
++	}
++
++	ath10k_mac_txq_state_update_commit(ar);
+ }
+ 
+ static void ath10k_htt_rx_tx_fetch_confirm(struct ath10k *ar,
+@@ -2090,6 +2143,8 @@ static void ath10k_htt_rx_tx_mode_switch_ind(struct ath10k *ar,
+ {
+ 	const struct htt_resp *resp = (void *)skb->data;
+ 	const struct htt_tx_mode_switch_record *record;
++	struct ieee80211_txq *txq;
++	struct ath10k_txq *artxq;
+ 	size_t len;
+ 	size_t num_records;
+ 	enum htt_tx_mode_switch_mode mode;
+@@ -2134,7 +2189,9 @@ static void ath10k_htt_rx_tx_mode_switch_ind(struct ath10k *ar,
+ 	if (!enable)
+ 		return;
+ 
+-	/* TODO: apply configuration */
++	ar->htt.tx_q_state.enabled = enable;
++	ar->htt.tx_q_state.mode = mode;
++	ar->htt.tx_q_state.threshold = threshold;
+ 
+ 	for (i = 0; i < num_records; i++) {
+ 		record = &resp->tx_mode_switch_ind.records[i];
+@@ -2149,10 +2206,24 @@ static void ath10k_htt_rx_tx_mode_switch_ind(struct ath10k *ar,
+ 			continue;
+ 		}
+ 
+-		/* TODO: apply configuration */
++		spin_lock_bh(&ar->data_lock);
++		txq = ath10k_mac_txq_lookup(ar, peer_id, tid);
++		spin_unlock_bh(&ar->data_lock);
++
++		if (!txq) {
++			ath10k_warn(ar, "failed to lookup txq for peer_id %hu tid %hhu\n",
++				    peer_id, tid);
++			continue;
++		}
++
++		spin_lock_bh(&ar->htt.tx_lock);
++		artxq = (void *)txq->drv_priv;
++		artxq->num_push_threshold = le16_to_cpu(record->num_max_msdus);
++		spin_unlock_bh(&ar->htt.tx_lock);
+ 	}
+ 
+-	/* TODO: apply configuration */
++	if (mode == HTT_TX_MODE_SWITCH_PUSH)
++		ath10k_mac_txq_push_pending(ar);
+ }
+ 
+ void ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
+diff --git a/drivers/net/wireless/ath/ath10k/htt_tx.c b/drivers/net/wireless/ath/ath10k/htt_tx.c
+index bcfff02d4444..f332df7d0cff 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_tx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
+@@ -177,6 +177,7 @@ int ath10k_htt_tx_alloc(struct ath10k_htt *htt)
+ 
+ 	spin_lock_init(&htt->tx_lock);
+ 	idr_init(&htt->pending_tx);
++	idr_init(&htt->tx_q_state.resp_ids);
+ 
+ 	size = htt->max_num_pending_tx * sizeof(struct ath10k_htt_txbuf);
+ 	htt->txbuf.vaddr = dma_alloc_coherent(ar->dev, size,
+@@ -185,7 +186,7 @@ int ath10k_htt_tx_alloc(struct ath10k_htt *htt)
+ 	if (!htt->txbuf.vaddr) {
+ 		ath10k_err(ar, "failed to alloc tx buffer\n");
+ 		ret = -ENOMEM;
+-		goto free_idr_pending_tx;
++		goto free_idr;
+ 	}
+ 
+ 	ret = ath10k_htt_tx_alloc_cont_frag_desc(htt);
+@@ -211,8 +212,9 @@ free_txbuf:
+ 	dma_free_coherent(htt->ar->dev, size, htt->txbuf.vaddr,
+ 			  htt->txbuf.paddr);
+ 
+-free_idr_pending_tx:
++free_idr:
+ 	idr_destroy(&htt->pending_tx);
++	idr_destroy(&htt->tx_q_state.resp_ids);
+ 
+ 	return ret;
+ }
+@@ -239,6 +241,7 @@ void ath10k_htt_tx_free(struct ath10k_htt *htt)
+ 
+ 	idr_for_each(&htt->pending_tx, ath10k_htt_tx_clean_up_pending, htt->ar);
+ 	idr_destroy(&htt->pending_tx);
++	idr_destroy(&htt->tx_q_state.resp_ids);
+ 
+ 	if (htt->txbuf.vaddr) {
+ 		size = htt->max_num_pending_tx *
+@@ -546,10 +549,13 @@ int ath10k_htt_tx_fetch_resp(struct ath10k *ar,
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+-	resp_id = ret = 0; /* TODO: allocate resp_id */
+-	if (ret)
++	ret = idr_alloc(&ar->htt.tx_q_state.resp_ids, ar, 0,
++			BIT(sizeof(resp_id) * 8) - 1, GFP_ATOMIC);
++	if (ret < 0)
+ 		goto err_free_skb;
+ 
++	resp_id = ret;
++
+ 	skb_put(skb, len);
+ 	cmd = (struct htt_cmd *)skb->data;
+ 	cmd->hdr.msg_type = HTT_H2T_MSG_TYPE_TX_FETCH_RESP;
+@@ -570,7 +576,7 @@ int ath10k_htt_tx_fetch_resp(struct ath10k *ar,
+ 	return 0;
+ 
+ err_free_resp_id:
+-	(void) resp_id; /* TODO: free resp_id */
++	idr_remove(&ar->htt.tx_q_state.resp_ids, resp_id);
+ 
+ err_free_skb:
+ 	dev_kfree_skb_any(skb);
+diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
+index 9acdbcc0914f..6014e6d21cc8 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -2834,6 +2834,26 @@ static int ath10k_station_disassoc(struct ath10k *ar,
+ 	return ret;
+ }
+ 
++struct ieee80211_txq *ath10k_mac_txq_lookup(struct ath10k *ar,
++					    u16 peer_id,
++					    u8 tid)
++{
++	struct ath10k_peer *peer;
++
++	lockdep_assert_held(&ar->data_lock);
++
++	peer = ar->peer_map[peer_id];
++	if (!peer)
++		return NULL;
++
++	if (peer->sta)
++		return peer->sta->txq[tid];
++	else if (peer->vif)
++		return peer->vif->txq;
++	else
++		return NULL;
++}
++
+ /**************/
+ /* Regulatory */
+ /**************/
+@@ -3015,13 +3035,6 @@ static void ath10k_reg_notifier(struct wiphy *wiphy,
+ /* TX handlers */
+ /***************/
+ 
+-enum ath10k_mac_tx_path {
+-	ATH10K_MAC_TX_HTT,
+-	ATH10K_MAC_TX_HTT_MGMT,
+-	ATH10K_MAC_TX_WMI_MGMT,
+-	ATH10K_MAC_TX_UNKNOWN,
+-};
+-
+ void ath10k_mac_tx_lock(struct ath10k *ar, int reason)
+ {
+ 	lockdep_assert_held(&ar->htt.tx_lock);
+@@ -3148,7 +3161,7 @@ void ath10k_mac_handle_tx_pause_vdev(struct ath10k *ar, u32 vdev_id,
+ 	spin_unlock_bh(&ar->htt.tx_lock);
+ }
+ 
+-static enum ath10k_hw_txrx_mode
++enum ath10k_hw_txrx_mode
+ ath10k_mac_tx_h_get_txmode(struct ath10k *ar,
+ 			   struct ieee80211_vif *vif,
+ 			   struct ieee80211_sta *sta,
+@@ -3300,9 +3313,9 @@ static void ath10k_tx_h_add_p2p_noa_ie(struct ath10k *ar,
+ 	}
+ }
+ 
+-static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+-				    struct ieee80211_txq *txq,
+-				    struct sk_buff *skb)
++void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
++			     struct ieee80211_txq *txq,
++			     struct sk_buff *skb)
+ {
+ 	struct ieee80211_hdr *hdr = (void *)skb->data;
+ 	struct ieee80211_vif *vif = txq->vif;
+@@ -3356,7 +3369,7 @@ unlock:
+ 	return ret;
+ }
+ 
+-static enum ath10k_mac_tx_path
++enum ath10k_mac_tx_path
+ ath10k_mac_tx_h_get_txpath(struct ath10k *ar,
+ 			   struct sk_buff *skb,
+ 			   enum ath10k_hw_txrx_mode txmode)
+@@ -3415,12 +3428,12 @@ static int ath10k_mac_tx_submit(struct ath10k *ar,
+ /* This function consumes the sk_buff regardless of return value as far as
+  * caller is concerned so no freeing is necessary afterwards.
+  */
+-static int ath10k_mac_tx(struct ath10k *ar,
+-			 struct ieee80211_vif *vif,
+-			 struct ieee80211_sta *sta,
+-			 enum ath10k_hw_txrx_mode txmode,
+-			 enum ath10k_mac_tx_path txpath,
+-			 struct sk_buff *skb)
++int ath10k_mac_tx(struct ath10k *ar,
++		  struct ieee80211_vif *vif,
++		  struct ieee80211_sta *sta,
++		  enum ath10k_hw_txrx_mode txmode,
++		  enum ath10k_mac_tx_path txpath,
++		  struct sk_buff *skb)
+ {
+ 	struct ieee80211_hw *hw = ar->hw;
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+@@ -3468,8 +3481,132 @@ static int ath10k_mac_tx(struct ath10k *ar,
+ 	return 0;
+ }
+ 
+-static void ath10k_mac_txq_push(struct ieee80211_hw *hw,
+-				struct ieee80211_txq *txq)
++static bool ath10k_mac_tx_push_threshold_reached(struct ath10k *ar,
++						 struct ath10k_txq *artxq)
++{
++	lockdep_assert_held(&ar->htt.tx_lock);
++
++	if (ar->htt.tx_q_state.mode == HTT_TX_MODE_SWITCH_PUSH)
++		return false;
++
++	if (ar->htt.num_pending_tx >= ar->htt.tx_q_state.threshold)
++		return true;
++
++	if (artxq->num_fw_queued >= artxq->num_push_threshold)
++		return true;
++
++	return false;
++}
++
++static u8 ath10k_mac_txq_calc_size(size_t count)
++{
++	int exp;
++	int factor;
++
++	exp = 0;
++	factor = count >> 7;
++
++	while (factor >= 64 && exp < 4) {
++		factor >>= 3;
++		exp++;
++	}
++
++	if (exp == 4)
++		return 0xff;
++
++	if (count > 0)
++		factor = max(1, factor);
++
++	return SM(exp, HTT_TX_Q_STATE_ENTRY_EXP) |
++	       SM(factor, HTT_TX_Q_STATE_ENTRY_FACTOR);
++}
++
++static void __ath10k_mac_txq_state_update(struct ieee80211_hw *hw,
++					  struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++	struct ath10k_sta *arsta = (void *)txq->sta->drv_priv;
++	struct ath10k_vif *arvif = (void *)txq->vif->drv_priv;
++	int idx;
++	u32 bit;
++	u16 peer_id;
++	u8 tid;
++	u8 count;
++
++	lockdep_assert_held(&ar->htt.tx_lock);
++
++	if (!ar->htt.tx_q_state.enabled)
++		return;
++
++	if (txq->sta)
++		peer_id = arsta->peer_id;
++	else
++		peer_id = arvif->peer_id;
++
++	tid = txq->tid;
++	bit = BIT(peer_id % 32);
++	idx = peer_id / 32;
++	count = ath10k_mac_txq_calc_size(txq->qsize);
++
++	if (unlikely(peer_id >= ar->htt.tx_q_state.num_peers) ||
++	    unlikely(tid >= ar->htt.tx_q_state.num_tids)) {
++		ath10k_warn(ar, "refusing to update txq for peer_id %hu tid %hhu due to out of bounds\n",
++			    peer_id, tid);
++		return;
++	}
++
++	ar->htt.tx_q_state.vaddr->count[tid][peer_id] = count;
++	ar->htt.tx_q_state.vaddr->map[tid][idx] &= ~bit;
++	ar->htt.tx_q_state.vaddr->map[tid][idx] |= count ? bit : 0;
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "mac txq state update peer_id %hu tid %hhu count %hhu\n",
++		   peer_id, tid, count);
++}
++
++void ath10k_mac_txq_state_update(struct ieee80211_hw *hw,
++				 struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++
++	spin_lock_bh(&ar->htt.tx_lock);
++	__ath10k_mac_txq_state_update(hw, txq);
++	spin_unlock_bh(&ar->htt.tx_lock);
++}
++
++static void __ath10k_mac_txq_state_update_commit(struct ath10k *ar)
++{
++	u32 seq;
++	size_t size;
++
++	lockdep_assert_held(&ar->htt.tx_lock);
++
++	if (!ar->htt.tx_q_state.enabled)
++		return;
++
++	seq = le32_to_cpu(ar->htt.tx_q_state.vaddr->seq);
++	seq++;
++	ar->htt.tx_q_state.vaddr->seq = cpu_to_le32(seq);
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "mac txq state update commit seq %u\n",
++		   seq);
++
++	size = sizeof(*ar->htt.tx_q_state.vaddr);
++	dma_sync_single_for_device(ar->dev,
++				   ar->htt.tx_q_state.paddr,
++				   size,
++				   DMA_TO_DEVICE);
++}
++
++void ath10k_mac_txq_state_update_commit(struct ath10k *ar)
++{
++	spin_lock_bh(&ar->htt.tx_lock);
++	__ath10k_mac_txq_state_update_commit(ar);
++	spin_unlock_bh(&ar->htt.tx_lock);
++}
++
++int ath10k_mac_txq_push_one(struct ieee80211_hw *hw,
++			    struct ieee80211_txq *txq,
++			    bool htt_requested)
+ {
+ 	struct ath10k *ar = hw->priv;
+ 	struct ath10k_htt *htt = &ar->htt;
+@@ -3482,52 +3619,81 @@ static void ath10k_mac_txq_push(struct ieee80211_hw *hw,
+ 	bool is_mgmt = false;
+ 	bool is_presp = false;
+ 	int ret;
++	int skb_len;
++
++	lockdep_assert_held(&ar->pending_txqs_lock);
++
++	spin_lock_bh(&ar->htt.tx_lock);
++
++	if (!htt_requested && ath10k_mac_tx_push_threshold_reached(ar, artxq)) {
++		if (list_empty(&artxq->pending) && txq->qdepth > 0)
++			list_move_tail(&artxq->pending,
++				       &ar->pending_txqs);
++		spin_unlock_bh(&ar->htt.tx_lock);
++		return -EBUSY;
++	}
++
++	ret = ath10k_htt_tx_inc_pending(htt, is_mgmt, is_presp);
++	if (ret) {
++		if (list_empty(&artxq->pending) && txq->qdepth > 0)
++			list_move_tail(&artxq->pending,
++				       &ar->pending_txqs);
++		spin_unlock_bh(&ar->htt.tx_lock);
++		return -EBUSY;
++	}
++
++	artxq->num_fw_queued++;
++
++	spin_unlock_bh(&ar->htt.tx_lock);
++
++	skb = ieee80211_tx_dequeue(hw, txq);
++	if (!skb) {
++		spin_lock_bh(&ar->htt.tx_lock);
++		if (!list_empty(&artxq->pending))
++			list_del_init(&artxq->pending);
++		ath10k_htt_tx_dec_pending(htt, is_mgmt);
++		artxq->num_fw_queued--;
++		spin_unlock_bh(&ar->htt.tx_lock);
++		return -ENOENT;
++	}
++
++	skb_len = skb->len;
++
++	ath10k_mac_tx_h_fill_cb(ar, txq, skb);
++
++	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
++	txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
++
++	ret = ath10k_mac_tx(ar, vif, sta, txmode, txpath, skb);
++	if (ret) {
++		ath10k_warn(ar, "failed to transmit queued frame: %d\n",
++			    ret);
++		spin_lock_bh(&ar->htt.tx_lock);
++		ath10k_htt_tx_dec_pending(htt, is_mgmt);
++		artxq->num_fw_queued--;
++		spin_unlock_bh(&ar->htt.tx_lock);
++		/* fall through */
++	}
++
++	return skb_len;
++}
++
++static void ath10k_mac_txq_push(struct ieee80211_hw *hw,
++				struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++	bool htt_requested = false;
++	int ret;
+ 
+ 	lockdep_assert_held(&ar->pending_txqs_lock);
+ 
+ 	for (;;) {
+-		spin_lock_bh(&ar->htt.tx_lock);
+-
+-		ret = ath10k_htt_tx_inc_pending(htt, is_mgmt, is_presp);
+-		if (ret) {
+-			if (list_empty(&artxq->pending) && txq->qdepth > 0)
+-				list_move_tail(&artxq->pending,
+-					       &ar->pending_txqs);
+-			spin_unlock_bh(&ar->htt.tx_lock);
++		ret = ath10k_mac_txq_push_one(hw, txq, htt_requested);
++		if (ret < 0)
+ 			break;
+-		}
+-
+-		artxq->num_fw_queued++;
+-
+-		spin_unlock_bh(&ar->htt.tx_lock);
+-
+-		skb = ieee80211_tx_dequeue(hw, txq);
+-		if (!skb) {
+-			spin_lock_bh(&ar->htt.tx_lock);
+-			if (!list_empty(&artxq->pending))
+-				list_del_init(&artxq->pending);
+-			ath10k_htt_tx_dec_pending(htt, is_mgmt);
+-			artxq->num_fw_queued--;
+-			spin_unlock_bh(&ar->htt.tx_lock);
+-			break;
+-		}
+-
+-		ath10k_mac_tx_h_fill_cb(ar, txq, skb);
+-
+-		txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
+-		txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
+-
+-		ret = ath10k_mac_tx(ar, vif, sta, txmode, txpath, skb);
+-		if (ret) {
+-			ath10k_warn(ar, "failed to transmit queued frame: %d\n",
+-				    ret);
+-			spin_lock_bh(&ar->htt.tx_lock);
+-			ath10k_htt_tx_dec_pending(htt, is_mgmt);
+-			artxq->num_fw_queued--;
+-			spin_unlock_bh(&ar->htt.tx_lock);
+-			continue;
+-		}
+ 	}
++
++	ath10k_mac_txq_state_update(hw, txq);
+ }
+ 
+ void ath10k_mac_txq_push_pending(struct ath10k *ar)
+@@ -3557,6 +3723,8 @@ void ath10k_mac_txq_push_pending(struct ath10k *ar)
+ 		ath10k_mac_txq_push(hw, txq);
+ 	}
+ 
++	ath10k_mac_txq_state_update_commit(ar);
++
+ 	spin_unlock_bh(&ar->pending_txqs_lock);
+ 	rcu_read_unlock();
+ }
+@@ -3963,7 +4131,10 @@ static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
+ 	struct ath10k *ar = hw->priv;
+ 
+ 	spin_lock_bh(&ar->pending_txqs_lock);
++
+ 	ath10k_mac_txq_push(hw, txq);
++	ath10k_mac_txq_state_update_commit(ar);
++
+ 	spin_unlock_bh(&ar->pending_txqs_lock);
+ }
+ 
+diff --git a/drivers/net/wireless/ath/ath10k/mac.h b/drivers/net/wireless/ath/ath10k/mac.h
+index 32c508c6334b..8d5d565c9df1 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.h
++++ b/drivers/net/wireless/ath/ath10k/mac.h
+@@ -39,6 +39,13 @@ struct rfc1042_hdr {
+ 	__be16 snap_type;
+ } __packed;
+ 
++enum ath10k_mac_tx_path {
++	ATH10K_MAC_TX_HTT,
++	ATH10K_MAC_TX_HTT_MGMT,
++	ATH10K_MAC_TX_WMI_MGMT,
++	ATH10K_MAC_TX_UNKNOWN,
++};
++
+ struct ath10k *ath10k_mac_create(size_t priv_size);
+ void ath10k_mac_destroy(struct ath10k *ar);
+ int ath10k_mac_register(struct ath10k *ar);
+@@ -70,12 +77,43 @@ u8 ath10k_mac_hw_rate_to_idx(const struct ieee80211_supported_band *sband,
+ u8 ath10k_mac_bitrate_to_idx(const struct ieee80211_supported_band *sband,
+ 			     u32 bitrate);
+ 
++void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
++			     struct ieee80211_txq *txq,
++			     struct sk_buff *skb);
++
++enum ath10k_hw_txrx_mode
++ath10k_mac_tx_h_get_txmode(struct ath10k *ar,
++			   struct ieee80211_vif *vif,
++			   struct ieee80211_sta *sta,
++			   struct sk_buff *skb);
++
++enum ath10k_mac_tx_path
++ath10k_mac_tx_h_get_txpath(struct ath10k *ar,
++			   struct sk_buff *skb,
++			   enum ath10k_hw_txrx_mode txmode);
++
++int ath10k_mac_tx(struct ath10k *ar,
++		  struct ieee80211_vif *vif,
++		  struct ieee80211_sta *sta,
++		  enum ath10k_hw_txrx_mode txmode,
++		  enum ath10k_mac_tx_path txpath,
++		  struct sk_buff *skb);
++
+ void ath10k_mac_tx_lock(struct ath10k *ar, int reason);
+ void ath10k_mac_tx_unlock(struct ath10k *ar, int reason);
+ void ath10k_mac_vif_tx_lock(struct ath10k_vif *arvif, int reason);
+ void ath10k_mac_vif_tx_unlock(struct ath10k_vif *arvif, int reason);
+ bool ath10k_mac_tx_frm_has_freq(struct ath10k *ar);
+ void ath10k_mac_txq_push_pending(struct ath10k *ar);
++void ath10k_mac_txq_state_update(struct ieee80211_hw *hw,
++				 struct ieee80211_txq *txq);
++void ath10k_mac_txq_state_update_commit(struct ath10k *ar);
++struct ieee80211_txq *ath10k_mac_txq_lookup(struct ath10k *ar,
++					    u16 peer_id,
++					    u8 tid);
++int ath10k_mac_txq_push_one(struct ieee80211_hw *hw,
++			    struct ieee80211_txq *txq,
++			    bool htt_requested);
+ 
+ static inline struct ath10k_vif *ath10k_vif_to_arvif(struct ieee80211_vif *vif)
+ {
+-- 
+2.1.4
+
