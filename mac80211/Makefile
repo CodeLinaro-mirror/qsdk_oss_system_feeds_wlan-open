@@ -315,7 +315,7 @@ endef
 define KernelPackage/wil6210
   $(call KernelPackage/mac80211/Default)
   TITLE:=QCA 802.11ad wireless cards support
-  DEPENDS+= @PCI_SUPPORT +kmod-ath
+  DEPENDS+= @PCI_SUPPORT +kmod-cfg80211
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/wil6210/wil6210.ko
   AUTOLOAD:=$(call AutoProbe,wil6210)
@@ -375,7 +375,7 @@ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
-config-$(call config_package,wil6210) += WIL6210
+config-$(call config_package,wil6210) += ATH_CARDS WIL6210
 
 config-$(CONFIG_PACKAGE_kmod-ath9k) += ATH9K_CHANNEL_CONTEXT
 config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_ALG \
