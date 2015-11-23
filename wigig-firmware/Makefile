@@ -29,8 +29,10 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/lib/firmware
 	$(INSTALL_DATA) \
 		$(PKG_BUILD_DIR)/WIL6210/wil6210.fw \
+	$(1)/lib/firmware/
+	$(INSTALL_DATA) \
 		$(PKG_BUILD_DIR)/WIL6210/wil6210.board \
-	$(1)/lib/firmware
+	$(1)/lib/firmware/wil6210.brd
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
