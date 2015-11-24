@@ -1,6 +1,8 @@
+diff --git a/drivers/net/wireless/ath/ath10k/ahb.c b/drivers/net/wireless/ath/ath10k/ahb.c
+index 90d837a..5a80b00 100644
 --- a/drivers/net/wireless/ath/ath10k/ahb.c
 +++ b/drivers/net/wireless/ath/ath10k/ahb.c
-@@ -563,6 +563,8 @@ static int ath10k_ahb_resource_init(stru
+@@ -563,6 +563,8 @@ static int ath10k_ahb_resource_init(struct ath10k *ar)
  		goto err_clock_deinit;
  	}
  
@@ -43,7 +45,7 @@
  static const struct ath10k_hif_ops ath10k_ahb_hif_ops = {
  	.tx_sg                  = ath10k_pci_hif_tx_sg,
  	.diag_read              = ath10k_pci_hif_diag_read,
-@@ -761,6 +790,7 @@ static const struct ath10k_hif_ops ath10
+@@ -761,6 +790,7 @@ static const struct ath10k_hif_ops ath10k_ahb_hif_ops = {
  	.power_down             = ath10k_pci_hif_power_down,
  	.read32                 = ath10k_ahb_read32,
  	.write32                = ath10k_ahb_write32,
@@ -51,6 +53,8 @@
  };
  
  static const struct ath10k_bus_ops ath10k_ahb_bus_ops = {
+diff --git a/drivers/net/wireless/ath/ath10k/ahb.h b/drivers/net/wireless/ath/ath10k/ahb.h
+index 255ed17..3d3c307 100644
 --- a/drivers/net/wireless/ath/ath10k/ahb.h
 +++ b/drivers/net/wireless/ath/ath10k/ahb.h
 @@ -37,6 +37,8 @@ struct ath10k_ahb {
@@ -62,6 +66,8 @@
  };
  
  #ifdef CPTCFG_ATH10K_AHB
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index 0be58d7..764769d 100644
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
 @@ -18,6 +18,8 @@
@@ -180,7 +186,40 @@
  static int ath10k_download_cal_file(struct ath10k *ar)
  {
  	int ret;
-@@ -1770,6 +1872,8 @@ static int ath10k_core_probe_fw(struct a
+@@ -1199,6 +1301,23 @@ static int ath10k_download_cal_data(struct ath10k *ar)
+ {
+ 	int ret;
+ 
++	ret = ath10k_download_cal_data_mtd(ar);
++	if (ret == 0) {
++		/* Run otp with get chip id param to move downloaded caldata
++		 * content to temporary memory in the target.
++		 */
++		ret = ath10k_core_get_board_id_from_otp(ar);
++		if (ret)
++			return ret;
++
++		/* Download board data and run otp. This step will make sure
++		 * the target derives final version of board specific info
++		 * from board data content and caldata content downloaded in
++		 * previous steps.
++		 */
++		goto load_bdata_and_run_otp;
++	}
++
+ 	ret = ath10k_download_cal_file(ar);
+ 	if (ret == 0) {
+ 		ar->cal_mode = ATH10K_CAL_MODE_FILE;
+@@ -1219,6 +1338,8 @@ static int ath10k_download_cal_data(struct ath10k *ar)
+ 		   "boot did not find DT entry, try OTP next: %d\n",
+ 		   ret);
+ 
++load_bdata_and_run_otp:
++
+ 	ret = ath10k_download_and_run_otp(ar);
+ 	if (ret) {
+ 		ath10k_err(ar, "failed to run otp: %d\n", ret);
+@@ -1770,6 +1891,8 @@ static int ath10k_core_probe_fw(struct ath10k *ar)
  		goto err_power_down;
  	}
  
@@ -189,6 +228,8 @@
  	ret = ath10k_core_get_board_id_from_otp(ar);
  	if (ret && ret != -EOPNOTSUPP) {
  		ath10k_err(ar, "failed to get board id from otp for qca99x0: %d\n",
+diff --git a/drivers/net/wireless/ath/ath10k/hif.h b/drivers/net/wireless/ath/ath10k/hif.h
+index 89e7076..c1de2d6 100644
 --- a/drivers/net/wireless/ath/ath10k/hif.h
 +++ b/drivers/net/wireless/ath/ath10k/hif.h
 @@ -30,6 +30,13 @@ struct ath10k_hif_sg_item {
@@ -216,7 +257,7 @@
  };
  
  static inline int ath10k_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
-@@ -202,4 +213,13 @@ static inline void ath10k_hif_write32(st
+@@ -202,4 +213,13 @@ static inline void ath10k_hif_write32(struct ath10k *ar,
  	ar->hif.ops->write32(ar, address, data);
  }
  
