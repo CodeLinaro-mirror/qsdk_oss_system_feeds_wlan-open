@@ -66,7 +66,7 @@
  		.continuous_frag_desc = true,
  		.channel_counters_freq_hz = 150000,
  		.max_probe_resp_desc_thres = 24,
-@@ -163,6 +173,26 @@ static const struct ath10k_hw_params ath
+@@ -163,6 +173,27 @@ static const struct ath10k_hw_params ath
  			.board_ext_size = QCA9377_BOARD_EXT_DATA_SZ,
  		},
  	},
@@ -81,6 +81,7 @@
 +		.continuous_frag_desc = true,
 +		.channel_counters_freq_hz = 125000,
 +		.max_probe_resp_desc_thres = 24,
++		.platform_type = WMI_HOST_PLATFORM_LOW_PERF,
 +		.fw = {
 +			.dir = QCA40XX_HW_1_0_FW_DIR,
 +			.fw = QCA40XX_HW_1_0_FW_FILE,
@@ -93,7 +94,7 @@
  };
  
  static const char *const ath10k_core_fw_feature_str[] = {
-@@ -579,10 +609,12 @@ out:
+@@ -579,10 +610,12 @@ out:
  static int ath10k_core_get_board_id_from_otp(struct ath10k *ar)
  {
  	u32 result, address;
@@ -106,7 +107,7 @@
  
  	if (!ar->otp_data || !ar->otp_len) {
  		ath10k_warn(ar,
-@@ -601,8 +633,7 @@ static int ath10k_core_get_board_id_from
+@@ -601,8 +634,7 @@ static int ath10k_core_get_board_id_from
  		return ret;
  	}
  
@@ -116,7 +117,7 @@
  	if (ret) {
  		ath10k_err(ar, "could not execute otp for board id check: %d\n",
  			   ret);
-@@ -1383,8 +1414,10 @@ static int ath10k_init_hw_params(struct
+@@ -1402,8 +1434,10 @@ static int ath10k_init_hw_params(struct
  	for (i = 0; i < ARRAY_SIZE(ath10k_hw_params_list); i++) {
  		hw_params = &ath10k_hw_params_list[i];
  
@@ -128,7 +129,7 @@
  	}
  
  	if (i == ARRAY_SIZE(ath10k_hw_params_list)) {
-@@ -1581,6 +1614,22 @@ static int ath10k_core_init_firmware_fea
+@@ -1600,6 +1634,22 @@ static int ath10k_core_init_firmware_fea
  		ar->htt.max_num_pending_tx = TARGET_10_4_NUM_MSDU_DESC;
  		ar->fw_stats_req_mask = WMI_STAT_PEER;
  		ar->max_spatial_stream = WMI_10_4_MAX_SPATIAL_STREAM;
@@ -151,7 +152,7 @@
  		break;
  	case ATH10K_FW_WMI_OP_VERSION_UNSET:
  	case ATH10K_FW_WMI_OP_VERSION_MAX:
-@@ -1858,6 +1907,7 @@ static int ath10k_core_probe_fw(struct a
+@@ -1877,6 +1927,7 @@ static int ath10k_core_probe_fw(struct a
  	}
  
  	ar->target_version = target_info.version;
@@ -161,7 +162,7 @@
  	ret = ath10k_init_hw_params(ar);
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -626,6 +626,7 @@ struct ath10k {
+@@ -627,6 +627,7 @@ struct ath10k {
  	u16 dev_id;
  	u32 chip_id;
  	u32 target_version;
@@ -169,7 +170,7 @@
  	u8 fw_version_major;
  	u32 fw_version_minor;
  	u16 fw_version_release;
-@@ -661,10 +662,13 @@ struct ath10k {
+@@ -662,10 +663,13 @@ struct ath10k {
  
  	struct ath10k_hw_params {
  		u32 id;
@@ -183,7 +184,16 @@
  
  		/* This is true if given HW chip has a quirky Cycle Counter
  		 * wraparound which resets to 0x7fffffff instead of 0. All
-@@ -806,6 +810,9 @@ struct ath10k {
+@@ -692,6 +696,8 @@ struct ath10k {
+ 		 */
+ 		bool utf_codeswap_support;
+ 
++		enum wmi_host_platform_type platform_type;
++
+ 		struct ath10k_hw_params_fw {
+ 			const char *dir;
+ 			const char *fw;
+@@ -807,6 +813,9 @@ struct ath10k {
  	int max_num_tdls_vdevs;
  	int num_active_peers;
  	int num_tids;
@@ -275,7 +285,40 @@
  #endif /* __TARGADDRS_H__ */
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -4580,9 +4580,9 @@ static void ath10k_wmi_event_service_rea
+@@ -724,6 +724,7 @@ static struct wmi_cmd_map wmi_10_4_cmd_m
+ 	.set_cca_params_cmdid = WMI_10_4_SET_CCA_PARAMS_CMDID,
+ 	.pdev_bss_chan_info_request_cmdid =
+ 			WMI_10_4_PDEV_BSS_CHAN_INFO_REQUEST_CMDID,
++	.ext_resource_cfg_cmdid = WMI_10_4_EXT_RESOURCE_CFG_CMDID,
+ };
+ 
+ /* MAIN WMI VDEV param map */
+@@ -1691,11 +1692,24 @@ void ath10k_wmi_put_wmi_channel(struct w
+ int ath10k_wmi_wait_for_service_ready(struct ath10k *ar)
+ {
+ 	unsigned long time_left;
++	int ret;
+ 
+ 	time_left = wait_for_completion_timeout(&ar->wmi.service_ready,
+ 						WMI_SERVICE_READY_TIMEOUT_HZ);
+ 	if (!time_left)
+ 		return -ETIMEDOUT;
++
++	if (test_bit(WMI_SERVICE_EXT_RES_CFG_SUPPORT, ar->wmi.svc_map) &&
++	    ar->hw_params.platform_type) {
++		ret = ath10k_wmi_ext_resource_config(ar,
++						     ar->hw_params.platform_type);
++		if (ret) {
++			ath10k_warn(ar, "failed to send host platform type : %d\n",
++				    ret);
++			return ret;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -4580,9 +4594,9 @@ static void ath10k_wmi_event_service_rea
  
  	if (test_bit(WMI_SERVICE_PEER_CACHING, ar->wmi.svc_map)) {
  		ar->max_num_peers = TARGET_10_4_NUM_QCACHE_PEERS_MAX +
@@ -288,7 +331,7 @@
  		ar->num_tids = ar->num_active_peers * 2;
  		ar->max_num_stations = TARGET_10_4_NUM_QCACHE_PEERS_MAX;
  	}
-@@ -5627,8 +5627,8 @@ static struct sk_buff *ath10k_wmi_10_4_o
+@@ -5627,8 +5641,8 @@ static struct sk_buff *ath10k_wmi_10_4_o
  			__cpu_to_le32(TARGET_10_4_NUM_OFFLOAD_REORDER_BUFFS);
  	config.num_peer_keys  = __cpu_to_le32(TARGET_10_4_NUM_PEER_KEYS);
  	config.ast_skid_limit = __cpu_to_le32(TARGET_10_4_AST_SKID_LIMIT);
@@ -299,7 +342,7 @@
  
  	config.rx_timeout_pri[0] = __cpu_to_le32(TARGET_10_4_RX_TIMEOUT_LO_PRI);
  	config.rx_timeout_pri[1] = __cpu_to_le32(TARGET_10_4_RX_TIMEOUT_LO_PRI);
-@@ -5659,7 +5659,7 @@ static struct sk_buff *ath10k_wmi_10_4_o
+@@ -5659,7 +5673,7 @@ static struct sk_buff *ath10k_wmi_10_4_o
  	config.vow_config = __cpu_to_le32(TARGET_10_4_VOW_CONFIG);
  	config.gtk_offload_max_vdev =
  			__cpu_to_le32(TARGET_10_4_GTK_OFFLOAD_MAX_VDEV);
@@ -308,9 +351,50 @@
  	config.max_frag_entries = __cpu_to_le32(TARGET_10_4_11AC_TX_MAX_FRAGS);
  	config.max_peer_ext_stats =
  			__cpu_to_le32(TARGET_10_4_MAX_PEER_EXT_STATS);
+@@ -7606,6 +7620,24 @@ ath10k_wmi_op_gen_set_smart_ant_train_in
+ 	return skb;
+ }
+ 
++static struct sk_buff *
++ath10k_wmi_10_4_op_gen_ext_resource_config(struct ath10k *ar,
++					   enum wmi_host_platform_type type)
++{
++	struct wmi_ext_resource_config *cmd;
++	struct sk_buff *skb;
++
++	skb = ath10k_wmi_alloc_skb(ar, sizeof(*cmd));
++	if (!skb)
++		return ERR_PTR(-ENOMEM);
++
++	cmd = (struct wmi_ext_resource_config *)skb->data;
++
++	ath10k_dbg(ar, ATH10K_DBG_WMI,
++		   "host platform type :%d\n", type);
++	return skb;
++}
++
+ static const struct wmi_ops wmi_ops = {
+ 	.rx = ath10k_wmi_op_rx,
+ 	.map_svc = wmi_main_svc_map,
+@@ -7960,6 +7992,7 @@ static const struct wmi_ops wmi_10_4_ops
+ 	.gen_peer_assoc = ath10k_wmi_10_2_op_gen_peer_assoc,
+ 	.gen_request_stats = ath10k_wmi_op_gen_request_stats,
+ 	.gen_pdev_get_temperature = ath10k_wmi_10_2_op_gen_pdev_get_temperature,
++	.gen_ext_resource_config = ath10k_wmi_10_4_op_gen_ext_resource_config,
+ };
+ 
+ int ath10k_wmi_attach(struct ath10k *ar)
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -1791,6 +1791,7 @@ enum wmi_channel_change_cause {
+@@ -788,6 +788,7 @@ struct wmi_cmd_map {
+ 	u32 peer_set_smart_tx_ant_cmdid;
+ 	u32 peer_smart_ant_fb_config_cmdid;
+ 	u32 peer_set_smart_ant_train_info_cmdid;
++	u32 ext_resource_cfg_cmdid;
+ };
+ 
+ /*
+@@ -1791,6 +1792,7 @@ enum wmi_channel_change_cause {
  
  #define WMI_MAX_SPATIAL_STREAM        3 /* default max ss */
  #define WMI_10_4_MAX_SPATIAL_STREAM   4
@@ -318,3 +402,54 @@
  
  /* HT Capabilities*/
  #define WMI_HT_CAP_ENABLED                0x0001   /* HT Enabled/ disabled */
+@@ -6441,6 +6443,15 @@ struct wmi_peer_ratecode_list_event {
+ 	struct wmi_peer_rate_info peer_rate_info;
+ } __packed;
+ 
++enum wmi_host_platform_type {
++	WMI_HOST_PLATFORM_HIGH_PERF,
++	WMI_HOST_PLATFORM_LOW_PERF,
++};
++
++struct wmi_ext_resource_config {
++	__le32 host_platform_config;
++} __packed;
++
+ struct ath10k;
+ struct ath10k_vif;
+ struct ath10k_fw_stats_pdev;
+--- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
++++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
+@@ -203,6 +203,8 @@ struct wmi_ops {
+ 	struct sk_buff *(*gen_peer_set_smart_ant_train_info)(struct ath10k *ar,
+ 				u32 vdev_id, const u8 *mac_addr,
+ 				const struct wmi_peer_sant_set_train_arg *arg);
++	struct sk_buff *(*gen_ext_resource_config)(struct ath10k *ar,
++						   enum wmi_host_platform_type type);
+ };
+ 
+ int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
+@@ -1448,4 +1450,23 @@ ath10k_wmi_peer_set_smart_ant_train_info
+ 	return ath10k_wmi_cmd_send(ar, skb,
+ 			ar->wmi.cmd->peer_set_smart_ant_train_info_cmdid);
+ }
++
++static inline int
++ath10k_wmi_ext_resource_config(struct ath10k *ar,
++			       enum wmi_host_platform_type type)
++{
++	struct sk_buff *skb;
++
++	if (!ar->wmi.ops->gen_ext_resource_config)
++		return -EOPNOTSUPP;
++
++	skb = ar->wmi.ops->gen_ext_resource_config(ar, type);
++
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	return ath10k_wmi_cmd_send(ar, skb,
++				   ar->wmi.cmd->ext_resource_cfg_cmdid);
++}
++
+ #endif
