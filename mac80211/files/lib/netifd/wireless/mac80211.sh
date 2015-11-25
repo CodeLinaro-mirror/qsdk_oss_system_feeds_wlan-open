@@ -1,6 +1,7 @@
 #!/bin/sh
 . /lib/netifd/netifd-wireless.sh
-. /lib/netifd/hostapd.sh
+[ -e /lib/netifd/hostapd.sh ] && . /lib/netifd/hostapd.sh
+[ -e /lib/wifi/hostapd.sh ] && . /lib/wifi/hostapd.sh
 
 init_wireless_driver "$@"
 
