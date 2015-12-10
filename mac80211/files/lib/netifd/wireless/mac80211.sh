@@ -607,8 +607,8 @@ drv_mac80211_setup() {
 	rm -f "$hostapd_conf_file"
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy"
 
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 	for_each_interface "ap" mac80211_prepare_vif
+	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 
 	[ -n "$hostapd_ctrl" ] && {
 		/usr/sbin/hostapd -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
