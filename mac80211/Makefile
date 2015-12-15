@@ -316,6 +316,19 @@ QCA IEEE 802.11ac family of chipsets. For now only
 PCI is supported.
 endef
 
+define KernelPackage/wil6210/config
+  if PACKAGE_kmod-wil6210
+	if PACKAGE_kmod-qca-nss-drv
+	config PACKAGE_WIL6210_NSS_SUPPORT
+		bool "Enable NSS support for 11ad wil6210 driver"
+		default y
+		help
+		This option enables support for NSS in boards
+	endif
+
+  endif
+endef
+
 define KernelPackage/wil6210
   $(call KernelPackage/mac80211/Default)
   TITLE:=QCA 802.11ad wireless cards support
@@ -380,6 +393,8 @@ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
 config-$(call config_package,wil6210) += ATH_CARDS WIL6210
+
+config-$(CONFIG_PACKAGE_WIL6210_NSS_SUPPORT) += WIL6210_NSS_SUPPORT
 
 config-$(CONFIG_PACKAGE_kmod-ath9k) += ATH9K_CHANNEL_CONTEXT
 config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_ALG \
