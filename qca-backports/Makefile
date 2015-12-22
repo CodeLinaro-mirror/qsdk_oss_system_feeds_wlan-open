@@ -186,7 +186,11 @@ ifneq ($(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
 	git clone $(CONFIG_KERNEL_GIT_CLONE_URI) $(2)
-	(cd $(2); git remote add src $(1); git fetch src)
+        GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
+        (cd $(2); git remote add src $(1) && git fetch src || \
+        [ -n "${CONFIG_GIT_MIRROR}" ] && \
+        (git remote rm src && git remote add src $(CONFIG_GIT_MIRROR)$$$$GIT_NAME && \
+        git fetch src;))
   endef
 else
   define FastCloneKernel
