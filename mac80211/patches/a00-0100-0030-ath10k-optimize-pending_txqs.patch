@@ -1,8 +1,6 @@
-diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
-index 9dd74ee2bdd5..207c2f13c2fb 100644
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -2130,7 +2130,6 @@ struct ath10k *ath10k_core_create(size_t priv_size, struct device *dev,
+@@ -2266,7 +2266,6 @@ struct ath10k *ath10k_core_create(size_t
  
  	mutex_init(&ar->conf_mutex);
  	spin_lock_init(&ar->data_lock);
@@ -10,11 +8,9 @@ index 9dd74ee2bdd5..207c2f13c2fb 100644
  
  	INIT_LIST_HEAD(&ar->pending_txqs);
  	INIT_LIST_HEAD(&ar->peers);
-diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
-index 9bbfb9bcbf2f..1bbba82b621a 100644
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -796,7 +796,6 @@ struct ath10k {
+@@ -819,7 +819,6 @@ struct ath10k {
  
  	/* protects shared structure data */
  	spinlock_t data_lock;
@@ -22,11 +18,9 @@ index 9bbfb9bcbf2f..1bbba82b621a 100644
  
  	struct list_head pending_txqs;
  	struct list_head arvifs;
-diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
-index 55fa3c33f2f3..8177c7946ebf 100644
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -2038,7 +2038,6 @@ static void ath10k_htt_rx_tx_fetch_ind(struct ath10k *ar, struct sk_buff *skb)
+@@ -2055,7 +2055,6 @@ static void ath10k_htt_rx_tx_fetch_ind(s
  		return;
  	}
  
@@ -34,7 +28,7 @@ index 55fa3c33f2f3..8177c7946ebf 100644
  	rcu_read_lock();
  
  	for (i = 0; i < num_records; i++) {
-@@ -2091,7 +2090,6 @@ static void ath10k_htt_rx_tx_fetch_ind(struct ath10k *ar, struct sk_buff *skb)
+@@ -2108,7 +2107,6 @@ static void ath10k_htt_rx_tx_fetch_ind(s
  	}
  
  	rcu_read_unlock();
@@ -42,11 +36,9 @@ index 55fa3c33f2f3..8177c7946ebf 100644
  
  	resp_ids = ath10k_htt_get_tx_fetch_ind_resp_ids(&resp->tx_fetch_ind);
  	ath10k_htt_rx_tx_fetch_resp_id_confirm(ar, resp_ids, num_resp_ids);
-diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
-index b48591e7ec5b..38c6d5afdd12 100644
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -3637,23 +3637,15 @@ int ath10k_mac_txq_push_one(struct ieee80211_hw *hw,
+@@ -3630,23 +3630,15 @@ int ath10k_mac_txq_push_one(struct ieee8
  	int ret;
  	int skb_len;
  
@@ -70,7 +62,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  		spin_unlock_bh(&ar->htt.tx_lock);
  		return -EBUSY;
  	}
-@@ -3694,57 +3686,70 @@ int ath10k_mac_txq_push_one(struct ieee80211_hw *hw,
+@@ -3687,57 +3679,70 @@ int ath10k_mac_txq_push_one(struct ieee8
  	return skb_len;
  }
  
@@ -121,27 +113,27 @@ index b48591e7ec5b..38c6d5afdd12 100644
 +		goto skip;
  
 -	list_for_each_entry_safe(artxq, tmp, &ar->pending_txqs, pending) {
--		txq = container_of((void *)artxq, struct ieee80211_txq,
--				   drv_priv);
--		list_move_tail(&artxq->pending, &list);
--	}
 +	/* The artxq->pending can be re-injected by other code flows so to
 +	 * avoid vicious loop limit the number of iterations.
 +	 */
 +	n_iters = 0;
 +	list_for_each_entry(artxq, &ar->pending_txqs, pending)
 +		n_iters++;
- 
--	list_for_each_entry_safe(artxq, tmp, &list, pending) {
++
 +	while (!list_empty(&ar->pending_txqs) && n_iters-- > 0) {
 +		artxq = list_first_entry(&ar->pending_txqs,
 +					 struct ath10k_txq,
 +					 pending);
  		txq = container_of((void *)artxq, struct ieee80211_txq,
  				   drv_priv);
+-		list_move_tail(&artxq->pending, &list);
+-	}
+ 
+-	list_for_each_entry_safe(artxq, tmp, &list, pending) {
+-		txq = container_of((void *)artxq, struct ieee80211_txq,
+-				   drv_priv);
 -		list_del_init(&artxq->pending);
 -		ath10k_mac_txq_push(hw, txq);
-+
 +		spin_unlock_bh(&ar->htt.tx_lock);
 +		ret = ath10k_mac_txq_push(hw, txq);
 +		spin_lock_bh(&ar->htt.tx_lock);
@@ -164,7 +156,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  	rcu_read_unlock();
  }
  
-@@ -4167,13 +4172,17 @@ static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
+@@ -4160,13 +4165,17 @@ static void ath10k_mac_op_wake_tx_queue(
  					struct ieee80211_txq *txq)
  {
  	struct ath10k *ar = hw->priv;
@@ -186,7 +178,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  }
  
  /* Must not be called with conf_mutex held as workers can use that also. */
-@@ -5122,7 +5131,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
+@@ -5131,7 +5140,6 @@ static void ath10k_remove_interface(stru
  	ar->free_vdev_map |= 1LL << arvif->vdev_id;
  	list_del(&arvif->list);
  
@@ -194,7 +186,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  	spin_lock_bh(&ar->htt.tx_lock);
  	if (vif->txq) {
  		if (!list_empty(&artxq->pending))
-@@ -5132,7 +5140,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
+@@ -5141,7 +5149,6 @@ static void ath10k_remove_interface(stru
  	}
  	ath10k_mac_vif_cleanup(ar, vif);
  	spin_unlock_bh(&ar->htt.tx_lock);
@@ -202,7 +194,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  
  	if (arvif->vdev_type == WMI_VDEV_TYPE_AP ||
  	    arvif->vdev_type == WMI_VDEV_TYPE_IBSS) {
-@@ -6040,7 +6047,6 @@ static int ath10k_sta_state(struct ieee80211_hw *hw,
+@@ -6049,7 +6056,6 @@ static int ath10k_sta_state(struct ieee8
  
  		ath10k_mac_dec_num_stations(arvif, sta);
  
@@ -210,7 +202,7 @@ index b48591e7ec5b..38c6d5afdd12 100644
  		spin_lock_bh(&ar->htt.tx_lock);
  
  		for (i = 0; i < ARRAY_SIZE(sta->txq); i++) {
-@@ -6056,7 +6062,6 @@ static int ath10k_sta_state(struct ieee80211_hw *hw,
+@@ -6065,7 +6071,6 @@ static int ath10k_sta_state(struct ieee8
  		}
  
  		spin_unlock_bh(&ar->htt.tx_lock);
@@ -218,6 +210,3 @@ index b48591e7ec5b..38c6d5afdd12 100644
  
  		spin_lock_bh(&ar->data_lock);
  		for (i = 0; i < ARRAY_SIZE(ar->peer_map); i++) {
--- 
-2.1.4
-
