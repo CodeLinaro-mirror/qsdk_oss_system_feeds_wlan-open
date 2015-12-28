@@ -23,7 +23,7 @@
 @@ -986,6 +986,8 @@ static void ieee80211_do_stop(struct iee
  
  		ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
- 		sdata->txqs_len[txqi->txq.ac] = 0;
+ 		atomic_set(&sdata->txqs_len[txqi->txq.ac], 0);
 +		txqi->txq.qdepth = 0;
 +		txqi->txq.qsize = 0;
  	}
@@ -34,7 +34,7 @@
 @@ -115,6 +115,8 @@ static void __cleanup_single_sta(struct
  
  			ieee80211_purge_tx_queue(&local->hw, &txqi->queue);
- 			sta->txqs_len[txqi->txq.ac] = 0;
+ 			atomic_set(&sta->txqs_len[txqi->txq.ac], 0);
 +			txqi->txq.qdepth = 0;
 +			txqi->txq.qsize = 0;
  		}
@@ -42,17 +42,17 @@
  
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -1275,6 +1275,9 @@ static void ieee80211_drv_tx(struct ieee
+@@ -1276,6 +1276,9 @@ static void ieee80211_drv_tx(struct ieee
  
- 	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+ 	spin_lock_bh(&txqi->queue.lock);
  
 +	txq->qdepth++;
 +	txq->qsize += skb->len;
 +
  	if (pubsta) {
- 		sta = container_of(pubsta, struct sta_info, sta);
- 		pending = ++sta->txqs_len[ac];
-@@ -1339,6 +1342,15 @@ struct sk_buff *ieee80211_tx_dequeue(str
+ 		pending = atomic_add_return(1, &sta->txqs_len[ac]);
+ 	} else {
+@@ -1336,6 +1339,15 @@ struct sk_buff *ieee80211_tx_dequeue(str
  	if (!skb)
  		goto out;
  
@@ -66,5 +66,5 @@
 +		txq->qsize = 0;
 +
  	if (txq->sta) {
- 		sta = container_of(txq->sta, struct sta_info, sta);
- 		sta->txqs_len[ac]--;
+ 		pending = atomic_sub_return(1, &sta->txqs_len[ac]);
+ 		sq = ac + sta->sta_id_off;
