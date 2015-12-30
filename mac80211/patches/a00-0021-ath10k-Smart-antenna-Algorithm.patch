@@ -84,9 +84,9 @@
  };
  
  enum ath10k_state {
-@@ -600,23 +603,6 @@ enum ath10k_tx_pause_reason {
- 
- #define ATH10K_RATECODE_LIST_TIMEOUT	100 /* msecs */
+@@ -598,23 +601,6 @@ enum ath10k_tx_pause_reason {
+ 	ATH10K_TX_PAUSE_MAX,
+ };
  
 -struct ath10k_peer_ratecode_list {
 -	u8 mac_addr[ETH_ALEN];
@@ -734,7 +734,7 @@
  #endif
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/smart_ant_alg.c
-@@ -0,0 +1,1717 @@
+@@ -0,0 +1,1796 @@
 +/*
 + * Copyright (c) 2015, The Linux Foundation.
 + *
@@ -851,6 +851,86 @@
 +	for (i = 0; i < ATH10K_SMART_ANT_MAX_CHAINS; i++) {
 +		ath10k_dbg(ar, ATH10K_DBG_SMART_ANT, "rssi[%d] %d\n",
 +			   i, (u8)fb->rssi[i]);
++	}
++}
++
++static inline bool smart_ant_alg_is_valid_ratecode(struct ieee80211_sta *sta,
++					u8 bw, u8 nss, u8 mcs)
++{
++	if (!(sta->ht_cap.cap & IEEE80211_HT_CAP_LDPC_CODING) ||
++			!(sta->vht_cap.cap & IEEE80211_VHT_CAP_RXLDPC)) {
++		if (bw == 0 && nss < 2 && mcs > 8)
++			return false;
++		else if (bw == 2 && nss == 2 && mcs == 6)
++			return false;
++	}
++
++	return true;
++}
++
++static void ath10k_smart_ant_alg_peer_ratecode_fill(struct ath10k *ar, 
++					struct ath10k_smart_ant_sta *sa_sta,
++					struct ieee80211_sta *sta)
++{
++
++	int i, nss, max_rates, caps;
++	u8 bw, *rates[3], rate_idx;
++
++	memset(&sa_sta->rate_cap, 0, sizeof(sa_sta->rate_cap));
++	ether_addr_copy(sa_sta->rate_cap.mac_addr, sta->addr);
++
++	caps = (sta->vht_cap.vht_supported)? WMI_RATE_PREAMBLE_VHT :
++		((sta->ht_cap.ht_supported)? WMI_RATE_PREAMBLE_HT :
++		 WMI_RATE_PREAMBLE_OFDM);
++	max_rates = (caps == WMI_RATE_PREAMBLE_VHT)? ATH10K_VHT_MCS_MAX :
++		((caps == WMI_RATE_PREAMBLE_HT)? ATH10K_HT_MCS_MAX :
++		 ATH10K_OFDM_RATES_MAX);
++
++	if (caps > WMI_RATE_PREAMBLE_OFDM) {
++		rates[0] = sa_sta->rate_cap.rtcode_20;
++		rates[1] = sa_sta->rate_cap.rtcode_40;
++		rates[2] = sa_sta->rate_cap.rtcode_80;
++
++		ath10k_dbg(ar, ATH10K_DBG_SMART_ANT,
++				"rate code list for %s, bw %d \n",
++				((caps == WMI_RATE_PREAMBLE_VHT)? "VHT": "HT"),
++				sta->bandwidth);
++		if (sta->bandwidth > 2) {
++			ath10k_warn(ar, "bandwidth %d is not supported,\
++					limiting to bw 2 \n", sta->bandwidth);
++			sta->bandwidth = 2;
++		}
++		for (bw = 0; bw <= sta->bandwidth; bw++) {
++			rate_idx = 0;
++			for (nss = 0; nss < sta->rx_nss; nss++ ) {
++				for (i = 0; i < max_rates; i++) {
++					if (smart_ant_alg_is_valid_ratecode(sta,
++								bw, nss, i))
++						rates[bw][rate_idx++] =
++							ATH10K_HW_RATECODE(i,
++								nss, caps);
++				}
++			}
++			sa_sta->rate_cap.rt_count[bw + 1] = rate_idx;
++		}
++	} else {
++		ath10k_dbg(ar, ATH10K_DBG_SMART_ANT,
++				"rate code list for legacy mode %x\n",
++				sta->supp_rates[0]);
++		rates[0] = sa_sta->rate_cap.rtcode_legacy;
++		for (i = 0; i < ATH10K_CCK_RATES_MAX; i++) {
++			rates[0][i] = ATH10K_HW_RATECODE(i, nss,
++					WMI_RATE_PREAMBLE_CCK);
++		}
++		sa_sta->rate_cap.rt_count[0] = ATH10K_CCK_RATES_MAX;
++		if (sta->supp_rates[0] > 0xff) {
++			for (i = 0; i < ATH10K_OFDM_RATES_MAX; i++) {
++				rates[0][i + ATH10K_CCK_RATES_MAX] =
++					ATH10K_HW_RATECODE(i, nss, 
++							WMI_RATE_PREAMBLE_OFDM);
++			}
++			sa_sta->rate_cap.rt_count[0] += ATH10K_OFDM_RATES_MAX;
++		}
 +	}
 +}
 +
@@ -2253,14 +2333,13 @@
 +		return -ENOMEM;
 +	}
 +
-+	memcpy(&smart_ant_sta->rate_cap, &ar->ratecode_list,
-+	       sizeof(smart_ant_sta->rate_cap));
++	ath10k_smart_ant_alg_peer_ratecode_fill(ar, smart_ant_sta, sta);
 +
 +	ath10k_dbg(ar, ATH10K_DBG_SMART_ANT,
 +		   "Smart antenna connect for %pM\n", sta->addr);
 +
 +	for (i = 0; i < ATH10K_SMART_ANT_RTCNT_MAX; i++)
-+		smart_ant_alg_dbg_ratelist(ar, &ar->ratecode_list, i);
++		smart_ant_alg_dbg_ratelist(ar, &smart_ant_sta->rate_cap, i);
 +
 +	/* Configure to get feedback for every N PPDUs.
 +	 * ATH10K_TX_FEEDBACK_CONFIG_DEFAULT - b2:b0 Number of PPDUs
@@ -2454,7 +2533,7 @@
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/smart_ant_alg.h
-@@ -0,0 +1,522 @@
+@@ -0,0 +1,524 @@
 +/*
 + * Copyright (c) 2015, The Linux Foundation.
 + *
@@ -2661,6 +2740,8 @@
 +
 +#define ATH10K_VHT_MCS_MAX 	10
 +#define ATH10K_HT_MCS_MAX 	8
++#define ATH10K_CCK_RATES_MAX	4
++#define ATH10K_OFDM_RATES_MAX	8
 +
 +#define ATH10K_NFB_COMB_FB(bw) \
 +	(bw & ATH10K_NFB_COMB_FB_MASK)
@@ -2979,7 +3060,7 @@
 +#endif /* _SMART_ANT_ALG_ */
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -5571,11 +5571,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
+@@ -5519,11 +5519,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
  		config.num_peers =
  			__cpu_to_le32(min(TARGET_10_2_SMART_ANT_NUM_PEERS,
  					  TARGET_10X_NUM_PEERS));

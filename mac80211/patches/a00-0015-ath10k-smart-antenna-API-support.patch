@@ -25,22 +25,12 @@
  
  static const struct ath10k_hw_params ath10k_hw_params_list[] = {
  	{
-@@ -2014,6 +2018,7 @@ struct ath10k *ath10k_core_create(size_t
- 	init_completion(&ar->install_key_done);
- 	init_completion(&ar->vdev_setup_done);
- 	init_completion(&ar->thermal.wmi_sync);
-+	init_completion(&ar->ratecode_evt);
- 
- 	INIT_DELAYED_WORK(&ar->scan.timeout, ath10k_scan_timeout_work);
- 
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -598,6 +598,17 @@ enum ath10k_tx_pause_reason {
+@@ -598,6 +598,15 @@ enum ath10k_tx_pause_reason {
  	ATH10K_TX_PAUSE_MAX,
  };
  
-+#define ATH10K_RATECODE_LIST_TIMEOUT	100 /* msecs */
-+
 +struct ath10k_peer_ratecode_list {
 +	u8 mac_addr[ETH_ALEN];
 +	u8 rtcode_legacy[WMI_CCK_OFDM_RATES_MAX];
@@ -53,17 +43,7 @@
  struct ath10k {
  	struct ath_common ath_common;
  	struct ieee80211_hw *hw;
-@@ -861,10 +872,32 @@ struct ath10k {
- 	struct work_struct fwlog_tx_work;
- 	struct sk_buff_head fwlog_tx_queue;
- 
-+	struct completion ratecode_evt;
-+	/* Temporary place to store peer's rate code reported in RATECODE_LIST
-+	 * wmi event after successful assoc_complete command
-+	 */
-+	struct ath10k_peer_ratecode_list ratecode_list;
-+
- 	/* must be last */
+@@ -865,6 +874,22 @@ struct ath10k {
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
  
@@ -165,12 +145,9 @@
  
  /*********/
  /* Rates */
-@@ -5516,10 +5517,40 @@ static int ath10k_sta_state(struct ieee8
- 		ath10k_dbg(ar, ATH10K_DBG_MAC, "mac sta %pM associated\n",
+@@ -5517,9 +5518,20 @@ static int ath10k_sta_state(struct ieee8
  			   sta->addr);
  
-+		reinit_completion(&ar->ratecode_evt);
-+
  		ret = ath10k_station_assoc(ar, vif, sta, false);
 -		if (ret)
 +		if (ret) {
@@ -179,25 +156,8 @@
 +			goto exit;
 +		}
 +
-+		/* wait for completion to get rate code list event from fw
-+		 * after assoc_complete wmi command. This ratecode list info
-+		 * can be used with smart antenna logic. As of now do this
-+		 * only for AP mode because this is the only mode tested with
-+		 * smart antenna APIs.
-+		 */
 +		if (vif->type == NL80211_IFTYPE_AP &&
 +		    ath10k_smart_ant_enabled(ar)) {
-+			int timeout;
-+
-+			timeout = wait_for_completion_timeout(&ar->ratecode_evt,
-+				msecs_to_jiffies(ATH10K_RATECODE_LIST_TIMEOUT));
-+			if (timeout == 0) {
-+				ath10k_warn(ar, "timeout on rate code list event %pM\n",
-+					    sta->addr);
-+				ret = -ETIMEDOUT;
-+				goto exit;
-+			}
-+
 +			if (ath10k_smart_ant_sta_connect(ar, arvif, sta)) {
 +				ath10k_warn(ar,
 +					    "Smart antenna station connect failed, disabling smart antenna for %pM\n",
@@ -207,7 +167,7 @@
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTHORIZED &&
  		   sta->tdls) {
-@@ -5552,6 +5583,8 @@ static int ath10k_sta_state(struct ieee8
+@@ -5552,6 +5564,8 @@ static int ath10k_sta_state(struct ieee8
  		ath10k_dbg(ar, ATH10K_DBG_MAC, "mac sta %pM disassociated\n",
  			   sta->addr);
  
@@ -216,7 +176,7 @@
  		ret = ath10k_station_disassoc(ar, vif, sta);
  		if (ret)
  			ath10k_warn(ar, "failed to disassociate station: %pM vdev %i: %i\n",
-@@ -6490,6 +6523,8 @@ ath10k_mac_update_vif_chan(struct ath10k
+@@ -6490,6 +6504,8 @@ ath10k_mac_update_vif_chan(struct ath10k
  	 * should be available for the channel switch now.
  	 */
  
@@ -225,7 +185,7 @@
  	spin_lock_bh(&ar->data_lock);
  	ath10k_mac_update_rx_channel(ar, NULL, vifs, n_vifs);
  	spin_unlock_bh(&ar->data_lock);
-@@ -6722,6 +6757,21 @@ ath10k_mac_op_assign_vif_chanctx(struct
+@@ -6722,6 +6738,21 @@ ath10k_mac_op_assign_vif_chanctx(struct
  		arvif->is_up = true;
  	}
  
@@ -534,70 +494,11 @@
  };
  
  static struct wmi_pdev_param_map wmi_10_4_pdev_param_map = {
-@@ -4741,6 +4767,57 @@ static int ath10k_wmi_event_temperature(
- 	return 0;
- }
- 
-+static int
-+ath10k_wmi_event_ratecode_list(struct ath10k *ar, struct sk_buff *skb)
-+{
-+	struct wmi_peer_ratecode_list_event *ev =
-+			(struct wmi_peer_ratecode_list_event *)skb->data;
-+	int i;
-+
-+	if (!ath10k_smart_ant_enabled(ar))
-+		return 0;
-+
-+	if (WARN_ON(skb->len < sizeof(*ev)))
-+		return -EPROTO;
-+
-+	spin_lock_bh(&ar->data_lock);
-+	memset(&ar->ratecode_list, 0, sizeof(ar->ratecode_list));
-+	ether_addr_copy(ar->ratecode_list.mac_addr, ev->peer_macaddr.addr);
-+
-+	ath10k_dbg(ar, ATH10K_DBG_WMI,
-+		   "wmi peer rate code list peer_addr %pM skb->len %zu ev-size %zu\n",
-+		   ar->ratecode_list.mac_addr, skb->len, sizeof(*ev));
-+
-+	for (i = 0; i < WMI_RATE_COUNT_MAX; i++) {
-+		ar->ratecode_list.rt_count[i] = ev->peer_rate_info.ratecount[i];
-+		ath10k_dbg(ar, ATH10K_DBG_WMI, "wmi ratecode list rate count[%d] %d\n",
-+			   i, ar->ratecode_list.rt_count[i]);
-+	}
-+
-+	/* Fill in legacy rate code */
-+	memcpy(ar->ratecode_list.rtcode_legacy,
-+	       ev->peer_rate_info.ratecode_legacy,
-+	       WMI_CCK_OFDM_RATES_MAX);
-+
-+	/* Fill 20, 40 and 80 bw rate code */
-+	memcpy(ar->ratecode_list.rtcode_20,
-+	       ev->peer_rate_info.ratecode_20,
-+	       WMI_MCS_RATES_MAX);
-+
-+	memcpy(ar->ratecode_list.rtcode_40,
-+	       ev->peer_rate_info.ratecode_40,
-+	       WMI_MCS_RATES_MAX);
-+
-+	memcpy(ar->ratecode_list.rtcode_80,
-+	       ev->peer_rate_info.ratecode_80,
-+	       WMI_MCS_RATES_MAX);
-+
-+	spin_unlock_bh(&ar->data_lock);
-+
-+	complete(&ar->ratecode_evt);
-+	return 0;
-+}
-+
- static void ath10k_wmi_op_rx(struct ath10k *ar, struct sk_buff *skb)
- {
- 	struct wmi_cmd_hdr *cmd_hdr;
-@@ -5084,9 +5161,11 @@ static void ath10k_wmi_10_2_op_rx(struct
+@@ -5084,9 +5110,10 @@ static void ath10k_wmi_10_2_op_rx(struct
  	case WMI_10_2_PDEV_TEMPERATURE_EVENTID:
  		ath10k_wmi_event_temperature(ar, skb);
  		break;
 +	case WMI_10_2_PEER_RATECODE_LIST_EVENTID:
-+		ath10k_wmi_event_ratecode_list(ar, skb);
 +		break;
  	case WMI_10_2_RTT_KEEPALIVE_EVENTID:
  	case WMI_10_2_GPIO_INPUT_EVENTID:
@@ -605,7 +506,7 @@
  	case WMI_10_2_GENERIC_BUFFER_EVENTID:
  	case WMI_10_2_MCAST_BUF_RELEASE_EVENTID:
  	case WMI_10_2_MCAST_LIST_AGEOUT_EVENTID:
-@@ -5488,7 +5567,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
+@@ -5488,7 +5515,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
  	u32 len, val, features;
  
  	config.num_vdevs = __cpu_to_le32(TARGET_10X_NUM_VDEVS);
@@ -620,7 +521,7 @@
  	config.num_peer_keys = __cpu_to_le32(TARGET_10X_NUM_PEER_KEYS);
  	config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
  	config.ast_skid_limit = __cpu_to_le32(TARGET_10X_AST_SKID_LIMIT);
-@@ -5547,6 +5632,11 @@ static struct sk_buff *ath10k_wmi_10_2_o
+@@ -5547,6 +5580,11 @@ static struct sk_buff *ath10k_wmi_10_2_o
  
  	cmd->resource_config.feature_mask = __cpu_to_le32(features);
  
@@ -632,7 +533,7 @@
  	memcpy(&cmd->resource_config.common, &config, sizeof(config));
  	ath10k_wmi_put_host_mem_chunks(ar, &cmd->mem_chunks);
  
-@@ -7379,6 +7469,212 @@ unlock:
+@@ -7379,6 +7417,212 @@ unlock:
  		buf[len] = 0;
  }
  
@@ -845,7 +746,7 @@
  static const struct wmi_ops wmi_ops = {
  	.rx = ath10k_wmi_op_rx,
  	.map_svc = wmi_main_svc_map,
-@@ -7443,6 +7739,13 @@ static const struct wmi_ops wmi_ops = {
+@@ -7443,6 +7687,13 @@ static const struct wmi_ops wmi_ops = {
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -859,7 +760,7 @@
  };
  
  static const struct wmi_ops wmi_10_1_ops = {
-@@ -7510,6 +7813,13 @@ static const struct wmi_ops wmi_10_1_ops
+@@ -7510,6 +7761,13 @@ static const struct wmi_ops wmi_10_1_ops
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -873,7 +774,7 @@
  };
  
  static const struct wmi_ops wmi_10_2_ops = {
-@@ -7574,6 +7884,13 @@ static const struct wmi_ops wmi_10_2_ops
+@@ -7574,6 +7832,13 @@ static const struct wmi_ops wmi_10_2_ops
  	.gen_delba_send = ath10k_wmi_op_gen_delba_send,
  	.fw_stats_fill = ath10k_wmi_10x_op_fw_stats_fill,
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -887,7 +788,7 @@
  };
  
  static const struct wmi_ops wmi_10_2_4_ops = {
-@@ -7643,6 +7960,13 @@ static const struct wmi_ops wmi_10_2_4_o
+@@ -7643,6 +7908,13 @@ static const struct wmi_ops wmi_10_2_4_o
  	/* .gen_prb_tmpl not implemented */
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
@@ -915,7 +816,7 @@
  };
  
  /*
-@@ -6369,6 +6374,95 @@ struct wmi_pdev_set_adaptive_cca_params
+@@ -6369,6 +6374,82 @@ struct wmi_pdev_set_adaptive_cca_params
  	__le32 cca_detect_margin;
  } __packed;
  
@@ -994,19 +895,6 @@
 +	u32 antennas[WMI_SMART_ANT_RATE_SERIES_MAX];
 +	u32 num_pkts;
 +};
-+
-+struct wmi_peer_rate_info {
-+	u8 ratecode_legacy[WMI_CCK_OFDM_RATES_MAX];
-+	u8 ratecode_20[WMI_MCS_RATES_MAX];
-+	u8 ratecode_40[WMI_MCS_RATES_MAX];
-+	u8 ratecode_80[WMI_MCS_RATES_MAX];
-+	u8 ratecount[WMI_RATE_COUNT_MAX];
-+} __packed;
-+
-+struct wmi_peer_ratecode_list_event {
-+	struct wmi_mac_addr peer_macaddr;
-+	struct wmi_peer_rate_info peer_rate_info;
-+} __packed;
 +
  struct ath10k;
  struct ath10k_vif;
