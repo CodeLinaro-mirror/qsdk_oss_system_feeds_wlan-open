@@ -8,7 +8,7 @@ PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backport
 PKG_BACKPORTS_BRANCH:=master
 
 PKG_KERNEL_VERSION:=24a42ce
-PKG_KERNEL_SOURCE_URL:=https://github.com/kvalo/ath.git
+PKG_KERNEL_SOURCE_URL:=git://codeaurora.org/quic/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
 PKG_VERSION:=20151216
@@ -182,11 +182,7 @@ ifneq ($(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
 	git clone $(CONFIG_KERNEL_GIT_CLONE_URI) $(2)
-	GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
-	(cd $(2); git remote add src $(1) && git fetch src || \
-	[ -n "${CONFIG_GIT_MIRROR}" ] && \
-	(git remote rm src && git remote add src $(CONFIG_GIT_MIRROR)$$$$GIT_NAME && \
-	git fetch src;))
+	(cd $(2); git remote add src $(1); git fetch src)
   endef
 else
   define FastCloneKernel
