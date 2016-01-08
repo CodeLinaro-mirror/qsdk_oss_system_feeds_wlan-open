@@ -186,7 +186,11 @@ ifneq ($(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
   endef
 else
   define FastCloneKernel
-	git clone $(1) $(2)
+	GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
+	git clone $(1) $(2) || \
+	([ -n "${CONFIG_GIT_MIRROR}" ] && \
+	rm -rf $(2) && \
+	git clone $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
   endef
 endif
 
