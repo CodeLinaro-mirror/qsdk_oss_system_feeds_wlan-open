@@ -1,0 +1,341 @@
+--- a/net/mac80211/debugfs.c
++++ b/net/mac80211/debugfs.c
+@@ -255,6 +255,8 @@ void debugfs_hw_add(struct ieee80211_loc
+ 	DEBUGFS_ADD(hwflags);
+ 	DEBUGFS_ADD(user_power);
+ 	DEBUGFS_ADD(power);
++	debugfs_create_bool("rx_stats_enabled", S_IWUSR | S_IRUSR, phyd,
++			    &local->rx_stats_enabled);
+ 
+ 	statsd = debugfs_create_dir("statistics", phyd);
+ 
+--- a/net/mac80211/debugfs_sta.c
++++ b/net/mac80211/debugfs_sta.c
+@@ -296,8 +296,12 @@ static ssize_t sta_rx_stats_read(struct
+ 	char *buf;
+ 	const int size = 2816;  /* adjust the size for all items */
+ 	struct sta_info *sta = file->private_data;
++	struct ieee80211_local *local = sta->local;
+ 	int i;
+ 
++	if (!local->rx_stats_enabled)
++		return -ENOTSUPP;
++
+ 	buf = kzalloc(size, GFP_KERNEL);
+ 	if (buf == NULL)
+ 		return -ENOMEM;
+@@ -445,6 +449,121 @@ STA_OPS(vht_capa);
+ 		debugfs_create_u64(#name, 0400, sta->debugfs.dir,	\
+ 			(u64 *) &sta->field);
+ 
++void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
++{
++	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
++	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
++	struct ieee80211_local *local = sta->local;
++	unsigned int pkt_len = skb->len;
++	unsigned int bw_idx, gi_idx, i;
++
++	if (!local->rx_stats_enabled)
++		return;
++
++	if (is_multicast_ether_addr(hdr->addr1) ||
++	    !ieee80211_is_data(hdr->frame_control))
++		goto out;
++
++	/* Not support 5Mhz and 10Mhz currently  */
++	if (status->flag & (RX_FLAG_5MHZ | RX_FLAG_10MHZ))
++		goto out;
++
++	if (status->vht_flag & RX_VHT_FLAG_160MHZ)
++		bw_idx = 3;
++	else if (status->vht_flag & RX_VHT_FLAG_80MHZ)
++		bw_idx = 2;
++	else if (status->flag & RX_FLAG_40MHZ)
++		bw_idx = 1;
++	else
++		bw_idx = 0;
++
++	sta->rx_bw_pkt[bw_idx]++;
++	sta->rx_bw_byte[bw_idx] += pkt_len;
++
++	/* Keep silent quit for all packet not statisfy the
++	 * statistics requirment in the data path
++	 */
++	if (status->vht_nss > IEEE80211_VHT_NSS_NUM)
++		goto out;
++
++	sta->rx_nss_pkt[status->vht_nss]++;
++	sta->rx_nss_byte[status->vht_nss] += pkt_len;
++
++	gi_idx = (status->flag & RX_FLAG_SHORT_GI) ? 1 : 0;
++	sta->rx_gi_pkt[gi_idx]++;
++	sta->rx_gi_byte[gi_idx] += pkt_len;
++
++	if (status->flag & (RX_FLAG_HT | RX_FLAG_VHT)) {
++		if (status->rate_idx > (IEEE80211_VHT_MCS_NUM - 1))
++			goto out;
++
++		sta->rx_mcs_pkt[status->rate_idx]++;
++		sta->rx_mcs_byte[status->rate_idx] += pkt_len;
++
++		i = status->rate_idx * 8 + 8 * 10 * status->vht_nss;
++		i += bw_idx * 2 + gi_idx;
++		sta->rx_rate_pkt[i]++;
++		sta->rx_rate_byte[i] += pkt_len;
++	} else {
++		struct ieee80211_supported_band *sband;
++		int shift = ieee80211_vif_get_shift(&sta->sdata->vif);
++		u16 brate, legacy_rate;
++
++		if (status->rate_idx > IEEE80211_RX_LEGACY_RATE_NUM)
++			goto out;
++
++		sband = sta->local->hw.wiphy->bands[
++			ieee80211_get_sdata_band(sta->sdata)];
++		brate = sband->bitrates[status->rate_idx].bitrate;
++		legacy_rate = DIV_ROUND_UP(brate, 1 << shift);
++
++		switch (legacy_rate) {
++		case 10:
++			i = 0;
++			break;
++		case 20:
++			i = 1;
++			break;
++		case 55:
++			i = 2;
++			break;
++		case 110:
++			i = 3;
++			break;
++		case 60:
++			i = 4;
++			break;
++		case 90:
++			i = 5;
++			break;
++		case 120:
++			i = 6;
++			break;
++		case 180:
++			i = 7;
++			break;
++		case 240:
++			i = 8;
++			break;
++		case 360:
++			i = 9;
++			break;
++		case 480:
++			i = 10;
++			break;
++		case 540:
++			i = 11;
++			break;
++		default:
++			goto out;
++		}
++		sta->rx_legacy_pkt[i]++;
++		sta->rx_legacy_byte[i] += pkt_len;
++	}
++out:
++	return;
++}
++
+ void ieee80211_sta_debugfs_add(struct sta_info *sta)
+ {
+ 	struct ieee80211_local *local = sta->local;
+--- a/net/mac80211/debugfs_sta.h
++++ b/net/mac80211/debugfs_sta.h
+@@ -6,9 +6,14 @@
+ #ifdef CPTCFG_MAC80211_DEBUGFS
+ void ieee80211_sta_debugfs_add(struct sta_info *sta);
+ void ieee80211_sta_debugfs_remove(struct sta_info *sta);
++void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb);
+ #else
+ static inline void ieee80211_sta_debugfs_add(struct sta_info *sta) {}
+ static inline void ieee80211_sta_debugfs_remove(struct sta_info *sta) {}
++static inline void ieee80211_rx_h_sta_stats(struct sta_info *sta,
++					    struct sk_buff *skb)
++{
++}
+ #endif
+ 
+ #endif /* __MAC80211_DEBUGFS_STA_H */
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -1351,6 +1351,8 @@ struct ieee80211_local {
+ 		struct dentry *rcdir;
+ 		struct dentry *keys;
+ 	} debugfs;
++
++	bool rx_stats_enabled;
+ #endif
+ 
+ 	/*
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -31,6 +31,7 @@
+ #include "tkip.h"
+ #include "wme.h"
+ #include "rate.h"
++#include "debugfs_sta.h"
+ 
+ static inline void ieee80211_rx_stats(struct net_device *dev, u32 len)
+ {
+@@ -1412,118 +1413,6 @@ ieee80211_rx_h_uapsd_and_pspoll(struct i
+ 	return RX_CONTINUE;
+ }
+ 
+-static void ieee80211_rx_h_sta_stats(struct sta_info *sta,
+-				     struct sk_buff *skb)
+-{
+-	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
+-	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
+-	unsigned int pkt_len = skb->len;
+-	unsigned int bw_idx, gi_idx, i;
+-
+-	if (is_multicast_ether_addr(hdr->addr1) ||
+-	    !ieee80211_is_data(hdr->frame_control))
+-		goto out;
+-
+-	/* Not support 5Mhz and 10Mhz currently  */
+-	if (status->flag & (RX_FLAG_5MHZ | RX_FLAG_10MHZ))
+-		goto out;
+-
+-	if (status->vht_flag & RX_VHT_FLAG_160MHZ)
+-		bw_idx = 3;
+-	else if (status->vht_flag & RX_VHT_FLAG_80MHZ)
+-		bw_idx = 2;
+-	else if (status->flag & RX_FLAG_40MHZ)
+-		bw_idx = 1;
+-	else
+-		bw_idx = 0;
+-
+-	sta->rx_bw_pkt[bw_idx]++;
+-	sta->rx_bw_byte[bw_idx] += pkt_len;
+-
+-	/* Keep silent quit for all packet not statisfy the
+-	 * statistics requirment in the data path
+-	 */
+-	if (status->vht_nss > IEEE80211_VHT_NSS_NUM)
+-		goto out;
+-
+-	sta->rx_nss_pkt[status->vht_nss]++;
+-	sta->rx_nss_byte[status->vht_nss] += pkt_len;
+-
+-	gi_idx = (status->flag & RX_FLAG_SHORT_GI) ? 1 : 0;
+-	sta->rx_gi_pkt[gi_idx]++;
+-	sta->rx_gi_byte[gi_idx] += pkt_len;
+-
+-	if (status->flag & (RX_FLAG_HT | RX_FLAG_VHT)) {
+-		if (status->rate_idx > (IEEE80211_VHT_MCS_NUM - 1))
+-			goto out;
+-
+-		sta->rx_mcs_pkt[status->rate_idx]++;
+-		sta->rx_mcs_byte[status->rate_idx] += pkt_len;
+-
+-		i = status->rate_idx * 8 + 8 * 10 * status->vht_nss;
+-		i += bw_idx * 2 + gi_idx;
+-		sta->rx_rate_pkt[i]++;
+-		sta->rx_rate_byte[i] += pkt_len;
+-	} else {
+-		struct ieee80211_supported_band *sband;
+-		int shift = ieee80211_vif_get_shift(&sta->sdata->vif);
+-		u16 brate, legacy_rate;
+-
+-		if (status->rate_idx > IEEE80211_RX_LEGACY_RATE_NUM)
+-			goto out;
+-
+-		sband = sta->local->hw.wiphy->bands[
+-			ieee80211_get_sdata_band(sta->sdata)];
+-		brate = sband->bitrates[status->rate_idx].bitrate;
+-		legacy_rate = DIV_ROUND_UP(brate, 1 << shift);
+-
+-		switch (legacy_rate) {
+-		case 10:
+-			i = 0;
+-			break;
+-		case 20:
+-			i = 1;
+-			break;
+-		case 55:
+-			i = 2;
+-			break;
+-		case 110:
+-			i = 3;
+-			break;
+-		case 60:
+-			i = 4;
+-			break;
+-		case 90:
+-			i = 5;
+-			break;
+-		case 120:
+-			i = 6;
+-			break;
+-		case 180:
+-			i = 7;
+-			break;
+-		case 240:
+-			i = 8;
+-			break;
+-		case 360:
+-			i = 9;
+-			break;
+-		case 480:
+-			i = 10;
+-			break;
+-		case 540:
+-			i = 11;
+-			break;
+-		default:
+-			goto out;
+-		}
+-		sta->rx_legacy_pkt[i]++;
+-		sta->rx_legacy_byte[i] += pkt_len;
+-	}
+-out:
+-	return;
+-}
+-
+ static ieee80211_rx_result debug_noinline
+ ieee80211_rx_h_sta_process(struct ieee80211_rx_data *rx)
+ {
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -495,16 +495,6 @@ struct sta_info {
+ 		struct dentry *dir;
+ 		bool add_has_run;
+ 	} debugfs;
+-#endif
+-
+-	enum ieee80211_sta_rx_bandwidth cur_max_bandwidth;
+-
+-	enum ieee80211_smps_mode known_smps_mode;
+-	const struct ieee80211_cipher_scheme *cipher_scheme;
+-
+-	u8 reserved_tid;
+-
+-	struct cfg80211_chan_def tdls_chandef;
+ 
+ 	u64 rx_legacy_pkt[IEEE80211_RX_LEGACY_RATE_NUM];
+ 	u64 rx_mcs_pkt[IEEE80211_VHT_MCS_NUM];
+@@ -518,6 +508,16 @@ struct sta_info {
+ 	u64 rx_nss_byte[IEEE80211_VHT_NSS_NUM];
+ 	u64 rx_gi_byte[IEEE80211_VHT_GI_NUM];
+ 	u64 rx_rate_byte[IEEE80211_VHT_RATE_NUM];
++#endif
++
++	enum ieee80211_sta_rx_bandwidth cur_max_bandwidth;
++
++	enum ieee80211_smps_mode known_smps_mode;
++	const struct ieee80211_cipher_scheme *cipher_scheme;
++
++	u8 reserved_tid;
++
++	struct cfg80211_chan_def tdls_chandef;
+ 
+ 	/* keep last! */
+ 	struct ieee80211_sta sta;
