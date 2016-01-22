@@ -32,7 +32,6 @@ drv_mac80211_init_device_config() {
 		su_beamformer \
 		su_beamformee \
 		mu_beamformer \
-		mu_beamformee \
 		vht_txop_ps \
 		htc_vht \
 		rx_antenna_pattern \
@@ -144,7 +143,6 @@ mac80211_hostapd_setup_base() {
 				su_beamformer:1 \
 				su_beamformee:1 \
 				mu_beamformer:1 \
-				mu_beamformee:1 \
 				vht_txop_ps:1 \
 				htc_vht:1 \
 				max_ampdu_length_exp:7 \
@@ -177,8 +175,6 @@ mac80211_hostapd_setup_base() {
 				vht_capab="$vht_capab[SU-BEAMFORMEE]"
 			[ "$((($vht_cap & 524288) * $mu_beamformer))" -eq 524288 ] && \
 				vht_capab="$vht_capab[MU-BEAMFORMER]"
-			[ "$((($vht_cap & 1048576) * $mu_beamformee))" -eq 1048576 ] && \
-				vht_capab="$vht_capab[MU-BEAMFORMEE]"
 			[ "$((($vht_cap & 2097152) * $vht_txop_ps))" -eq 2097152 ] && \
 				vht_capab="$vht_capab[VHT-TXOP-PS]"
 			[ "$((($vht_cap & 4194304) * $htc_vht))" -eq 4194304 ] && \
