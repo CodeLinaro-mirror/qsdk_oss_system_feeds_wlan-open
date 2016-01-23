@@ -177,11 +177,22 @@ define Download/linux-firmware
 endef
 $(eval $(call Download,linux-firmware))
 
-ifneq ($(call qstrip,$(CONFIG_KERNEL_GIT_CLONE_URI)),)
+
+$(eval EXT_KERNEL_DIR:=$(CONFIG_EXTERNAL_KERNEL_TREE))
+IS_EXT_KERNEL_TREE_GIT:=$(shell cd $(EXT_KERNEL_DIR) && git rev-parse --is-inside-work-tree)
+
+ifeq ($(IS_EXT_KERNEL_TREE_GIT), true)
+  $(eval _LINUX_SRC:=$(CONFIG_EXTERNAL_KERNEL_TREE))
+else
+  _LINUX_SRC=$(CONFIG_KERNEL_GIT_CLONE_URI)
+endif
+
+
+ifneq ($(call qstrip,$(_LINUX_SRC)),)
 # --reference option doesn't work on git trees synced with "repo", so instead
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
-	git clone $(CONFIG_KERNEL_GIT_CLONE_URI) $(2)
+	git clone $(_LINUX_SRC) $(2)
 	(cd $(2); git remote add src $(1); git fetch src)
   endef
 else
