@@ -1,0 +1,116 @@
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -40,6 +40,7 @@ static bool skip_otp;
+ static bool rawmode;
+ bool bug_on_fw_assert = true;
+ bool ath10k_enable_smart_antenna = false;
++bool ath10k_enable_tx_stats = true;
+ 
+ module_param_named(debug_mask, ath10k_debug_mask, uint, 0644);
+ module_param_named(cryptmode, ath10k_cryptmode_param, uint, 0644);
+@@ -49,6 +50,7 @@ module_param(rawmode, bool, 0644);
+ module_param(bug_on_fw_assert, bool, 0644);
+ module_param_named(enable_smart_antenna, ath10k_enable_smart_antenna,
+ 		   bool, 0644);
++module_param_named(enable_tx_stats, ath10k_enable_tx_stats, bool, 0644);
+ 
+ MODULE_PARM_DESC(debug_mask, "Debugging mask");
+ MODULE_PARM_DESC(uart_print, "Uart target debugging");
+@@ -57,6 +59,7 @@ MODULE_PARM_DESC(cryptmode, "Crypto mode
+ MODULE_PARM_DESC(rawmode, "Use raw 802.11 frame datapath");
+ MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
+ MODULE_PARM_DESC(enable_smart_antenna, "Enable smart antenna supprot in fw");
++MODULE_PARM_DESC(enable_tx_stats, "Enable tx stats support");
+ 
+ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+@@ -1665,6 +1668,12 @@ static int ath10k_core_init_firmware_fea
+ 			ar->max_num_peers = TARGET_10X_NUM_PEERS;
+ 			ar->max_num_stations = TARGET_10X_NUM_STATIONS;
+ 		}
++		if (ath10k_enable_tx_stats) {
++			ar->max_num_peers -=
++					TARGET_10_2_TX_STATS_PEERS_OVERHEAD;
++			ar->max_num_stations -=
++					TARGET_10_2_TX_STATS_PEERS_OVERHEAD;
++		}
+ 		ar->max_num_vdevs = TARGET_10X_NUM_VDEVS;
+ 		ar->htt.max_num_pending_tx = TARGET_10X_NUM_MSDU_DESC;
+ 		ar->fw_stats_req_mask = WMI_STAT_PEER;
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -915,6 +915,19 @@ static inline bool ath10k_smart_ant_enab
+ 	return true;
+ }
+ 
++extern bool ath10k_enable_tx_stats;
++
++static inline bool ath10k_tx_stats_enabled(struct ath10k *ar)
++{
++	if (!test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
++		return false;
++
++	if (!ath10k_enable_tx_stats)
++		return false;
++
++	return true;
++}
++
+ struct ath10k *ath10k_core_create(size_t priv_size, struct device *dev,
+ 				  enum ath10k_bus bus,
+ 				  enum ath10k_hw_rev hw_rev,
+--- a/drivers/net/wireless/ath/ath10k/debug.h
++++ b/drivers/net/wireless/ath/ath10k/debug.h
+@@ -49,7 +49,8 @@ enum ath10k_pktlog_filter {
+ 	ATH10K_PKTLOG_RCUPDATE   = 0x000000008,
+ 	ATH10K_PKTLOG_DBG_PRINT  = 0x000000010,
+ 	ATH10K_PKTLOG_SMART_ANT	 = 0x000000020,
+-	ATH10K_PKTLOG_ANY        = 0x00000003f,
++	ATH10K_PKTLOG_PEER_STATS = 0x000000040,
++	ATH10K_PKTLOG_ANY        = 0x00000007f,
+ };
+ 
+ enum ath10k_dbg_aggr_mode {
+--- a/drivers/net/wireless/ath/ath10k/hw.h
++++ b/drivers/net/wireless/ath/ath10k/hw.h
+@@ -381,6 +381,7 @@ enum ath10k_hw_4addr_pad {
+ #define TARGET_10X_AST_SKID_LIMIT		128
+ #define TARGET_10X_NUM_STATIONS			128
+ #define TARGET_10_2_SMART_ANT_NUM_STATIONS	115
++#define TARGET_10_2_TX_STATS_PEERS_OVERHEAD	15
+ #define TARGET_10X_NUM_PEERS			((TARGET_10X_NUM_STATIONS) + \
+ 						 (TARGET_10X_NUM_VDEVS))
+ #define TARGET_10_2_SMART_ANT_NUM_PEERS		(TARGET_10_2_SMART_ANT_NUM_STATIONS + \
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -6749,6 +6749,16 @@ ath10k_mac_op_assign_vif_chanctx(struct
+ 		arvif->is_up = true;
+ 	}
+ 
++	if (ath10k_tx_stats_enabled(ar)) {
++		ar->debug.pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
++		/* This is used for per peer tx stats */
++		ret = ath10k_wmi_pdev_pktlog_enable(ar, ar->debug.pktlog_filter);
++		if (ret) {
++			ath10k_warn(ar, "failed to enable peer stats pktlog: %d\n", ret);
++			goto err_stop;
++		}
++	}
++
+ 	ret = ath10k_smart_ant_enable(ar, arvif);
+ 	if (ret) {
+ 		ath10k_warn(ar, "failed to enable smart antenna algorithm %d\n",
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -5513,6 +5513,11 @@ static struct sk_buff *ath10k_wmi_10_2_o
+ 		config.num_peers = __cpu_to_le32(TARGET_10X_NUM_PEERS);
+ 		config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
+ 	}
++	if (ath10k_tx_stats_enabled(ar)) {
++		config.num_peers = __cpu_to_le32(config.num_peers -
++				TARGET_10_2_TX_STATS_PEERS_OVERHEAD);
++		config.num_tids = __cpu_to_le32(config.num_peers * 2);
++	}
+ 	config.num_peer_keys = __cpu_to_le32(TARGET_10X_NUM_PEER_KEYS);
+ 	config.ast_skid_limit = __cpu_to_le32(TARGET_10X_AST_SKID_LIMIT);
+ 	config.tx_chain_mask = __cpu_to_le32(TARGET_10X_TX_CHAIN_MASK);
