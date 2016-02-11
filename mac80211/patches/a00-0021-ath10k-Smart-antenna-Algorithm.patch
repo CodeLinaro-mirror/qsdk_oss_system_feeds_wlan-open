@@ -68,15 +68,15 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -317,6 +318,7 @@ struct ath10k_sta {
- 	/* protected by conf_mutex */
+@@ -319,6 +320,7 @@ struct ath10k_sta {
  	bool aggr_mode;
+ 	u64 rx_duration;
  #endif
 +	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
  
  #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5*HZ)
-@@ -428,6 +430,7 @@ struct ath10k_debug {
+@@ -430,6 +432,7 @@ struct ath10k_debug {
  	struct ath_pktlog pktlog;
  	bool is_pkt_logging;
  #endif
@@ -84,7 +84,7 @@
  };
  
  enum ath10k_state {
-@@ -598,23 +601,6 @@ enum ath10k_tx_pause_reason {
+@@ -600,23 +603,6 @@ enum ath10k_tx_pause_reason {
  	ATH10K_TX_PAUSE_MAX,
  };
  
@@ -110,7 +110,7 @@
  	struct ieee80211_hw *hw;
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -1910,7 +1910,8 @@ void ath10k_debug_stop(struct ath10k *ar
+@@ -1916,7 +1916,8 @@ void ath10k_debug_stop(struct ath10k *ar
  	if (ar->debug.htt_stats_mask != 0)
  		cancel_delayed_work(&ar->debug.htt_stats_dwork);
  
@@ -120,7 +120,7 @@
  }
  
  static ssize_t ath10k_write_simulate_radar(struct file *file,
-@@ -2006,6 +2007,9 @@ static ssize_t ath10k_write_pktlog_filte
+@@ -2012,6 +2013,9 @@ static ssize_t ath10k_write_pktlog_filte
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -130,7 +130,7 @@
  	if (ar->state != ATH10K_STATE_ON) {
  		ar->debug.pktlog_filter = filter;
  		ret = count;
-@@ -2020,10 +2024,18 @@ static ssize_t ath10k_write_pktlog_filte
+@@ -2026,10 +2030,18 @@ static ssize_t ath10k_write_pktlog_filte
  			goto out;
  		}
  	} else {
@@ -868,7 +868,7 @@
 +	return true;
 +}
 +
-+static void ath10k_smart_ant_alg_peer_ratecode_fill(struct ath10k *ar, 
++static void ath10k_smart_ant_alg_peer_ratecode_fill(struct ath10k *ar,
 +					struct ath10k_smart_ant_sta *sa_sta,
 +					struct ieee80211_sta *sta)
 +{
@@ -926,7 +926,7 @@
 +		if (sta->supp_rates[0] > 0xff) {
 +			for (i = 0; i < ATH10K_OFDM_RATES_MAX; i++) {
 +				rates[0][i + ATH10K_CCK_RATES_MAX] =
-+					ATH10K_HW_RATECODE(i, nss, 
++					ATH10K_HW_RATECODE(i, nss,
 +							WMI_RATE_PREAMBLE_OFDM);
 +			}
 +			sa_sta->rate_cap.rt_count[0] += ATH10K_OFDM_RATES_MAX;
@@ -2529,7 +2529,7 @@
 +	info->enabled = true;
 +
 +	/* Enable tx feedback through packetlog */
-+	return ath10k_wmi_pdev_pktlog_enable(ar, 
++	return ath10k_wmi_pdev_pktlog_enable(ar,
 +			(ar->debug.pktlog_filter | ATH10K_PKTLOG_SMART_ANT));
 +}
 --- /dev/null
@@ -3061,7 +3061,7 @@
 +#endif /* _SMART_ANT_ALG_ */
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -5492,11 +5492,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
+@@ -5548,11 +5548,13 @@ static struct sk_buff *ath10k_wmi_10_2_o
  		config.num_peers =
  			__cpu_to_le32(min(TARGET_10_2_SMART_ANT_NUM_PEERS,
  					  TARGET_10X_NUM_PEERS));
