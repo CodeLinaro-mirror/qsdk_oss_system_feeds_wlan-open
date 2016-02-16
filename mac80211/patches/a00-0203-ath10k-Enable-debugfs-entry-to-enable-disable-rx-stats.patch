@@ -350,3 +350,281 @@
  
  	/* keep last! */
  	struct ieee80211_sta sta;
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -651,6 +651,9 @@ enum ath10k_dev_flags {
+ 
+ 	/* Bluetooth coexistance enabled */
+ 	ATH10K_FLAG_BTCOEX,
++
++	/* Per Station statistics service */
++	ATH10K_FLAG_PEER_STATS,
+ };
+ 
+ enum ath10k_cal_mode {
+@@ -734,6 +737,7 @@ struct ath10k {
+ 	u32 max_spatial_stream;
+ 	/* protected by conf_mutex */
+ 	bool ani_enabled;
++	bool fw_feature_restart;
+ 
+ 	DECLARE_BITMAP(fw_features, ATH10K_FW_FEATURE_COUNT);
+ 
+@@ -1015,17 +1019,13 @@ static inline bool ath10k_smart_ant_enab
+ 	return true;
+ }
+ 
+-extern bool ath10k_enable_tx_stats;
+-
+-static inline bool ath10k_tx_stats_enabled(struct ath10k *ar)
++static inline bool ath10k_peer_stats_enabled(struct ath10k *ar)
+ {
+-	if (!test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
+-		return false;
++	if (test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags) &&
++	    test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
++		return true;
+ 
+-	if (!ath10k_enable_tx_stats)
+-		return false;
+-
+-	return true;
++	return false;
+ }
+ 
+ struct ath10k *ath10k_core_create(size_t priv_size, struct device *dev,
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -320,7 +320,7 @@ static void ath10k_debug_fw_stats_reset(
+ void ath10k_debug_fw_stats_process(struct ath10k *ar, struct sk_buff *skb)
+ {
+ 	struct ath10k_fw_stats stats = {};
+-	bool is_start, is_started, is_end, peer_stats_svc;
++	bool is_start, is_started, is_end;
+ 	size_t num_peers;
+ 	size_t num_vdevs;
+ 	int ret;
+@@ -348,12 +348,11 @@ void ath10k_debug_fw_stats_process(struc
+ 	 *     delivered which is treated as end-of-data and is itself discarded
+ 	 */
+ 
+-	peer_stats_svc = test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map);
+-	if (peer_stats_svc)
++	if (ath10k_peer_stats_enabled(ar))
+ 		ath10k_sta_update_rx_duration(ar, &stats.peers);
+ 
+ 	if (ar->debug.fw_stats_done) {
+-		if (!peer_stats_svc)
++		if (!ath10k_peer_stats_enabled(ar))
+ 			ath10k_warn(ar, "received unsolicited stats update event\n");
+ 
+ 		goto free;
+@@ -2193,6 +2192,7 @@ static ssize_t ath10k_write_btcoex(struc
+ 
+ 	ath10k_info(ar, "restarting firmware due to btcoex change");
+ 
++	ar->fw_feature_restart = true;
+ 	queue_work(ar->workqueue, &ar->restart_work);
+ 
+ exit:
+@@ -2222,6 +2222,74 @@ static const struct file_operations fops
+ 	.open = simple_open
+ };
+ 
++static ssize_t ath10k_write_peer_stats(struct file *file,
++				       const char __user *ubuf,
++				       size_t count, loff_t *ppos)
++{
++	struct ath10k *ar = file->private_data;
++	char buf[32];
++	size_t buf_size;
++	int ret = 0;
++	bool val;
++
++	buf_size = min(count, (sizeof(buf) - 1));
++	if (copy_from_user(buf, ubuf, buf_size))
++		return -EFAULT;
++
++	buf[buf_size] = '\0';
++
++	if (strtobool(buf, &val) != 0)
++		return -EINVAL;
++
++	mutex_lock(&ar->conf_mutex);
++
++	if (ar->state != ATH10K_STATE_ON &&
++	    ar->state != ATH10K_STATE_RESTARTED) {
++		ret = -ENETDOWN;
++		goto exit;
++	}
++
++	if (!(test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags) ^ val))
++		goto exit;
++
++	if (val)
++		set_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags);
++	else
++		clear_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags);
++
++	ath10k_info(ar, "restarting firmware due to Peer stats change");
++
++	ar->fw_feature_restart = true;
++	queue_work(ar->workqueue, &ar->restart_work);
++	ret = count;
++
++exit:
++	mutex_unlock(&ar->conf_mutex);
++	return ret;
++}
++
++static ssize_t ath10k_read_peer_stats(struct file *file, char __user *ubuf,
++				      size_t count, loff_t *ppos)
++
++{
++	char buf[32];
++	struct ath10k *ar = file->private_data;
++	int len = 0;
++
++	mutex_lock(&ar->conf_mutex);
++	len = scnprintf(buf, sizeof(buf) - len, "%d\n",
++			test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags));
++	mutex_unlock(&ar->conf_mutex);
++
++	return simple_read_from_buffer(ubuf, count, ppos, buf, len);
++}
++
++static const struct file_operations fops_peer_stats = {
++	.read = ath10k_read_peer_stats,
++	.write = ath10k_write_peer_stats,
++	.open = simple_open
++};
++
+ static ssize_t ath10k_debug_fw_checksums_read(struct file *file,
+ 					      char __user *user_buf,
+ 					      size_t count, loff_t *ppos)
+@@ -2397,6 +2465,11 @@ int ath10k_debug_register(struct ath10k
+ 		debugfs_create_file("btcoex", S_IRUGO | S_IWUSR,
+ 				    ar->debug.debugfs_phy, ar, &fops_btcoex);
+ 
++	if (test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
++		debugfs_create_file("peer_stats", S_IRUGO | S_IWUSR,
++				    ar->debug.debugfs_phy, ar,
++				    &fops_peer_stats);
++
+ 	debugfs_create_file("fw_checksums", S_IRUSR,
+ 			    ar->debug.debugfs_phy, ar, &fops_fw_checksums);
+ 
+@@ -2472,9 +2545,6 @@ void ath10k_dbg_gen_bug_on_fw_assert(str
+ 	int ret, i, num_read;
+ 	u8 *addr, *pos;
+ 
+-	if (!bug_on_fw_assert)
+-		return;
+-
+ 	addr = (u8 *)ioremap(ATH10K_FW_IO_MEM_ADDR, ATH10K_FW_IO_MEM_SIZE);
+ 	if (!addr) {
+ 		ath10k_err(ar, "Cannot access memory to dump WLAN Firmware data\n");
+@@ -2720,6 +2790,9 @@ void ath10k_dbg_ipq40xx_bug_on_fw_assert
+ 
+ void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar)
+ {
++	if (!bug_on_fw_assert || ar->fw_feature_restart)
++		return;
++
+ 	if (QCA_REV_99X0(ar))
+ 		ath10k_dbg_qca99x0_bug_on_fw_assert(ar);
+ 	else if (QCA_REV_40XX(ar))
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -4490,7 +4490,7 @@ static int ath10k_start(struct ieee80211
+ 
+ 	ar->ani_enabled = true;
+ 
+-	if (test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map)) {
++	if (ath10k_peer_stats_enabled(ar)) {
+ 		param = ar->wmi.pdev_param->peer_stats_update_period;
+ 		ret = ath10k_wmi_pdev_set_param(ar, param,
+ 						PEER_DEFAULT_STATS_UPDATE_PERIOD);
+@@ -7206,7 +7206,7 @@ ath10k_mac_op_assign_vif_chanctx(struct
+ 		arvif->is_up = true;
+ 	}
+ 
+-	if (ath10k_tx_stats_enabled(ar)) {
++	if (ath10k_peer_stats_enabled(ar)) {
+ 		ar->debug.pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
+ 		/* This is used for per peer tx stats */
+ 		ret = ath10k_wmi_pdev_pktlog_enable(ar, ar->debug.pktlog_filter);
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -5576,7 +5576,7 @@ static struct sk_buff *ath10k_wmi_10_2_o
+ 		config.num_peers = __cpu_to_le32(TARGET_10X_NUM_PEERS);
+ 		config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
+ 	}
+-	if (ath10k_tx_stats_enabled(ar)) {
++	if (ath10k_peer_stats_enabled(ar)) {
+ 		config.num_peers = __cpu_to_le32(config.num_peers -
+ 				TARGET_10_2_TX_STATS_PEERS_OVERHEAD);
+ 		config.num_tids = __cpu_to_le32(config.num_peers * 2);
+@@ -5636,7 +5636,7 @@ static struct sk_buff *ath10k_wmi_10_2_o
+ 	    test_bit(WMI_SERVICE_COEX_GPIO, ar->wmi.svc_map))
+ 		features |= WMI_10_2_COEX_GPIO;
+ 
+-	if (test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
++	if (ath10k_peer_stats_enabled(ar))
+ 		features |= WMI_10_2_PEER_STATS;
+ 
+ 	cmd->resource_config.feature_mask = __cpu_to_le32(features);
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -40,7 +40,6 @@ static bool skip_otp;
+ static bool rawmode;
+ bool bug_on_fw_assert = true;
+ bool ath10k_enable_smart_antenna = false;
+-bool ath10k_enable_tx_stats = true;
+ 
+ module_param_named(debug_mask, ath10k_debug_mask, uint, 0644);
+ module_param_named(cryptmode, ath10k_cryptmode_param, uint, 0644);
+@@ -50,7 +49,6 @@ module_param(rawmode, bool, 0644);
+ module_param(bug_on_fw_assert, bool, 0644);
+ module_param_named(enable_smart_antenna, ath10k_enable_smart_antenna,
+ 		   bool, 0644);
+-module_param_named(enable_tx_stats, ath10k_enable_tx_stats, bool, 0644);
+ 
+ MODULE_PARM_DESC(debug_mask, "Debugging mask");
+ MODULE_PARM_DESC(uart_print, "Uart target debugging");
+@@ -59,7 +57,6 @@ MODULE_PARM_DESC(cryptmode, "Crypto mode
+ MODULE_PARM_DESC(rawmode, "Use raw 802.11 frame datapath");
+ MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
+ MODULE_PARM_DESC(enable_smart_antenna, "Enable smart antenna supprot in fw");
+-MODULE_PARM_DESC(enable_tx_stats, "Enable tx stats support");
+ 
+ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+@@ -1567,6 +1564,7 @@ static void ath10k_core_restart(struct w
+ 		break;
+ 	}
+ 
++	ar->fw_feature_restart = false;
+ 	mutex_unlock(&ar->conf_mutex);
+ }
+ 
+@@ -1669,7 +1667,7 @@ static int ath10k_core_init_firmware_fea
+ 			ar->max_num_peers = TARGET_10X_NUM_PEERS;
+ 			ar->max_num_stations = TARGET_10X_NUM_STATIONS;
+ 		}
+-		if (ath10k_enable_tx_stats) {
++		if (ath10k_peer_stats_enabled(ar)) {
+ 			ar->max_num_peers -=
+ 					TARGET_10_2_TX_STATS_PEERS_OVERHEAD;
+ 			ar->max_num_stations -=
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2436,7 +2436,7 @@ void ath10k_htt_t2h_msg_handler(struct a
+ 					__le16_to_cpu(hdr->size));
+ 		ath10k_smart_ant_proc_tx_feedback(ar, resp->pktlog_msg.payload);
+ 		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
+-		if (ath10k_tx_stats_enabled(ar))
++		if (ath10k_peer_stats_enabled(ar))
+ 			ath10k_process_tx_stats(ar, resp->pktlog_msg.payload);
+ 		break;
+ 	}
