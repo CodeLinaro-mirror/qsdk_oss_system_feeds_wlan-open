@@ -24,7 +24,7 @@
  	buf = kzalloc(size, GFP_KERNEL);
  	if (buf == NULL)
  		return -ENOMEM;
-@@ -445,6 +449,132 @@ STA_OPS(vht_capa);
+@@ -445,6 +449,128 @@ STA_OPS(vht_capa);
  		debugfs_create_u64(#name, 0400, sta->debugfs.dir,	\
  			(u64 *) &sta->field);
  
@@ -34,7 +34,7 @@
 +	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 +	struct ieee80211_local *local = sta->local;
 +	unsigned int pkt_len = skb->len;
-+	unsigned int bw_idx, gi_idx, mcs_idx, nss_idx, i;
++	unsigned int bw_idx, gi_idx, mcs_idx = 0, nss_idx = 0, i;
 +
 +	if (!local->rx_stats_enabled)
 +		return;
@@ -62,33 +62,29 @@
 +	if ((status->flag & RX_FLAG_HT) && (status->rate_idx < 32)) {
 +		nss_idx = status->rate_idx / 8;
 +		mcs_idx = status->rate_idx % 8;
-+	} else {
-+		nss_idx = status->vht_nss;
++	} else if (status->flag & RX_FLAG_VHT) {
++		nss_idx = status->vht_nss - 1;
 +		mcs_idx = status->rate_idx;
 +	}
-+
-+	sta->rx_bw_pkt[bw_idx]++;
-+	sta->rx_bw_byte[bw_idx] += pkt_len;
 +
 +	/* Keep silent quit for all packet not statisfy the
 +	 * statistics requirment in the data path
 +	 */
-+	if (nss_idx > IEEE80211_VHT_NSS_NUM)
++	if (nss_idx > IEEE80211_VHT_NSS_NUM - 1 ||
++	    mcs_idx > (IEEE80211_VHT_MCS_NUM - 1))
 +		goto out;
-+
-+	sta->rx_nss_pkt[nss_idx]++;
-+	sta->rx_nss_byte[nss_idx] += pkt_len;
 +
 +	gi_idx = (status->flag & RX_FLAG_SHORT_GI) ? 1 : 0;
 +	sta->rx_gi_pkt[gi_idx]++;
 +	sta->rx_gi_byte[gi_idx] += pkt_len;
++	sta->rx_bw_pkt[bw_idx]++;
++	sta->rx_bw_byte[bw_idx] += pkt_len;
 +
 +	if (status->flag & (RX_FLAG_HT | RX_FLAG_VHT)) {
-+		if (mcs_idx > (IEEE80211_VHT_MCS_NUM - 1))
-+			goto out;
-+
 +		sta->rx_mcs_pkt[mcs_idx]++;
 +		sta->rx_mcs_byte[mcs_idx] += pkt_len;
++		sta->rx_nss_pkt[nss_idx]++;
++		sta->rx_nss_byte[nss_idx] += pkt_len;
 +
 +		i = mcs_idx * 8 + 8 * 10 * nss_idx;
 +		i += bw_idx * 2 + gi_idx;
