@@ -11,7 +11,7 @@
  
 --- a/net/mac80211/debugfs_sta.c
 +++ b/net/mac80211/debugfs_sta.c
-@@ -296,8 +296,12 @@ static ssize_t sta_rx_stats_read(struct
+@@ -296,17 +296,28 @@ static ssize_t sta_rx_stats_read(struct
  	char *buf;
  	const int size = 2816;  /* adjust the size for all items */
  	struct sta_info *sta = file->private_data;
@@ -24,7 +24,46 @@
  	buf = kzalloc(size, GFP_KERNEL);
  	if (buf == NULL)
  		return -ENOMEM;
-@@ -445,6 +449,128 @@ STA_OPS(vht_capa);
+ 
+-	len += scnprintf(buf + len, size - len, "MCS packets: ");
++	len += scnprintf(buf + len, size - len, "VHT MCS packets: ");
+ 	for (i = 0; i < IEEE80211_VHT_MCS_NUM; i++)
+ 		len += scnprintf(buf + len, size - len, "%llu, ",
+-				 sta->rx_mcs_pkt[i]);
++				 sta->rx_mcs_vht_pkt[i]);
++	len += scnprintf(buf + len, size - len, "\n");
++
++	len += scnprintf(buf + len, size - len, "HT MCS packets: ");
++	for (i = 0; i < IEEE80211_HT_MCS_NUM; i++)
++		len += scnprintf(buf + len, size - len, "%llu, ",
++				 sta->rx_mcs_ht_pkt[i]);
+ 	len += scnprintf(buf + len, size - len, "\n");
++
+ 	len += scnprintf(buf + len, size - len,
+ 			"BW packets:  20Mhz: %llu\t40Mhz: %llu\t80Mhz: %llu\t",
+ 			sta->rx_bw_pkt[0], sta->rx_bw_pkt[1],
+@@ -355,11 +366,18 @@ static ssize_t sta_rx_stats_read(struct
+ 	len += scnprintf(buf + len, size - len, "\n\n");
+ 
+ 	/* Below function can be merged into a macro with above part*/
+-	len += scnprintf(buf + len, size - len, "MCS bytes: ");
++	len += scnprintf(buf + len, size - len, "VHT MCS bytes: ");
+ 	for (i = 0; i < IEEE80211_VHT_MCS_NUM; i++)
+ 		len += scnprintf(buf + len, size - len, "%llu, ",
+-				 sta->rx_mcs_byte[i]);
++				 sta->rx_mcs_vht_byte[i]);
++	len += scnprintf(buf + len, size - len, "\n");
++
++	len += scnprintf(buf + len, size - len, "HT MCS bytes: ");
++	for (i = 0; i < IEEE80211_HT_MCS_NUM; i++)
++		len += scnprintf(buf + len, size - len, "%llu, ",
++				 sta->rx_mcs_ht_byte[i]);
+ 	len += scnprintf(buf + len, size - len, "\n");
++
+ 	len += scnprintf(buf + len, size - len,
+ 			 "BW bytes:  20Mhz: %llu, 40Mhz: %llu, 80Mhz: %llu, 160Mhz: %llu\n",
+ 			 sta->rx_bw_byte[0], sta->rx_bw_byte[1],
+@@ -445,6 +463,134 @@ STA_OPS(vht_capa);
  		debugfs_create_u64(#name, 0400, sta->debugfs.dir,	\
  			(u64 *) &sta->field);
  
@@ -56,23 +95,33 @@
 +	else
 +		bw_idx = 0;
 +
-+	/* In HT mode MCS 0 - 31 are upadted as MCS 0-7
-+	 * with NSS=0,1,2,3
-+	 */
-+	if ((status->flag & RX_FLAG_HT) && (status->rate_idx < 32)) {
-+		nss_idx = status->rate_idx / 8;
-+		mcs_idx = status->rate_idx % 8;
-+	} else if (status->flag & RX_FLAG_VHT) {
-+		nss_idx = status->vht_nss - 1;
++	if (status->flag & RX_FLAG_HT) {
 +		mcs_idx = status->rate_idx;
-+	}
++		nss_idx = (mcs_idx >> 3) - 1;
 +
-+	/* Keep silent quit for all packet not statisfy the
-+	 * statistics requirment in the data path
-+	 */
-+	if (nss_idx > IEEE80211_VHT_NSS_NUM - 1 ||
-+	    mcs_idx > (IEEE80211_VHT_MCS_NUM - 1))
-+		goto out;
++		if (status->rate_idx > IEEE80211_HT_MCS_NUM - 1 ||
++		    nss_idx > IEEE80211_VHT_NSS_NUM - 1)
++			goto out;
++
++		sta->rx_mcs_ht_pkt[mcs_idx]++;
++		sta->rx_mcs_ht_byte[mcs_idx] += pkt_len;
++		sta->rx_nss_pkt[nss_idx]++;
++		sta->rx_nss_byte[nss_idx] += pkt_len;
++		/* To fit into rate table for HT packets */
++		mcs_idx = mcs_idx % 8;
++	} else if (status->flag & RX_FLAG_VHT) {
++		mcs_idx = status->rate_idx;
++		nss_idx = status->vht_nss - 1;
++
++		if (nss_idx > IEEE80211_VHT_NSS_NUM - 1 ||
++		    mcs_idx > (IEEE80211_VHT_MCS_NUM - 1))
++			goto out;
++
++		sta->rx_mcs_vht_pkt[mcs_idx]++;
++		sta->rx_mcs_vht_byte[mcs_idx] += pkt_len;
++		sta->rx_nss_pkt[nss_idx]++;
++		sta->rx_nss_byte[nss_idx] += pkt_len;
++	}
 +
 +	gi_idx = (status->flag & RX_FLAG_SHORT_GI) ? 1 : 0;
 +	sta->rx_gi_pkt[gi_idx]++;
@@ -81,11 +130,7 @@
 +	sta->rx_bw_byte[bw_idx] += pkt_len;
 +
 +	if (status->flag & (RX_FLAG_HT | RX_FLAG_VHT)) {
-+		sta->rx_mcs_pkt[mcs_idx]++;
-+		sta->rx_mcs_byte[mcs_idx] += pkt_len;
-+		sta->rx_nss_pkt[nss_idx]++;
-+		sta->rx_nss_byte[nss_idx] += pkt_len;
-+
++		/* Update Rate table for HT and VHT packets */
 +		i = mcs_idx * 8 + 8 * 10 * nss_idx;
 +		i += bw_idx * 2 + gi_idx;
 +		sta->rx_rate_pkt[i]++;
@@ -95,12 +140,12 @@
 +		int shift = ieee80211_vif_get_shift(&sta->sdata->vif);
 +		u16 brate, legacy_rate;
 +
-+		if (mcs_idx > IEEE80211_RX_LEGACY_RATE_NUM)
++		if (status->rate_idx > IEEE80211_RX_LEGACY_RATE_NUM - 1)
 +			goto out;
 +
 +		sband = sta->local->hw.wiphy->bands[
 +			ieee80211_get_sdata_band(sta->sdata)];
-+		brate = sband->bitrates[mcs_idx].bitrate;
++		brate = sband->bitrates[status->rate_idx].bitrate;
 +		legacy_rate = DIV_ROUND_UP(brate, 1 << shift);
 +
 +		switch (legacy_rate) {
@@ -312,7 +357,15 @@
  {
 --- a/net/mac80211/sta_info.h
 +++ b/net/mac80211/sta_info.h
-@@ -495,16 +495,6 @@ struct sta_info {
+@@ -248,6 +248,7 @@ struct sta_ampdu_mlme {
+ 
+ #define IEEE80211_FAST_XMIT_MAX_IV	18
+ 
++#define IEEE80211_HT_MCS_NUM	32
+ #define IEEE80211_VHT_MCS_NUM	10
+ #define IEEE80211_VHT_BW_NUM	4
+ #define IEEE80211_VHT_NSS_NUM	4
+@@ -495,29 +496,31 @@ struct sta_info {
  		struct dentry *dir;
  		bool add_has_run;
  	} debugfs;
@@ -328,8 +381,18 @@
 -	struct cfg80211_chan_def tdls_chandef;
  
  	u64 rx_legacy_pkt[IEEE80211_RX_LEGACY_RATE_NUM];
- 	u64 rx_mcs_pkt[IEEE80211_VHT_MCS_NUM];
-@@ -518,6 +508,16 @@ struct sta_info {
+-	u64 rx_mcs_pkt[IEEE80211_VHT_MCS_NUM];
++	u64 rx_mcs_ht_pkt[IEEE80211_HT_MCS_NUM];
++	u64 rx_mcs_vht_pkt[IEEE80211_VHT_MCS_NUM];
+ 	u64 rx_bw_pkt[IEEE80211_VHT_BW_NUM];
+ 	u64 rx_nss_pkt[IEEE80211_VHT_NSS_NUM];
+ 	u64 rx_gi_pkt[IEEE80211_VHT_GI_NUM];
+ 	u64 rx_rate_pkt[IEEE80211_VHT_RATE_NUM];
+ 	u64 rx_legacy_byte[IEEE80211_RX_LEGACY_RATE_NUM];
+-	u64 rx_mcs_byte[IEEE80211_VHT_MCS_NUM];
++	u64 rx_mcs_ht_byte[IEEE80211_HT_MCS_NUM];
++	u64 rx_mcs_vht_byte[IEEE80211_VHT_MCS_NUM];
+ 	u64 rx_bw_byte[IEEE80211_VHT_BW_NUM];
  	u64 rx_nss_byte[IEEE80211_VHT_NSS_NUM];
  	u64 rx_gi_byte[IEEE80211_VHT_GI_NUM];
  	u64 rx_rate_byte[IEEE80211_VHT_RATE_NUM];
