@@ -421,15 +421,7 @@
  };
  
  enum ath10k_cal_mode {
-@@ -734,6 +737,7 @@ struct ath10k {
- 	u32 max_spatial_stream;
- 	/* protected by conf_mutex */
- 	bool ani_enabled;
-+	bool fw_feature_restart;
- 
- 	DECLARE_BITMAP(fw_features, ATH10K_FW_FEATURE_COUNT);
- 
-@@ -1015,17 +1019,13 @@ static inline bool ath10k_smart_ant_enab
+@@ -1015,17 +1018,13 @@ static inline bool ath10k_smart_ant_enab
  	return true;
  }
  
@@ -478,15 +470,7 @@
  			ath10k_warn(ar, "received unsolicited stats update event\n");
  
  		goto free;
-@@ -2193,6 +2192,7 @@ static ssize_t ath10k_write_btcoex(struc
- 
- 	ath10k_info(ar, "restarting firmware due to btcoex change");
- 
-+	ar->fw_feature_restart = true;
- 	queue_work(ar->workqueue, &ar->restart_work);
- 
- exit:
-@@ -2222,6 +2222,74 @@ static const struct file_operations fops
+@@ -2222,6 +2221,73 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -527,7 +511,6 @@
 +
 +	ath10k_info(ar, "restarting firmware due to Peer stats change");
 +
-+	ar->fw_feature_restart = true;
 +	queue_work(ar->workqueue, &ar->restart_work);
 +	ret = count;
 +
@@ -561,7 +544,7 @@
  static ssize_t ath10k_debug_fw_checksums_read(struct file *file,
  					      char __user *user_buf,
  					      size_t count, loff_t *ppos)
-@@ -2397,6 +2465,11 @@ int ath10k_debug_register(struct ath10k
+@@ -2397,6 +2463,11 @@ int ath10k_debug_register(struct ath10k
  		debugfs_create_file("btcoex", S_IRUGO | S_IWUSR,
  				    ar->debug.debugfs_phy, ar, &fops_btcoex);
  
@@ -573,7 +556,7 @@
  	debugfs_create_file("fw_checksums", S_IRUSR,
  			    ar->debug.debugfs_phy, ar, &fops_fw_checksums);
  
-@@ -2472,9 +2545,6 @@ void ath10k_dbg_gen_bug_on_fw_assert(str
+@@ -2472,9 +2543,6 @@ void ath10k_dbg_gen_bug_on_fw_assert(str
  	int ret, i, num_read;
  	u8 *addr, *pos;
  
@@ -583,16 +566,6 @@
  	addr = (u8 *)ioremap(ATH10K_FW_IO_MEM_ADDR, ATH10K_FW_IO_MEM_SIZE);
  	if (!addr) {
  		ath10k_err(ar, "Cannot access memory to dump WLAN Firmware data\n");
-@@ -2720,6 +2790,9 @@ void ath10k_dbg_ipq40xx_bug_on_fw_assert
- 
- void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar)
- {
-+	if (!bug_on_fw_assert || ar->fw_feature_restart)
-+		return;
-+
- 	if (QCA_REV_99X0(ar))
- 		ath10k_dbg_qca99x0_bug_on_fw_assert(ar);
- 	else if (QCA_REV_40XX(ar))
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
 @@ -4490,7 +4490,7 @@ static int ath10k_start(struct ieee80211
@@ -635,39 +608,44 @@
  	cmd->resource_config.feature_mask = __cpu_to_le32(features);
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -40,7 +40,6 @@ static bool skip_otp;
+@@ -38,28 +38,22 @@ static unsigned int ath10k_cryptmode_par
+ static bool uart_print;
+ static bool skip_otp;
  static bool rawmode;
- bool bug_on_fw_assert = true;
+-bool bug_on_fw_assert = true;
  bool ath10k_enable_smart_antenna = false;
 -bool ath10k_enable_tx_stats = true;
  
  module_param_named(debug_mask, ath10k_debug_mask, uint, 0644);
  module_param_named(cryptmode, ath10k_cryptmode_param, uint, 0644);
-@@ -50,7 +49,6 @@ module_param(rawmode, bool, 0644);
- module_param(bug_on_fw_assert, bool, 0644);
+ module_param(uart_print, bool, 0644);
+ module_param(skip_otp, bool, 0644);
+ module_param(rawmode, bool, 0644);
+-module_param(bug_on_fw_assert, bool, 0644);
  module_param_named(enable_smart_antenna, ath10k_enable_smart_antenna,
  		   bool, 0644);
 -module_param_named(enable_tx_stats, ath10k_enable_tx_stats, bool, 0644);
  
  MODULE_PARM_DESC(debug_mask, "Debugging mask");
  MODULE_PARM_DESC(uart_print, "Uart target debugging");
-@@ -59,7 +57,6 @@ MODULE_PARM_DESC(cryptmode, "Crypto mode
+ MODULE_PARM_DESC(skip_otp, "Skip otp failure for calibration in testmode");
+ MODULE_PARM_DESC(cryptmode, "Crypto mode: 0-hardware, 1-software");
  MODULE_PARM_DESC(rawmode, "Use raw 802.11 frame datapath");
- MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
+-MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
  MODULE_PARM_DESC(enable_smart_antenna, "Enable smart antenna supprot in fw");
 -MODULE_PARM_DESC(enable_tx_stats, "Enable tx stats support");
  
  static const struct ath10k_hw_params ath10k_hw_params_list[] = {
  	{
-@@ -1567,6 +1564,7 @@ static void ath10k_core_restart(struct w
- 		break;
- 	}
+@@ -1525,7 +1519,6 @@ static void ath10k_core_restart(struct w
+ 	 */
+ 	barrier();
  
-+	ar->fw_feature_restart = false;
- 	mutex_unlock(&ar->conf_mutex);
- }
- 
-@@ -1669,7 +1667,7 @@ static int ath10k_core_init_firmware_fea
+-	ath10k_dbg_bug_on_fw_assert(ar);
+ 	ieee80211_stop_queues(ar->hw);
+ 	ath10k_drain_tx(ar);
+ 	complete_all(&ar->scan.started);
+@@ -1669,7 +1662,7 @@ static int ath10k_core_init_firmware_fea
  			ar->max_num_peers = TARGET_10X_NUM_PEERS;
  			ar->max_num_stations = TARGET_10X_NUM_STATIONS;
  		}
@@ -687,3 +665,45 @@
  			ath10k_process_tx_stats(ar, resp->pktlog_msg.payload);
  		break;
  	}
+--- a/drivers/net/wireless/ath/ath10k/debug.h
++++ b/drivers/net/wireless/ath/ath10k/debug.h
+@@ -66,7 +66,6 @@ enum ath10k_dbg_aggr_mode {
+ 
+ 
+ extern unsigned int ath10k_debug_mask;
+-extern bool bug_on_fw_assert;
+ 
+ __printf(2, 3) void ath10k_info(struct ath10k *ar, const char *fmt, ...);
+ __printf(2, 3) void ath10k_err(struct ath10k *ar, const char *fmt, ...);
+--- a/drivers/net/wireless/ath/ath10k/pci.c
++++ b/drivers/net/wireless/ath/ath10k/pci.c
+@@ -46,6 +46,7 @@ enum ath10k_pci_reset_mode {
+ 
+ static unsigned int ath10k_pci_irq_mode = ATH10K_PCI_IRQ_AUTO;
+ static unsigned int ath10k_pci_reset_mode = ATH10K_PCI_RESET_AUTO;
++bool bug_on_fw_assert = true;
+ 
+ module_param_named(irq_mode, ath10k_pci_irq_mode, uint, 0644);
+ MODULE_PARM_DESC(irq_mode, "0: auto, 1: legacy, 2: msi (default: 0)");
+@@ -53,6 +54,9 @@ MODULE_PARM_DESC(irq_mode, "0: auto, 1:
+ module_param_named(reset_mode, ath10k_pci_reset_mode, uint, 0644);
+ MODULE_PARM_DESC(reset_mode, "0: auto, 1: warm only (default: 0)");
+ 
++module_param(bug_on_fw_assert, bool, 0644);
++MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
++
+ /* how long wait to wait for target to initialise, in ms */
+ #define ATH10K_PCI_TARGET_WAIT 3000
+ #define ATH10K_PCI_NUM_WARM_RESET_ATTEMPTS 3
+@@ -1417,7 +1421,10 @@ static void ath10k_pci_fw_crashed_dump(s
+ 
+ 	spin_unlock_bh(&ar->data_lock);
+ 
+-	queue_work(ar->workqueue, &ar->restart_work);
++	if (bug_on_fw_assert)
++		ath10k_dbg_bug_on_fw_assert(ar);
++	else
++		queue_work(ar->workqueue, &ar->restart_work);
+ }
+ 
+ void ath10k_pci_hif_send_complete_check(struct ath10k *ar, u8 pipe,
