@@ -1,0 +1,86 @@
+--- a/drivers/net/wireless/ath/wil6210/cfg80211.c
++++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
+@@ -402,6 +402,7 @@ static int wil_cfg80211_scan(struct wiphy *wiphy,
+ 	mod_timer(&wil->scan_timer, jiffies + WIL6210_SCAN_TO);
+ 
+ 	memset(&cmd, 0, sizeof(cmd));
++	cmd.cmd.scan_type = WMI_ACTIVE_SCAN;
+ 	cmd.cmd.num_channels = 0;
+ 	n = min(request->n_channels, 4U);
+ 	for (i = 0; i < n; i++) {
+@@ -429,6 +430,11 @@ static int wil_cfg80211_scan(struct wiphy *wiphy,
+ 	if (rc)
+ 		goto out;
+ 
++	if (wil->discovery_mode && cmd.cmd.scan_type == WMI_ACTIVE_SCAN) {
++		cmd.cmd.discovery_mode = 1;
++		wil_dbg_misc(wil, "active scan with discovery_mode=1\n");
++	}
++
+ 	rc = wmi_send(wil, WMI_START_SCAN_CMDID, &cmd, sizeof(cmd.cmd) +
+ 			cmd.cmd.num_channels * sizeof(cmd.cmd.channel_list[0]));
+ 
+--- a/drivers/net/wireless/ath/wil6210/debugfs.c
++++ b/drivers/net/wireless/ath/wil6210/debugfs.c
+@@ -37,6 +37,7 @@ enum dbg_off_type {
+ 	doff_x32 = 1,
+ 	doff_ulong = 2,
+ 	doff_io32 = 3,
++	doff_u8 = 4
+ };
+ 
+ /* offset to "wil" */
+@@ -346,6 +347,10 @@ static void wil6210_debugfs_init_offset(struct wil6210_priv *wil,
+ 							 tbl[i].mode, dbg,
+ 							 base + tbl[i].off);
+ 			break;
++		case doff_u8:
++			f = debugfs_create_u8(tbl[i].name, tbl[i].mode, dbg,
++					      base + tbl[i].off);
++			break;
+ 		default:
+ 			f = ERR_PTR(-EINVAL);
+ 		}
+@@ -1588,6 +1593,7 @@ static const struct dbg_off dbg_wil_off[] = {
+ 	WIL_FIELD(hw_version,	S_IRUGO,		doff_x32),
+ 	WIL_FIELD(recovery_count, S_IRUGO,		doff_u32),
+ 	WIL_FIELD(ap_isolate,	S_IRUGO,		doff_u32),
++	WIL_FIELD(discovery_mode, S_IRUGO | S_IWUSR,	doff_u8),
+ 	{},
+ };
+ 
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -616,6 +616,7 @@ struct wil6210_priv {
+ 	/* debugfs */
+ 	struct dentry *debug;
+ 	struct debugfs_blob_wrapper blobs[ARRAY_SIZE(fw_mapping)];
++	u8 discovery_mode;
+ 
+ 	void *platform_handle;
+ 	struct wil_platform_ops platform_ops;
+--- a/drivers/net/wireless/ath/wil6210/wmi.h
++++ b/drivers/net/wireless/ath/wil6210/wmi.h
+@@ -288,16 +288,17 @@ struct wmi_delete_cipher_key_cmd {
+  * - WMI_SCAN_COMPLETE_EVENTID
+  */
+ enum wmi_scan_type {
+-	WMI_LONG_SCAN		= 0,
++	WMI_ACTIVE_SCAN		= 0,
+ 	WMI_SHORT_SCAN		= 1,
+ 	WMI_PASSIVE_SCAN	= 2,
+ 	WMI_DIRECT_SCAN		= 3,
+-	WMI_ACTIVE_SCAN		= 4,
++	WMI_LONG_SCAN		= 4,
+ };
+ 
+ struct wmi_start_scan_cmd {
+ 	u8 direct_scan_mac_addr[6];
+-	u8 reserved[2];
++	u8 discovery_mode;
++	u8 reserved;
+ 	__le32 dwell_time;	/* duration in the home channel(ms) */
+ 	__le32 force_scan_interval;	/* Time interval between scans (ms)*/
+ 	u8 scan_type;		/* wmi_scan_type */
+
+
