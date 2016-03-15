@@ -350,7 +350,7 @@
  	struct ath10k_fw_stats_peer *peer;
 --- a/drivers/net/wireless/ath/ath10k/htt.h
 +++ b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -30,6 +30,22 @@
+@@ -30,6 +30,23 @@
  #include "rx_desc.h"
  #include "hw.h"
  
@@ -368,6 +368,7 @@
 +	u8 flags[ATH10K_TX_STATS_NO_OF_COMB_FB];
 +	__le32 tx_duration;
 +	u8 tx_ppdu_cnt;
++	u8 peer_id;
 +} __packed;
 +
  enum htt_dbg_stats_type {
@@ -375,7 +376,7 @@
  	HTT_DBG_STATS_RX_REORDER	= 1 << 1,
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -1986,6 +1986,59 @@ static void ath10k_htt_rx_in_ord_ind(str
+@@ -1986,6 +1986,57 @@ static void ath10k_htt_rx_in_ord_ind(str
  	tasklet_schedule(&htt->rx_replenish_task);
  }
  
@@ -385,6 +386,10 @@
 +	u16 log_type = __le16_to_cpu(pl_hdr->log_type);
 +	struct ath10k_peer *peer;
 +	struct ath10k_per_peer_tx_stats *p_tx_stats = &ar->peer_tx_stats;
++	struct ieee80211_sta *sta;
++	struct ath10k_sta *arsta;
++	u32 peer_id;
++	u8 peer_mac[ETH_ALEN];
 +
 +	if (log_type != ATH_PKTLOG_TYPE_TX_CTRL &&
 +	    log_type != ATH_PKTLOG_TYPE_TX_STAT)
@@ -393,49 +398,43 @@
 +	if (log_type == ATH_PKTLOG_TYPE_TX_STAT) {
 +		memcpy(p_tx_stats, (pl_hdr->payload) +
 +			ATH10K_TX_STATS_OFFSET, sizeof(*p_tx_stats));
++		peer_id = p_tx_stats->peer_id;
 +	} else {
-+		struct ieee80211_sta *sta;
-+		struct ath10k_sta *arsta;
 +		u32 *tx_ctrl_desc;
-+		u32 peer_id;
-+		u32 ftype;
-+		u8 peer_mac[ETH_ALEN];
-+
 +		tx_ctrl_desc = (u32 *)pl_hdr->payload;
 +
 +		peer_id = __le32_to_cpu(tx_ctrl_desc[ATH10K_TXC_PEERID]);
-+		ftype = TXCS_MS(tx_ctrl_desc, ATH10K_TXC_FTYPE);
-+
-+		if (ftype != ATH10K_FTYPE_DATA)
-+			return;
-+
-+		spin_lock_bh(&ar->data_lock);
-+		peer = ath10k_peer_find_by_id(ar, peer_id);
-+		if (!peer) {
-+			spin_unlock_bh(&ar->data_lock);
-+			return;
-+		}
-+		ether_addr_copy(peer_mac, peer->addr);
-+		spin_unlock_bh(&ar->data_lock);
-+
-+		rcu_read_lock();
-+		sta = ieee80211_find_sta_by_ifaddr(ar->hw, peer_mac, NULL);
-+		if (!sta) {
-+			rcu_read_unlock();
-+			ath10k_dbg(ar, ATH10K_DBG_HTT,
-+				   "Sta entry for %pM not found\n", peer_mac);
-+			return;
-+		}
-+		arsta = (struct ath10k_sta *)sta->drv_priv;
-+		ath10k_update_peer_tx_stats(ar, arsta, p_tx_stats);
-+		rcu_read_unlock();
 +	}
++
++	if (!p_tx_stats->tx_ppdu_cnt)
++		return;
++
++	spin_lock_bh(&ar->data_lock);
++	peer = ath10k_peer_find_by_id(ar, peer_id);
++	if (!peer) {
++		spin_unlock_bh(&ar->data_lock);
++		return;
++	}
++	ether_addr_copy(peer_mac, peer->addr);
++	spin_unlock_bh(&ar->data_lock);
++
++	rcu_read_lock();
++	sta = ieee80211_find_sta_by_ifaddr(ar->hw, peer_mac, NULL);
++	if (!sta) {
++		rcu_read_unlock();
++		ath10k_dbg(ar, ATH10K_DBG_HTT,
++			   "Sta entry for %pM not found\n", peer_mac);
++		return;
++	}
++	arsta = (struct ath10k_sta *)sta->drv_priv;
++	ath10k_update_peer_tx_stats(ar, arsta, p_tx_stats);
++	rcu_read_unlock();
 +}
 +
  void ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
  {
  	struct ath10k_htt *htt = &ar->htt;
-@@ -2111,6 +2164,8 @@ void ath10k_htt_t2h_msg_handler(struct a
+@@ -2111,6 +2162,8 @@ void ath10k_htt_t2h_msg_handler(struct a
  					__le16_to_cpu(hdr->size));
  		ath10k_smart_ant_proc_tx_feedback(ar, resp->pktlog_msg.payload);
  		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
