@@ -1,0 +1,147 @@
+--- a/drivers/net/wireless/ath/wil6210/interrupt.c
++++ b/drivers/net/wireless/ath/wil6210/interrupt.c
+@@ -394,9 +394,10 @@ static irqreturn_t wil6210_irq_misc_thread(int irq, void *cookie)
+ 		wil_fw_core_dump(wil);
+ 		wil_notify_fw_error(wil);
+ 		isr &= ~ISR_MISC_FW_ERROR;
+-		if (wil->platform_ops.notify_crash) {
++		if (wil->platform_ops.notify) {
+ 			wil_err(wil, "notify platform driver about FW crash");
+-			wil->platform_ops.notify_crash(wil->platform_handle);
++			wil->platform_ops.notify(wil->platform_handle,
++						 WIL_PLATFORM_EVT_FW_CRASH);
+ 		} else {
+ 			wil_fw_error_recovery(wil);
+ 		}
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -782,6 +782,15 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 	if (wil->hw_version == HW_VER_UNKNOWN)
+ 		return -ENODEV;
+ 
++	if (wil->platform_ops.notify) {
++		rc = wil->platform_ops.notify(wil->platform_handle,
++					      WIL_PLATFORM_EVT_PRE_RESET);
++		if (rc)
++			wil_err(wil,
++				"%s: PRE_RESET platform notify failed, rc %d\n",
++				__func__, rc);
++	}
++
+ 	set_bit(wil_status_resetting, wil->status);
+ 
+ 	cancel_work_sync(&wil->disconnect_worker);
+@@ -861,8 +870,27 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 
+ 		/* we just started MAC, wait for FW ready */
+ 		rc = wil_wait_for_fw_ready(wil);
+-		if (rc == 0) /* check FW is responsive */
+-			rc = wmi_echo(wil);
++		if (rc)
++			return rc;
++
++		/* check FW is responsive */
++		rc = wmi_echo(wil);
++		if (rc) {
++			wil_err(wil, "%s: wmi_echo failed, rc %d\n",
++				__func__, rc);
++			return rc;
++		}
++
++		if (wil->platform_ops.notify) {
++			rc = wil->platform_ops.notify(wil->platform_handle,
++						      WIL_PLATFORM_EVT_FW_RDY);
++			if (rc) {
++				wil_err(wil,
++					"%s: FW_RDY notify failed, rc %d\n",
++					__func__, rc);
++				rc = 0;
++			}
++		}
+ 	}
+ 
+ 	return rc;
+--- a/drivers/net/wireless/ath/wil6210/wil_platform.h
++++ b/drivers/net/wireless/ath/wil6210/wil_platform.h
+@@ -19,6 +19,12 @@
+ 
+ struct device;
+ 
++enum wil_platform_event {
++	WIL_PLATFORM_EVT_FW_CRASH = 0,
++	WIL_PLATFORM_EVT_PRE_RESET = 1,
++	WIL_PLATFORM_EVT_FW_RDY = 2,
++};
++
+ /**
+  * struct wil_platform_ops - wil platform module calls from this
+  * driver to platform driver
+@@ -28,7 +34,7 @@ struct wil_platform_ops {
+ 	int (*suspend)(void *handle);
+ 	int (*resume)(void *handle);
+ 	void (*uninit)(void *handle);
+-	int (*notify_crash)(void *handle);
++	int (*notify)(void *handle, enum wil_platform_event evt);
+ };
+ 
+ /**
+--- a/drivers/net/wireless/ath/wil6210/wil_platform_ipq.c
++++ b/drivers/net/wireless/ath/wil6210/wil_platform_ipq.c
+@@ -32,16 +32,10 @@ struct ipq11ad_ctx {
+ 	u32 fw_io_mem_size;
+ };
+ 
+-static int ops_notify_crash(void *handle)
++static int ipq_11ad_notify_crash(struct ipq11ad_ctx *ctx)
+ {
+-	struct ipq11ad_ctx *ctx = (struct ipq11ad_ctx *)handle;
+ 	int rc;
+ 
+-	if (!ctx) {
+-		pr_err("%s: Context not found.\n", __func__);
+-		return -ENODEV;
+-	}
+-
+ 	pr_info("%s: Fw error detected, crash_on_fw_err = %d.\n",
+ 		__func__, crash_on_fw_err);
+ 
+@@ -71,6 +65,28 @@ static int ops_notify_crash(void *handle)
+ 	return 0;
+ }
+ 
++static int ops_notify(void *handle, enum wil_platform_event evt)
++{
++	struct ipq11ad_ctx *ctx = (struct ipq11ad_ctx *)handle;
++	int rc = 0;
++
++	if (!ctx) {
++		pr_err("%s: Context not found\n", __func__);
++		return -ENODEV;
++	}
++
++	switch (evt) {
++	case WIL_PLATFORM_EVT_FW_CRASH:
++		rc = ipq_11ad_notify_crash(ctx);
++		break;
++	default:
++		pr_debug("%s: Unhandled event %d\n", __func__, evt);
++		break;
++	}
++
++	return rc;
++}
++
+ static void ops_uninit(void *handle)
+ {
+ 	struct ipq11ad_ctx *ctx = (struct ipq11ad_ctx *)handle;
+@@ -110,7 +126,7 @@ void *ipq_11ad_dev_init(struct wil_platform_ops *ops,
+ 	}
+ 
+ 	/* fill ops */
+-	ops->notify_crash = ops_notify_crash;
++	ops->notify = ops_notify;
+ 	ops->uninit = ops_uninit;
+ 
+ 	/* ramdump - address and size */
+
+
