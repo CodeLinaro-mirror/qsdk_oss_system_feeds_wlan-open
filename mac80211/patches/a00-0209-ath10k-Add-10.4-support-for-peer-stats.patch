@@ -182,6 +182,35 @@
  	struct ath10k_fw_stats_peer *peer;
  	struct ath10k_sta *arsta;
  
+@@ -254,6 +255,28 @@ void ath10k_sta_update_rx_duration(struc
+ 	rcu_read_unlock();
+ }
+ 
++void ath10k_sta_statistics(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++			   struct ieee80211_sta *sta,
++			   struct station_info *sinfo)
++{
++	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
++	struct ath10k *ar = arsta->arvif->ar;
++
++	mutex_lock(&ar->conf_mutex);
++
++	if (ar->state != ATH10K_STATE_ON &&
++	    ar->state != ATH10K_STATE_RESTARTED)
++		goto out;
++
++	if (!ath10k_peer_stats_enabled(ar))
++		goto out;
++
++	sinfo->rx_duration = arsta->rx_duration;
++	sinfo->filled |= 1ULL << NL80211_STA_INFO_RX_DURATION;
++out:
++	mutex_unlock(&ar->conf_mutex);
++}
++
+ static ssize_t ath10k_dbg_sta_read_aggr_mode(struct file *file,
+ 					     char __user *user_buf,
+ 					     size_t count, loff_t *ppos)
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -1060,11 +1060,12 @@ struct cfg80211_tid_stats {
@@ -244,3 +273,25 @@
  
  	switch (rdev->wiphy.signal_type) {
  	case CFG80211_SIGNAL_TYPE_MBM:
+--- a/drivers/net/wireless/ath/ath10k/debug.h
++++ b/drivers/net/wireless/ath/ath10k/debug.h
+@@ -223,6 +223,9 @@ void ath10k_sta_add_debugfs(struct ieee8
+ void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *peer);
+ void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
+ 				struct ath10k_per_peer_tx_stats *p_tx_stats);
++void ath10k_sta_statistics(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++			   struct ieee80211_sta *sta,
++			   struct station_info *sinfo);
+ #else
+ static inline void ath10k_sta_update_rx_duration(struct ath10k *ar,
+ 						 struct list_head *peer)
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -7350,6 +7350,7 @@ static const struct ieee80211_ops ath10k
+ #endif
+ #ifdef CPTCFG_MAC80211_DEBUGFS
+ 	.sta_add_debugfs		= ath10k_sta_add_debugfs,
++	.sta_statistics			= ath10k_sta_statistics,
+ #endif
+ };
+ 
