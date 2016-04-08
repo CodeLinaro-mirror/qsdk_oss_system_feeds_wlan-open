@@ -40,21 +40,42 @@
  };
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -714,6 +714,13 @@ int ieee80211_do_open(struct wireless_de
+@@ -16,6 +16,7 @@
+ #include <linux/if_arp.h>
+ #include <linux/netdevice.h>
+ #include <linux/rtnetlink.h>
++#include <linux/module.h>
+ #include <net/mac80211.h>
+ #include <net/ieee80211_radiotap.h>
+ #include "ieee80211_i.h"
+@@ -27,6 +28,10 @@
+ #include "wme.h"
+ #include "rate.h"
+ 
++bool is_nss_enable = true;
++module_param(is_nss_enable, bool, 0644);
++MODULE_PARM_DESC(is_nss_enable, "NSS enable module param");
++
+ /**
+  * DOC: Interface list locking
+  *
+@@ -714,6 +719,15 @@ int ieee80211_do_open(struct wireless_de
  
  	ieee80211_recalc_ps(local);
  
 +#ifdef CPTCFG_MAC80211_NSS_SUPPORT
-+	sdata->nssctx = nss_create_virt_if(dev);
-+	if (sdata->nssctx)
-+		sdata_info(sdata, "Created a NSS virtual interface\n");
-+	else
-+		sdata_err(sdata, "Failed to create a NSS virtual interface\n");
++	if (is_nss_enable) {
++		sdata->nssctx = nss_create_virt_if(dev);
++		if (sdata->nssctx)
++			sdata_info(sdata, "Created a NSS virtual interface\n");
++		else
++			sdata_err(sdata, "Failed to create a NSS virtual interface\n");
++	}
 +#endif
  	if (sdata->vif.type == NL80211_IFTYPE_MONITOR ||
  	    sdata->vif.type == NL80211_IFTYPE_AP_VLAN) {
  		/* XXX: for AP_VLAN, actually track AP queues */
-@@ -1043,6 +1050,12 @@ static int ieee80211_stop(struct net_dev
+@@ -1043,6 +1057,12 @@ static int ieee80211_stop(struct net_dev
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  
@@ -117,15 +138,17 @@
  /*
   * monitor mode reception
   *
-@@ -2115,7 +2156,7 @@ ieee80211_deliver_skb(struct ieee80211_r
+@@ -2115,8 +2156,8 @@ ieee80211_deliver_skb(struct ieee80211_r
  		}
  	}
  
 -#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+-	if (skb) {
 +#if !defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) || defined(CPTCFG_MAC80211_NSS_SUPPORT)
- 	if (skb) {
++	if (skb && sdata->nssctx) {
  		/* 'align' will only take the values 0 or 2 here since all
  		 * frames are required to be aligned to 2-byte boundaries
+ 		 * when being passed to mac80211; the code here works just
 @@ -2147,8 +2188,13 @@ ieee80211_deliver_skb(struct ieee80211_r
  		memset(skb->cb, 0, sizeof(skb->cb));
  		if (rx->napi)
