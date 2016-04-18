@@ -522,6 +522,12 @@ mac80211_interface_cleanup() {
 	local phy="$1"
 
 	for wdev in $(list_phy_interfaces "$phy"); do
+		# 11ad uses single hostapd instance
+		[ -f "/var/run/hostapd-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
+			hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
+			rm /var/run/hostapd-${wdev}.lock
+		}
+
 		ifconfig "$wdev" down 2>/dev/null
 		iw dev "$wdev" del
 	done
@@ -596,13 +602,33 @@ drv_mac80211_setup() {
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 
 	[ -n "$hostapd_ctrl" ] && {
-		/usr/sbin/hostapd -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
-		ret="$?"
-		wireless_add_process "$(cat /var/run/wifi-$phy.pid)" "/usr/sbin/hostapd" 1
-		[ "$ret" != 0 ] && {
-			wireless_setup_failed HOSTAPD_START_FAILED
-			return
-		}
+		# 11ad uses single hostapd instance
+		if [ $hwmode = "11ad" ]; then
+			if ! [ -f "/var/run/hostapd-global.pid" ]
+			then
+				# run the single instance of hostapd
+				hostapd -g /var/run/hostapd/global -B -P /var/run/hostapd-global.pid
+				ret="$?"
+				wireless_add_process "$(cat /var/run/hostapd-global.pid)" "/usr/sbin/hostapd" 1
+				[ "$ret" != 0 ] && {
+					wireless_setup_failed HOSTAPD_START_FAILED
+					return
+				}
+			fi
+			[ -f "/var/run/hostapd-$ifname.lock" ] &&
+				rm /var/run/hostapd-$ifname.lock
+			# let hostapd manage interface $ifname
+			hostapd_cli -p /var/run/hostapd raw ADD bss_config=$ifname:$hostapd_conf_file
+			touch /var/run/hostapd-$ifname.lock
+		else
+			/usr/sbin/hostapd -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
+			ret="$?"
+			wireless_add_process "$(cat /var/run/wifi-$phy.pid)" "/usr/sbin/hostapd" 1
+			[ "$ret" != 0 ] && {
+				wireless_setup_failed HOSTAPD_START_FAILED
+				return
+			}
+		fi
 	}
 
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
