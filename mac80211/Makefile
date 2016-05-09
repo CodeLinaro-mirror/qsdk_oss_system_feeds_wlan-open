@@ -38,7 +38,6 @@ define KernelPackage/mac80211/Default
   SUBMENU:=$(WMENU)
   URL:=http://www.qca.qualcomm.com
   MAINTAINER:=Qualcomm Atheros
-  DEPENDS:=@(!(TARGET_avr32||TARGET_ps3||TARGET_pxcab)||BROKEN)
 endef
 
 define KernelPackage/cfg80211
