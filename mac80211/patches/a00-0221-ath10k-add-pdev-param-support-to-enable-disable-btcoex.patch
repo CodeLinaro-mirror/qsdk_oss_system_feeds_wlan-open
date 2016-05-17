@@ -1,0 +1,132 @@
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -1924,8 +1924,13 @@ int ath10k_core_start(struct ath10k *ar,
+ 	if (test_bit(WMI_SERVICE_EXT_RES_CFG_SUPPORT, ar->wmi.svc_map) &&
+ 	    (mode == ATH10K_FIRMWARE_MODE_NORMAL)) {
+ 
++		/* QCA4019 device supports BT-Coex enablement knob via pdev param.
++		 * * By default set COEX_GPIO config and disable coex functionality
++		 * * via pdev param at driver start.
++		 */
+ 		if (test_bit(WMI_SERVICE_COEX_GPIO, ar->wmi.svc_map) &&
+-		    test_bit(ATH10K_FLAG_BTCOEX, &ar->dev_flags))
++		    (test_bit(ATH10K_FLAG_BTCOEX, &ar->dev_flags) ||
++		     QCA_REV_40XX(ar)))
+ 			val = WMI_FW_FEATURE_COEX_GPIO_SUPPORT;
+ 
+ 		if (test_bit(WMI_SERVICE_PEER_STATS, ar->wmi.svc_map))
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2181,7 +2181,9 @@ static ssize_t ath10k_write_btcoex(struc
+ 	struct ath10k *ar = file->private_data;
+ 	char buf[32];
+ 	size_t buf_size;
++	int ret = 0;
+ 	bool val;
++	u32 pdev_param;
+ 
+ 	buf_size = min(count, (sizeof(buf) - 1));
+ 	if (copy_from_user(buf, ubuf, buf_size))
+@@ -2197,6 +2199,18 @@ static ssize_t ath10k_write_btcoex(struc
+ 	if (!(test_bit(ATH10K_FLAG_BTCOEX, &ar->dev_flags) ^ val))
+ 		goto exit;
+ 
++	pdev_param = ar->wmi.pdev_param->enable_btcoex;
++	if (pdev_param != WMI_PDEV_PARAM_UNSUPPORTED) {
++		ret = ath10k_wmi_pdev_set_param(ar, pdev_param, val);
++		if (ret) {
++			ath10k_warn(ar, "failed to enable btcoex: %d\n", ret);
++			goto exit;
++		}
++	} else {
++		ath10k_info(ar, "restarting firmware due to btcoex change");
++		queue_work(ar->workqueue, &ar->restart_work);
++	}
++
+ 	if (val)
+ 		set_bit(ATH10K_FLAG_BTCOEX, &ar->dev_flags);
+ 	else
+@@ -2205,10 +2219,6 @@ static ssize_t ath10k_write_btcoex(struc
+ 	if (ar->state != ATH10K_STATE_ON)
+ 		goto exit;
+ 
+-	ath10k_info(ar, "restarting firmware due to btcoex change");
+-
+-	queue_work(ar->workqueue, &ar->restart_work);
+-
+ exit:
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -4498,6 +4498,16 @@ static int ath10k_start(struct ieee80211
+ 		}
+ 	}
+ 
++	param = ar->wmi.pdev_param->enable_btcoex;
++	if (QCA_REV_40XX(ar)) {
++		ret = ath10k_wmi_pdev_set_param(ar, param, 0);
++		if (ret) {
++			ath10k_warn(ar, "failed to disable btcoex by default: %d\n", ret);
++			goto err_core_stop;
++		}
++		clear_bit(ATH10K_FLAG_BTCOEX, &ar->dev_flags);
++	}
++
+ 	ar->num_started_vdevs = 0;
+ 	ath10k_regd_update(ar);
+ 
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -1122,6 +1122,7 @@ static struct wmi_pdev_param_map wmi_pde
+ 	.wapi_mbssid_offset = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_srcaddr = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_dstaddr = WMI_PDEV_PARAM_UNSUPPORTED,
++	.enable_btcoex = WMI_PDEV_PARAM_UNSUPPORTED,
+ };
+ 
+ static struct wmi_pdev_param_map wmi_10x_pdev_param_map = {
+@@ -1217,6 +1218,7 @@ static struct wmi_pdev_param_map wmi_10x
+ 	.wapi_mbssid_offset = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_srcaddr = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_dstaddr = WMI_PDEV_PARAM_UNSUPPORTED,
++	.enable_btcoex = WMI_PDEV_PARAM_UNSUPPORTED,
+ };
+ 
+ static struct wmi_pdev_param_map wmi_10_2_4_pdev_param_map = {
+@@ -1312,6 +1314,7 @@ static struct wmi_pdev_param_map wmi_10_
+ 	.wapi_mbssid_offset = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_srcaddr = WMI_PDEV_PARAM_UNSUPPORTED,
+ 	.arp_dstaddr = WMI_PDEV_PARAM_UNSUPPORTED,
++	.enable_btcoex = WMI_PDEV_PARAM_UNSUPPORTED,
+ };
+ 
+ /* firmware 10.2 specific mappings */
+@@ -1576,6 +1579,7 @@ static struct wmi_pdev_param_map wmi_10_
+ 	.wapi_mbssid_offset = WMI_10_4_PDEV_PARAM_WAPI_MBSSID_OFFSET,
+ 	.arp_srcaddr = WMI_10_4_PDEV_PARAM_ARP_SRCADDR,
+ 	.arp_dstaddr = WMI_10_4_PDEV_PARAM_ARP_DSTADDR,
++	.enable_btcoex = WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
+ };
+ 
+ static const struct wmi_peer_flags_map wmi_peer_flags_map = {
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
+@@ -3433,6 +3433,7 @@ struct wmi_pdev_param_map {
+ 	u32 wapi_mbssid_offset;
+ 	u32 arp_srcaddr;
+ 	u32 arp_dstaddr;
++	u32 enable_btcoex;
+ };
+ 
+ #define WMI_PDEV_PARAM_UNSUPPORTED 0
+@@ -3746,6 +3747,9 @@ enum wmi_10_4_pdev_param {
+ 	WMI_10_4_PDEV_PARAM_ATF_OBSS_NOISE_SCH,
+ 	WMI_10_4_PDEV_PARAM_ATF_OBSS_NOISE_SCALING_FACTOR,
+ 	WMI_10_4_PDEV_PARAM_CUST_TXPOWER_SCALE,
++	WMI_10_4_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
++	WMI_10_4_PDEV_PARAM_ATF_SSID_GROUP_POLICY,
++	WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
+ };
+ 
+ struct wmi_pdev_set_param_cmd {
