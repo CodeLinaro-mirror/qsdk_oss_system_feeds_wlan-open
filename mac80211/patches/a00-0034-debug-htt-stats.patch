@@ -307,7 +307,7 @@
 +		goto exit;
 +	}
 +
-+	if (ar->wmi.op_version <
++	if (ar->running_fw->fw_file.wmi_op_version <
 +	    ATH10K_FW_WMI_OP_VERSION_10_4)
 +		ret = ath10k_htt_10_2_process_stats(ar, skb);
 +	else
@@ -1661,7 +1661,7 @@
 +	if (!buf)
 +		return -ENOMEM;
 +
-+	if (ar->wmi.op_version <
++	if (ar->running_fw->fw_file.wmi_op_version <
 +	    ATH10K_FW_WMI_OP_VERSION_10_4)
 +		ath10k_htt_10_2_stats_fill(ar, buf, &length);
 +	else
@@ -2191,7 +2191,7 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -410,6 +411,10 @@ struct ath10k_debug {
+@@ -424,6 +425,10 @@ struct ath10k_debug {
  	bool fw_stats_done;
  
  	unsigned long htt_stats_mask;
@@ -2204,7 +2204,7 @@
  	struct ath_dfs_pool_stats dfs_pool_stats;
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -1061,6 +1061,7 @@ static int ath10k_debug_htt_stats_req(st
+@@ -1066,6 +1066,7 @@ static int ath10k_debug_htt_stats_req(st
  		return 0;
  
  	cookie = get_jiffies_64();
@@ -2212,19 +2212,19 @@
  
  	ret = ath10k_htt_h2t_stats_req(&ar->htt, ar->debug.htt_stats_mask,
  				       cookie);
-@@ -1112,8 +1113,9 @@ static ssize_t ath10k_write_htt_stats_ma
+@@ -1117,8 +1118,9 @@ static ssize_t ath10k_write_htt_stats_ma
  	if (ret)
  		return ret;
  
 -	/* max 8 bit masks (for now) */
 -	if (mask > 0xff)
-+	if ((ar->wmi.op_version <
++	if ((ar->running_fw->fw_file.wmi_op_version <
 +	     ATH10K_FW_WMI_OP_VERSION_10_4 && mask > 0x31) ||
 +	     mask > 0xffff)
  		return -E2BIG;
  
  	mutex_lock(&ar->conf_mutex);
-@@ -1140,6 +1142,44 @@ static const struct file_operations fops
+@@ -1145,6 +1147,44 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -2269,7 +2269,7 @@
  static ssize_t ath10k_read_htt_max_amsdu_ampdu(struct file *file,
  					       char __user *user_buf,
  					       size_t count, loff_t *ppos)
-@@ -2320,6 +2360,9 @@ int ath10k_debug_register(struct ath10k
+@@ -2421,6 +2461,9 @@ int ath10k_debug_register(struct ath10k
  	debugfs_create_file("nf_cal_period", S_IRUSR | S_IWUSR,
  			    ar->debug.debugfs_phy, ar, &fops_nf_cal_period);
  
@@ -2279,7 +2279,7 @@
  	if (config_enabled(CPTCFG_ATH10K_DFS_CERTIFIED)) {
  		debugfs_create_file("dfs_simulate_radar", S_IWUSR,
  				    ar->debug.debugfs_phy, ar,
-@@ -2338,6 +2381,7 @@ int ath10k_debug_register(struct ath10k
+@@ -2439,6 +2482,7 @@ int ath10k_debug_register(struct ath10k
  			    ar->debug.debugfs_phy, ar, &fops_pktlog_filter);
  
  	ath10k_smart_ant_debugfs_init(ar);
@@ -2289,7 +2289,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -149,6 +149,7 @@ void ath10k_debug_get_et_stats(struct ie
+@@ -150,6 +150,7 @@ void ath10k_debug_get_et_stats(struct ie
  			       struct ieee80211_vif *vif,
  			       struct ethtool_stats *stats, u64 *data);
  void ath10k_smart_ant_debugfs_init(struct ath10k *ar);
@@ -2297,7 +2297,7 @@
  #else
  static inline int ath10k_debug_start(struct ath10k *ar)
  {
-@@ -205,6 +206,7 @@ ath10k_debug_get_new_fw_crash_data(struc
+@@ -206,6 +207,7 @@ ath10k_debug_get_new_fw_crash_data(struc
  #define ath10k_debug_get_et_sset_count NULL
  #define ath10k_debug_get_et_stats NULL
  #define ath10k_smart_ant_debugfs_init NULL
@@ -2315,7 +2315,7 @@
  
  #include <linux/log2.h>
  
-@@ -2083,6 +2084,9 @@ void ath10k_htt_t2h_msg_handler(struct a
+@@ -2296,6 +2297,9 @@ bool ath10k_htt_t2h_msg_handler(struct a
  		break;
  	case HTT_T2H_MSG_TYPE_STATS_CONF:
  		trace_ath10k_htt_stats(ar, skb->data, skb->len);
@@ -2327,7 +2327,7 @@
  		/* Firmware can return tx frames if it's unable to fully
 --- a/drivers/net/wireless/ath/ath10k/htt.h
 +++ b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -31,12 +31,21 @@
+@@ -32,12 +32,21 @@
  #include "hw.h"
  
  enum htt_dbg_stats_type {
@@ -2355,9 +2355,9 @@
  
  	HTT_DBG_NUM_STATS /* keep this last */
  };
-@@ -1591,7 +1600,7 @@ void ath10k_htt_rx_free(struct ath10k_ht
- void ath10k_htt_htc_tx_complete(struct ath10k *ar, struct sk_buff *skb);
- void ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb);
+@@ -1767,7 +1776,7 @@ void ath10k_htt_htc_tx_complete(struct a
+ void ath10k_htt_htc_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb);
+ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb);
  int ath10k_htt_h2t_ver_req_msg(struct ath10k_htt *htt);
 -int ath10k_htt_h2t_stats_req(struct ath10k_htt *htt, u8 mask, u64 cookie);
 +int ath10k_htt_h2t_stats_req(struct ath10k_htt *htt, u32 mask, u64 cookie);
@@ -2366,7 +2366,7 @@
  int ath10k_htt_h2t_aggr_cfg_msg(struct ath10k_htt *htt,
 --- a/drivers/net/wireless/ath/ath10k/htt_tx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
-@@ -221,7 +221,7 @@ int ath10k_htt_h2t_ver_req_msg(struct at
+@@ -443,7 +443,7 @@ int ath10k_htt_h2t_ver_req_msg(struct at
  	return 0;
  }
  
@@ -2375,7 +2375,7 @@
  {
  	struct ath10k *ar = htt->ar;
  	struct htt_stats_req *req;
-@@ -244,10 +244,17 @@ int ath10k_htt_h2t_stats_req(struct ath1
+@@ -466,10 +466,17 @@ int ath10k_htt_h2t_stats_req(struct ath1
  
  	memset(req, 0, sizeof(*req));
  
