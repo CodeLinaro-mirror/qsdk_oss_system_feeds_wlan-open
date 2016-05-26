@@ -71,6 +71,23 @@
  };
  
  enum ath10k_dbg_aggr_mode {
+@@ -217,11 +218,16 @@ ath10k_debug_get_new_fw_crash_data(struc
+ void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			    struct ieee80211_sta *sta, struct dentry *dir);
+ void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *peer);
++int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar);
+ #else
+ static inline void ath10k_sta_update_rx_duration(struct ath10k *ar,
+ 						 struct list_head *peer)
+ {
+ }
++static inline int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar)
++{
++	return 0;
++}
+ #endif /* CPTCFG_MAC80211_DEBUGFS */
+ void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar);
+ 
 --- a/drivers/net/wireless/ath/ath10k/hw.h
 +++ b/drivers/net/wireless/ath/ath10k/hw.h
 @@ -381,6 +381,7 @@ enum ath10k_hw_4addr_pad {
@@ -83,18 +100,14 @@
  #define TARGET_10_2_SMART_ANT_NUM_PEERS		(TARGET_10_2_SMART_ANT_NUM_STATIONS + \
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -6750,6 +6750,16 @@ ath10k_mac_op_assign_vif_chanctx(struct
+@@ -6750,6 +6750,12 @@ ath10k_mac_op_assign_vif_chanctx(struct
  		arvif->is_up = true;
  	}
  
-+	if (ath10k_tx_stats_enabled(ar)) {
-+		ar->debug.pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
-+		/* This is used for per peer tx stats */
-+		ret = ath10k_wmi_pdev_pktlog_enable(ar, ar->debug.pktlog_filter);
-+		if (ret) {
-+			ath10k_warn(ar, "failed to enable peer stats pktlog: %d\n", ret);
-+			goto err_stop;
-+		}
++	ret = ath10k_debug_tx_peer_stats_enable(ar);
++	if(ret) {
++		ath10k_warn(ar, "failed to enable peer stats pktlog: %d\n", ret);
++		goto err_stop;
 +	}
 +
  	ret = ath10k_smart_ant_enable(ar, arvif);
@@ -114,3 +127,22 @@
  	config.num_peer_keys = __cpu_to_le32(TARGET_10X_NUM_PEER_KEYS);
  	config.ast_skid_limit = __cpu_to_le32(TARGET_10X_AST_SKID_LIMIT);
  	config.tx_chain_mask = __cpu_to_le32(TARGET_10X_TX_CHAIN_MASK);
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2409,6 +2409,16 @@ void ath10k_debug_unregister(struct ath1
+ 	ath10k_deinit_pktlog(ar);
+ }
+ 
++int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar)
++{
++	if (ath10k_tx_stats_enabled(ar)) {
++		ar->debug.pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
++		/* This is used for per peer tx stats */
++		return ath10k_wmi_pdev_pktlog_enable(ar, ar->debug.pktlog_filter);
++	}
++	return 0;
++}
++
+ #endif /* CPTCFG_ATH10K_DEBUGFS */
+ 
+ #ifdef CPTCFG_ATH10K_DEBUG
