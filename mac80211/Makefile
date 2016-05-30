@@ -157,13 +157,13 @@ Generic IEEE 802.11 Networking Stack (mac80211)
 endef
 
 PKG_LINUX_FIRMWARE_NAME:=linux-firmware
-PKG_LINUX_FIRMWARE_VERSION:=17657c3
+PKG_LINUX_FIRMWARE_VERSION:=8afadbe
 PKG_LINUX_FIRMWARE_BRANCH:=master
 PKG_LINUX_FIRMWARE_SOURCE:=$(PKG_LINUX_FIRMWARE_NAME)-$(PKG_LINUX_FIRMWARE_VERSION).tar.bz2
 PKG_LINUX_FIRMWARE_PROTO:=git
 PKG_LINUX_FIRMWARE_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
 PKG_LINUX_FIRMWARE_SUBDIR:=$(PKG_LINUX_FIRMWARE_NAME)-$(PKG_LINUX_FIRMWARE_VERSION)
-PKG_LINUX_FIRMWARE_MIRROR_MD5SUM:=837a1a9456c1ec8b428cc0b2b08a331b
+PKG_LINUX_FIRMWARE_MIRROR_MD5SUM:=ec34aec8b2d172b2a4438619d28f89a1
 
 define Download/linux-firmware
   FILE:=$(PKG_LINUX_FIRMWARE_SOURCE)
@@ -500,6 +500,14 @@ define KernelPackage/ath9k-htc/install
 		$(PKG_BUILD_DIR)/$(PKG_LINUX_FIRMWARE_SUBDIR)/htc_9271.fw \
 		$(PKG_BUILD_DIR)/$(PKG_LINUX_FIRMWARE_SUBDIR)/htc_7010.fw \
 		$(1)/lib/firmware/
+endef
+
+define KernelPackage/ath10k/install
+	$(INSTALL_DIR) $(1)/lib/firmware/ath10k/QCA9377/hw1.0
+	$(INSTALL_DATA) \
+		$(PKG_BUILD_DIR)/$(PKG_LINUX_FIRMWARE_SUBDIR)/ath10k/QCA9377/hw1.0/board.bin \
+		$(PKG_BUILD_DIR)/$(PKG_LINUX_FIRMWARE_SUBDIR)/ath10k/QCA9377/hw1.0/firmware-5.bin \
+		$(1)/lib/firmware/ath10k/QCA9377/hw1.0
 endef
 
 $(eval $(call KernelPackage,cfg80211))
