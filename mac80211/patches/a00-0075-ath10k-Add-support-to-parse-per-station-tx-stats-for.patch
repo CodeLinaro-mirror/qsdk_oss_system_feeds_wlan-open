@@ -101,29 +101,70 @@
  #endif
  	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
-@@ -894,6 +981,7 @@ struct ath10k {
+@@ -443,6 +530,28 @@ struct ath10k_debug {
+ 	struct dentry *debugfs_smartant;
+ };
+ 
++#ifdef CPTCFG_MAC80211_DEBUGFS
++
++#define ATH10K_10_4_TX_STATS_OFFSET	144
++#define ATH10K_10_2_TX_STATS_OFFSET	128
++#define ATH10K_TX_STATS_NO_OF_COMB_FB	4
++
++struct ath10k_per_peer_tx_stats {
++	u8 ratecode[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	u8 success_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	__le16 success_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	u8 retry_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	__le16 retry_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	u8 failed_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	__le16 failed_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	u8 flags[ATH10K_TX_STATS_NO_OF_COMB_FB];
++	__le32 tx_duration;
++	u8 tx_ppdu_cnt;
++	u8 peer_id;
++} __packed;
++
++#endif /*CPTCFG_MAC80211_DEBUGFS*/
++
+ enum ath10k_state {
+ 	ATH10K_STATE_OFF = 0,
+ 	ATH10K_STATE_ON,
+@@ -894,6 +1003,9 @@ struct ath10k {
  	struct sk_buff_head fwlog_tx_queue;
  
  	struct ath10k_smart_ant_info smart_ant_info;
++#ifdef CPTCFG_MAC80211_DEBUGFS
 +	struct ath10k_per_peer_tx_stats peer_tx_stats;
++#endif /*CPTCFG_MAC80211_DEBUGFS*/
  
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -218,11 +218,17 @@ ath10k_debug_get_new_fw_crash_data(struc
- void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+@@ -219,6 +219,10 @@ void ath10k_sta_add_debugfs(struct ieee8
  			    struct ieee80211_sta *sta, struct dentry *dir);
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *peer);
+ int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar);
 +void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
-+				struct ath10k_per_peer_tx_stats *p_tx_stats);
++				 struct ath10k_per_peer_tx_stats *p_tx_stats);
++void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data);
++void ath10k_fetch_10_4_tx_stats(struct ath10k *ar, u8 *data);
  #else
  static inline void ath10k_sta_update_rx_duration(struct ath10k *ar,
  						 struct list_head *peer)
+@@ -228,6 +232,16 @@ static inline int ath10k_debug_tx_peer_s
  {
+ 	return 0;
  }
-+void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
-+				struct ath10k_per_peer_tx_stats *p_tx_stats)
++static inline void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
++				 struct ath10k_per_peer_tx_stats *p_tx_stats)
++{
++}
++static inline void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
++{
++}
++static inline void ath10k_fetch_10_4_tx_stats(struct ath10k *ar, u8 *data)
 +{
 +}
  #endif /* CPTCFG_MAC80211_DEBUGFS */
@@ -131,13 +172,14 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -16,8 +16,268 @@
+@@ -16,7 +16,268 @@
  
  #include "core.h"
  #include "wmi-ops.h"
 +#include "wmi.h"
  #include "debug.h"
- 
++#include "txrx.h"
++
 +static char ath10k_map_rate_code_number(u8 rate, u8 pream)
 +{
 +	u8 i;
@@ -396,45 +438,15 @@
 +	tx_stats->tx_duration += __le32_to_cpu(peer_stats->tx_duration);
 +	spin_unlock_bh(&ar->data_lock);
 +}
-+
+ 
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *head)
  {	struct ieee80211_sta *sta;
- 	struct ath10k_fw_stats_peer *peer;
---- a/drivers/net/wireless/ath/ath10k/htt.h
-+++ b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -30,6 +30,24 @@
- #include "rx_desc.h"
- #include "hw.h"
+@@ -271,6 +532,84 @@ static const struct file_operations fops
+ 	.llseek = default_llseek,
+ };
  
-+#define ATH10K_10_2_TX_STATS_OFFSET	128
-+#define ATH10K_10_4_TX_STATS_OFFSET	144
-+#define ATH10K_TX_STATS_NO_OF_COMB_FB 4
-+
-+struct ath10k_per_peer_tx_stats {
-+	u8 ratecode[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	u8 success_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	__le16 success_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	u8 retry_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	__le16 retry_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	u8 failed_pkts[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	__le16 failed_bytes[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	u8 flags[ATH10K_TX_STATS_NO_OF_COMB_FB];
-+	__le32 tx_duration;
-+	u8 tx_ppdu_cnt;
-+	u8 peer_id;
-+} __packed;
-+
- enum htt_dbg_stats_type {
- 	HTT_DBG_STATS_WAL_PDEV_TXRX	= 1 << 0,
- 	HTT_DBG_STATS_RX_REORDER	= 1 << 1,
---- a/drivers/net/wireless/ath/ath10k/htt_rx.c
-+++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -1986,6 +1986,84 @@ static void ath10k_htt_rx_in_ord_ind(str
- 	tasklet_schedule(&htt->rx_replenish_task);
- }
- 
-+void ath10k_process_tx_stats(struct ath10k *ar, u32 peer_id,
-+			     struct ath10k_per_peer_tx_stats *p_tx_stats)
++void ath10k_debug_process_tx_stats(struct ath10k *ar, u32 peer_id,
++			     	   struct ath10k_per_peer_tx_stats *p_tx_stats)
 +{
 +	struct ath10k_peer *peer;
 +	struct ieee80211_sta *sta;
@@ -463,7 +475,7 @@
 +	rcu_read_unlock();
 +}
 +
-+static void ath10k_fetch_10_4_tx_stats(struct ath10k *ar, u8 *data)
++void ath10k_fetch_10_4_tx_stats(struct ath10k *ar, u8 *data)
 +{
 +	struct ath10k_pktlog_10_4_hdr *hdr = (struct ath10k_pktlog_10_4_hdr *)data;
 +	struct ath10k_per_peer_tx_stats *p_tx_stats = &ar->peer_tx_stats;
@@ -478,11 +490,11 @@
 +			return;
 +
 +		peer_id = p_tx_stats->peer_id;
-+		ath10k_process_tx_stats(ar, peer_id, p_tx_stats);
++		ath10k_debug_process_tx_stats(ar, peer_id, p_tx_stats);
 +	}
 +}
 +
-+static void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
++void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
 +{
 +	struct ath10k_pktlog_hdr *hdr = (struct ath10k_pktlog_hdr *)data;
 +	struct ath10k_per_peer_tx_stats *p_tx_stats = &ar->peer_tx_stats;
@@ -508,13 +520,15 @@
 +		peer_id = __le32_to_cpu(tx_ctrl_desc[ATH10K_TXC_PEERID]);
 +	}
 +
-+	ath10k_process_tx_stats(ar, peer_id, p_tx_stats);
++	ath10k_debug_process_tx_stats(ar, peer_id, p_tx_stats);
 +}
 +
- void ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
+ void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			    struct ieee80211_sta *sta, struct dentry *dir)
  {
- 	struct ath10k_htt *htt = &ar->htt;
-@@ -2111,6 +2189,8 @@ void ath10k_htt_t2h_msg_handler(struct a
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2111,6 +2111,8 @@ void ath10k_htt_t2h_msg_handler(struct a
  					__le16_to_cpu(hdr->size));
  		ath10k_smart_ant_proc_tx_feedback(ar, resp->pktlog_msg.payload);
  		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
@@ -523,7 +537,7 @@
  		break;
  	}
  	case HTT_T2H_MSG_TYPE_RX_FLUSH: {
-@@ -2158,6 +2238,8 @@ void ath10k_htt_rx_pktlog_completion_han
+@@ -2158,6 +2160,8 @@ void ath10k_htt_rx_pktlog_completion_han
  	trace_ath10k_htt_pktlog(ar, hdr->payload,
  				sizeof(*hdr) + __le16_to_cpu(hdr->size));
  	ath10k_process_pktlog(ar, skb->data);
