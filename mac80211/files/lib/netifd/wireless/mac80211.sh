@@ -277,6 +277,13 @@ mac80211_hostapd_setup_bss() {
 	local ifname="$2"
 	local macaddr="$3"
 	local type="$4"
+	local fst_disabled
+	local fst_iface1
+	local fst_iface2
+	local fst_group_id
+	local fst_priority1
+	local fst_priority2
+	local fst_load=0
 
 	hostapd_cfg=
 	append hostapd_cfg "$type=$ifname" "$N"
@@ -289,9 +296,35 @@ mac80211_hostapd_setup_bss() {
 	[ "$wds" -gt 0 ] && append hostapd_cfg "wds_sta=1" "$N"
 	[ "$staidx" -gt 0 ] && append hostapd_cfg "start_disabled=1" "$N"
 
+	config_load fst && {
+		fst_load=1
+	}
+
+	if [ $fst_load == 1 ] ; then
+		config_get fst_disabled config disabled
+		config_get fst_iface1 config interface1
+		config_get fst_iface2 config interface2
+		config_get fst_group_id config mux_interface
+		config_get fst_priority1 config interface1_priority
+		config_get fst_priority2 config interface2_priority
+
+		if [ $fst_disabled -eq 0 ] ; then
+			if [ "$ifname" == $fst_iface1 ] ; then
+				append hostapd_cfg "fst_group_id=$fst_group_id" "$N"
+				append hostapd_cfg "fst_priority=$fst_priority1" "$N"
+			elif [ "$ifname" == $fst_iface2 ] ; then
+				append hostapd_cfg "fst_group_id=$fst_group_id" "$N"
+				append hostapd_cfg "fst_priority=$fst_priority2" "$N"
+			fi
+		else
+			append hostapd_cfg "bssid=$macaddr" "$N"
+		fi
+	else
+		append hostapd_cfg "bssid=$macaddr" "$N"
+	fi
+
 	cat >> /var/run/hostapd-$phy.conf <<EOF
 $hostapd_cfg
-bssid=$macaddr
 ${dtim_period:+dtim_period=$dtim_period}
 ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
