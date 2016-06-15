@@ -147,4 +147,10 @@ post_mac80211() {
 			enable_smp_affinity_wifi
 		}
 	fi
+
+	/usr/sbin/fst.sh start
+}
+
+pre_mac80211() {
+	/usr/sbin/fst.sh stop
 }
