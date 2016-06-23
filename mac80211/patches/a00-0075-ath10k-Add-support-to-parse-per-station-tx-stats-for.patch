@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -308,6 +308,92 @@ struct ath10k_peer {
+@@ -308,6 +308,94 @@ struct ath10k_peer {
  	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
  };
  
@@ -88,12 +88,14 @@
 +	u64 tx_duration;
 +	u64 ba_fails;
 +	u64 ack_fails;
++
++	struct rate_info txrate;
 +};
 +
  struct ath10k_sta {
  	struct ath10k_vif *arvif;
  
-@@ -323,6 +409,7 @@ struct ath10k_sta {
+@@ -323,6 +411,7 @@ struct ath10k_sta {
  	/* protected by conf_mutex */
  	bool aggr_mode;
  	u64 rx_duration;
@@ -101,7 +103,7 @@
  #endif
  	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
-@@ -443,6 +530,28 @@ struct ath10k_debug {
+@@ -443,6 +532,28 @@ struct ath10k_debug {
  	struct dentry *debugfs_smartant;
  };
  
@@ -130,7 +132,7 @@
  enum ath10k_state {
  	ATH10K_STATE_OFF = 0,
  	ATH10K_STATE_ON,
-@@ -894,6 +1003,9 @@ struct ath10k {
+@@ -894,6 +1005,9 @@ struct ath10k {
  	struct sk_buff_head fwlog_tx_queue;
  
  	struct ath10k_smart_ant_info smart_ant_info;
@@ -172,7 +174,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -16,7 +16,268 @@
+@@ -16,7 +16,299 @@
  
  #include "core.h"
  #include "wmi-ops.h"
@@ -202,6 +204,31 @@
 +	return i;
 +}
 +
++static void ath10k_fill_tx_bitrate(struct ath10k_sta *arsta,
++				   struct rate_info *txrate,
++				   u8 rate, u8 sgi)
++{
++	if ((txrate->flags == WMI_RATE_PREAMBLE_CCK) ||
++            (txrate->flags == WMI_RATE_PREAMBLE_OFDM)) {
++		if (rate == TX_CCK_RATE_5_5_MBPS)
++			arsta->tx_stats.txrate.legacy = rate * 10 + 50;
++		else
++			arsta->tx_stats.txrate.legacy = rate * 10;
++	} else 	if (txrate->flags == WMI_RATE_PREAMBLE_HT) {
++		arsta->tx_stats.txrate.flags = RATE_INFO_FLAGS_MCS;
++		arsta->tx_stats.txrate.mcs = txrate->mcs;
++		if (sgi)
++			arsta->tx_stats.txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++	} else {
++		arsta->tx_stats.txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
++		arsta->tx_stats.txrate.mcs = txrate->mcs;
++		if (sgi)
++			arsta->tx_stats.txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++	}
++	arsta->tx_stats.txrate.nss = txrate->nss;
++	arsta->tx_stats.txrate.bw = txrate->bw + RATE_INFO_BW_20;
++}
++
 +void ath10k_update_peer_tx_stats(struct ath10k *ar,
 +				 struct ath10k_sta *arsta,
 +				 struct ath10k_per_peer_tx_stats *peer_stats)
@@ -210,6 +237,7 @@
 +	int i, idx, ht_idx;
 +	struct ath10k_tx_stats *tx_stats;
 +	bool legacy_rate;
++	struct rate_info txrate;
 +
 +	spin_lock_bh(&ar->data_lock);
 +	tx_stats = &arsta->tx_stats;
@@ -433,6 +461,11 @@
 +				peer_stats->failed_pkts[i] +
 +				peer_stats->retry_pkts[i]);
 +		}
++		txrate.flags = pream;
++		txrate.mcs = mcs;
++		txrate.nss = nss + 1;
++		txrate.bw = bw;
++		ath10k_fill_tx_bitrate(arsta, &txrate, rate, gi);
 +	}
 +
 +	tx_stats->tx_duration += __le32_to_cpu(peer_stats->tx_duration);
@@ -441,7 +474,7 @@
  
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *head)
  {	struct ieee80211_sta *sta;
-@@ -271,6 +532,84 @@ static const struct file_operations fops
+@@ -271,6 +563,84 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
