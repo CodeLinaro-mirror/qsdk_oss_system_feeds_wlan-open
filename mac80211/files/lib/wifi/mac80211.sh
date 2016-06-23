@@ -148,9 +148,14 @@ post_mac80211() {
 		}
 	fi
 
-	/usr/sbin/fst.sh start
+	[ -f "/usr/sbin/fst.sh" ] && {
+		/usr/sbin/fst.sh start
+	}
 }
 
 pre_mac80211() {
-	/usr/sbin/fst.sh stop
+
+	[ -f "/usr/sbin/fst.sh" ] && {
+		/usr/sbin/fst.sh stop
+	}
 }
