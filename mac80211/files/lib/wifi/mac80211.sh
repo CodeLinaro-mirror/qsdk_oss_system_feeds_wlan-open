@@ -154,8 +154,8 @@ post_mac80211() {
 }
 
 pre_mac80211() {
-
 	[ -f "/usr/sbin/fst.sh" ] && {
+		/usr/sbin/fst.sh set_mac_addr
 		/usr/sbin/fst.sh stop
 	}
 }
