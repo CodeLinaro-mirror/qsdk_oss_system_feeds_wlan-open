@@ -1,25 +1,52 @@
 --- a/drivers/net/wireless/ath/ath10k/ahb.c
 +++ b/drivers/net/wireless/ath/ath10k/ahb.c
-@@ -563,6 +563,8 @@ static int ath10k_ahb_resource_init(stru
+@@ -25,7 +25,7 @@
+ #include "ahb.h"
+ 
+ static const struct of_device_id ath10k_ahb_of_match[] = {
+-	{ .compatible = "qcom,ipq4019-wifi",
++	{ .compatible = "qca,wifi-ipq40xx",
+ 	  .data = (void *)ATH10K_HW_QCA4019
+ 	},
+ 	{ }
+@@ -512,10 +512,17 @@ static int ath10k_ahb_resource_init(stru
+ 	struct device *dev;
+ 	struct resource *res;
+ 	int ret;
++	u32 core_id;
+ 
+ 	pdev = ar_ahb->pdev;
+ 	dev = &pdev->dev;
+ 
++	ret = of_property_read_u32(dev->of_node, "core-id", &core_id);
++	if (ret) {
++		ath10k_err(ar, "failed to get code id: %d\n", ret);
++		goto out;
++	}
++
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res) {
+ 		ath10k_err(ar, "failed to get memory resource\n");
+@@ -575,6 +582,8 @@ static int ath10k_ahb_resource_init(stru
  		goto err_clock_deinit;
  	}
  
 +	ar_ahb->core_id = core_id;
 +
- 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "core id: 0x%x irq: %d\n",
- 		   core_id, ar_ahb->irq);
+ 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "irq: %d\n", ar_ahb->irq);
  
-@@ -746,6 +748,33 @@ out:
+ 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "mem: 0x%p mem_len: %lu gcc mem: 0x%p tcsr_mem: 0x%p\n",
+@@ -757,6 +766,32 @@ out:
  	return ret;
  }
  
 +static struct ath10k_hif_caldata_mtd_params ath10k_ahb_caldata_mtd_map[] = {
-+	{	/* core 0 */
++	{       /* core 0 */
 +		.mtd_name = "0:ART",
 +		.addr = 0x1000,
 +		.len = 12064,
 +	},
-+	{	/* core 1 */
++	{       /* core 1 */
 +		.mtd_name = "0:ART",
 +		.addr = 0x5000,
 +		.len = 12064,
@@ -27,7 +54,7 @@
 +};
 +
 +static int ath10k_ahb_hif_get_caldata_mtd_map(struct ath10k *ar,
-+		    struct ath10k_hif_caldata_mtd_params **info)
++			struct ath10k_hif_caldata_mtd_params **info)
 +{
 +	struct ath10k_ahb *ar_ahb = ath10k_ahb_priv(ar);
 +
@@ -36,24 +63,23 @@
 +		return -ENODATA;
 +
 +	*info = &ath10k_ahb_caldata_mtd_map[ar_ahb->core_id];
-+
 +	return 0;
 +}
 +
  static const struct ath10k_hif_ops ath10k_ahb_hif_ops = {
  	.tx_sg                  = ath10k_pci_hif_tx_sg,
  	.diag_read              = ath10k_pci_hif_diag_read,
-@@ -761,6 +790,7 @@ static const struct ath10k_hif_ops ath10
+@@ -772,6 +807,7 @@ static const struct ath10k_hif_ops ath10
  	.power_down             = ath10k_pci_hif_power_down,
  	.read32                 = ath10k_ahb_read32,
  	.write32                = ath10k_ahb_write32,
-+	.get_caldata_mtd_map	= ath10k_ahb_hif_get_caldata_mtd_map,
++	.get_caldata_mtd_map    = ath10k_ahb_hif_get_caldata_mtd_map,
  };
  
  static const struct ath10k_bus_ops ath10k_ahb_bus_ops = {
 --- a/drivers/net/wireless/ath/ath10k/ahb.h
 +++ b/drivers/net/wireless/ath/ath10k/ahb.h
-@@ -37,6 +37,8 @@ struct ath10k_ahb {
+@@ -38,6 +38,8 @@ struct ath10k_ahb {
  	struct reset_control *radio_warm_rst;
  	struct reset_control *radio_srif_rst;
  	struct reset_control *cpu_init_rst;
@@ -73,7 +99,7 @@
  
  #include "core.h"
  #include "mac.h"
-@@ -444,6 +446,106 @@ exit:
+@@ -487,6 +489,106 @@ exit:
  	return ret;
  }
  
@@ -177,12 +203,12 @@
 +	return ret;
 +}
 +
- static int ath10k_download_cal_file(struct ath10k *ar)
+ static int ath10k_download_cal_file(struct ath10k *ar,
+ 				    const struct firmware *file)
  {
- 	int ret;
-@@ -1248,6 +1350,23 @@ static int ath10k_download_cal_data(stru
- {
- 	int ret;
+@@ -1319,6 +1421,23 @@ static int ath10k_download_cal_data(stru
+ 		   "pre cal download procedure failed, try cal file: %d\n",
+ 		   ret);
  
 +	ret = ath10k_download_cal_data_mtd(ar);
 +	if (ret == 0) {
@@ -197,25 +223,24 @@
 +		 * the target derives final version of board specific info
 +		 * from board data content and caldata content downloaded in
 +		 * previous steps.
-+		 */
++		*/
 +		goto load_bdata_and_run_otp;
 +	}
 +
- 	ret = ath10k_download_cal_file(ar);
+ 	ret = ath10k_download_cal_file(ar, ar->cal_file);
  	if (ret == 0) {
  		ar->cal_mode = ATH10K_CAL_MODE_FILE;
-@@ -1268,6 +1387,8 @@ static int ath10k_download_cal_data(stru
+@@ -1339,6 +1458,7 @@ static int ath10k_download_cal_data(stru
  		   "boot did not find DT entry, try OTP next: %d\n",
  		   ret);
  
 +load_bdata_and_run_otp:
-+
  	ret = ath10k_download_and_run_otp(ar);
  	if (ret) {
  		ath10k_err(ar, "failed to run otp: %d\n", ret);
-@@ -1822,6 +1943,8 @@ static int ath10k_core_probe_fw(struct a
- 
- 	ath10k_debug_print_hwfw_info(ar);
+@@ -1960,6 +2080,8 @@ static int ath10k_core_probe_fw(struct a
+ 			   "could not load pre cal data: %d\n", ret);
+ 	}
  
 +	ath10k_download_cal_data_mtd(ar);
 +
@@ -238,23 +263,22 @@
  struct ath10k_hif_ops {
  	/* send a scatter-gather list to the target */
  	int (*tx_sg)(struct ath10k *ar, u8 pipe_id,
-@@ -87,6 +94,10 @@ struct ath10k_hif_ops {
+@@ -87,6 +94,9 @@ struct ath10k_hif_ops {
  
  	int (*suspend)(struct ath10k *ar);
  	int (*resume)(struct ath10k *ar);
-+
 +	/* Get caldata mapping detail where it's located in the flash */
 +	int (*get_caldata_mtd_map)(struct ath10k *ar,
 +				   struct ath10k_hif_caldata_mtd_params **info);
  };
  
  static inline int ath10k_hif_tx_sg(struct ath10k *ar, u8 pipe_id,
-@@ -202,4 +213,13 @@ static inline void ath10k_hif_write32(st
+@@ -202,4 +212,13 @@ static inline void ath10k_hif_write32(st
  	ar->hif.ops->write32(ar, address, data);
  }
  
 +static inline int ath10k_hif_get_caldata_mtd_map(struct ath10k *ar,
-+		  struct ath10k_hif_caldata_mtd_params **info)
++			struct ath10k_hif_caldata_mtd_params **info)
 +{
 +	if (!ar->hif.ops->get_caldata_mtd_map)
 +		return -EOPNOTSUPP;
