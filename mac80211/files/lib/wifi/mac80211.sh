@@ -138,6 +138,7 @@ EOF
 }
 
 post_mac80211() {
+	local action=${1}
 
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 
@@ -147,10 +148,14 @@ post_mac80211() {
 			enable_smp_affinity_wifi
 		}
 	fi
+	case "${action}" in
+		enable)
+			[ -f "/usr/sbin/fst.sh" ] && {
+				/usr/sbin/fst.sh start
+			}
+		;;
+	esac
 
-	[ -f "/usr/sbin/fst.sh" ] && {
-		/usr/sbin/fst.sh start
-	}
 }
 
 pre_mac80211() {
