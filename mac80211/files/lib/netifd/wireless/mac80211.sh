@@ -316,15 +316,12 @@ mac80211_hostapd_setup_bss() {
 				append hostapd_cfg "fst_group_id=$fst_group_id" "$N"
 				append hostapd_cfg "fst_priority=$fst_priority2" "$N"
 			fi
-		else
-			append hostapd_cfg "bssid=$macaddr" "$N"
 		fi
-	else
-		append hostapd_cfg "bssid=$macaddr" "$N"
 	fi
 
 	cat >> /var/run/hostapd-$phy.conf <<EOF
 $hostapd_cfg
+bssid=$macaddr
 ${dtim_period:+dtim_period=$dtim_period}
 ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
