@@ -69,18 +69,6 @@ define Package/$(PKG_NAME)/install
 		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-ahb-0011-0000.bin  \
 	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/
 	$(INSTALL_BIN) \
-		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-ahb-0012-0000.bin  \
-	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/
-	$(INSTALL_BIN) \
-		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-ahb-0013-0000.bin  \
-	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/
-	$(INSTALL_BIN) \
-		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-ahb-0014-0000.bin  \
-	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/
-	$(INSTALL_BIN) \
-		$(PKG_BUILD_DIR)/ath10k/QCA40XX/hw1.0/board-ahb-0015-0000.bin  \
-	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/
-	$(INSTALL_BIN) \
 		$(PKG_BUILD_DIR)/10.5/firmware-5.bin_$(PKG_DK_FW_VERSION) \
 	$(1)/lib/firmware/ath10k/QCA4019/hw1.0/firmware-5.bin
 	$(INSTALL_BIN) \
