@@ -1,7 +1,7 @@
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -308,6 +308,92 @@ struct ath10k_peer {
- 	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
+@@ -317,6 +317,94 @@ struct ath10k_txq {
+ 	unsigned long num_push_allowed;
  };
  
 +struct ath10k_tx_stats {
@@ -88,12 +88,14 @@
 +	u64 tx_duration;
 +	u64 ba_fails;
 +	u64 ack_fails;
++
++	struct rate_info txrate;
 +};
 +
  struct ath10k_sta {
  	struct ath10k_vif *arvif;
  
-@@ -323,6 +409,7 @@ struct ath10k_sta {
+@@ -333,6 +421,7 @@ struct ath10k_sta {
  	/* protected by conf_mutex */
  	bool aggr_mode;
  	u64 rx_duration;
@@ -101,7 +103,7 @@
  #endif
  	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
-@@ -443,6 +530,28 @@ struct ath10k_debug {
+@@ -454,6 +543,29 @@ struct ath10k_debug {
  	struct dentry *debugfs_smartant;
  };
  
@@ -109,6 +111,7 @@
 +
 +#define ATH10K_10_4_TX_STATS_OFFSET	144
 +#define ATH10K_10_2_TX_STATS_OFFSET	128
++#define ATH10K_10_2_TX_STATS_OFFSET_V2	136
 +#define ATH10K_TX_STATS_NO_OF_COMB_FB	4
 +
 +struct ath10k_per_peer_tx_stats {
@@ -130,7 +133,7 @@
  enum ath10k_state {
  	ATH10K_STATE_OFF = 0,
  	ATH10K_STATE_ON,
-@@ -894,6 +1003,9 @@ struct ath10k {
+@@ -945,6 +1057,9 @@ struct ath10k {
  	struct sk_buff_head fwlog_tx_queue;
  
  	struct ath10k_smart_ant_info smart_ant_info;
@@ -142,10 +145,21 @@
  	u8 drv_priv[0] __aligned(sizeof(void *));
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -219,6 +219,10 @@ void ath10k_sta_add_debugfs(struct ieee8
+@@ -49,7 +49,8 @@ enum ath10k_pktlog_filter {
+ 	ATH10K_PKTLOG_RCUPDATE   = 0x000000008,
+ 	ATH10K_PKTLOG_DBG_PRINT  = 0x000000010,
+ 	ATH10K_PKTLOG_SMART_ANT	 = 0x000000020,
+-	ATH10K_PKTLOG_ANY        = 0x00000003f,
++	ATH10K_PKTLOG_PEER_STATS = 0x000000040,
++	ATH10K_PKTLOG_ANY        = 0x00000007f,
+ };
+ 
+ enum ath10k_dbg_aggr_mode {
+@@ -217,11 +218,30 @@ ath10k_debug_get_new_fw_crash_data(struc
+ void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
  			    struct ieee80211_sta *sta, struct dentry *dir);
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *peer);
- int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar);
++int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar);
 +void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
 +				 struct ath10k_per_peer_tx_stats *p_tx_stats);
 +void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data);
@@ -153,10 +167,12 @@
  #else
  static inline void ath10k_sta_update_rx_duration(struct ath10k *ar,
  						 struct list_head *peer)
-@@ -228,6 +232,16 @@ static inline int ath10k_debug_tx_peer_s
  {
- 	return 0;
  }
++static inline int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar)
++{
++	return 0;
++}
 +static inline void ath10k_update_peer_tx_stats(struct ath10k *ar, struct ath10k_sta *sta,
 +				 struct ath10k_per_peer_tx_stats *p_tx_stats)
 +{
@@ -172,7 +188,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -16,7 +16,268 @@
+@@ -16,7 +16,299 @@
  
  #include "core.h"
  #include "wmi-ops.h"
@@ -202,6 +218,31 @@
 +	return i;
 +}
 +
++static void ath10k_fill_tx_bitrate(struct ath10k_sta *arsta,
++				   struct rate_info *txrate,
++				   u8 rate, u8 sgi)
++{
++	if ((txrate->flags == WMI_RATE_PREAMBLE_CCK) ||
++            (txrate->flags == WMI_RATE_PREAMBLE_OFDM)) {
++		if (rate == TX_CCK_RATE_5_5_MBPS)
++			arsta->tx_stats.txrate.legacy = rate * 10 + 50;
++		else
++			arsta->tx_stats.txrate.legacy = rate * 10;
++	} else 	if (txrate->flags == WMI_RATE_PREAMBLE_HT) {
++		arsta->tx_stats.txrate.flags = RATE_INFO_FLAGS_MCS;
++		arsta->tx_stats.txrate.mcs = txrate->mcs;
++		if (sgi)
++			arsta->tx_stats.txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++	} else {
++		arsta->tx_stats.txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
++		arsta->tx_stats.txrate.mcs = txrate->mcs;
++		if (sgi)
++			arsta->tx_stats.txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++	}
++	arsta->tx_stats.txrate.nss = txrate->nss;
++	arsta->tx_stats.txrate.bw = txrate->bw + RATE_INFO_BW_20;
++}
++
 +void ath10k_update_peer_tx_stats(struct ath10k *ar,
 +				 struct ath10k_sta *arsta,
 +				 struct ath10k_per_peer_tx_stats *peer_stats)
@@ -210,6 +251,7 @@
 +	int i, idx, ht_idx;
 +	struct ath10k_tx_stats *tx_stats;
 +	bool legacy_rate;
++	struct rate_info txrate;
 +
 +	spin_lock_bh(&ar->data_lock);
 +	tx_stats = &arsta->tx_stats;
@@ -433,6 +475,11 @@
 +				peer_stats->failed_pkts[i] +
 +				peer_stats->retry_pkts[i]);
 +		}
++		txrate.flags = pream;
++		txrate.mcs = mcs;
++		txrate.nss = nss + 1;
++		txrate.bw = bw;
++		ath10k_fill_tx_bitrate(arsta, &txrate, rate, gi);
 +	}
 +
 +	tx_stats->tx_duration += __le32_to_cpu(peer_stats->tx_duration);
@@ -441,7 +488,7 @@
  
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *head)
  {	struct ieee80211_sta *sta;
-@@ -271,6 +532,84 @@ static const struct file_operations fops
+@@ -271,6 +563,89 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -499,6 +546,7 @@
 +	struct ath10k_pktlog_hdr *hdr = (struct ath10k_pktlog_hdr *)data;
 +	struct ath10k_per_peer_tx_stats *p_tx_stats = &ar->peer_tx_stats;
 +	u16 log_type = __le16_to_cpu(hdr->log_type);
++	u16 log_flags = __le16_to_cpu(hdr->flags);
 +	u32 peer_id = 0;
 +
 +	if (log_type != ATH_PKTLOG_TYPE_TX_CTRL &&
@@ -506,8 +554,12 @@
 +		return;
 +
 +	if (log_type == ATH_PKTLOG_TYPE_TX_STAT) {
-+		memcpy(p_tx_stats, (hdr->payload) +
-+		       ATH10K_10_2_TX_STATS_OFFSET, sizeof(*p_tx_stats));
++		if (log_flags & PKTLOG_INFO_FLAG_HW_STATUS_V2)
++			memcpy(p_tx_stats, (hdr->payload) +
++			       ATH10K_10_2_TX_STATS_OFFSET_V2, sizeof(*p_tx_stats));
++		else
++			memcpy(p_tx_stats, (hdr->payload) +
++			       ATH10K_10_2_TX_STATS_OFFSET, sizeof(*p_tx_stats));
 +
 +		if (!p_tx_stats->tx_ppdu_cnt)
 +			return;
@@ -528,27 +580,27 @@
  {
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -2111,6 +2111,8 @@ void ath10k_htt_t2h_msg_handler(struct a
+@@ -2324,6 +2324,8 @@ bool ath10k_htt_t2h_msg_handler(struct a
  					__le16_to_cpu(hdr->size));
  		ath10k_smart_ant_proc_tx_feedback(ar, resp->pktlog_msg.payload);
  		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
-+		if (ath10k_tx_stats_enabled(ar))
++		if (ath10k_peer_stats_enabled(ar))
 +			ath10k_fetch_10_2_tx_stats(ar, resp->pktlog_msg.payload);
  		break;
  	}
  	case HTT_T2H_MSG_TYPE_RX_FLUSH: {
-@@ -2158,6 +2160,8 @@ void ath10k_htt_rx_pktlog_completion_han
- 	trace_ath10k_htt_pktlog(ar, hdr->payload,
- 				sizeof(*hdr) + __le16_to_cpu(hdr->size));
+@@ -2386,6 +2388,8 @@ void ath10k_htt_rx_pktlog_completion_han
+ {
+ 	trace_ath10k_htt_pktlog(ar, skb->data, skb->len);
  	ath10k_process_pktlog(ar, skb->data);
-+	if (ath10k_tx_stats_enabled(ar))
++	if (ath10k_peer_stats_enabled(ar))
 +		ath10k_fetch_10_4_tx_stats(ar, skb->data);
  	dev_kfree_skb_any(skb);
  }
  EXPORT_SYMBOL(ath10k_htt_rx_pktlog_completion_handler);
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -4503,12 +4503,45 @@ enum wmi_rate_preamble {
+@@ -4591,12 +4591,45 @@ enum wmi_rate_preamble {
  
  #define ATH10K_HW_NSS(rate)		(1 + (((rate) >> 4) & 0x3))
  #define ATH10K_HW_PREAMBLE(rate)	(((rate) >> 6) & 0x3)
@@ -594,3 +646,37 @@
  struct wmi_vdev_param_map {
  	u32 rts_threshold;
  	u32 fragmentation_threshold;
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2513,6 +2513,16 @@ void ath10k_debug_unregister(struct ath1
+ 	ath10k_deinit_pktlog(ar);
+ }
+ 
++int ath10k_debug_tx_peer_stats_enable(struct ath10k *ar)
++{
++	if (ath10k_peer_stats_enabled(ar)) {
++		ar->debug.pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
++		/* This is used for per peer tx stats */
++		return ath10k_wmi_pdev_pktlog_enable(ar, ar->debug.pktlog_filter);
++	}
++	return 0;
++}
++
+ #endif /* CPTCFG_ATH10K_DEBUGFS */
+ 
+ #ifdef CPTCFG_ATH10K_DEBUG
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -7270,6 +7270,12 @@ ath10k_mac_op_assign_vif_chanctx(struct
+ 		arvif->is_up = true;
+ 	}
+ 
++	ret = ath10k_debug_tx_peer_stats_enable(ar);
++	if (ret) {
++		ath10k_warn(ar, "failed to enable peer stats pktlog: %d\n", ret);
++		goto err_stop;
++	}
++
+ 	ret = ath10k_smart_ant_enable(ar, arvif);
+ 	if (ret) {
+ 		ath10k_warn(ar, "failed to enable smart antenna algorithm %d\n",
