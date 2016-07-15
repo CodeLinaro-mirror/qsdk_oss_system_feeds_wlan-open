@@ -217,7 +217,8 @@ define DownloadBackports
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit 5225663 6d061f9 53873f1)
+	git revert --no-edit 522566376a3f 6d061f9f6136 53873f134d28 2dad624e6dd6 9b95fe59b18b \
+	08f4cbb8f207 d686b920abb7)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
