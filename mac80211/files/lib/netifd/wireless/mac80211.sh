@@ -316,15 +316,12 @@ mac80211_hostapd_setup_bss() {
 				append hostapd_cfg "fst_group_id=$fst_group_id" "$N"
 				append hostapd_cfg "fst_priority=$fst_priority2" "$N"
 			fi
-		else
-			append hostapd_cfg "bssid=$macaddr" "$N"
 		fi
-	else
-		append hostapd_cfg "bssid=$macaddr" "$N"
 	fi
 
 	cat >> /var/run/hostapd-$phy.conf <<EOF
 $hostapd_cfg
+bssid=$macaddr
 ${dtim_period:+dtim_period=$dtim_period}
 ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
@@ -637,7 +634,6 @@ drv_mac80211_setup() {
 	[ -n "$hostapd_ctrl" ] && {
 		# 11ad uses single hostapd instance
 		if [ $hwmode = "11ad" ]; then
-			acquire_lock "/var/run/hostapd-single-instance.lock" 30
 			if ! [ -f "/var/run/hostapd-global.pid" ]
 			then
 				# run the single instance of hostapd
@@ -646,11 +642,9 @@ drv_mac80211_setup() {
 				wireless_add_process "$(cat /var/run/hostapd-global.pid)" "/usr/sbin/hostapd" 1
 				[ "$ret" != 0 ] && {
 					wireless_setup_failed HOSTAPD_START_FAILED
-					release_lock "/var/run/hostapd-single-instance.lock"
 					return
 				}
 			fi
-			release_lock "/var/run/hostapd-single-instance.lock"
 			[ -f "/var/run/hostapd-$ifname.lock" ] &&
 				rm /var/run/hostapd-$ifname.lock
 			# let hostapd manage interface $ifname
