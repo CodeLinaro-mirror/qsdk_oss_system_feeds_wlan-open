@@ -70,8 +70,8 @@ detect_mac80211() {
 		[ "$found" -gt 0 ] && continue
 
 		mode_11n=""
-		mode_band="g"
-		channel="11"
+		mode_band="a"
+		channel="36"
 		htmode=""
 
 		ht_cap=0
@@ -95,7 +95,7 @@ detect_mac80211() {
 			[ "$(($ht_cap & 4096))" -eq 4096 ] && append ht_capab "$list	DSSS_CCK-40" "$N"
 			[ "$(($ht_cap & 16384))" -eq 16384 ] && append ht_capab "$list	40-INTOLERANT" "$N"
 		}
-		iw phy "$dev" info | grep -q '2412 MHz' || { mode_band="a"; channel="36"; }
+		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
 		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
 
 		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
@@ -138,6 +138,7 @@ EOF
 }
 
 post_mac80211() {
+	local action=${1}
 
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 
@@ -147,10 +148,19 @@ post_mac80211() {
 			enable_smp_affinity_wifi
 		}
 	fi
+	case "${action}" in
+		enable)
+			[ -f "/usr/sbin/fst.sh" ] && {
+				/usr/sbin/fst.sh start
+			}
+		;;
+	esac
 
-	/usr/sbin/fst.sh start
 }
 
 pre_mac80211() {
-	/usr/sbin/fst.sh stop
+	[ -f "/usr/sbin/fst.sh" ] && {
+		/usr/sbin/fst.sh set_mac_addr
+		/usr/sbin/fst.sh stop
+	}
 }

@@ -1,13 +1,13 @@
 --- a/drivers/net/wireless/ath/wil6210/Makefile
 +++ b/drivers/net/wireless/ath/wil6210/Makefile
-@@ -18,6 +18,7 @@ wil6210-$(CONFIG_WIL6210_TRACING) += trace.o
+@@ -18,6 +18,7 @@
  wil6210-y += wil_platform.o
  wil6210-y += ethtool.o
  wil6210-y += wil_crash_dump.o
 +wil6210-y += wil_platform_ipq.o
+ wil6210-y += p2p.o
  
  # for tracing framework to find trace.h
- CFLAGS_trace.o := -I$(src)
 --- a/drivers/net/wireless/ath/wil6210/wil_platform.c
 +++ b/drivers/net/wireless/ath/wil6210/wil_platform.c
 @@ -17,6 +17,8 @@
@@ -19,7 +19,7 @@
  int __init wil_platform_modinit(void)
  {
  	return 0;
-@@ -45,6 +47,9 @@ void *wil_platform_init(struct device *dev, struct wil_platform_ops *ops,
+@@ -45,6 +47,9 @@
  	}
  
  	/* platform specific init functions should be called here */
@@ -29,10 +29,9 @@
  
  	return handle;
  }
-
 --- /dev/null
 +++ b/drivers/net/wireless/ath/wil6210/wil_platform_ipq.c
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,159 @@
 +/*
 + * Copyright (c) 2016 Qualcomm Atheros, Inc.
 + *
@@ -67,15 +66,9 @@
 +	u32 fw_io_mem_size;
 +};
 +
-+static int ops_notify_crash(void *handle)
++static int ipq_11ad_notify_crash(struct ipq11ad_ctx *ctx)
 +{
-+	struct ipq11ad_ctx *ctx = (struct ipq11ad_ctx *)handle;
 +	int rc;
-+
-+	if (!ctx) {
-+		pr_err("%s: Context not found.\n", __func__);
-+		return -ENODEV;
-+	}
 +
 +	pr_info("%s: Fw error detected, crash_on_fw_err = %d.\n",
 +		__func__, crash_on_fw_err);
@@ -104,6 +97,28 @@
 +	BUG_ON(1);
 +
 +	return 0;
++}
++
++static int ops_notify(void *handle, enum wil_platform_event evt)
++{
++	struct ipq11ad_ctx *ctx = (struct ipq11ad_ctx *)handle;
++	int rc = 0;
++
++	if (!ctx) {
++		pr_err("%s: Context not found\n", __func__);
++		return -ENODEV;
++	}
++
++	switch (evt) {
++	case WIL_PLATFORM_EVT_FW_CRASH:
++		rc = ipq_11ad_notify_crash(ctx);
++		break;
++	default:
++		pr_debug("%s: Unhandled event %d\n", __func__, evt);
++		break;
++	}
++
++	return rc;
 +}
 +
 +static void ops_uninit(void *handle)
@@ -145,7 +160,7 @@
 +	}
 +
 +	/* fill ops */
-+	ops->notify_crash = ops_notify_crash;
++	ops->notify = ops_notify;
 +	ops->uninit = ops_uninit;
 +
 +	/* ramdump - address and size */
@@ -176,7 +191,6 @@
 +	return ctx;
 +}
 +EXPORT_SYMBOL(ipq_11ad_dev_init);
-
 --- /dev/null
 +++ b/drivers/net/wireless/ath/wil6210/wil_platform_ipq.h
 @@ -0,0 +1,37 @@
@@ -217,4 +231,12 @@
 +			const struct wil_platform_rops *rops, void *wil_handle);
 +
 +#endif /* __WIL_PLATFORM_IPQ_H__ */
-
+--- a/drivers/net/wireless/ath/wil6210/interrupt.c
++++ b/drivers/net/wireless/ath/wil6210/interrupt.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2012-2015 Qualcomm Atheros, Inc.
++ * Copyright (c) 2012-2016 Qualcomm Atheros, Inc.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
