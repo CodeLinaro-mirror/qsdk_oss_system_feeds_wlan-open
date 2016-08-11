@@ -362,7 +362,7 @@
  	else
 --- a/net/mac80211/status.c
 +++ b/net/mac80211/status.c
-@@ -506,12 +506,18 @@ static void ieee80211_report_used_skb(st
+@@ -506,12 +506,14 @@ static void ieee80211_report_used_skb(st
  				      struct sk_buff *skb, bool dropped)
  {
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
@@ -373,16 +373,12 @@
  	if (dropped)
  		acked = false;
  
-+	/* TODO: Handle ack_status reporting for 802.3 frame */
-+	if (info->control.no_80211_encap)
-+		return;
-+
 +	hdr = (void *)skb->data;
 +
  	if (info->flags & IEEE80211_TX_INTFL_MLME_CONN_TX) {
  		struct ieee80211_sub_if_data *sdata;
  
-@@ -945,6 +951,85 @@ void ieee80211_tx_status(struct ieee8021
+@@ -945,6 +947,85 @@ void ieee80211_tx_status(struct ieee8021
  }
  EXPORT_SYMBOL(ieee80211_tx_status);
  
@@ -507,7 +503,7 @@
  {
  	struct sta_info *sta;
  
-@@ -3304,6 +3308,274 @@ netdev_tx_t ieee80211_subif_start_xmit(s
+@@ -3304,6 +3308,296 @@ netdev_tx_t ieee80211_subif_start_xmit(s
  	return NETDEV_TX_OK;
  }
  
@@ -622,6 +618,8 @@
 +	bool multicast;
 +	bool tdls_peer;
 +	u8 ra_addr[ETH_ALEN] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
++	u16 info_id = 0;
++	u32 info_flags = 0;
 +
 +	if (IS_ERR(sta) || (sta && !sta->uploaded))
 +		sta = NULL;
@@ -666,12 +664,32 @@
 +	    test_bit(SDATA_STATE_OFFCHANNEL, &sdata->state))
 +		goto out_free;
 +
-+	/* TODO: Handle frames requiring wifi tx status to be notified */
-+	if (skb->sk && skb_shinfo(skb)->tx_flags & SKBTX_WIFI_STATUS)
-+		goto out_free;
++	if (unlikely(!multicast && skb->sk &&
++		     skb_shinfo(skb)->tx_flags & SKBTX_WIFI_STATUS)) {
++		struct sk_buff *ack_skb = skb_clone_sk(skb);
++
++		if (ack_skb) {
++			unsigned long flags;
++			int id;
++
++			spin_lock_irqsave(&local->ack_status_lock, flags);
++			id = idr_alloc(&local->ack_status_frames, ack_skb,
++				       1, 0x10000, GFP_ATOMIC);
++			spin_unlock_irqrestore(&local->ack_status_lock, flags);
++
++			if (id >= 0) {
++				info_id = id;
++				info_flags |= IEEE80211_TX_CTL_REQ_TX_STATUS;
++			} else {
++				kfree_skb(ack_skb);
++			}
++		}
++	}
 +
 +	memset(info, 0, sizeof(*info));
 +
++	info->flags |= info_flags;
++	info->ack_frame_id = info_id;
 +	if (unlikely(sdata->control_port_protocol == ehdr->h_proto)) {
 +		if (sdata->control_port_no_encrypt)
 +			info->flags |= IEEE80211_TX_INTFL_DONT_ENCRYPT;
@@ -782,7 +800,7 @@
  struct sk_buff *
  ieee80211_build_data_template(struct ieee80211_sub_if_data *sdata,
  			      struct sk_buff *skb, u32 info_flags)
-@@ -3382,6 +3654,16 @@ static bool ieee80211_tx_pending_skb(str
+@@ -3382,6 +3676,16 @@ static bool ieee80211_tx_pending_skb(str
  		}
  		info->band = chanctx_conf->def.chan->band;
  		result = ieee80211_tx(sdata, NULL, skb, true);
