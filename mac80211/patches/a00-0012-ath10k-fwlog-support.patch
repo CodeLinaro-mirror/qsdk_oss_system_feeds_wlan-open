@@ -12,7 +12,7 @@
  ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -29,6 +29,7 @@
+@@ -30,6 +30,7 @@
  #include "htt.h"
  #include "testmode.h"
  #include "wmi-ops.h"
@@ -20,7 +20,23 @@
  
  unsigned int ath10k_debug_mask;
  static unsigned int ath10k_cryptmode_param;
-@@ -2023,6 +2024,8 @@ static void ath10k_core_register_work(st
+@@ -1626,6 +1627,7 @@ static int ath10k_core_init_firmware_fea
+ 		ar->htt.max_num_pending_tx = TARGET_10X_NUM_MSDU_DESC;
+ 		ar->fw_stats_req_mask = WMI_STAT_PEER;
+ 		ar->max_spatial_stream = WMI_MAX_SPATIAL_STREAM;
++		ar->fwlog_max_moduleid = ATH10K_FWLOG_MODULE_ID_MAX_10_2_4;
+ 		break;
+ 	case ATH10K_FW_WMI_OP_VERSION_TLV:
+ 		ar->max_num_peers = TARGET_TLV_NUM_PEERS;
+@@ -1647,6 +1649,7 @@ static int ath10k_core_init_firmware_fea
+ 		ar->fw_stats_req_mask = WMI_10_4_STAT_PEER |
+ 					WMI_10_4_STAT_PEER_EXTD;
+ 		ar->max_spatial_stream = ar->hw_params.max_spatial_stream;
++		ar->fwlog_max_moduleid = ATH10K_FWLOG_MODULE_ID_MAX_10_4;
+ 
+ 		if (test_bit(ATH10K_FW_FEATURE_PEER_FLOW_CONTROL,
+ 			     fw_file->fw_features))
+@@ -2085,6 +2088,8 @@ static void ath10k_core_register_work(st
  		goto err_spectral_destroy;
  	}
  
@@ -29,7 +45,7 @@
  	set_bit(ATH10K_FLAG_CORE_REGISTERED, &ar->dev_flags);
  	return;
  
-@@ -2085,6 +2088,8 @@ void ath10k_core_unregister(struct ath10
+@@ -2147,6 +2152,8 @@ void ath10k_core_unregister(struct ath10
  	ath10k_core_free_board_files(ar);
  
  	ath10k_debug_unregister(ar);
@@ -40,7 +56,24 @@
  
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -919,6 +919,9 @@ struct ath10k {
+@@ -47,6 +47,8 @@
+ #define ATH10K_FLUSH_TIMEOUT_HZ (5 * HZ)
+ #define ATH10K_CONNECTION_LOSS_HZ (3 * HZ)
+ #define ATH10K_NUM_CHANS 39
++#define ATH10K_FWLOG_MODULE_ID_MAX_10_2_4 28
++#define ATH10K_FWLOG_MODULE_ID_MAX_10_4	34
+ 
+ /* Antenna noise floor */
+ #define ATH10K_DEFAULT_NOISE_FLOOR -95
+@@ -686,6 +688,7 @@ struct ath10k {
+ 	u32 vht_cap_info;
+ 	u32 num_rf_chains;
+ 	u32 max_spatial_stream;
++	u32 fwlog_max_moduleid;
+ 	/* protected by conf_mutex */
+ 	bool ani_enabled;
+ 
+@@ -926,6 +929,9 @@ struct ath10k {
  	struct ath10k_thermal thermal;
  	struct ath10k_wow wow;
  
@@ -52,7 +85,7 @@
  };
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/fwlog.c
-@@ -0,0 +1,1495 @@
+@@ -0,0 +1,1549 @@
 +/*
 + * Copyright (c) 2015, The Linux Foundation. All rights reserved.
 + *
@@ -709,6 +742,9 @@
 +	"ANI_DBGID_OFDM_LEVEL_CFG",
 +	"ANI_DBGID_CCK_LEVEL_CFG",
 +},
++{
++	"" /* CACHEMGR */
++},
 +{      /* DEBUG */
 +	"WLAN_DEBUG_MODULE_DBGID_START",
 +	"WLAN_DEBUG_DBGID_PEER",
@@ -909,6 +945,12 @@
 +	"VDEV_MGR_HP_START_TIME",
 +	"VDEV_MGR_FIRST_BMISS_DETECTED",
 +	"VDEV_MGR_FINAL_BMISS_DETECTED",
++        "VDEV_MGR_VDEV_STOP",
++        "VDEV_MGR_VDEV_DOWN",
++        "VDEV_MGR_VDEV_START_RESP",
++        "VDEV_MGR_VDEV_STOP_RESP",
++        "VDEV_MGR_VDEV_CREATE",
++        "VDEV_MGR_VDEV_DELETE",
 +	"VDEV_MGR_DEFINITION_END",
 +},
 +
@@ -952,6 +994,9 @@
 +	"WHAL_ERROR_PAPRD_MAXGAIN_ABOVE_WINDOW",
 +	"WHAL_SMARTANT_CONFIGURE",
 +	"WHAL_SMARTANT_RXANTENNA",
++        "WHAL_TX_ENQUEUE",
++        "WHAL_CAL_SET_CAL_PERIOD",
++        "WHAL_CAL_PERFORM_CALIBRATION",
 +	"WHAL_DBGID_DEFINITION_END",
 +},
 +
@@ -1121,6 +1166,9 @@
 +	"SCAN_EVENT_PREEMPTED",
 +	"SCAN_EVENT_RESTARTED",
 +	"SCAN_EVENT_COMPLETED",
++        "SCAN_START_PARAMS1",
++        "SCAN_START_PARAMS2",
++        "SCAN_EVENT_SEND",
 +},
 +
 +{
@@ -1220,6 +1268,41 @@
 +	"WAL_DBGID_SET_M4_SENT_MANUALLY",
 +	"WAL_DBGID_PROCESS_4_WAY_HANDSHAKE",
 +	"WAL_DBGID_DEFINITION_END",
++        "WAL_DBGID_SET_HW_FILTER",
++        "WAL_DBGID_TX_PPDU_COMP_ERR",
++        "WAL_DBGID_TX_ENC_KEY_DROP",
++        "WAL_DBGID_PDEV_INFO_PRINT",
++        "WAL_DBGID_VDEV_INFO_PRINT",
++        "WAL_DBGID_LTEU_START_MU",
++        "WAL_DBGID_LTEU_REPORT_MU",
++        "WAL_DBGID_LTEU_SET_CONFIG1",
++        "WAL_DBGID_LTEU_SET_CONFIG2",
++        "WAL_DBGID_LTEU_SET_CONFIG3",
++        "WAL_DBGID_LTEU_INIT",
++        "WAL_DBGID_LTEU_MU_IN_PROGRESS",
++        "WAL_DBGID_LTEU_END_MU",
++        "WAL_DBGID_LTEU_PER_PKT_LOG1",
++        "WAL_DBGID_LTEU_PER_PKT_LOG2",
++        "WAL_DBGID_LTEU_PER_PKT_LOG3",
++        "WAL_DBGID_LTEU_START_MU_PARAMS",
++        "WAL_DBGID_LTEU_PKT_BASIC_MU",
++        "WAL_DBGID_LTEU_PKT_ADV_MU",
++        "WAL_DBGID_LTEU_PKT_BSSID_ENTRY",
++        "WAL_DBGID_LTEU_PER_BSSID_MU",
++        "WAL_DBGID_LTEU_COMPUTED_BSSID_MU",
++        "WAL_DBGID_LTEU_TOTAL_BSSID_MU",
++        "WAL_DBGID_LTEU_HIDDEN_NODE",
++        "WAL_DBGID_LTEU_REPORT_MU1",
++        "WAL_DBGID_LTEU_REPORT_MU2",
++        "WAL_DBGID_LTEU_START_MU_PARAMS1",
++        "WAL_DBGID_LTEU_START_MU_PARAMS2",
++        "WAL_DBGID_LTEU_UPDATE_BSSID_MU",
++        "WAL_DBGID_LTEU_BSSID_INDEX_MU",
++        "WAL_DBGID_LTEU_BSSID_MU_INFO",
++        "WAL_DBGID_LTEU_PKT_BINNING",
++        "WAL_DBGID_LTEU_PKT_MU_DB_ENTRY",
++        "WAL_DBGID_LTEU_MU_DB_ENTRY1",
++        "WAL_DBGID_LTEU_MU_DB_ENTRY2",
 +},
 +
 +{
@@ -1382,6 +1465,10 @@
 +	"HOSTQ_HOST_PARAM_NUMTID",
 +	"HOSTQ_HOST_PARAM_HOSTADDR",
 +},
++{
++	"WAL_DBGID_PFSCHED_SCH_CMD",
++	"WAL_DBGID_PFSCHED_USER_INFO",
++},
 +};
 +
 +static char * fw_dbglog_get_msg(u32 moduleid, u32 debugid,
@@ -1480,7 +1567,7 @@
 +		numargs = FW_DBGLOG_GET_NUMARGS(buffer[count + 1]);
 +		timestamp = FW_DBGLOG_GET_TIME_STAMP(buffer[count]);
 +
-+		if (moduleid >= WLAN_MODULE_ID_MAX)
++		if (moduleid >= ar->fwlog_max_moduleid)
 +			return;
 +
 +		printk("[%s] ", wiphy_name(ar->hw->wiphy));
