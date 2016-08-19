@@ -99,7 +99,7 @@
  
  #include "core.h"
  #include "mac.h"
-@@ -510,6 +512,106 @@ exit:
+@@ -511,6 +513,106 @@ exit:
  	return ret;
  }
  
@@ -206,7 +206,7 @@
  static int ath10k_download_cal_file(struct ath10k *ar,
  				    const struct firmware *file)
  {
-@@ -1371,6 +1473,23 @@ static int ath10k_download_cal_data(stru
+@@ -1372,6 +1474,23 @@ static int ath10k_download_cal_data(stru
  		   "pre cal download procedure failed, try cal file: %d\n",
  		   ret);
  
@@ -224,21 +224,13 @@
 +		 * from board data content and caldata content downloaded in
 +		 * previous steps.
 +		*/
-+		goto load_bdata_and_run_otp;
++		goto done;
 +	}
 +
  	ret = ath10k_download_cal_file(ar, ar->cal_file);
  	if (ret == 0) {
  		ar->cal_mode = ATH10K_CAL_MODE_FILE;
-@@ -1401,6 +1520,7 @@ static int ath10k_download_cal_data(stru
- 		   "boot did not find target EEPROM entry, try OTP next: %d\n",
- 		   ret);
- 
-+load_bdata_and_run_otp:
- 	ret = ath10k_download_and_run_otp(ar);
- 	if (ret) {
- 		ath10k_err(ar, "failed to run otp: %d\n", ret);
-@@ -2024,6 +2144,8 @@ static int ath10k_core_probe_fw(struct a
+@@ -2025,6 +2144,8 @@ static int ath10k_core_probe_fw(struct a
  			   "could not load pre cal data: %d\n", ret);
  	}
  
@@ -287,3 +279,70 @@
 +}
 +
  #endif /* _HIF_H_ */
+--- a/drivers/net/wireless/ath/ath10k/pci.c
++++ b/drivers/net/wireless/ath/ath10k/pci.c
+@@ -2715,6 +2715,56 @@ err_free:
+ 	return -EINVAL;
+ }
+ 
++static struct ath10k_hif_caldata_mtd_params ath10k_pci_caldata_mtd_map[] = {
++	{       /* pci dev 0 */
++		.mtd_name = "0:ART",
++		.addr = 0x1000,
++		.len = 12064,
++	},
++	{       /* pci dev 1 */
++		.mtd_name = "0:ART",
++		.addr = 0x5000,
++		.len = 12064,
++	},
++	{       /* pci dev 2 */
++		.mtd_name = "0:ART",
++		.addr = 0x9000,
++		.len = 12064,
++	},
++};
++
++static int ath10k_pci_hif_get_caldata_mtd_map(struct ath10k *ar,
++			struct ath10k_hif_caldata_mtd_params **info)
++{
++	int ret, index = -1;
++
++	ret = memcmp("0000", dev_name(ar->dev), 4);
++	if (ret == 0) {
++		index = 0;
++		goto done;
++	}
++
++	ret = memcmp("0001", dev_name(ar->dev), 4);
++	if (ret == 0) {
++		index = 1;
++		goto done;
++	}
++
++	ret = memcmp("0002", dev_name(ar->dev), 4);
++	if (ret == 0) {
++		index = 2;
++		goto done;
++	}
++
++done:
++	if (!QCA_REV_9888(ar) || index < 0)
++		return -ENODATA;
++
++	*info = &ath10k_pci_caldata_mtd_map[index];
++	return 0;
++}
++
++
+ static const struct ath10k_hif_ops ath10k_pci_hif_ops = {
+ 	.tx_sg			= ath10k_pci_hif_tx_sg,
+ 	.diag_read		= ath10k_pci_hif_diag_read,
+@@ -2730,6 +2780,7 @@ static const struct ath10k_hif_ops ath10
+ 	.power_down		= ath10k_pci_hif_power_down,
+ 	.read32			= ath10k_pci_read32,
+ 	.write32		= ath10k_pci_write32,
++	.get_caldata_mtd_map    = ath10k_pci_hif_get_caldata_mtd_map,
+ #ifdef CONFIG_PM
+ 	.suspend		= ath10k_pci_hif_suspend,
+ 	.resume			= ath10k_pci_hif_resume,
