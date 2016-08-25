@@ -155,7 +155,7 @@ post_mac80211() {
 			}
 		;;
 	esac
-
+	return 0
 }
 
 pre_mac80211() {
@@ -163,4 +163,5 @@ pre_mac80211() {
 		/usr/sbin/fst.sh set_mac_addr
 		/usr/sbin/fst.sh stop
 	}
+	return 0
 }
