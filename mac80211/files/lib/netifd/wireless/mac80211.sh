@@ -564,7 +564,21 @@ mac80211_interface_cleanup() {
 }
 
 drv_mac80211_cleanup() {
-	hostapd_common_cleanup
+	if eval "type hostapd_common_cleanup" 2>/dev/null >/dev/null; then
+		hostapd_common_cleanup
+	else
+		# 11ad uses single hostapd instance
+		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
+			for wdev in $(list_phy_interfaces "$phy"); do
+				if [ -f "/var/run/hostapd-${wdev}.lock" ]; then
+					hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
+					rm /var/run/hostapd-${wdev}.lock
+				fi
+				ifconfig "$wdev" down 2>/dev/null
+				iw dev "$wdev" del
+			done
+		done
+	fi
 }
 
 drv_mac80211_setup() {
