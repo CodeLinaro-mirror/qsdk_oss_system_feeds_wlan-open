@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -317,6 +317,78 @@ struct ath10k_txq {
+@@ -319,6 +319,78 @@ struct ath10k_txq {
  	unsigned long num_push_allowed;
  };
  
@@ -79,7 +79,7 @@
  struct ath10k_sta {
  	struct ath10k_vif *arvif;
  
-@@ -333,6 +405,7 @@ struct ath10k_sta {
+@@ -335,6 +407,7 @@ struct ath10k_sta {
  	/* protected by conf_mutex */
  	bool aggr_mode;
  	u64 rx_duration;
@@ -87,7 +87,7 @@
  #endif
  	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
-@@ -678,6 +751,21 @@ struct ath10k_fw_components {
+@@ -680,6 +753,21 @@ struct ath10k_fw_components {
  	struct ath10k_fw_file fw_file;
  };
  
@@ -109,7 +109,7 @@
  struct ath10k {
  	struct ath_common ath_common;
  	struct ieee80211_hw *hw;
-@@ -952,6 +1040,9 @@ struct ath10k {
+@@ -955,6 +1043,9 @@ struct ath10k {
  	struct sk_buff_head fwlog_tx_queue;
  
  	struct ath10k_smart_ant_info smart_ant_info;
@@ -461,7 +461,7 @@
  
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *head)
  {	struct ieee80211_sta *sta;
-@@ -271,6 +560,211 @@ static const struct file_operations fops
+@@ -271,6 +560,205 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -514,36 +514,32 @@
 +			(resp->peer_tx_stats.payload);
 +	peer_id = tx_stats->peer_id;
 +
++	rcu_read_lock();
 +	spin_lock_bh(&ar->data_lock);
 +	peer = ath10k_peer_find_by_id(ar, peer_id);
-+	if (!peer) {
-+		spin_unlock_bh(&ar->data_lock);
++	if (!peer)
 +		goto err;
-+	}
 +
-+	rcu_read_lock();
 +	sta = peer->sta;
-+	spin_unlock_bh(&ar->data_lock);
-+	if (!sta) {
-+		rcu_read_unlock();
++	if (!sta)
 +		goto err;
-+	}
 +
 +	for (i = 0; i < num_ppdu; i++) {
 +		tx_stats =(struct htt_per_peer_tx_stats_ind *)
 +			  (resp->peer_tx_stats.payload + i * ppdu_len);
 +
-+		spin_lock_bh(&ar->data_lock);
 +		arsta = (struct ath10k_sta *)sta->drv_priv;
 +		ath10k_update_per_peer_stats(p_tx_stats, NULL, tx_stats, i);
 +		ath10k_accumulate_per_peer_tx_stats(ar, sta, p_tx_stats);
 +		arsta->tx_stats.tx_duration += __le16_to_cpu(tx_stats->tx_duration);
-+		spin_unlock_bh(&ar->data_lock);
 +	}
-+
++	spin_unlock_bh(&ar->data_lock);
 +	rcu_read_unlock();
++
 +	return;
 +err:
++	spin_unlock_bh(&ar->data_lock);
++	rcu_read_unlock();
 +	ath10k_warn(ar, "invalid per peer stats received\n");
 +}
 +
@@ -555,8 +551,12 @@
 +	struct ieee80211_sta *sta;
 +	struct ath10k_sta *arsta;
 +	struct ath10k_peer *peer;
++	int len = __le16_to_cpu(hdr->size);
 +	u16 log_type = __le16_to_cpu(hdr->log_type);
 +	u32 peer_id = 0, i;
++
++	if (len != ATH10K_10_4_TX_STATS_OFFSET + sizeof(*tx_stats))
++		return;
 +
 +	if (log_type == ATH_PKTLOG_TYPE_TX_STAT) {
 +		tx_stats = (struct ath10k_per_peer_tx_stats *)
@@ -568,28 +568,21 @@
 +
 +		peer_id = tx_stats->peer_id;
 +
++		rcu_read_lock();
 +		spin_lock_bh(&ar->data_lock);
 +		peer = ath10k_peer_find_by_id(ar, peer_id);
-+		if (!peer) {
-+			spin_unlock_bh(&ar->data_lock);
++		if (!peer)
 +			goto err;
-+		}
 +
-+		rcu_read_lock();
 +		sta = peer->sta;
-+		spin_unlock_bh(&ar->data_lock);
-+		if (!sta) {
-+			rcu_read_unlock();
++		if (!sta)
 +			goto err;
-+		}
 +
-+		spin_lock_bh(&ar->data_lock);
 +		arsta = (struct ath10k_sta *)sta->drv_priv;
 +		for (i = 0; i < tx_stats->tx_ppdu_cnt; i++) {
 +			ath10k_update_per_peer_stats(p_tx_stats, tx_stats, NULL, i);
 +			ath10k_accumulate_per_peer_tx_stats(ar, sta, p_tx_stats);
 +		}
-+
 +		arsta->tx_stats.tx_duration += __le32_to_cpu(tx_stats->tx_duration);
 +		spin_unlock_bh(&ar->data_lock);
 +		rcu_read_unlock();
@@ -598,6 +591,8 @@
 +	}
 +
 +err:
++	spin_unlock_bh(&ar->data_lock);
++	rcu_read_unlock();
 +	ath10k_warn(ar, "invalid per peer stats received\n");
 +}
 +
@@ -609,9 +604,13 @@
 +	struct ieee80211_sta *sta;
 +	struct ath10k_sta *arsta;
 +	struct ath10k_peer *peer;
++	int len = __le16_to_cpu(hdr->size);
 +	u16 log_type = __le16_to_cpu(hdr->log_type);
 +	u16 log_flags = __le16_to_cpu(hdr->flags);
 +	u32 peer_id = 0, i;
++
++	if (len != ATH10K_10_4_TX_STATS_OFFSET + sizeof(*tx_stats))
++		return;
 +
 +	if (log_type != ATH_PKTLOG_TYPE_TX_CTRL &&
 +	    log_type != ATH_PKTLOG_TYPE_TX_STAT)
@@ -638,28 +637,21 @@
 +		peer_id = __le32_to_cpu(tx_ctrl_desc[ATH10K_TXC_PEERID]);
 +	}
 +
++	rcu_read_lock();
 +	spin_lock_bh(&ar->data_lock);
 +	peer = ath10k_peer_find_by_id(ar, peer_id);
-+	if (!peer) {
-+		spin_unlock_bh(&ar->data_lock);
++	if (!peer)
 +		goto err;
-+	}
 +
-+	rcu_read_lock();
 +	sta = peer->sta;
-+	spin_unlock_bh(&ar->data_lock);
-+	if (!sta) {
-+		rcu_read_unlock();
++	if (!sta)
 +		goto err;
-+	}
 +
-+	spin_lock_bh(&ar->data_lock);
 +	arsta = (struct ath10k_sta *)sta->drv_priv;
 +	for (i = 0; i < tx_stats->tx_ppdu_cnt; i++) {
 +		ath10k_update_per_peer_stats(p_tx_stats, tx_stats, NULL, i);
 +		ath10k_accumulate_per_peer_tx_stats(ar, sta, p_tx_stats);
 +	}
-+
 +	arsta->tx_stats.tx_duration += __le32_to_cpu(tx_stats->tx_duration);
 +	spin_unlock_bh(&ar->data_lock);
 +	rcu_read_unlock();
@@ -667,6 +659,8 @@
 +	return;
 +
 +err:
++	spin_unlock_bh(&ar->data_lock);
++	rcu_read_unlock();
 +	ath10k_warn(ar, "invalid per peer stats received\n");
 +}
 +
@@ -876,3 +870,13 @@
  	};
  } __packed;
  
+--- a/drivers/net/wireless/ath/ath10k/txrx.c
++++ b/drivers/net/wireless/ath/ath10k/txrx.c
+@@ -98,6 +98,7 @@ int ath10k_txrx_tx_unref(struct ath10k_h
+ 
+ 	info = IEEE80211_SKB_CB(msdu);
+ 	memset(&info->status, 0, sizeof(info->status));
++	info->status.rates[0].idx = -1;
+ 	trace_ath10k_txrx_tx_unref(ar, tx_done->msdu_id);
+ 
+ 	if (tx_done->status == HTT_TX_COMPL_STATE_DISCARD) {
