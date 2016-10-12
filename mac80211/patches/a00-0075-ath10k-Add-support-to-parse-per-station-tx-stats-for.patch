@@ -164,7 +164,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -16,7 +16,296 @@
+@@ -16,7 +16,300 @@
  
  #include "core.h"
  #include "wmi-ops.h"
@@ -200,7 +200,7 @@
 +				   struct ieee80211_sta *sta,
 +				   struct rate_info *txrate,
 +				   u8 rate, u8 sgi, u8 success, u8 failed,
-+				   u8 retries)
++				   u8 retries, bool skip_auto_rate)
 +{
 +	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
 +	struct ieee80211_chanctx_conf *conf = NULL;
@@ -208,8 +208,6 @@
 +
 +	memset(&info, 0, sizeof(info));
 +	info.status.rates[0].count = retries;
-+	if (success && !failed)
-+		info.flags = IEEE80211_TX_STAT_ACK;
 +
 +	switch (txrate->flags) {
 +	case WMI_RATE_PREAMBLE_OFDM:
@@ -270,7 +268,11 @@
 +	default:
 +		break;
 +	}
-+	ieee80211_tx_status_noskb(hw, sta, &info);
++
++	if (success && !skip_auto_rate) {
++		info.flags = IEEE80211_TX_STAT_ACK;
++		ieee80211_tx_status_noskb(hw, sta, &info);
++	}
 +}
 +
 +static void ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
@@ -281,7 +283,7 @@
 +	u8 pream, bw, mcs, nss, rate, gi;
 +	int idx, ht_idx;
 +	struct ath10k_tx_stats *tx_stats = &arsta->tx_stats;
-+	bool legacy_rate;
++	bool legacy_rate, skip_auto_rate;
 +	struct rate_info txrate;
 +
 +	pream = ATH10K_HW_PREAMBLE(peer_stats->ratecode);
@@ -289,6 +291,7 @@
 +		       (pream == WMI_RATE_PREAMBLE_OFDM));
 +
 +	gi = ATH10K_HW_GI(peer_stats->flags);
++	skip_auto_rate = ATH10K_HW_DATA_PKT(peer_stats->flags);
 +
 +	if (legacy_rate) {
 +		rate = ATH10K_HW_LEGACY_RATE(peer_stats->ratecode);
@@ -454,14 +457,15 @@
 +	ath10k_fill_tx_bitrate(ar->hw, sta, &txrate, rate, gi,
 +			       peer_stats->succ_pkts,
 +			       peer_stats->failed_pkts,
-+			       peer_stats->retry_pkts);
++			       peer_stats->retry_pkts,
++			       skip_auto_rate);
 +
 +
 +}
  
  void ath10k_sta_update_rx_duration(struct ath10k *ar, struct list_head *head)
  {	struct ieee80211_sta *sta;
-@@ -271,6 +560,205 @@ static const struct file_operations fops
+@@ -271,6 +564,205 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -700,7 +704,7 @@
  EXPORT_SYMBOL(ath10k_htt_rx_pktlog_completion_handler);
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -4591,12 +4591,45 @@ enum wmi_rate_preamble {
+@@ -4591,12 +4591,46 @@ enum wmi_rate_preamble {
  
  #define ATH10K_HW_NSS(rate)		(1 + (((rate) >> 4) & 0x3))
  #define ATH10K_HW_PREAMBLE(rate)	(((rate) >> 6) & 0x3)
@@ -713,6 +717,7 @@
 +#define ATH10K_HW_BA_FAIL(flags)	(((flags) >> 1) & 0x3)
 +#define ATH10K_HW_BW(flags)		(((flags) >> 3) & 0x3)
 +#define ATH10K_HW_GI(flags)		(((flags) >> 5) & 0x1)
++#define ATH10K_HW_DATA_PKT(flags)	(((flags) >> 6) & 0x1)
 +
  /* Value to disable fixed rate setting */
  #define WMI_FIXED_RATE_NONE    (0xff)
