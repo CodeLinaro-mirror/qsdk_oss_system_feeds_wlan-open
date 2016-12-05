@@ -20,6 +20,7 @@ drv_mac80211_init_device_config() {
 
 	config_add_string path phy 'macaddr:macaddr'
 	config_add_string hwmode
+	config_add_string board_file
 	config_add_int beacon_int chanbw frag rts
 	config_add_int rxantenna txantenna antenna_gain txpower distance
 	config_add_boolean noscan
@@ -586,6 +587,7 @@ drv_mac80211_setup() {
 	json_get_vars \
 		phy macaddr path \
 		country chanbw distance \
+		board_file \
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int
@@ -644,6 +646,10 @@ drv_mac80211_setup() {
 
 	for_each_interface "ap" mac80211_prepare_vif
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
+	[ -n "$board_file" ] && {
+		file=/sys/class/net/$ifname/device/wil6210/board_file
+		[ -f "$file" ] && echo "$board_file" > "$file"
+	}
 
 	[ -n "$hostapd_ctrl" ] && {
 		# 11ad uses single hostapd instance
