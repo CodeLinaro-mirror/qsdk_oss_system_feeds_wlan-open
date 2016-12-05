@@ -1,0 +1,237 @@
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -218,7 +218,7 @@ __acquires(&sta->tid_rx_lock) __releases(&sta->tid_rx_lock)
+ 	memset(&sta->stats, 0, sizeof(sta->stats));
+ }
+ 
+-static bool wil_ap_is_connected(struct wil6210_priv *wil)
++static bool wil_is_connected(struct wil6210_priv *wil)
+ {
+ 	int i;
+ 
+@@ -272,7 +272,7 @@ static void _wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ 	case NL80211_IFTYPE_STATION:
+ 	case NL80211_IFTYPE_P2P_CLIENT:
+ 		wil_bcast_fini(wil);
+-		netif_tx_stop_all_queues(ndev);
++		wil_update_net_queues_bh(wil, NULL, true);
+ 		netif_carrier_off(ndev);
+ 
+ 		if (test_bit(wil_status_fwconnected, wil->status)) {
+@@ -288,8 +288,12 @@ static void _wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ 		break;
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_P2P_GO:
+-		if (!wil_ap_is_connected(wil))
++		if (!wil_is_connected(wil)) {
++			wil_update_net_queues_bh(wil, NULL, true);
+ 			clear_bit(wil_status_fwconnected, wil->status);
++		} else {
++			wil_update_net_queues_bh(wil, NULL, false);
++		}
+ 		break;
+ 	default:
+ 		break;
+@@ -538,6 +542,8 @@ int wil_priv_init(struct wil6210_priv *wil)
+ 	INIT_LIST_HEAD(&wil->pending_wmi_ev);
+ 	INIT_LIST_HEAD(&wil->probe_client_pending);
+ 	spin_lock_init(&wil->wmi_ev_lock);
++	spin_lock_init(&wil->net_queue_lock);
++	wil->net_queue_stopped = 1;
+ 	init_waitqueue_head(&wil->wq);
+ 
+ 	wil->wmi_wq = create_singlethread_workqueue(WIL_NAME "_wmi");
+--- a/drivers/net/wireless/ath/wil6210/netdev.c
++++ b/drivers/net/wireless/ath/wil6210/netdev.c
+@@ -243,7 +243,7 @@ int wil_if_add(struct wil6210_priv *wil)
+ 	netif_tx_napi_add(ndev, &wil->napi_tx, wil6210_netdev_poll_tx,
+ 			  WIL6210_NAPI_BUDGET);
+ 
+-	netif_tx_stop_all_queues(ndev);
++	wil_update_net_queues_bh(wil, NULL, true);
+ 
+ 	rc = register_netdev(ndev);
+ 	if (rc < 0) {
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -91,6 +91,18 @@ static inline int wil_vring_wmark_high(struct vring *vring)
+ 	return vring->size/4;
+ }
+ 
++/* returns true if num avail descriptors is lower than wmark_low */
++static inline int wil_vring_avail_low(struct vring *vring)
++{
++	return wil_vring_avail_tx(vring) < wil_vring_wmark_low(vring);
++}
++
++/* returns true if num avail descriptors is higher than wmark_high */
++static inline int wil_vring_avail_high(struct vring *vring)
++{
++	return wil_vring_avail_tx(vring) > wil_vring_wmark_high(vring);
++}
++
+ /* wil_val_in_range - check if value in [min,max) */
+ static inline bool wil_val_in_range(int val, int min, int max)
+ {
+@@ -1800,6 +1812,89 @@ static int wil_tx_vring(struct wil6210_priv *wil, struct vring *vring,
+ 	return rc;
+ }
+ 
++/**
++ * Check status of tx vrings and stop/wake net queues if needed
++ *
++ * This function does one of two checks:
++ * In case check_stop is true, will check if net queues need to be stopped. If
++ * the conditions for stopping are met, netif_tx_stop_all_queues() is called.
++ * In case check_stop is false, will check if net queues need to be waked. If
++ * the conditions for waking are met, netif_tx_wake_all_queues() is called.
++ * vring is the vring which is currently being modified by either adding
++ * descriptors (tx) into it or removing descriptors (tx complete) from it. Can
++ * be null when irrelevant (e.g. connect/disconnect events).
++ *
++ * The implementation is to stop net queues if modified vring has low
++ * descriptor availability. Wake if all vrings are not in low descriptor
++ * availability and modified vring has high descriptor availability.
++ */
++static inline void __wil_update_net_queues(struct wil6210_priv *wil,
++					   struct vring *vring,
++					   bool check_stop)
++{
++	int i;
++
++	if (vring)
++		wil_dbg_txrx(wil, "vring %d, check_stop=%d, stopped=%d",
++			     (int)(vring - wil->vring_tx), check_stop,
++			     wil->net_queue_stopped);
++	else
++		wil_dbg_txrx(wil, "check_stop=%d, stopped=%d",
++			     check_stop, wil->net_queue_stopped);
++
++	if (check_stop == wil->net_queue_stopped)
++		/* net queues already in desired state */
++		return;
++
++	if (check_stop) {
++		if (!vring || unlikely(wil_vring_avail_low(vring))) {
++			/* not enough room in the vring */
++			netif_tx_stop_all_queues(wil_to_ndev(wil));
++			wil->net_queue_stopped = true;
++			wil_dbg_txrx(wil, "netif_tx_stop called\n");
++		}
++		return;
++	}
++
++	/* check wake */
++	for (i = 0; i < WIL6210_MAX_TX_RINGS; i++) {
++		struct vring *cur_vring = &wil->vring_tx[i];
++		struct vring_tx_data *txdata = &wil->vring_tx_data[i];
++
++		if (!cur_vring->va || !txdata->enabled || cur_vring == vring)
++			continue;
++
++		if (wil_vring_avail_low(cur_vring)) {
++			wil_dbg_txrx(wil, "vring %d full, can't wake\n",
++				     (int)(cur_vring - wil->vring_tx));
++			return;
++		}
++	}
++
++	if (!vring || wil_vring_avail_high(vring)) {
++		/* enough room in the vring */
++		wil_dbg_txrx(wil, "calling netif_tx_wake\n");
++		netif_tx_wake_all_queues(wil_to_ndev(wil));
++		wil->net_queue_stopped = false;
++	}
++}
++
++void wil_update_net_queues(struct wil6210_priv *wil, struct vring *vring,
++			   bool check_stop)
++{
++	spin_lock(&wil->net_queue_lock);
++	__wil_update_net_queues(wil, vring, check_stop);
++	spin_unlock(&wil->net_queue_lock);
++}
++
++void wil_update_net_queues_bh(struct wil6210_priv *wil, struct vring *vring,
++			      bool check_stop)
++{
++	spin_lock_bh(&wil->net_queue_lock);
++	__wil_update_net_queues(wil, vring, check_stop);
++	spin_unlock_bh(&wil->net_queue_lock);
++}
++
+ netdev_tx_t wil_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ {
+ 	struct wil6210_priv *wil = ndev_to_wil(ndev);
+@@ -1842,14 +1937,10 @@ netdev_tx_t wil_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	/* set up vring entry */
+ 	rc = wil_tx_vring(wil, vring, skb);
+ 
+-	/* do we still have enough room in the vring? */
+-	if (unlikely(wil_vring_avail_tx(vring) < wil_vring_wmark_low(vring))) {
+-		netif_tx_stop_all_queues(wil_to_ndev(wil));
+-		wil_dbg_txrx(wil, "netif_tx_stop : ring full\n");
+-	}
+-
+ 	switch (rc) {
+ 	case 0:
++		/* shall we stop net queues? */
++		wil_update_net_queues_bh(wil, vring, true);
+ 		/* statistics will be updated on the tx_complete */
+ 		dev_kfree_skb_any(skb);
+ 		return NETDEV_TX_OK;
+@@ -1998,10 +2089,9 @@ int wil_tx_complete(struct wil6210_priv *wil, int ringid)
+ 		txdata->last_idle = get_cycles();
+ 	}
+ 
+-	if (wil_vring_avail_tx(vring) > wil_vring_wmark_high(vring)) {
+-		wil_dbg_txrx(wil, "netif_tx_wake : ring not full\n");
+-		netif_tx_wake_all_queues(wil_to_ndev(wil));
+-	}
++	/* shall we wake net queues? */
++	if (done)
++		wil_update_net_queues(wil, vring, false);
+ 
+ 	return done;
+ }
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -628,6 +628,8 @@ struct wil6210_priv {
+ 	 * - consumed in thread by wmi_event_worker
+ 	 */
+ 	spinlock_t wmi_ev_lock;
++	spinlock_t net_queue_lock; /* guarding stop/wake netif queue */
++	int net_queue_stopped; /* netif_tx_stop_all_queues invoked */
+ 	struct napi_struct napi_rx;
+ 	struct napi_struct napi_tx;
+ 	/* keep alive */
+@@ -901,6 +903,10 @@ int wil_vring_init_bcast(struct wil6210_priv *wil, int id, int size);
+ int wil_bcast_init(struct wil6210_priv *wil);
+ void wil_bcast_fini(struct wil6210_priv *wil);
+ 
++void wil_update_net_queues(struct wil6210_priv *wil, struct vring *vring,
++			   bool should_stop);
++void wil_update_net_queues_bh(struct wil6210_priv *wil, struct vring *vring,
++			      bool check_stop);
+ netdev_tx_t wil_start_xmit(struct sk_buff *skb, struct net_device *ndev);
+ int wil_tx_complete(struct wil6210_priv *wil, int ringid);
+ void wil6210_unmask_irq_tx(struct wil6210_priv *wil);
+--- a/drivers/net/wireless/ath/wil6210/wmi.c
++++ b/drivers/net/wireless/ath/wil6210/wmi.c
+@@ -567,7 +567,6 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 	if ((wdev->iftype == NL80211_IFTYPE_STATION) ||
+ 	    (wdev->iftype == NL80211_IFTYPE_P2P_CLIENT)) {
+ 		if (rc) {
+-			netif_tx_stop_all_queues(ndev);
+ 			netif_carrier_off(ndev);
+ 			wil_err(wil,
+ 				"%s: cfg80211_connect_result with failure\n",
+@@ -611,7 +610,7 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 
+ 	wil->sta[evt->cid].status = wil_sta_connected;
+ 	set_bit(wil_status_fwconnected, wil->status);
+-	netif_tx_wake_all_queues(ndev);
++	wil_update_net_queues_bh(wil, NULL, false);
+ 
+ out:
+ 	if (rc)
