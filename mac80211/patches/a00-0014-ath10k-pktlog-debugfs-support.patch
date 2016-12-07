@@ -40,8 +40,8 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -438,6 +439,11 @@ struct ath10k_debug {
- 	u32 nf_cal_period;
+@@ -456,6 +457,11 @@ struct ath10k_debug {
+ 	void *cal_data;
  
  	struct ath10k_fw_crash_data *fw_crash_data;
 +#ifdef CPTCFG_ATH10K_PKTLOG
@@ -54,15 +54,15 @@
  enum ath10k_state {
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2341,6 +2341,7 @@ void ath10k_debug_destroy(struct ath10k
- 	ar->debug.fw_crash_data = NULL;
+@@ -2362,6 +2362,7 @@ void ath10k_debug_destroy(struct ath10k
+ 	ar->debug.cal_data = NULL;
  
  	ath10k_debug_fw_stats_reset(ar);
 +	ath10k_deinit_pktlog(ar);
  
  	kfree(ar->debug.tpc_stats);
  }
-@@ -2424,6 +2425,7 @@ int ath10k_debug_register(struct ath10k
+@@ -2445,6 +2446,7 @@ int ath10k_debug_register(struct ath10k
  
  	debugfs_create_file("pktlog_filter", S_IRUGO | S_IWUSR,
  			    ar->debug.debugfs_phy, ar, &fops_pktlog_filter);
@@ -70,7 +70,7 @@
  
  	debugfs_create_file("quiet_period", S_IRUGO | S_IWUSR,
  			    ar->debug.debugfs_phy, ar, &fops_quiet_period);
-@@ -2449,6 +2451,7 @@ int ath10k_debug_register(struct ath10k
+@@ -2470,6 +2472,7 @@ int ath10k_debug_register(struct ath10k
  void ath10k_debug_unregister(struct ath10k *ar)
  {
  	cancel_delayed_work_sync(&ar->debug.htt_stats_dwork);
@@ -80,31 +80,31 @@
  #endif /* CPTCFG_ATH10K_DEBUGFS */
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -1549,6 +1549,7 @@ static int ath10k_htt_rx_handle_amsdu(st
- 		return ret;
+@@ -1550,6 +1550,7 @@ static int ath10k_htt_rx_handle_amsdu(st
  	}
  
+ 	num_msdus = skb_queue_len(&amsdu);
 +	ath10k_pktlog_rx(ar, &amsdu);
- 	ath10k_htt_rx_h_ppdu(ar, &amsdu, &rx_status, 0xffff);
- 	ath10k_htt_rx_h_unchain(ar, &amsdu, ret > 0);
- 	ath10k_htt_rx_h_filter(ar, &amsdu, &rx_status);
-@@ -1890,6 +1891,7 @@ static void ath10k_htt_rx_in_ord_ind(str
- 			 * better to report something than nothing though. This
+ 	ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
+ 
+ 	/* only for ret = 1 indicates chained msdus */
+@@ -1890,6 +1891,7 @@ static int ath10k_htt_rx_in_ord_ind(stru
  			 * should still give an idea about rx rate to the user.
  			 */
+ 			num_msdus += skb_queue_len(&amsdu);
 +			ath10k_pktlog_rx(ar, &amsdu);
  			ath10k_htt_rx_h_ppdu(ar, &amsdu, status, vdev_id);
  			ath10k_htt_rx_h_filter(ar, &amsdu, status);
  			ath10k_htt_rx_h_mpdu(ar, &amsdu, status);
-@@ -2313,6 +2315,7 @@ bool ath10k_htt_t2h_msg_handler(struct a
- 		trace_ath10k_htt_pktlog(ar, resp->pktlog_msg.payload,
- 					sizeof(*hdr) +
- 					__le16_to_cpu(hdr->size));
+@@ -2433,6 +2435,7 @@ bool ath10k_htt_t2h_msg_handler(struct a
+ 					skb->len -
+ 					offsetof(struct htt_resp,
+ 						 pktlog_msg.payload));
 +		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
  		break;
  	}
  	case HTT_T2H_MSG_TYPE_RX_FLUSH: {
-@@ -2374,6 +2377,7 @@ void ath10k_htt_rx_pktlog_completion_han
+@@ -2495,6 +2498,7 @@ void ath10k_htt_rx_pktlog_completion_han
  					     struct sk_buff *skb)
  {
  	trace_ath10k_htt_pktlog(ar, skb->data, skb->len);
@@ -1317,3 +1317,41 @@
 +#endif /* CPTCFG_ATH10K_PKTLOG */
 +
 +#endif /* _PKTLOG_H_ */
+--- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
+@@ -17,6 +17,7 @@
+ #include "core.h"
+ #include "wmi-ops.h"
+ #include "debug.h"
++#include "hw.h"
+ 
+ static void ath10k_sta_update_extd_stats_rx_duration(struct ath10k *ar,
+ 						     struct ath10k_fw_stats *stats)
+--- a/drivers/net/wireless/ath/ath10k/hw.h
++++ b/drivers/net/wireless/ath/ath10k/hw.h
+@@ -308,6 +308,25 @@ enum ath10k_mcast2ucast_mode {
+ 	ATH10K_MCAST2UCAST_ENABLED = 1,
+ };
+ 
++struct ath10k_pktlog_hdr {
++	__le16 flags;
++	__le16 missed_cnt;
++	__le16 log_type;
++	__le16 size;
++	__le32 timestamp;
++	u8 payload[0];
++} __packed;
++
++struct ath10k_pktlog_10_4_hdr {
++	__le16 flags;
++	__le16 missed_cnt;
++	__le16 log_type;
++	__le16 size;
++	__le32 timestamp;
++	__le32 type_specific_data;
++	u8 payload[0];
++} __packed;
++
+ enum ath10k_hw_rate_ofdm {
+ 	ATH10K_HW_RATE_OFDM_48M = 0,
+ 	ATH10K_HW_RATE_OFDM_24M,
