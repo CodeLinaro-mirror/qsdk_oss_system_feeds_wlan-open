@@ -287,7 +287,7 @@ define KernelPackage/ath9k
   DEPENDS+= @PCI_SUPPORT||TARGET_ar71xx +kmod-ath9k-common
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath9k/ath9k.ko
-  AUTOLOAD:=$(call AutoProbe,ath9k)
+  AUTOLOAD:=$(call AutoLoad,80,ath9k)
 endef
 
 define KernelPackage/ath9k/description
@@ -302,7 +302,7 @@ define KernelPackage/ath9k-htc
   DEPENDS+= @USB_SUPPORT +kmod-ath9k-common +kmod-usb-core
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath9k/ath9k_htc.ko
-  AUTOLOAD:=$(call AutoProbe,ath9k_htc)
+  AUTOLOAD:=$(call AutoLoad,80,ath9k_htc)
 endef
 
 define KernelPackage/ath9k-htc/description
@@ -318,7 +318,7 @@ define KernelPackage/ath10k
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath10k/ath10k_core.ko \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath10k/ath10k_pci.ko
-  AUTOLOAD:=$(call AutoProbe,ath10k_core ath10k_pci)
+  AUTOLOAD:=$(call AutoLoad,81,ath10k_core ath10k_pci)
 endef
 
 define KernelPackage/ath10k/description
@@ -346,7 +346,7 @@ define KernelPackage/wil6210
   DEPENDS+= @PCI_SUPPORT +kmod-cfg80211
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/wil6210/wil6210.ko
-  AUTOLOAD:=$(call AutoProbe,wil6210)
+  AUTOLOAD:=$(call AutoLoad,80,wil6210)
 endef
 
 define KernelPackage/wil6210/description
