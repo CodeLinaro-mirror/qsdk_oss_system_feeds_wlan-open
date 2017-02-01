@@ -2,6 +2,7 @@
 . /lib/netifd/netifd-wireless.sh
 [ -e /lib/netifd/hostapd.sh ] && . /lib/netifd/hostapd.sh
 [ -e /lib/wifi/hostapd.sh ] && . /lib/wifi/hostapd.sh
+[ -e /lib/wifi/wpa_supplicant.sh ] && . /lib/wifi/wpa_supplicant.sh
 
 init_wireless_driver "$@"
 
@@ -553,10 +554,14 @@ mac80211_interface_cleanup() {
 	local phy="$1"
 
 	for wdev in $(list_phy_interfaces "$phy"); do
-		# 11ad uses single hostapd instance
+		# 11ad uses single hostapd and single wpa_supplicant instance
 		[ -f "/var/run/hostapd-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
 			hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
 			rm /var/run/hostapd-${wdev}.lock
+		}
+		[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
+			wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+			rm /var/run/wpa_supplicant-${wdev}.lock
 		}
 
 		ifconfig "$wdev" down 2>/dev/null
@@ -568,12 +573,16 @@ drv_mac80211_cleanup() {
 	if eval "type hostapd_common_cleanup" 2>/dev/null >/dev/null; then
 		hostapd_common_cleanup
 	else
-		# 11ad uses single hostapd instance
+		# 11ad uses single hostapd and single wpa_supplicant instance
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			for wdev in $(list_phy_interfaces "$phy"); do
 				if [ -f "/var/run/hostapd-${wdev}.lock" ]; then
 					hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
 					rm /var/run/hostapd-${wdev}.lock
+				fi
+				if [ -f "/var/run/wpa_supplicant-${wdev}.lock" ]; then
+					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+					rm /var/run/wpa_supplicant-${wdev}.lock
 				fi
 				ifconfig "$wdev" down 2>/dev/null
 				iw dev "$wdev" del
