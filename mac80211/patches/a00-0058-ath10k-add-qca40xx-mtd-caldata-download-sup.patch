@@ -9,44 +9,6 @@
  	  .data = (void *)ATH10K_HW_QCA4019
  	},
  	{ }
-@@ -512,10 +512,17 @@ static int ath10k_ahb_resource_init(stru
- 	struct device *dev;
- 	struct resource *res;
- 	int ret;
-+	u32 core_id;
- 
- 	pdev = ar_ahb->pdev;
- 	dev = &pdev->dev;
- 
-+	ret = of_property_read_u32(dev->of_node, "core-id", &core_id);
-+	if (ret) {
-+		ath10k_err(ar, "failed to get code id: %d\n", ret);
-+		goto out;
-+	}
-+
- 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
- 	if (!res) {
- 		ath10k_err(ar, "failed to get memory resource\n");
-@@ -575,6 +582,8 @@ static int ath10k_ahb_resource_init(stru
- 		goto err_clock_deinit;
- 	}
- 
-+	ar_ahb->core_id = core_id;
-+
- 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "irq: %d\n", ar_ahb->irq);
- 
- 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "mem: 0x%p mem_len: %lu gcc mem: 0x%p tcsr_mem: 0x%p\n",
---- a/drivers/net/wireless/ath/ath10k/ahb.h
-+++ b/drivers/net/wireless/ath/ath10k/ahb.h
-@@ -38,6 +38,8 @@ struct ath10k_ahb {
- 	struct reset_control *radio_warm_rst;
- 	struct reset_control *radio_srif_rst;
- 	struct reset_control *cpu_init_rst;
-+
-+	u32 core_id;
- };
- 
- #ifdef CPTCFG_ATH10K_AHB
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
 @@ -19,6 +19,8 @@
@@ -58,7 +20,7 @@
  
  #include "core.h"
  #include "mac.h"
-@@ -511,6 +513,125 @@ exit:
+@@ -553,6 +555,125 @@ exit:
  	return ret;
  }
  
@@ -184,7 +146,17 @@
  static int ath10k_download_cal_file(struct ath10k *ar,
  				    const struct firmware *file)
  {
-@@ -1372,6 +1493,23 @@ static int ath10k_download_cal_data(stru
+@@ -689,6 +810,9 @@ static int ath10k_core_get_board_id_from
+ 
+ 	ret = ath10k_bmi_execute(ar, address, BMI_PARAM_GET_EEPROM_BOARD_ID,
+ 				 &result);
++	if (!result)
++		ret = ath10k_bmi_execute(ar, address,
++					 BMI_PARAM_GET_FLASH_BOARD_ID, &result);
+ 	if (ret) {
+ 		ath10k_err(ar, "could not execute otp for board id check: %d\n",
+ 			   ret);
+@@ -1404,6 +1528,23 @@ static int ath10k_download_cal_data(stru
  		   "pre cal download procedure failed, try cal file: %d\n",
  		   ret);
  
@@ -208,7 +180,7 @@
  	ret = ath10k_download_cal_file(ar, ar->cal_file);
  	if (ret == 0) {
  		ar->cal_mode = ATH10K_CAL_MODE_FILE;
-@@ -2027,6 +2165,8 @@ static int ath10k_core_probe_fw(struct a
+@@ -2138,6 +2279,8 @@ static int ath10k_core_probe_fw(struct a
  			   "could not load pre cal data: %d\n", ret);
  	}
  
@@ -217,3 +189,13 @@
  	ret = ath10k_core_get_board_id_from_otp(ar);
  	if (ret && ret != -EOPNOTSUPP) {
  		ath10k_err(ar, "failed to get board id from otp: %d\n",
+--- a/drivers/net/wireless/ath/ath10k/bmi.h
++++ b/drivers/net/wireless/ath/ath10k/bmi.h
+@@ -83,6 +83,7 @@ enum bmi_cmd_id {
+ #define BMI_NVRAM_SEG_NAME_SZ 16
+ 
+ #define BMI_PARAM_GET_EEPROM_BOARD_ID 0x10
++#define BMI_PARAM_GET_FLASH_BOARD_ID 0x8000
+ 
+ #define ATH10K_BMI_BOARD_ID_FROM_OTP_MASK   0x7c00
+ #define ATH10K_BMI_BOARD_ID_FROM_OTP_LSB    10
