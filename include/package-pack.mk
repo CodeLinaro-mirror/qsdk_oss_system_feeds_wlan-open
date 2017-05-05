@@ -275,7 +275,7 @@ ifeq ($(CONFIG_USE_APK),)
 		$($(1)_COMMANDS) \
 	)
 
-	$(FAKEROOT) $(STAGING_DIR_HOST)/bin/bash $(SCRIPT_DIR)/ipkg-build -m "$(FILE_MODES)" $$(IDIR_$(1)) $$(PDIR_$(1))
+	$(FAKEROOT) $(STAGING_DIR_HOST)/bin/bash $(SCRIPT_DIR)/ipkg-build -m "$(FILE_MODES)" $(if $(CONFIG_KERNEL_MODULE_SIG),-p $(TOPDIR)/qca/src/linux-6.6/scripts/sign-file -s $(CONFIG_KERNEL_MODULE_SIG_HASH)) $$(IDIR_$(1)) $$(PDIR_$(1))
 else
 	mkdir -p $$(ADIR_$(1))/
 	mkdir -p $$(IDIR_$(1))/lib/apk/packages/
