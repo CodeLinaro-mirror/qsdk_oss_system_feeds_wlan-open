@@ -155,7 +155,8 @@ mac80211_hostapd_setup_base() {
 		DSSS_CCK-40:0x1000::$dsss_cck_40 \
 		40-INTOLERANT:0x4000::$intolerant_40
 
-		[ -n "$ht_capab" ] && append base_cfg "ht_capab=$ht_capab$ht_capab_flags" "$N"
+		ht_capab="$ht_capab$ht_capab_flags"
+		[ -n "$ht_capab" ] && append base_cfg "ht_capab=$ht_capab" "$N"
 	}
 
 	# 802.11ac
