@@ -94,6 +94,7 @@ mac80211_hostapd_setup_base() {
 
 		ht_capab=
 		case "$htmode" in
+			VHT20|HT20) ;;
 			HT40*|VHT40|VHT80|VHT160)
 				case "$hwmode" in
 					a)
