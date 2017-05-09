@@ -59,7 +59,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean wds powersave
 	config_add_int maxassoc
 	config_add_int max_listen_int
-	config_add_int dtim_period
+	config_add_int dtim_period start_disabled
 
 	# mesh
 	config_add_string mesh_id
@@ -343,12 +343,12 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$vif" || return 1
-	json_get_vars wds dtim_period max_listen_int
+	json_get_vars wds dtim_period max_listen_int start_disabled
 
 	set_default wds 0
 
 	[ "$wds" -gt 0 ] && append hostapd_cfg "wds_sta=1" "$N"
-	[ "$staidx" -gt 0 ] && append hostapd_cfg "start_disabled=1" "$N"
+	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
 	config_load fst && {
 		fst_load=1
