@@ -41,6 +41,13 @@ drv_mac80211_init_device_config() {
 		tx_antenna_pattern
 	config_add_int vht_max_mpdu vht_max_rx_stbc vht_link_adapt vht160
 	config_add_int max_ampdu_length_exp
+	config_add_boolean \
+               ldpc \
+               greenfield \
+               short_gi_20 \
+               short_gi_40 \
+               dsss_cck_40
+
 }
 
 drv_mac80211_init_iface_config() {
