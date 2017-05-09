@@ -601,7 +601,7 @@ mac80211_setup_adhoc() {
 			[ "$auto_channel" -gt 0 ] && ibss_htmode="HT40+"
 		;;
 		VHT80)
-			ibss_htmode="80Mhz"
+			ibss_htmode="80MHz"
 		;;
 		NONE|NOHT)
 			ibss_htmode="NOHT"
