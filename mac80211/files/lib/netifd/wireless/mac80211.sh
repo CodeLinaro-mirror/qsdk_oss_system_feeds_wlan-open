@@ -116,7 +116,9 @@ mac80211_hostapd_setup_base() {
 						esac
 					;;
 				esac
-				*) ieee80211n= ;;
+				[ "$auto_channel" -gt 0 ] && ht_capab="[HT40+]"
+			;;
+			*) ieee80211n= ;;
 		esac
 
 		[ -n "$ieee80211n" ] && {
