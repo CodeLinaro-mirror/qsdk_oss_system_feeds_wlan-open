@@ -53,6 +53,17 @@ define KernelPackage/cfg80211/description
 cfg80211 is the Linux wireless LAN (802.11) configuration API.
 endef
 
+define Package/mac80211-scripts
+  SUBMENU:=$(WMENU)
+  URL:=http://www.qca.qualcomm.com
+  MAINTAINER:=Qualcomm Atheros
+  TITLE:=mac80211 - wireless configuration scripts
+endef
+
+define Package/mac80211-scripts/description
+mac80211-scripts is the Linux wireless LAN (802.11) configuration scripts.
+endef
+
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
@@ -488,6 +499,10 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/*.h $(1)/usr/include/mac80211/ath/
 endef
 
+define Package/mac80211-scripts/install
+	$(call KernelPackage/cfg80211/install,$(1))
+endef
+
 define KernelPackage/cfg80211/install
 	$(INSTALL_DIR) $(1)/lib/wifi
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
@@ -513,6 +528,7 @@ endef
 
 $(eval $(call KernelPackage,cfg80211))
 $(eval $(call KernelPackage,mac80211))
+$(eval $(call BuildPackage,mac80211-scripts))
 $(eval $(call KernelPackage,ath9k-common))
 $(eval $(call KernelPackage,ath9k))
 $(eval $(call KernelPackage,ath9k-htc))
