@@ -214,7 +214,7 @@
  	return retval;
  }
  STA_OPS(rx_stats);
-@@ -604,6 +609,106 @@ STA_OPS(vht_capa);
+@@ -604,6 +609,109 @@ STA_OPS(vht_capa);
  		debugfs_create_u64(#name, 0400, sta->debugfs_dir,	\
  			(u64 *) &sta->field);
  
@@ -253,6 +253,9 @@
 +		bw_idx = 1;
 +	else
 +		bw_idx = 0;
++
++	i = abs(status->signal);
++	sta->sdata->vif.rx_signal_pkt[i]++;
 +
 +	if (status->flag & RX_FLAG_HT) {
 +		mcs_idx = status->rate_idx;
@@ -574,4 +577,76 @@
 +#endif
  	wiphy->ht_capa_mod_mask = &mac80211_ht_capa_mod_mask;
  	wiphy->vht_capa_mod_mask = &mac80211_vht_capa_mod_mask;
+ 
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -148,6 +148,7 @@ enum ieee80211_ac_numbers {
+ 	IEEE80211_AC_BK		= 3,
+ };
+ #define IEEE80211_NUM_ACS	4
++#define IEEE80211_NUM_SIGNAL	100
+ 
+ /**
+  * struct ieee80211_tx_queue_params - transmit queue configuration
+@@ -1453,6 +1454,7 @@ struct ieee80211_vif {
+ 	u32 driver_flags;
+ 
+ #ifdef CPTCFG_MAC80211_DEBUGFS
++	u64 rx_signal_pkt[IEEE80211_NUM_SIGNAL];
+ 	struct dentry *debugfs_dir;
+ #endif
+ 
+--- a/net/mac80211/debugfs_netdev.c
++++ b/net/mac80211/debugfs_netdev.c
+@@ -30,7 +30,7 @@ static ssize_t ieee80211_if_read(
+ 	size_t count, loff_t *ppos,
+ 	ssize_t (*format)(const struct ieee80211_sub_if_data *, char *, int))
+ {
+-	char buf[200];
++	char buf[512];
+ 	ssize_t ret = -EINVAL;
+ 
+ 	read_lock(&dev_base_lock);
+@@ -473,6 +473,22 @@ static ssize_t ieee80211_if_parse_tdls_w
+ }
+ IEEE80211_IF_FILE_RW(tdls_wider_bw);
+ 
++static ssize_t ieee80211_if_fmt_signal_stats(
++	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
++{
++	int len = 0, i;
++
++	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++) {
++		len += scnprintf(buf + len, buflen - len, " %llu ",
++				 sdata->vif.rx_signal_pkt[i]);
++		if ((i + 1) % 10 == 0)
++			len += scnprintf(buf + len, buflen - len, "\n");
++	}
++
++	return len;
++}
++IEEE80211_IF_FILE_R(signal_stats);
++
+ /* AP attributes */
+ IEEE80211_IF_FILE(num_mcast_sta, u.ap.num_mcast_sta, ATOMIC);
+ IEEE80211_IF_FILE(num_sta_ps, u.ap.ps.num_sta_ps, ATOMIC);
+@@ -656,6 +672,7 @@ static void add_common_files(struct ieee
+ 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_2ghz);
+ 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_5ghz);
+ 	DEBUGFS_ADD(hw_queues);
++	DEBUGFS_ADD(signal_stats);
+ 
+ 	if (sdata->local->ops->wake_tx_queue)
+ 		DEBUGFS_ADD(aqm);
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -1938,6 +1938,9 @@ int ieee80211_if_add(struct ieee80211_lo
+ 	if (new_wdev)
+ 		*new_wdev = &sdata->wdev;
+ 
++	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++)
++		sdata->vif.rx_signal_pkt[i] =  0;
++
+ 	return 0;
+ }
  
