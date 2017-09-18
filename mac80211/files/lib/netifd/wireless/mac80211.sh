@@ -624,10 +624,17 @@ drv_mac80211_setup() {
 	[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel")"
 
 	[ -n "$country" ] && {
-		iw reg get | grep -q "^country $country:" || {
-			iw reg set "$country"
-			sleep 1
-		}
+		if iw reg get | grep -q "^global$"; then
+			iw reg get | grep -A 1 "^global$" | grep -q "^country $country:" || {
+				iw reg set "$country"
+				sleep 1
+			}
+		else
+			iw reg get | grep -q "^country $country:" || {
+				iw reg set "$country"
+				sleep 1
+			}
+		fi
 	}
 
 	hostapd_conf_file="/var/run/hostapd-$phy.conf"
