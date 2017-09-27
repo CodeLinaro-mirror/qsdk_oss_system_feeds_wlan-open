@@ -67,7 +67,7 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
-  DEPENDS+= @TARGET_ipq806x||TARGET_ar71xx \
+  DEPENDS+= @TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+kmod-crypto-arc4 +kmod-crypto-aes +kmod-cfg80211 +hostapd-common
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
