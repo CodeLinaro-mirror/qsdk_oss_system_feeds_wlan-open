@@ -75,6 +75,14 @@ mac80211_hostapd_setup_base() {
 		ht_capab=
 		case "$htmode" in
 			HT20|HT40-|HT40+) ht_capab="[$htmode]";;
+			HT40)
+				case "$channel" in
+					1|2|3|4|5|6) ht_capab="[HT40+]";;
+					7|8|9|10|11|12|13|14) ht_capab="[HT40-]";;
+					36|44|52|60|100|108|116|124|132|140|149|157) ht_capab="[HT40+]";;
+					40|48|56|64|104|112|120|128|136|144|153|161) ht_capab="[HT40-]";;
+				esac
+				;;
 			VHT40|VHT80|VHT160)
 				case "$channel" in
 					36|44|52|60|100|108|116|124|132|140|149|157) ht_capab="[HT40+]";;
@@ -616,10 +624,17 @@ drv_mac80211_setup() {
 	[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel")"
 
 	[ -n "$country" ] && {
-		iw reg get | grep -q "^country $country:" || {
-			iw reg set "$country"
-			sleep 1
-		}
+		if iw reg get | grep -q "^global$"; then
+			iw reg get | grep -A 1 "^global$" | grep -q "^country $country:" || {
+				iw reg set "$country"
+				sleep 1
+			}
+		else
+			iw reg get | grep -q "^country $country:" || {
+				iw reg set "$country"
+				sleep 1
+			}
+		fi
 	}
 
 	hostapd_conf_file="/var/run/hostapd-$phy.conf"
