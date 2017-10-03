@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/wil6210/cfg80211.c
 +++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
-@@ -51,6 +51,9 @@ MODULE_PARM_DESC(disable_ap_sme, " let user space handle AP mode SME");
+@@ -57,6 +57,9 @@ static struct wiphy_wowlan_support wil_w
  	.max_power		= 40,				\
  }
  
@@ -10,7 +10,7 @@
  static struct ieee80211_channel wil_60ghz_channels[] = {
  	CHAN60G(1, 0),
  	CHAN60G(2, 0),
-@@ -96,7 +99,7 @@ nla_policy qca_wlan_acs_vendor_attr[QCA_WLAN_VENDOR_ATTR_ACS_MAX + 1] = {
+@@ -77,7 +80,7 @@ static struct ieee80211_channel wil_60gh
  #define WIL_MAX_RF_SECTORS (128)
  #define WIL_CID_ALL (0xff)
  
@@ -19,7 +19,7 @@
  	QCA_ATTR_MAC_ADDR = 6,
  	QCA_ATTR_PAD = 13,
  	QCA_ATTR_TSF = 29,
-@@ -104,7 +107,9 @@ enum qca_wlan_vendor_attr_rf_sector {
+@@ -85,7 +88,9 @@ enum qca_wlan_vendor_attr_rf_sector {
  	QCA_ATTR_DMG_RF_SECTOR_TYPE = 31,
  	QCA_ATTR_DMG_RF_MODULE_MASK = 32,
  	QCA_ATTR_DMG_RF_SECTOR_CFG = 33,
@@ -30,7 +30,7 @@
  };
  
  enum qca_wlan_vendor_attr_dmg_rf_sector_type {
-@@ -129,8 +134,22 @@ enum qca_wlan_vendor_attr_dmg_rf_sector_cfg {
+@@ -110,8 +115,22 @@ enum qca_wlan_vendor_attr_dmg_rf_sector_
  	QCA_ATTR_DMG_RF_SECTOR_CFG_AFTER_LAST - 1
  };
  
@@ -54,26 +54,26 @@
  	[QCA_ATTR_MAC_ADDR] = { .len = ETH_ALEN },
  	[QCA_ATTR_DMG_RF_SECTOR_INDEX] = { .type = NLA_U16 },
  	[QCA_ATTR_DMG_RF_SECTOR_TYPE] = { .type = NLA_U8 },
-@@ -164,6 +183,7 @@ enum qca_nl80211_vendor_subcmds {
+@@ -145,6 +164,7 @@ enum qca_nl80211_vendor_subcmds {
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SECTOR_CFG = 140,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR = 141,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SELECTED_SECTOR = 142,
 +	QCA_NL80211_VENDOR_SUBCMD_BRP_SET_ANT_LIMIT = 153,
  };
  
- enum qca_nl80211_vendor_subcmds_index {
-@@ -184,6 +204,8 @@ static int wil_rf_sector_get_selected(struct wiphy *wiphy,
- static int wil_rf_sector_set_selected(struct wiphy *wiphy,
- 				      struct wireless_dev *wdev,
+ static int wil_rf_sector_get_cfg(struct wiphy *wiphy,
+@@ -161,6 +181,8 @@ static int wil_rf_sector_set_selected(st
  				      const void *data, int data_len);
+ static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 		      const void *data, int data_len);
 +static int wil_brp_set_ant_limit(struct wiphy *wiphy, struct wireless_dev *wdev,
 +				 const void *data, int data_len);
  
  /* vendor specific commands */
  static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
-@@ -267,6 +289,13 @@ static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
- 			 WIPHY_VENDOR_CMD_NEED_RUNNING,
- 		.doit = wil_rf_sector_set_selected
+@@ -244,6 +266,13 @@ static const struct wiphy_vendor_command
+ 			WIPHY_VENDOR_CMD_NEED_RUNNING,
+ 		.doit = wil_aoa_abort_measurement
  	},
 +	{
 +		.info.vendor_id = QCA_NL80211_VENDOR_ID,
@@ -84,8 +84,8 @@
 +	},
  };
  
- /* vendor specific events */
-@@ -2274,7 +2303,7 @@ static int wil_rf_sector_get_cfg(struct wiphy *wiphy,
+ /* Vendor id to be used in vendor specific command and events
+@@ -2039,7 +2068,7 @@ static int wil_rf_sector_get_cfg(struct
  {
  	struct wil6210_priv *wil = wdev_to_wil(wdev);
  	int rc;
@@ -94,16 +94,16 @@
  	u16 sector_index;
  	u8 sector_type;
  	u32 rf_modules_vec;
-@@ -2291,7 +2320,7 @@ static int wil_rf_sector_get_cfg(struct wiphy *wiphy,
+@@ -2056,7 +2085,7 @@ static int wil_rf_sector_get_cfg(struct
  	if (!test_bit(WMI_FW_CAPABILITY_RF_SECTORS, wil->fw_capabilities))
  		return -EOPNOTSUPP;
  
 -	rc = nla_parse(tb, QCA_ATTR_DMG_RF_SECTOR_MAX, data, data_len,
 +	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
- 		       wil_rf_sector_policy);
+ 		       wil_rf_sector_policy, NULL);
  	if (rc) {
  		wil_err(wil, "Invalid rf sector ATTR\n");
-@@ -2391,7 +2420,7 @@ static int wil_rf_sector_set_cfg(struct wiphy *wiphy,
+@@ -2158,7 +2187,7 @@ static int wil_rf_sector_set_cfg(struct
  {
  	struct wil6210_priv *wil = wdev_to_wil(wdev);
  	int rc, tmp;
@@ -112,16 +112,16 @@
  	struct nlattr *tb2[QCA_ATTR_DMG_RF_SECTOR_CFG_MAX + 1];
  	u16 sector_index, rf_module_index;
  	u8 sector_type;
-@@ -2407,7 +2436,7 @@ static int wil_rf_sector_set_cfg(struct wiphy *wiphy,
+@@ -2174,7 +2203,7 @@ static int wil_rf_sector_set_cfg(struct
  	if (!test_bit(WMI_FW_CAPABILITY_RF_SECTORS, wil->fw_capabilities))
  		return -EOPNOTSUPP;
  
 -	rc = nla_parse(tb, QCA_ATTR_DMG_RF_SECTOR_MAX, data, data_len,
 +	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
- 		       wil_rf_sector_policy);
+ 		       wil_rf_sector_policy, NULL);
  	if (rc) {
  		wil_err(wil, "Invalid rf sector ATTR\n");
-@@ -2498,7 +2527,7 @@ static int wil_rf_sector_get_selected(struct wiphy *wiphy,
+@@ -2266,7 +2295,7 @@ static int wil_rf_sector_get_selected(st
  {
  	struct wil6210_priv *wil = wdev_to_wil(wdev);
  	int rc;
@@ -130,16 +130,16 @@
  	u8 sector_type, mac_addr[ETH_ALEN];
  	int cid = 0;
  	struct wmi_get_selected_rf_sector_index_cmd cmd;
-@@ -2511,7 +2540,7 @@ static int wil_rf_sector_get_selected(struct wiphy *wiphy,
+@@ -2279,7 +2308,7 @@ static int wil_rf_sector_get_selected(st
  	if (!test_bit(WMI_FW_CAPABILITY_RF_SECTORS, wil->fw_capabilities))
- 		return -ENOTSUPP;
+ 		return -EOPNOTSUPP;
  
 -	rc = nla_parse(tb, QCA_ATTR_DMG_RF_SECTOR_MAX, data, data_len,
 +	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
- 		       wil_rf_sector_policy);
+ 		       wil_rf_sector_policy, NULL);
  	if (rc) {
  		wil_err(wil, "Invalid rf sector ATTR\n");
-@@ -2608,7 +2637,7 @@ static int wil_rf_sector_set_selected(struct wiphy *wiphy,
+@@ -2378,7 +2407,7 @@ static int wil_rf_sector_set_selected(st
  {
  	struct wil6210_priv *wil = wdev_to_wil(wdev);
  	int rc;
@@ -148,20 +148,19 @@
  	u16 sector_index;
  	u8 sector_type, mac_addr[ETH_ALEN], i;
  	int cid = 0;
-@@ -2616,7 +2645,7 @@ static int wil_rf_sector_set_selected(struct wiphy *wiphy,
+@@ -2386,7 +2415,7 @@ static int wil_rf_sector_set_selected(st
  	if (!test_bit(WMI_FW_CAPABILITY_RF_SECTORS, wil->fw_capabilities))
- 		return -ENOTSUPP;
+ 		return -EOPNOTSUPP;
  
 -	rc = nla_parse(tb, QCA_ATTR_DMG_RF_SECTOR_MAX, data, data_len,
 +	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
- 		       wil_rf_sector_policy);
+ 		       wil_rf_sector_policy, NULL);
  	if (rc) {
  		wil_err(wil, "Invalid rf sector ATTR\n");
-@@ -2695,3 +2724,93 @@ static int wil_rf_sector_set_selected(struct wiphy *wiphy,
- 
+@@ -2466,6 +2495,96 @@ static int wil_rf_sector_set_selected(st
  	return rc;
  }
-+
+ 
 +static int
 +wil_brp_wmi_set_ant_limit(struct wil6210_priv *wil, u8 cid, u8 limit_mode,
 +			  u8 antenna_num_limit)
@@ -180,14 +179,14 @@
 +	reply.evt.status = WMI_FW_STATUS_FAILURE;
 +
 +	rc = wmi_call(wil, WMI_BRP_SET_ANT_LIMIT_CMDID, &cmd, sizeof(cmd),
-+		      WMI_BRP_SET_ANT_LIMIT_EVENTID, &reply,
-+		      sizeof(reply), 250);
++			WMI_BRP_SET_ANT_LIMIT_EVENTID, &reply,
++			sizeof(reply), 250);
 +	if (rc)
 +		return rc;
 +
 +	if (reply.evt.status != WMI_FW_STATUS_SUCCESS) {
 +		wil_err(wil, "brp set antenna limit failed with status %d\n",
-+			reply.evt.status);
++				reply.evt.status);
 +		rc = -EINVAL;
 +	}
 +
@@ -209,7 +208,7 @@
 +		return -ENOTSUPP;
 +
 +	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
-+		       wil_brp_ant_limit_policy);
++			wil_brp_ant_limit_policy);
 +	if (rc) {
 +		wil_err(wil, "Invalid ant limit ATTR\n");
 +		return rc;
@@ -234,9 +233,9 @@
 +
 +		antenna_num_limit = nla_get_u8(tb[QCA_ATTR_BRP_ANT_NUM_LIMIT]);
 +		if (antenna_num_limit > WIL_BRP_ANT_LIMIT_MAX ||
-+		    antenna_num_limit < WIL_BRP_ANT_LIMIT_MIN) {
++				antenna_num_limit < WIL_BRP_ANT_LIMIT_MIN) {
 +			wil_err(wil, "Invalid number of antenna limit: %d\n",
-+				antenna_num_limit);
++					antenna_num_limit);
 +			return -EINVAL;
 +		}
 +	}
@@ -249,5 +248,9 @@
 +	}
 +
 +	return wil_brp_wmi_set_ant_limit(wil, cid, limit_mode,
-+					 antenna_num_limit);
++			antenna_num_limit);
 +}
++
+ static int wil_start_acs_survey(struct wil6210_priv *wil, uint dwell_time,
+ 				struct ieee80211_channel *channels,
+ 				u8 num_channels)
