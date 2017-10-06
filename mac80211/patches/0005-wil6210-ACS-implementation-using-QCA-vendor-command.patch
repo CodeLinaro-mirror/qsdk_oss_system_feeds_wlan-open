@@ -1,6 +1,12 @@
 --- a/drivers/net/wireless/ath/wil6210/cfg80211.c
 +++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
-@@ -20,6 +20,21 @@
+@@ -14,10 +14,27 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <linux/moduleparam.h>
+ #include <linux/etherdevice.h>
++#include <net/netlink.h>
  #include "wil6210.h"
  #include "wmi.h"
  
@@ -21,38 +27,11 @@
 +
  #define WIL_MAX_ROC_DURATION_MS 5000
  
- bool disable_ap_sme;
-@@ -115,6 +130,7 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
+ #define CHAN60G(_channel, _flags) {				\
+@@ -36,6 +53,72 @@ static struct ieee80211_channel wil_60gh
+ /* channel 4 not supported yet */
  };
  
- enum qca_nl80211_vendor_subcmds {
-+	QCA_NL80211_VENDOR_SUBCMD_DO_ACS = 54,
- 	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SECTOR_CFG = 139,
- 	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SECTOR_CFG = 140,
- 	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR = 141,
-@@ -133,6 +149,8 @@ static int wil_rf_sector_get_selected(st
- static int wil_rf_sector_set_selected(struct wiphy *wiphy,
- 				      struct wireless_dev *wdev,
- 				      const void *data, int data_len);
-+static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
-+		      const void *data, int data_len);
- 
- /* vendor specific commands */
- static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
-@@ -166,6 +184,61 @@ static const struct wiphy_vendor_command
- 			 WIPHY_VENDOR_CMD_NEED_RUNNING,
- 		.doit = wil_rf_sector_set_selected
- 	},
-+	{
-+		.info.vendor_id = QCA_NL80211_VENDOR_ID,
-+		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_DO_ACS,
-+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-+			 WIPHY_VENDOR_CMD_NEED_NETDEV |
-+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
-+		.doit = wil_do_acs
-+	},
-+};
-+
 +/* Vendor id to be used in vendor specific command and events
 + * to user space.
 + * NOTE: The authoritative place for definition of QCA_NL80211_VENDOR_ID,
@@ -88,8 +67,27 @@
 +	[QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE] = { .type = NLA_U8 },
 +};
 +
++enum qca_nl80211_vendor_subcmds {
++	QCA_NL80211_VENDOR_SUBCMD_DO_ACS = 54,
++};
++
 +enum qca_nl80211_vendor_subcmds_index {
 +	QCA_NL80211_VENDOR_SUBCMD_DO_ACS_INDEX,
++};
++
++static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
++		      const void *data, int data_len);
++
++/* vendor specific commands */
++static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
++	[QCA_NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
++		.info.vendor_id = QCA_NL80211_VENDOR_ID,
++		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_DO_ACS,
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV |
++			 WIPHY_VENDOR_CMD_NEED_RUNNING,
++		.doit = wil_do_acs
++	},
 +};
 +
 +/* vendor specific events */
@@ -98,21 +96,26 @@
 +			.vendor_id = QCA_NL80211_VENDOR_ID,
 +			.subcmd = QCA_NL80211_VENDOR_SUBCMD_DO_ACS
 +	},
- };
- 
++};
++
  static struct ieee80211_supported_band wil_band_60ghz = {
-@@ -1815,6 +1888,8 @@ static void wil_wiphy_init(struct wiphy
- 
- 	wiphy->n_vendor_commands = ARRAY_SIZE(wil_nl80211_vendor_commands);
- 	wiphy->vendor_commands = wil_nl80211_vendor_commands;
+ 	.channels = wil_60ghz_channels,
+ 	.n_channels = ARRAY_SIZE(wil_60ghz_channels),
+@@ -1562,6 +1645,11 @@ static void wil_wiphy_init(struct wiphy
+ 	wiphy->n_cipher_suites = ARRAY_SIZE(wil_cipher_suites);
+ 	wiphy->mgmt_stypes = wil_mgmt_stypes;
+ 	wiphy->features |= NL80211_FEATURE_SK_TX_STATUS;
++
++	wiphy->n_vendor_commands = ARRAY_SIZE(wil_nl80211_vendor_commands);
++	wiphy->vendor_commands = wil_nl80211_vendor_commands;
 +	wiphy->vendor_events = wil_nl80211_vendor_events;
 +	wiphy->n_vendor_events = ARRAY_SIZE(wil_nl80211_vendor_events);
+ }
  
- #ifdef CONFIG_PM
- 	wiphy->wowlan = &wil_wowlan_support;
-@@ -2326,3 +2401,299 @@ static int wil_rf_sector_set_selected(st
- 
- 	return rc;
+ struct wireless_dev *wil_cfg80211_init(struct device *dev)
+@@ -1620,3 +1708,299 @@ void wil_p2p_wdev_free(struct wil6210_pr
+ 		kfree(p2p_wdev);
+ 	}
  }
 +
 +static int wil_start_acs_survey(struct wil6210_priv *wil, uint dwell_time,
@@ -412,8 +415,8 @@
 +
 --- a/drivers/net/wireless/ath/wil6210/debugfs.c
 +++ b/drivers/net/wireless/ath/wil6210/debugfs.c
-@@ -1661,6 +1661,65 @@ static const struct file_operations fops
- 	.open  = simple_open,
+@@ -1603,6 +1603,65 @@ static const struct file_operations fops
+ 	.llseek		= seq_lseek,
  };
  
 +/*---------Survey results------------*/
@@ -478,17 +481,17 @@
  /*----------------*/
  static void wil6210_debugfs_init_blobs(struct wil6210_priv *wil,
  				       struct dentry *dbg)
-@@ -1714,6 +1773,7 @@ static const struct {
- 	{"fw_capabilities",	0444,	&fops_fw_capabilities},
- 	{"fw_version",	0444,		&fops_fw_version},
- 	{"suspend_stats",	0644,	&fops_suspend_stats},
+@@ -1655,6 +1714,7 @@ static const struct {
+ 	{"led_blink_time",	S_IRUGO | S_IWUSR,	&fops_led_blink_time},
+ 	{"fw_capabilities",	S_IRUGO,	&fops_fw_capabilities},
+ 	{"fw_version",	S_IRUGO,		&fops_fw_version},
 +	{"survey",      S_IRUGO,                &fops_survey},
  };
  
  static void wil6210_debugfs_init_files(struct wil6210_priv *wil,
 --- a/drivers/net/wireless/ath/wil6210/wil6210.h
 +++ b/drivers/net/wireless/ath/wil6210/wil6210.h
-@@ -729,6 +729,11 @@ struct wil6210_priv {
+@@ -673,6 +673,11 @@ struct wil6210_priv {
  #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
  	void *nss_ctx;
  #endif
@@ -498,11 +501,11 @@
 +		struct scan_acs_info ch_info[4];
 +	} __packed survey_reply;
  
- 	enum wmi_ps_profile_type ps_profile;
- 
+ #ifdef CONFIG_PM
+ #ifdef CONFIG_PM_SLEEP
 --- a/drivers/net/wireless/ath/wil6210/wmi.c
 +++ b/drivers/net/wireless/ath/wil6210/wmi.c
-@@ -482,6 +482,27 @@ static void wmi_evt_scan_complete(struct
+@@ -462,6 +462,27 @@ static void wmi_evt_scan_complete(struct
  	mutex_unlock(&wil->p2p_wdev_mutex);
  }
  
@@ -530,7 +533,7 @@
  static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
  {
  	struct net_device *ndev = wil_to_ndev(wil);
-@@ -844,18 +865,19 @@ static const struct {
+@@ -804,18 +825,19 @@ static const struct {
  	void (*handler)(struct wil6210_priv *wil, int eventid,
  			void *data, int data_len);
  } wmi_evt_handlers[] = {
@@ -569,6 +572,6 @@
 +#define WMI_SCAN_DWELL_TIME_MS		(100)
  #define MAX_NUM_OF_SECTORS		(128)
 +#define WMI_SURVEY_TIMEOUT_MS		(10000)
- #define WMI_SCHED_MAX_ALLOCS_PER_CMD	(4)
- #define WMI_RF_DTYPE_LENGTH		(3)
- #define WMI_RF_ETYPE_LENGTH		(3)
+ 
+ /* Mailbox interface
+  * used for commands and events

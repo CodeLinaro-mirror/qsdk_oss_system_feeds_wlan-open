@@ -1,18 +1,20 @@
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -925,6 +925,11 @@ struct ieee80211_tx_info {
+@@ -912,7 +912,12 @@ struct ieee80211_tx_info {
+ 			};
  			struct ieee80211_key_conf *hw_key;
  			u32 flags;
- 			codel_time_t enqueue_time;
+-			/* 4 bytes free */
 +			/* XXX: This frame is not encaptulated with 802.11
 +			 * header. Should this be added to %IEEE80211_TX_CTRL_*
 +			 * flags?.
 +			 */
 +			bool no_80211_encap;
++			/* 3 bytes free */
  		} control;
  		struct {
  			u64 cookie;
-@@ -4316,6 +4321,25 @@ void ieee80211_tx_status_irqsafe(struct
+@@ -4225,6 +4230,25 @@ void ieee80211_tx_status_irqsafe(struct
  				 struct sk_buff *skb);
  
  /**
@@ -40,8 +42,8 @@
   * When operating in AP-mode, call this function to report a non-responding
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -172,6 +172,9 @@ static int ieee80211_change_iface(struct
- 			return ret;
+@@ -129,6 +129,9 @@ static int ieee80211_change_iface(struct
+ 		}
  	}
  
 +	if (!ieee80211_sdata_running(sdata))
@@ -50,7 +52,7 @@
  	return 0;
  }
  
-@@ -2321,6 +2324,12 @@ static int ieee80211_set_wiphy_params(st
+@@ -2283,6 +2286,12 @@ static int ieee80211_set_wiphy_params(st
  	if (changed & WIPHY_PARAM_FRAG_THRESHOLD) {
  		ieee80211_check_fast_xmit_all(local);
  
@@ -65,7 +67,7 @@
  		if (err) {
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -978,6 +978,8 @@ struct ieee80211_sub_if_data {
+@@ -967,6 +967,8 @@ struct ieee80211_sub_if_data {
  	void *nssctx;
  #endif
  
@@ -74,7 +76,7 @@
  	/* must be last, dynamically sized area in this! */
  	struct ieee80211_vif vif;
  };
-@@ -1701,6 +1703,8 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -1683,6 +1685,8 @@ int ieee80211_if_add(struct ieee80211_lo
  		     struct vif_params *params);
  int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
  			     enum nl80211_iftype type);
@@ -83,7 +85,7 @@
  void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
  void ieee80211_remove_interfaces(struct ieee80211_local *local);
  u32 ieee80211_idle_off(struct ieee80211_local *local);
-@@ -1728,6 +1732,8 @@ netdev_tx_t ieee80211_monitor_start_xmit
+@@ -1710,6 +1714,8 @@ netdev_tx_t ieee80211_monitor_start_xmit
  					 struct net_device *dev);
  netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
  				       struct net_device *dev);
@@ -92,7 +94,7 @@
  void __ieee80211_subif_start_xmit(struct sk_buff *skb,
  				  struct net_device *dev,
  				  u32 info_flags);
-@@ -1888,6 +1894,10 @@ void __ieee80211_tx_skb_tid_band(struct
+@@ -1864,6 +1870,10 @@ void __ieee80211_tx_skb_tid_band(struct
  				 struct sk_buff *skb, int tid,
  				 enum nl80211_band band);
  
@@ -105,26 +107,26 @@
  			  struct sk_buff *skb, int tid,
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -1248,6 +1248,17 @@ static const struct net_device_ops ieee8
- #endif
+@@ -1194,6 +1194,17 @@ static const struct net_device_ops ieee8
+ 	.ndo_get_stats64	= ieee80211_get_stats64,
  };
  
 +static const struct net_device_ops ieee80211_dataif_8023_ops = {
-+	.ndo_open               = ieee80211_open,
-+	.ndo_stop               = ieee80211_stop,
-+	.ndo_uninit             = ieee80211_uninit,
-+	.ndo_start_xmit         = ieee80211_subif_8023_start_xmit,
-+	.ndo_set_rx_mode        = ieee80211_set_multicast_list,
-+	.ndo_set_mac_address    = ieee80211_change_mac,
-+	.ndo_select_queue       = ieee80211_netdev_select_queue,
-+	.ndo_get_stats64        = ieee80211_get_stats64,
++	.ndo_open		= ieee80211_open,
++	.ndo_stop		= ieee80211_stop,
++	.ndo_uninit		= ieee80211_uninit,
++	.ndo_start_xmit		= ieee80211_subif_8023_start_xmit,
++	.ndo_set_rx_mode	= ieee80211_set_multicast_list,
++	.ndo_set_mac_address	= ieee80211_change_mac,
++	.ndo_select_queue	= ieee80211_netdev_select_queue,
++	.ndo_get_stats64	= ieee80211_get_stats64,
 +};
 +
- #if LINUX_VERSION_IS_GEQ(3,14,0) || \
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0) || \
      (LINUX_VERSION_CODE == KERNEL_VERSION(3,13,11) && UTS_UBUNTU_RELEASE_ABI > 30)
  static u16 ieee80211_monitor_select_queue(struct net_device *dev,
-@@ -1298,6 +1309,63 @@ static const struct net_device_ops ieee8
- #endif
+@@ -1237,6 +1248,63 @@ static const struct net_device_ops ieee8
+ 	.ndo_get_stats64	= ieee80211_get_stats64,
  };
  
 +static bool
@@ -187,7 +189,7 @@
  static void ieee80211_if_free(struct net_device *dev)
  {
  	free_percpu(netdev_tstats(dev));
-@@ -1511,6 +1579,8 @@ static void ieee80211_setup_sdata(struct
+@@ -1452,6 +1520,8 @@ static void ieee80211_setup_sdata(struct
  
  	sdata->noack_map = 0;
  
@@ -196,7 +198,7 @@
  	/* only monitor/p2p-device differ */
  	if (sdata->dev) {
  		sdata->dev->netdev_ops = &ieee80211_dataif_ops;
-@@ -2002,6 +2072,8 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -1931,6 +2001,8 @@ int ieee80211_if_add(struct ieee80211_lo
  	list_add_tail_rcu(&sdata->list, &local->interfaces);
  	mutex_unlock(&local->iflist_mtx);
  
@@ -219,9 +221,9 @@
  	case WLAN_CIPHER_SUITE_WEP40:
 --- a/net/mac80211/status.c
 +++ b/net/mac80211/status.c
-@@ -983,6 +983,85 @@ void ieee80211_tx_status_ext(struct ieee
+@@ -952,6 +952,85 @@ void ieee80211_tx_status(struct ieee8021
  }
- EXPORT_SYMBOL(ieee80211_tx_status_ext);
+ EXPORT_SYMBOL(ieee80211_tx_status);
  
 +void ieee80211_tx_status_8023(struct ieee80211_hw *hw,
 +			      struct ieee80211_vif *vif,
@@ -307,7 +309,7 @@
  	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -1251,12 +1251,18 @@ static struct txq_info *ieee80211_get_tx
+@@ -1255,12 +1255,18 @@ static struct txq_info *ieee80211_get_tx
  	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	struct ieee80211_txq *txq = NULL;
@@ -326,8 +328,8 @@
 +	if (!is_data)
  		return NULL;
  
- 	if (sta) {
-@@ -1430,6 +1436,7 @@ void ieee80211_txq_purge(struct ieee8021
+ 	if (pubsta) {
+@@ -1429,6 +1435,7 @@ void ieee80211_txq_purge(struct ieee8021
  {
  	struct fq *fq = &local->fq;
  	struct fq_tin *tin = &txqi->tin;
@@ -335,7 +337,7 @@
  
  	fq_tin_reset(fq, tin, fq_skb_free_func);
  	ieee80211_purge_tx_queue(&local->hw, &txqi->frags);
-@@ -2274,9 +2281,9 @@ static inline bool ieee80211_is_tdls_set
+@@ -2282,9 +2289,9 @@ static inline bool ieee80211_is_tdls_set
  	       skb->data[14] == WLAN_TDLS_SNAP_RFTYPE;
  }
  
@@ -348,7 +350,7 @@
  {
  	struct sta_info *sta;
  
-@@ -3443,6 +3450,9 @@ begin:
+@@ -3421,6 +3428,9 @@ begin:
  	hdr = (struct ieee80211_hdr *)skb->data;
  	info = IEEE80211_SKB_CB(skb);
  
@@ -358,7 +360,7 @@
  	memset(&tx, 0, sizeof(tx));
  	__skb_queue_head_init(&tx.skbs);
  	tx.local = local;
-@@ -3767,6 +3777,187 @@ netdev_tx_t ieee80211_subif_start_xmit(s
+@@ -3594,6 +3604,187 @@ netdev_tx_t ieee80211_subif_start_xmit(s
  	return NETDEV_TX_OK;
  }
  
@@ -546,7 +548,7 @@
  struct sk_buff *
  ieee80211_build_data_template(struct ieee80211_sub_if_data *sdata,
  			      struct sk_buff *skb, u32 info_flags)
-@@ -3845,6 +4036,16 @@ static bool ieee80211_tx_pending_skb(str
+@@ -3672,6 +3863,16 @@ static bool ieee80211_tx_pending_skb(str
  		}
  		info->band = chanctx_conf->def.chan->band;
  		result = ieee80211_tx(sdata, NULL, skb, true);
