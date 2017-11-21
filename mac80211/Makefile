@@ -352,7 +352,7 @@ endef
 define KernelPackage/wil6210
   $(call KernelPackage/mac80211/Default)
   TITLE:=QCA 802.11ad wireless cards support
-  DEPENDS+= @PCI_SUPPORT +kmod-cfg80211
+  DEPENDS+= @TARGET_ipq806x||TARGET_ipq_ipq806x @PCI_SUPPORT +kmod-cfg80211
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/wil6210/wil6210.ko
   AUTOLOAD:=$(call AutoProbe,wil6210)
