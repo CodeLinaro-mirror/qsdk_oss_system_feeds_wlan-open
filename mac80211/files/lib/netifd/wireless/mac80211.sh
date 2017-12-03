@@ -1,5 +1,6 @@
 #!/bin/sh
 . /lib/netifd/netifd-wireless.sh
+[ -e /lib/functions.sh ] && . /lib/functions.sh
 [ -e /lib/netifd/hostapd.sh ] && . /lib/netifd/hostapd.sh
 [ -e /lib/wifi/hostapd.sh ] && . /lib/wifi/hostapd.sh
 [ -e /lib/wifi/wpa_supplicant.sh ] && . /lib/wifi/wpa_supplicant.sh
@@ -392,6 +393,7 @@ mac80211_check_ap() {
 }
 
 mac80211_prepare_vif() {
+	json_get_vars vif
 	json_select config
 
 	json_get_vars ifname mode ssid wds powersave macaddr
@@ -599,6 +601,38 @@ drv_mac80211_cleanup() {
 	fi
 }
 
+mac80211_map_config_ifaces_to_json() {
+	arg_device=$1
+	index=1
+	json_get_keys ifaces interfaces
+
+	json_select interfaces
+	config_cb() {
+		local type="$1"
+		local section="$2"
+		local jiface
+
+		config_get TYPE "$CONFIG_SECTION" TYPE
+		case "$TYPE" in
+			wifi-iface)
+				config_get device "$CONFIG_SECTION" device
+				[ "$device" == "$arg_device" ] && {
+					jiface=$(echo $ifaces | cut -d' ' -f$index)
+					json_select $jiface
+					json_add_string "vif" "$CONFIG_SECTION"
+					json_select ..
+					index=$(( index+1 ))
+				}
+			;;
+		esac
+	}
+
+	config_load wireless
+	config_set "$arg_device" phy "$phy"
+	json_select ..
+	reset_cb
+}
+
 drv_mac80211_setup() {
 	json_select config
 	json_get_vars \
@@ -616,6 +650,8 @@ drv_mac80211_setup() {
 		wireless_set_retry 0
 		return 1
 	}
+	# workaround for buggy hostapd.sh in premium profile
+	[ -e /lib/wifi/hostapd.sh ] && mac80211_map_config_ifaces_to_json $1
 
 	wireless_set_data phy="$phy"
 	mac80211_interface_cleanup "$phy"
