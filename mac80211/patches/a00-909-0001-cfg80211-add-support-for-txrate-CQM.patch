@@ -1,37 +1,35 @@
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -4126,6 +4126,19 @@ enum nl80211_ps_state {
+@@ -4126,6 +4126,17 @@ enum nl80211_ps_state {
   *	loss event
   * @NL80211_ATTR_CQM_RSSI_LEVEL: the RSSI value in dBm that triggered the
   *	RSSI threshold event.
 + * @NL80211_ATTR_CQM_TX_RATE_LEVEL: the tx rate value in Kbps that triggered the
 + *	TX_RATE threshold event.
-+ * @NL80211_ATTR_CQM_TX_RATE_THOLD: TX RATE threshold in Kbps. This value
-+ *	specifies the threshold for the TX_RATE level at which an event will be
-+ *	sent. Zero to disable. Alternatively, if
-+ *	%NL80211_EXT_FEATURE_CQM_TX_RATE_LIST is Set, multiple values can be
-+ *	supplied as a low-to-high sorted array ofthreshold values in Kbps.
-+ *	Events will be sent when the TX_RATE valuecrosses any of the thresholds.
-+ * @NL80211_ATTR_CQM_TX_RATE_HYST: TX RATE hysteresis in Kbps. This value
-+ *	specifies the minimum amount the TX_RATE level must change after an
-+ *	event before anew event may be issued (to reduce effects of TX_RATE
-+ *	 oscillation).
++ * @NL80211_ATTR_CQM_LOW_TX_RATE_THOLD: TX_RATE threshold in Kbps. This value
++ *	specifies the low threshold for the TX_RATE level at which an event will be
++ *	sent. Zero to disable. Events will be sent when the TX_RATE value goes
++ *	lesser than this threshold.
++ * @NL80211_ATTR_CQM_HIGH_TX_RATE_THOLD: TX RATE in Kbps. This value
++ *	specifies the high threshold for the TX_RATE  level at which an event will
++ *	be sent. Zero to diable. Event will be sent when the TX_RATE values goes
++ *	greater than this threshold.
 + * @NL80211_ATTR_CQM_TX_RATE_THRESHOLD_EVENT: TX_RATE threshold event
   * @__NL80211_ATTR_CQM_AFTER_LAST: internal
   * @NL80211_ATTR_CQM_MAX: highest key attribute
   */
-@@ -4140,6 +4153,10 @@ enum nl80211_attr_cqm {
+@@ -4140,6 +4151,10 @@ enum nl80211_attr_cqm {
  	NL80211_ATTR_CQM_TXE_INTVL,
  	NL80211_ATTR_CQM_BEACON_LOSS_EVENT,
  	NL80211_ATTR_CQM_RSSI_LEVEL,
-+	NL80211_ATTR_CQM_TX_RATE_THOLD,
-+	NL80211_ATTR_CQM_TX_RATE_HYST,
++	NL80211_ATTR_CQM_LOW_TX_RATE_THOLD,
++	NL80211_ATTR_CQM_HIGH_TX_RATE_THOLD,
 +	NL80211_ATTR_CQM_TX_RATE_THRESHOLD_EVENT,
 +	NL80211_ATTR_CQM_TX_RATE_LEVEL,
  
  	/* keep last */
  	__NL80211_ATTR_CQM_AFTER_LAST,
-@@ -4160,6 +4177,17 @@ enum nl80211_cqm_rssi_threshold_event {
+@@ -4160,6 +4175,17 @@ enum nl80211_cqm_rssi_threshold_event {
  	NL80211_CQM_RSSI_BEACON_LOSS_EVENT,
  };
  
@@ -49,342 +47,63 @@
  
  /**
   * enum nl80211_tx_power_setting - TX power adjustment
-@@ -4927,6 +4955,8 @@ enum nl80211_feature_flags {
-  *	handshake with 802.1X in station mode (will pass EAP frames to the host
-  *	and accept the set_pmk/del_pmk commands), doing it in the host might not
-  *	be supported.
-+ *	%NL80211_ATTR_CQM_TX_RATE_THOLD attribute accepts a list of zero or more
-+ *	TX RATE threshold values to monitor rather than exactly one threshold.
-  *
-  * @NUM_NL80211_EXT_FEATURES: number of extended features.
-  * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
-@@ -4949,6 +4979,7 @@ enum nl80211_ext_feature_index {
- 	NL80211_EXT_FEATURE_FILS_SK_OFFLOAD,
- 	NL80211_EXT_FEATURE_4WAY_HANDSHAKE_STA_PSK,
- 	NL80211_EXT_FEATURE_4WAY_HANDSHAKE_STA_1X,
-+	NL80211_EXT_FEATURE_CQM_TX_RATE_LIST,
- 
- 	/* add new features before the definition below */
- 	NUM_NL80211_EXT_FEATURES,
---- a/net/wireless/core.c
-+++ b/net/wireless/core.c
-@@ -988,10 +988,16 @@ void wiphy_rfkill_set_hw_state(struct wiphy *wiphy, bool blocked)
- }
- EXPORT_SYMBOL(wiphy_rfkill_set_hw_state);
- 
--void cfg80211_cqm_config_free(struct wireless_dev *wdev)
-+void cfg80211_cqm_rssi_config_free(struct wireless_dev *wdev)
- {
--	kfree(wdev->cqm_config);
--	wdev->cqm_config = NULL;
-+	kfree(wdev->cqm_rssi_config);
-+	wdev->cqm_rssi_config = NULL;
-+}
-+
-+void cfg80211_cqm_txrate_config_free(struct wireless_dev *wdev)
-+{
-+	kfree(wdev->cqm_txrate_config);
-+	wdev->cqm_txrate_config = NULL;
- }
- 
- void cfg80211_unregister_wdev(struct wireless_dev *wdev)
-@@ -1021,7 +1027,8 @@ void cfg80211_unregister_wdev(struct wireless_dev *wdev)
- 		break;
- 	}
- 
--	cfg80211_cqm_config_free(wdev);
-+	cfg80211_cqm_rssi_config_free(wdev);
-+	cfg80211_cqm_txrate_config_free(wdev);
- }
- EXPORT_SYMBOL(cfg80211_unregister_wdev);
- 
-@@ -1295,7 +1302,8 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
- 			kzfree(wdev->wext.keys);
- #endif
- 			flush_work(&wdev->disconnect_wk);
--			cfg80211_cqm_config_free(wdev);
-+			cfg80211_cqm_rssi_config_free(wdev);
-+			cfg80211_cqm_txrate_config_free(wdev);
- 		}
- 		/*
- 		 * synchronise (so that we won't find this netdev
---- a/net/wireless/core.h
-+++ b/net/wireless/core.h
-@@ -255,13 +255,20 @@ struct cfg80211_beacon_registration {
- 	u32 nlportid;
- };
- 
--struct cfg80211_cqm_config {
-+struct cfg80211_cqm_rssi_config {
- 	u32 rssi_hyst;
- 	s32 last_rssi_event_value;
- 	int n_rssi_thresholds;
- 	s32 rssi_thresholds[0];
- };
- 
-+struct cfg80211_cqm_txrate_config {
-+	u32 txrate_hyst;
-+	u32 last_txrate_event_value;
-+	int n_txrate_tholds;
-+	u32 txrate_tholds[0];
-+};
-+
- void cfg80211_destroy_ifaces(struct cfg80211_registered_device *rdev);
- 
- /* free object */
-@@ -514,6 +521,7 @@ void cfg80211_stop_nan(struct cfg80211_registered_device *rdev,
- #define CFG80211_DEV_WARN_ON(cond)	({bool __r = (cond); __r; })
- #endif
- 
--void cfg80211_cqm_config_free(struct wireless_dev *wdev);
-+void cfg80211_cqm_rssi_config_free(struct wireless_dev *wdev);
-+void cfg80211_cqm_txrate_config_free(struct wireless_dev *wdev);
- 
- #endif /* __NET_WIRELESS_CORE_H */
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -9693,6 +9693,10 @@ nl80211_attr_cqm_policy[NL80211_ATTR_CQM_MAX + 1] = {
+@@ -9693,6 +9693,10 @@ nl80211_attr_cqm_policy[NL80211_ATTR_CQM
  	[NL80211_ATTR_CQM_TXE_PKTS] = { .type = NLA_U32 },
  	[NL80211_ATTR_CQM_TXE_INTVL] = { .type = NLA_U32 },
  	[NL80211_ATTR_CQM_RSSI_LEVEL] = { .type = NLA_S32 },
-+	[NL80211_ATTR_CQM_TX_RATE_THOLD] = { .type = NLA_BINARY },
-+	[NL80211_ATTR_CQM_TX_RATE_HYST] = { .type = NLA_U32 },
++	[NL80211_ATTR_CQM_LOW_TX_RATE_THOLD] = { .type = NLA_U32 },
++	[NL80211_ATTR_CQM_HIGH_TX_RATE_THOLD] = { .type = NLA_U32 },
 +	[NL80211_ATTR_CQM_TX_RATE_THRESHOLD_EVENT] = { .type = NLA_U32 },
 +	[NL80211_ATTR_CQM_TX_RATE_LEVEL] = { .type = NLA_U32 },
  };
  
  static int nl80211_set_cqm_txe(struct genl_info *info,
-@@ -9725,7 +9729,7 @@ static int cfg80211_cqm_rssi_update(struct cfg80211_registered_device *rdev,
- 	int err;
- 
- 	/* RSSI reporting disabled? */
--	if (!wdev->cqm_config)
-+	if (!wdev->cqm_rssi_config)
- 		return rdev_set_cqm_rssi_range_config(rdev, dev, 0, 0);
- 
- 	/*
-@@ -9734,8 +9738,8 @@ static int cfg80211_cqm_rssi_update(struct cfg80211_registered_device *rdev,
- 	 * connection is established and enough beacons received to calculate
- 	 * the average.
- 	 */
--	if (!wdev->cqm_config->last_rssi_event_value && wdev->current_bss &&
--	    rdev->ops->get_station) {
-+	if (!wdev->cqm_rssi_config->last_rssi_event_value &&
-+	    wdev->current_bss && rdev->ops->get_station) {
- 		struct station_info sinfo;
- 		u8 *mac_addr;
- 
-@@ -9746,22 +9750,22 @@ static int cfg80211_cqm_rssi_update(struct cfg80211_registered_device *rdev,
- 			return err;
- 
- 		if (sinfo.filled & BIT(NL80211_STA_INFO_BEACON_SIGNAL_AVG))
--			wdev->cqm_config->last_rssi_event_value =
-+			wdev->cqm_rssi_config->last_rssi_event_value =
- 				(s8) sinfo.rx_beacon_signal_avg;
- 	}
- 
--	last = wdev->cqm_config->last_rssi_event_value;
--	hyst = wdev->cqm_config->rssi_hyst;
--	n = wdev->cqm_config->n_rssi_thresholds;
-+	last = wdev->cqm_rssi_config->last_rssi_event_value;
-+	hyst = wdev->cqm_rssi_config->rssi_hyst;
-+	n = wdev->cqm_rssi_config->n_rssi_thresholds;
- 
- 	for (i = 0; i < n; i++)
--		if (last < wdev->cqm_config->rssi_thresholds[i])
-+		if (last < wdev->cqm_rssi_config->rssi_thresholds[i])
- 			break;
- 
- 	low = i > 0 ?
--		(wdev->cqm_config->rssi_thresholds[i - 1] - hyst) : S32_MIN;
-+	     (wdev->cqm_rssi_config->rssi_thresholds[i - 1] - hyst) : S32_MIN;
- 	high = i < n ?
--		(wdev->cqm_config->rssi_thresholds[i] + hyst - 1) : S32_MAX;
-+	     (wdev->cqm_rssi_config->rssi_thresholds[i] + hyst - 1) : S32_MAX;
- 
- 	return rdev_set_cqm_rssi_range_config(rdev, dev, low, high);
- }
-@@ -9790,7 +9794,7 @@ static int nl80211_set_cqm_rssi(struct genl_info *info,
- 		return -EOPNOTSUPP;
- 
- 	wdev_lock(wdev);
--	cfg80211_cqm_config_free(wdev);
-+	cfg80211_cqm_rssi_config_free(wdev);
- 	wdev_unlock(wdev);
- 
- 	if (n_thresholds <= 1 && rdev->ops->set_cqm_rssi_config) {
-@@ -9810,21 +9814,21 @@ static int nl80211_set_cqm_rssi(struct genl_info *info,
- 
- 	wdev_lock(wdev);
- 	if (n_thresholds) {
--		struct cfg80211_cqm_config *cqm_config;
-+		struct cfg80211_cqm_rssi_config *cqm_rssi_config;
- 
--		cqm_config = kzalloc(sizeof(struct cfg80211_cqm_config) +
-+		cqm_rssi_config = kzalloc(sizeof(*cqm_rssi_config) +
- 				     n_thresholds * sizeof(s32), GFP_KERNEL);
--		if (!cqm_config) {
-+		if (!cqm_rssi_config) {
- 			err = -ENOMEM;
- 			goto unlock;
- 		}
- 
--		cqm_config->rssi_hyst = hysteresis;
--		cqm_config->n_rssi_thresholds = n_thresholds;
--		memcpy(cqm_config->rssi_thresholds, thresholds,
-+		cqm_rssi_config->rssi_hyst = hysteresis;
-+		cqm_rssi_config->n_rssi_thresholds = n_thresholds;
-+		memcpy(cqm_rssi_config->rssi_thresholds, thresholds,
- 		       n_thresholds * sizeof(s32));
- 
--		wdev->cqm_config = cqm_config;
-+		wdev->cqm_rssi_config = cqm_rssi_config;
- 	}
- 
- 	err = cfg80211_cqm_rssi_update(rdev, dev);
-@@ -9835,6 +9839,101 @@ unlock:
+@@ -9835,6 +9839,24 @@ unlock:
  	return err;
  }
  
-+static int cfg80211_cqm_tx_rate_update(struct cfg80211_registered_device *rdev,
-+				       struct net_device *dev)
-+{
-+	struct wireless_dev *wdev = dev->ieee80211_ptr;
-+	u32 last, low, high;
-+	u32 hyst;
-+	int i, n;
-+
-+	/* TX_RATE reporting disabled? */
-+	if (!wdev->cqm_txrate_config)
-+		return rdev_set_cqm_tx_rate_range_config(rdev, dev, 0, 0);
-+
-+	last = wdev->cqm_txrate_config->last_txrate_event_value;
-+	hyst = wdev->cqm_txrate_config->txrate_hyst;
-+	n = wdev->cqm_txrate_config->n_txrate_tholds;
-+
-+	for (i = 0; i < n; i++)
-+		if (last < wdev->cqm_txrate_config->txrate_tholds[i])
-+			break;
-+
-+	low = i > 0 ?
-+	      (wdev->cqm_txrate_config->txrate_tholds[i - 1] - hyst) : 0;
-+	high = i < n ?
-+	      (wdev->cqm_txrate_config->txrate_tholds[i] + hyst - 1) : U32_MAX;
-+	return rdev_set_cqm_tx_rate_range_config(rdev, dev, low, high);
-+}
-+
 +static int nl80211_set_cqm_tx_rate(struct genl_info *info,
-+				   const u32 *thresholds, int n_thresholds,
-+				   u32 hysteresis)
++				   u32 low_thold, u32 high_thold)
 +{
 +	struct cfg80211_registered_device *rdev = info->user_ptr[0];
 +	struct net_device *dev = info->user_ptr[1];
 +	struct wireless_dev *wdev = dev->ieee80211_ptr;
-+	int i, err;
-+	u32 prev = 0;
 +
-+	/* Check all values sorted . Accepts only positive rates*/
-+	for (i = 0; i < n_thresholds; i++) {
-+		if (thresholds[i] <= prev)
-+			return -EINVAL;
-+
-+		prev = thresholds[i];
-+	}
++	if (!rdev->ops->set_cqm_tx_rate_config)
++		return -EOPNOTSUPP;
 +
 +	if ((wdev->iftype != NL80211_IFTYPE_STATION &&
 +	     wdev->iftype != NL80211_IFTYPE_P2P_CLIENT) &&
 +	     wdev->iftype != NL80211_IFTYPE_AP)
 +		return -EOPNOTSUPP;
 +
-+	wdev_lock(wdev);
-+	cfg80211_cqm_txrate_config_free(wdev);
-+	wdev_unlock(wdev);
-+
-+	if (n_thresholds <= 1 && rdev->ops->set_cqm_tx_rate_config) {
-+		if (n_thresholds == 0 || thresholds[0] == 0) /* Disabling */
-+			return rdev_set_cqm_tx_rate_config(rdev, dev, 0, 0);
-+
-+		return rdev_set_cqm_tx_rate_config(rdev, dev,
-+						thresholds[0], hysteresis);
-+	}
-+
-+	if (!wiphy_ext_feature_isset(&rdev->wiphy,
-+				     NL80211_EXT_FEATURE_CQM_TX_RATE_LIST))
-+		return -EOPNOTSUPP;
-+
-+	if (n_thresholds == 1 && thresholds[0] == 0) /* Disabling */
-+		n_thresholds = 0;
-+
-+	wdev_lock(wdev);
-+	if (n_thresholds) {
-+		struct cfg80211_cqm_txrate_config *cqm_txrate_config;
-+
-+		cqm_txrate_config = kzalloc(sizeof(*cqm_txrate_config) +
-+				     n_thresholds * sizeof(u32), GFP_KERNEL);
-+		if (!cqm_txrate_config) {
-+			err = -ENOMEM;
-+			goto unlock;
-+		}
-+
-+		cqm_txrate_config->txrate_hyst = hysteresis;
-+		cqm_txrate_config->n_txrate_tholds = n_thresholds;
-+		memcpy(cqm_txrate_config->txrate_tholds, thresholds,
-+		       n_thresholds * sizeof(u32));
-+
-+		wdev->cqm_txrate_config = cqm_txrate_config;
-+	}
-+
-+	err = cfg80211_cqm_tx_rate_update(rdev, dev);
-+
-+unlock:
-+	wdev_unlock(wdev);
-+
-+	return err;
++	return rdev_set_cqm_tx_rate_config(rdev, dev, low_thold,
++					   high_thold);
 +}
  static int nl80211_set_cqm(struct sk_buff *skb, struct genl_info *info)
  {
  	struct nlattr *attrs[NL80211_ATTR_CQM_MAX + 1];
-@@ -9865,6 +9964,21 @@ static int nl80211_set_cqm(struct sk_buff *skb, struct genl_info *info)
+@@ -9865,6 +9887,17 @@ static int nl80211_set_cqm(struct sk_buf
  					    hysteresis);
  	}
  
-+	if (attrs[NL80211_ATTR_CQM_TX_RATE_THOLD] &&
-+	    attrs[NL80211_ATTR_CQM_TX_RATE_HYST]) {
-+		const u32 *thresholds =
-+			nla_data(attrs[NL80211_ATTR_CQM_TX_RATE_THOLD]);
-+		int len = nla_len(attrs[NL80211_ATTR_CQM_TX_RATE_THOLD]);
-+		u32 hysteresis =
-+			nla_get_u32(attrs[NL80211_ATTR_CQM_TX_RATE_HYST]);
++	if (attrs[NL80211_ATTR_CQM_LOW_TX_RATE_THOLD] &&
++	    attrs[NL80211_ATTR_CQM_HIGH_TX_RATE_THOLD]) {
++		u32 low_thold =
++			nla_get_u32(attrs[NL80211_ATTR_CQM_LOW_TX_RATE_THOLD]);
++		u32 high_thold =
++			nla_get_u32(attrs[NL80211_ATTR_CQM_HIGH_TX_RATE_THOLD]);
 +
-+		if (len % 4)
-+			return -EINVAL;
-+
-+		return nl80211_set_cqm_tx_rate(info, thresholds, len / 4,
-+					    hysteresis);
++		return nl80211_set_cqm_tx_rate(info, low_thold,
++					       high_thold);
 +	}
 +
  	if (attrs[NL80211_ATTR_CQM_TXE_RATE] &&
  	    attrs[NL80211_ATTR_CQM_TXE_PKTS] &&
  	    attrs[NL80211_ATTR_CQM_TXE_INTVL]) {
-@@ -14401,13 +14515,14 @@ void cfg80211_cqm_rssi_notify(struct net_device *dev, const u8 *peer,
- 		    rssi_event != NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH))
- 		return;
- 
--	if (wdev->cqm_config) {
--		wdev->cqm_config->last_rssi_event_value = rssi_level;
-+	if (wdev->cqm_rssi_config) {
-+		wdev->cqm_rssi_config->last_rssi_event_value = rssi_level;
- 
- 		cfg80211_cqm_rssi_update(rdev, dev);
- 
- 		if (rssi_level == 0)
--			rssi_level = wdev->cqm_config->last_rssi_event_value;
-+			rssi_level =
-+				wdev->cqm_rssi_config->last_rssi_event_value;
- 	}
- 
- 	msg = cfg80211_prepare_cqm(dev, peer, gfp);
-@@ -14431,6 +14546,52 @@ void cfg80211_cqm_rssi_notify(struct net_device *dev, const u8 *peer,
+@@ -14431,6 +14464,40 @@ void cfg80211_cqm_rssi_notify(struct net
  }
  EXPORT_SYMBOL(cfg80211_cqm_rssi_notify);
  
@@ -393,8 +112,6 @@
 +			u32 txrate_level, gfp_t gfp)
 +{
 +	struct sk_buff *msg;
-+	struct wireless_dev *wdev = dev->ieee80211_ptr;
-+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 +
 +	trace_cfg80211_cqm_tx_rate_notify(dev, peer, txrate_event,
 +					  txrate_level);
@@ -402,16 +119,6 @@
 +	if (WARN_ON(txrate_event != NL80211_CQM_TX_RATE_THRESHOLD_EVENT_LOW &&
 +		    txrate_event != NL80211_CQM_TX_RATE_THRESHOLD_EVENT_HIGH))
 +		return;
-+
-+	if (wdev->cqm_txrate_config) {
-+		wdev->cqm_txrate_config->last_txrate_event_value = txrate_level;
-+
-+		cfg80211_cqm_tx_rate_update(rdev, dev);
-+
-+		if (txrate_level == 0)
-+			txrate_level =
-+			      wdev->cqm_txrate_config->last_txrate_event_value;
-+	}
 +
 +	msg = cfg80211_prepare_cqm(dev, peer, gfp);
 +	if (!msg)
@@ -439,33 +146,20 @@
  			     u32 rate, u32 intvl, gfp_t gfp)
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -761,6 +761,34 @@ rdev_set_cqm_rssi_range_config(struct cfg80211_registered_device *rdev,
+@@ -761,6 +761,21 @@ rdev_set_cqm_rssi_range_config(struct cf
  }
  
  static inline int
 +rdev_set_cqm_tx_rate_config(struct cfg80211_registered_device *rdev,
-+			    struct net_device *dev, u32 txrate_thold,
-+			    u32 txrate_hyst)
++			    struct net_device *dev, u32 low_txrate_thold,
++			    u32 high_txrate_thold)
 +{
 +	int ret;
 +
-+	trace_rdev_set_cqm_tx_rate_config(&rdev->wiphy, dev, txrate_thold,
-+					  txrate_hyst);
-+	ret = rdev->ops->set_cqm_tx_rate_config(&rdev->wiphy, dev, txrate_thold,
-+						txrate_hyst);
-+	trace_rdev_return_int(&rdev->wiphy, ret);
-+	return ret;
-+}
-+
-+static inline int
-+rdev_set_cqm_tx_rate_range_config(struct cfg80211_registered_device *rdev,
-+				  struct net_device *dev, u32 low, u32 high)
-+{
-+	int ret;
-+
-+	trace_rdev_set_cqm_tx_rate_range_config(&rdev->wiphy, dev, low, high);
-+	ret = rdev->ops->set_cqm_tx_rate_range_config(&rdev->wiphy, dev,
-+						      low, high);
++	trace_rdev_set_cqm_tx_rate_config(&rdev->wiphy, dev, low_txrate_thold,
++					  high_txrate_thold);
++	ret = rdev->ops->set_cqm_tx_rate_config(&rdev->wiphy, dev, low_txrate_thold,
++						high_txrate_thold);
 +	trace_rdev_return_int(&rdev->wiphy, ret);
 +	return ret;
 +}
@@ -476,59 +170,37 @@
  {
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -1339,6 +1339,51 @@ TRACE_EVENT(rdev_set_cqm_rssi_range_config,
+@@ -1339,6 +1339,29 @@ TRACE_EVENT(rdev_set_cqm_rssi_range_conf
  		  __entry->rssi_low, __entry->rssi_high)
  );
  
 +TRACE_EVENT(rdev_set_cqm_tx_rate_config,
 +	TP_PROTO(struct wiphy *wiphy,
-+		 struct net_device *netdev, u32 txrate_thold,
-+		 u32 txrate_hyst),
-+	TP_ARGS(wiphy, netdev, txrate_thold, txrate_hyst),
++		 struct net_device *netdev, u32 low_txrate_thold,
++		 u32 high_txrate_thold),
++	TP_ARGS(wiphy, netdev, low_txrate_thold, high_txrate_thold),
 +	TP_STRUCT__entry(
 +		WIPHY_ENTRY
 +		NETDEV_ENTRY
-+		__field(u32, txrate_thold)
-+		__field(u32, txrate_hyst)
++		__field(u32, low_txrate_thold)
++		__field(u32, high_txrate_thold)
 +	),
 +	TP_fast_assign(
 +		WIPHY_ASSIGN;
 +		NETDEV_ASSIGN;
-+		__entry->txrate_thold = txrate_thold;
-+		__entry->txrate_hyst = txrate_hyst;
++		__entry->low_txrate_thold = low_txrate_thold;
++		__entry->high_txrate_thold = high_txrate_thold;
 +	),
 +	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT
-+		  ", txrate_thold: %d, txrate_hyst: %u ",
++		  ", low_txrate_thold: %u, high_txrate_thold: %u ",
 +		  WIPHY_PR_ARG, NETDEV_PR_ARG,
-+		  __entry->txrate_thold, __entry->txrate_hyst)
-+);
-+
-+TRACE_EVENT(rdev_set_cqm_tx_rate_range_config,
-+	TP_PROTO(struct wiphy *wiphy,
-+		 struct net_device *netdev, u32 low, u32 high),
-+	TP_ARGS(wiphy, netdev, low, high),
-+	TP_STRUCT__entry(
-+		WIPHY_ENTRY
-+		NETDEV_ENTRY
-+		__field(u32, txrate_low)
-+		__field(u32, txrate_high)
-+	),
-+	TP_fast_assign(
-+		WIPHY_ASSIGN;
-+		NETDEV_ASSIGN;
-+		__entry->txrate_low = low;
-+		__entry->txrate_high = high;
-+	),
-+	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT
-+		  ", range: %d - %d ",
-+		  WIPHY_PR_ARG, NETDEV_PR_ARG,
-+		  __entry->txrate_low, __entry->txrate_high)
++		  __entry->low_txrate_thold, __entry->high_txrate_thold)
 +);
 +
  TRACE_EVENT(rdev_set_cqm_txe_config,
  	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev, u32 rate,
  		 u32 pkts, u32 intvl),
-@@ -2597,6 +2642,28 @@ TRACE_EVENT(cfg80211_cqm_rssi_notify,
+@@ -2597,6 +2620,28 @@ TRACE_EVENT(cfg80211_cqm_rssi_notify,
  		  NETDEV_PR_ARG, __entry->rssi_event, __entry->rssi_level)
  );
  
@@ -559,69 +231,29 @@
  		 enum nl80211_iftype iftype, bool check_no_ir),
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -2800,6 +2800,17 @@ struct cfg80211_pmk_conf {
+@@ -2800,6 +2800,9 @@ struct cfg80211_pmk_conf {
   *	signal level is found to be outside the two values.  The driver should
   *	set %NL80211_EXT_FEATURE_CQM_RSSI_LIST if this method is implemented.
   *	If it is provided then there's no point providing @set_cqm_rssi_config.
 + * @set_cqm_tx_rate_config: Configure connection quality monitor TX RATE
 + *	threshold. After configuration, the driver should (soon) send an event
 + *	indicating the current level is above/below the configured threshold;
-+ *	this mayneed some care when the configuration is changed (without
-+ *	first beingdisabled.)
-+ * @set_cqm_tx_rate_range_config: Configure two TX RATE thresholds in the
-+ *	connection quality monitor.  An event is to be sent only when the
-+ *	tx rate level is found to be outside the two values.  The driver
-+ *	should set %NL80211_EXT_FEATURE_CQM_TX_RATE_LIST if this method
-+ *	is implemented.If it is provided then there's no point providing
-+ *	@set_cqm_tx_rate_config.
   * @set_cqm_txe_config: Configure connection quality monitor TX error
   *	thresholds.
   * @sched_scan_start: Tell the driver to start a scheduled scan.
-@@ -3099,6 +3110,13 @@ struct cfg80211_ops {
+@@ -3099,6 +3102,11 @@ struct cfg80211_ops {
  					     struct net_device *dev,
  					     s32 rssi_low, s32 rssi_high);
  
 +	int	(*set_cqm_tx_rate_config)(struct wiphy *wiphy,
-+				       struct net_device *dev,
-+				       u32 txrate_thold, u32 txrate_hyst);
-+	int	(*set_cqm_tx_rate_range_config)(struct wiphy *wiphy,
-+					     struct net_device *dev,
-+					     u32 txrate_low, u32 txrate_high);
++					  struct net_device *dev,
++					  u32 low_txrate_thold,
++					  u32 high_txrate_thold);
 +
  	int	(*set_cqm_txe_config)(struct wiphy *wiphy,
  				      struct net_device *dev,
  				      u32 rate, u32 pkts, u32 intvl);
-@@ -3995,7 +4013,8 @@ void wiphy_free(struct wiphy *wiphy);
- struct cfg80211_conn;
- struct cfg80211_internal_bss;
- struct cfg80211_cached_keys;
--struct cfg80211_cqm_config;
-+struct cfg80211_cqm_rssi_config;
-+struct cfg80211_cqm_txrate_config;
- 
- /**
-  * struct wireless_dev - wireless device state
-@@ -4060,7 +4079,8 @@ struct cfg80211_cqm_config;
-  * @event_lock: (private) lock for event list
-  * @owner_nlportid: (private) owner socket port ID
-  * @nl_owner_dead: (private) owner socket went away
-- * @cqm_config: (private) nl80211 RSSI monitor state
-+ * @cqm_rssi_config: (private) nl80211 RSSI monitor state
-+ * @cqm_txrate_config: (private) nl80211 TX RATE monitor state
-  */
- struct wireless_dev {
- 	struct wiphy *wiphy;
-@@ -4131,7 +4151,8 @@ struct wireless_dev {
- 	} wext;
- #endif
- 
--	struct cfg80211_cqm_config *cqm_config;
-+	struct cfg80211_cqm_rssi_config *cqm_rssi_config;
-+	struct cfg80211_cqm_txrate_config *cqm_txrate_config;
- };
- 
- static inline u8 *wdev_address(struct wireless_dev *wdev)
-@@ -5645,6 +5666,20 @@ void cfg80211_cqm_rssi_notify(struct net_device *dev, const u8 *peer,
+@@ -5645,6 +5653,20 @@ void cfg80211_cqm_rssi_notify(struct net
  			      s32 rssi_level, gfp_t gfp);
  
  /**
@@ -642,7 +274,3 @@
   * cfg80211_cqm_pktloss_notify - notify userspace about packetloss to peer
   * @dev: network device
   * @peer: peer's MAC address
-
--- 
-1.7.9.5
-
