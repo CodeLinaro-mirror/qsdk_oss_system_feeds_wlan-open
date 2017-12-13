@@ -516,6 +516,18 @@ mac80211_setup_adhoc() {
 		${keyspec:+keys $keyspec}
 }
 
+mac80211_setup_ap() {
+	json_get_vars  mcast_rate
+
+	[ -n "$mcast_rate" ] && {
+		local mrate="$(($mcast_rate / 1000))"
+		local sub="$(((mcast_rate / 100) % 10))"
+
+		[ $sub -gt 0 ] && mcval=$mrate.$sub || mcval=$mrate
+		iw dev "$ifname" set mcast_rate $mcval
+	}
+}
+
 mac80211_setup_vif() {
 	local name="$1"
 
@@ -547,6 +559,9 @@ mac80211_setup_vif() {
 		;;
 		sta|mesh)
 			mac80211_setup_supplicant || failed=1
+		;;
+		ap)
+			mac80211_setup_ap
 		;;
 	esac
 
