@@ -136,6 +136,40 @@ EOF
 	devidx=$(($devidx + 1))
 	done
 }
+# This start_lbd is to check the dual band availability and
+# make sure that dual bands (2.4G and 5G) available before
+# starting lbd init script.
+
+start_lbd() {
+	local band_24g
+	local band_5g
+	local i=0
+
+	driver=$(lsmod | cut -d' ' -f 1 | grep ath10k_core)
+
+	if [ "$driver" == "ath10k_core" ]; then
+		while [ $i -lt 10 ]
+		do
+			BANDS=$(/usr/sbin/iw dev 2> /dev/null | grep channel | cut -d' ' -f 2 | cut -d'.' -f 1)
+			for channel in $BANDS
+			do
+				if [ "$channel" -le "14" ]; then
+					band_24g=1
+				elif [ "$channel" -ge "36" ]; then
+					band_5g=1
+				fi
+			done
+
+			if [ "$band_24g" == "1" ] && [ "$band_5g" == "1" ]; then
+				/etc/init.d/lbd start
+				return 0
+			fi
+			sleep 1
+			i=$(($i + 1))
+		done
+	fi
+	return 0
+}
 
 post_mac80211() {
 	local action=${1}
@@ -153,6 +187,9 @@ post_mac80211() {
 			[ -f "/usr/sbin/fst.sh" ] && {
 				/usr/sbin/fst.sh start
 			}
+			if [ -f "/etc/init.d/lbd" ]; then
+				start_lbd &
+			fi
 		;;
 	esac
 	return 0
@@ -167,6 +204,7 @@ pre_mac80211() {
 				/usr/sbin/fst.sh set_mac_addr
 				/usr/sbin/fst.sh stop
 			}
+			[ ! -f /etc/init.d/lbd ] || /etc/init.d/lbd stop
 		;;
 	esac
 	return 0
