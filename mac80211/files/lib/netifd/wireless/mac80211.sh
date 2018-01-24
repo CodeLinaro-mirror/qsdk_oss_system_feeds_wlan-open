@@ -725,6 +725,7 @@ drv_mac80211_setup() {
 					return
 				}
 			fi
+			ifname="wlan${phy#phy}"
 			[ -f "/var/run/hostapd-$ifname.lock" ] &&
 				rm /var/run/hostapd-$ifname.lock
 			# let hostapd manage interface $ifname
