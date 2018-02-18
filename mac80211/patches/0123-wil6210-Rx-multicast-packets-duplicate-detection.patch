@@ -1,0 +1,99 @@
+--- a/drivers/net/wireless/ath/wil6210/debugfs.c
++++ b/drivers/net/wireless/ath/wil6210/debugfs.c
+@@ -1328,6 +1328,7 @@ static void wil_print_rxtid(struct seq_file *s, struct wil_tid_ampdu_rx *r)
+ 	int i;
+ 	u16 index = ((r->head_seq_num - r->ssn) & 0xfff) % r->buf_size;
+ 	unsigned long long drop_dup = r->drop_dup, drop_old = r->drop_old;
++	unsigned long long drop_dup_mcast = r->drop_dup_mcast;
+ 
+ 	seq_printf(s, "([%2d] %3d TU) 0x%03x [", r->buf_size, r->timeout,
+ 		   r->head_seq_num);
+@@ -1338,9 +1339,9 @@ static void wil_print_rxtid(struct seq_file *s, struct wil_tid_ampdu_rx *r)
+ 			seq_printf(s, "%c", r->reorder_buf[i] ? '*' : '_');
+ 	}
+ 	seq_printf(s,
+-		   "] total %llu drop %llu (dup %llu + old %llu) last 0x%03x\n",
+-		   r->total, drop_dup + drop_old, drop_dup, drop_old,
+-		   r->ssn_last_drop);
++		   "] total %llu drop %llu (dup %llu + old %llu + dup mcast %llu) last 0x%03x\n",
++		   r->total, drop_dup + drop_old + drop_dup_mcast, drop_dup,
++		   drop_old, drop_dup_mcast, r->ssn_last_drop);
+ }
+ 
+ static void wil_print_rxtid_crypto(struct seq_file *s, int tid,
+--- a/drivers/net/wireless/ath/wil6210/rx_reorder.c
++++ b/drivers/net/wireless/ath/wil6210/rx_reorder.c
+@@ -108,11 +108,6 @@ __acquires(&sta->tid_rx_lock) __releases(&sta->tid_rx_lock)
+ 	wil_dbg_txrx(wil, "MID %d CID %d TID %d Seq 0x%03x mcast %01x\n",
+ 		     mid, cid, tid, seq, mcast);
+ 
+-	if (unlikely(mcast)) {
+-		wil_netif_rx_any(skb, ndev);
+-		return;
+-	}
+-
+ 	spin_lock(&sta->tid_rx_lock);
+ 
+ 	r = sta->tid_rx[tid];
+@@ -121,6 +116,19 @@ __acquires(&sta->tid_rx_lock) __releases(&sta->tid_rx_lock)
+ 		goto out;
+ 	}
+ 
++	if (unlikely(mcast)) {
++		if (wil_rxdesc_retry(d) && seq == r->mcast_last_seq) {
++			r->drop_dup_mcast++;
++			wil_dbg_txrx(wil, "Rx drop: dup mcast seq 0x%03x\n",
++				     seq);
++			dev_kfree_skb(skb);
++			goto out;
++		}
++		r->mcast_last_seq = seq;
++		wil_netif_rx_any(skb, ndev);
++		goto out;
++	}
++
+ 	r->total++;
+ 	hseq = r->head_seq_num;
+ 
+@@ -255,6 +263,7 @@ struct wil_tid_ampdu_rx *wil_tid_ampdu_rx_alloc(struct wil6210_priv *wil,
+ 	r->buf_size = size;
+ 	r->stored_mpdu_num = 0;
+ 	r->first_time = true;
++	r->mcast_last_seq = U16_MAX;
+ 	return r;
+ }
+ 
+--- a/drivers/net/wireless/ath/wil6210/txrx.h
++++ b/drivers/net/wireless/ath/wil6210/txrx.h
+@@ -480,6 +480,11 @@ static inline int wil_rxdesc_ext_subtype(struct vring_rx_desc *d)
+ 	return WIL_GET_BITS(d->mac.d0, 28, 31);
+ }
+ 
++static inline int wil_rxdesc_retry(struct vring_rx_desc *d)
++{
++	return WIL_GET_BITS(d->mac.d0, 31, 31);
++}
++
+ static inline int wil_rxdesc_key_id(struct vring_rx_desc *d)
+ {
+ 	return WIL_GET_BITS(d->mac.d1, 4, 5);
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -449,6 +449,8 @@ struct pci_dev;
+  * @drop_old: old frames dropped for this reorder buffer
+  * @dialog_token: dialog token for aggregation session
+  * @first_time: true when this buffer used 1-st time
++ * @mcast_last_seq: sequence number (SN) of last received multicast packet
++ * @drop_dup_mcast: duplicate multicast frames dropped for this reorder buffer
+  */
+ struct wil_tid_ampdu_rx {
+ 	struct sk_buff **reorder_buf;
+@@ -467,6 +469,8 @@ struct wil_tid_ampdu_rx {
+ 	unsigned long long drop_old;
+ 	u8 dialog_token;
+ 	bool first_time; /* is it 1-st time this buffer used? */
++	u16 mcast_last_seq; /* multicast dup detection */
++	unsigned long long drop_dup_mcast;
+ };
+ 
+ /**
