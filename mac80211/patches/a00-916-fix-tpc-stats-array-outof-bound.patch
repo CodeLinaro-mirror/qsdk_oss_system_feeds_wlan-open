@@ -1,0 +1,67 @@
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -1928,11 +1928,15 @@ static void ath10k_tpc_stats_print(struc
+ 	*len += scnprintf(buf + *len, buf_len - *len,
+ 			  "********************************\n");
+ 	*len += scnprintf(buf + *len, buf_len - *len,
+-			  "No.  Preamble Rate_code tpc_value1 tpc_value2 tpc_value3\n");
++			  "No.  Preamble Rate_code ");
++
++	for (i = 0; i < WMI_TPC_TX_N_CHAIN; i++)
++		*len += scnprintf(buf + *len, buf_len - *len,
++				  "tpc_value%d ", i);
+ 
+ 	for (i = 0; i < tpc_stats->rate_max; i++) {
+ 		*len += scnprintf(buf + *len, buf_len - *len,
+-				  "%8d %s 0x%2x %s\n", i,
++				  "\n%8d %s 0x%2x %s\n", i,
+ 				  pream_str[tpc_stats->tpc_table[j].pream_idx[i]],
+ 				  tpc_stats->tpc_table[j].rate_code[i],
+ 				  tpc_stats->tpc_table[j].tpc_value[i]);
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -4482,7 +4482,7 @@ void ath10k_wmi_event_pdev_tpc_config(st
+ 
+ 	tpc_stats = kzalloc(sizeof(*tpc_stats), GFP_ATOMIC);
+ 	if (!tpc_stats)
+-		return;
++		goto exit;
+ 
+ 	/* Create the rate code table based on the chains supported */
+ 	rate_idx = 0;
+@@ -4508,6 +4508,13 @@ void ath10k_wmi_event_pdev_tpc_config(st
+ 
+ 	num_tx_chain = __le32_to_cpu(ev->num_tx_chain);
+ 
++	if (num_tx_chain > WMI_TPC_TX_N_CHAIN) {
++		ath10k_warn(ar, "number of tx chain is %d greater than TPC"
++			    " configured tx chain %d\n", num_tx_chain,
++			    WMI_TPC_TX_N_CHAIN);
++		goto exit;
++	}
++
+ 	/* Fill HT20 rate code */
+ 	for (i = 0; i < num_tx_chain; i++) {
+ 		for (j = 0; j < 8; j++) {
+@@ -4612,6 +4619,9 @@ void ath10k_wmi_event_pdev_tpc_config(st
+ 		   __le32_to_cpu(ev->twice_max_rd_power) / 2,
+ 		   __le32_to_cpu(ev->num_tx_chain),
+ 		   __le32_to_cpu(ev->rate_max));
++
++exit:
++	complete(&ar->debug.tpc_complete);
+ }
+ 
+ void ath10k_wmi_event_peer_sta_ps_state_chg(struct ath10k *ar, struct sk_buff *skb)
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
+@@ -4073,8 +4073,8 @@ struct wmi_pdev_get_tpc_config_cmd {
+ } __packed;
+ 
+ #define WMI_TPC_CONFIG_PARAM		1
+-#define WMI_TPC_RATE_MAX		160
+ #define WMI_TPC_TX_N_CHAIN		4
++#define WMI_TPC_RATE_MAX		(WMI_TPC_TX_N_CHAIN * 65)
+ #define WMI_TPC_PREAM_TABLE_MAX		10
+ #define WMI_TPC_FLAG			3
+ #define WMI_TPC_BUF_SIZE		10
