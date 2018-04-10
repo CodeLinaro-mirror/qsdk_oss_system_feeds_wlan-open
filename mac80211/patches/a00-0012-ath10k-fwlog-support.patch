@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
-@@ -12,7 +12,8 @@ ath10k_core-y += mac.o \
+@@ -13,7 +13,8 @@ ath10k_core-y += mac.o \
  		 bmi.o \
  		 hw.o \
  		 p2p.o \
@@ -8,19 +8,19 @@
 +		 swap.o \
 +		 fwlog.o
  
- ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o
+ ath10k_core-$(CPTCFG_ATH10K_SPECTRAL) += spectral.o
  ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -32,6 +32,7 @@
- #include "htt.h"
+@@ -34,6 +34,7 @@
  #include "testmode.h"
  #include "wmi-ops.h"
+ #include "coredump.h"
 +#include "fwlog.h"
  
  unsigned int ath10k_debug_mask;
  static unsigned int ath10k_cryptmode_param;
-@@ -1869,6 +1870,7 @@ static int ath10k_core_init_firmware_fea
+@@ -2026,6 +2027,7 @@ static int ath10k_core_init_firmware_features(struct ath10k *ar)
  		ar->htt.max_num_pending_tx = TARGET_10X_NUM_MSDU_DESC;
  		ar->fw_stats_req_mask = WMI_STAT_PEER;
  		ar->max_spatial_stream = WMI_MAX_SPATIAL_STREAM;
@@ -28,15 +28,15 @@
  		break;
  	case ATH10K_FW_WMI_OP_VERSION_TLV:
  		ar->max_num_peers = TARGET_TLV_NUM_PEERS;
-@@ -1891,6 +1893,7 @@ static int ath10k_core_init_firmware_fea
- 					WMI_10_4_STAT_PEER_EXTD;
+@@ -2049,6 +2051,7 @@ static int ath10k_core_init_firmware_features(struct ath10k *ar)
+ 					WMI_10_4_STAT_VDEV_EXTD;
  		ar->max_spatial_stream = ar->hw_params.max_spatial_stream;
  		ar->max_num_tdls_vdevs = TARGET_10_4_NUM_TDLS_VDEVS;
 +		ar->fwlog_max_moduleid = ATH10K_FWLOG_MODULE_ID_MAX_10_4;
  
  		if (test_bit(ATH10K_FW_FEATURE_PEER_FLOW_CONTROL,
  			     fw_file->fw_features))
-@@ -2426,6 +2429,8 @@ static void ath10k_core_register_work(st
+@@ -2627,6 +2630,8 @@ static void ath10k_core_register_work(struct work_struct *work)
  		goto err_spectral_destroy;
  	}
  
@@ -45,7 +45,7 @@
  	set_bit(ATH10K_FLAG_CORE_REGISTERED, &ar->dev_flags);
  	return;
  
-@@ -2489,6 +2494,8 @@ void ath10k_core_unregister(struct ath10
+@@ -2692,6 +2697,8 @@ void ath10k_core_unregister(struct ath10k *ar)
  	ath10k_core_free_board_files(ar);
  
  	ath10k_debug_unregister(ar);
@@ -56,7 +56,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -47,6 +47,8 @@
+@@ -48,6 +48,8 @@
  #define ATH10K_FLUSH_TIMEOUT_HZ (5 * HZ)
  #define ATH10K_CONNECTION_LOSS_HZ (3 * HZ)
  #define ATH10K_NUM_CHANS 40
@@ -65,7 +65,7 @@
  
  /* Antenna noise floor */
  #define ATH10K_DEFAULT_NOISE_FLOOR -95
-@@ -782,6 +784,7 @@ struct ath10k {
+@@ -879,6 +881,7 @@ struct ath10k {
  	u32 vht_cap_info;
  	u32 num_rf_chains;
  	u32 max_spatial_stream;
@@ -73,9 +73,9 @@
  	/* protected by conf_mutex */
  	u32 low_5ghz_chan;
  	u32 high_5ghz_chan;
-@@ -1000,6 +1003,9 @@ struct ath10k {
+@@ -1107,6 +1110,9 @@ struct ath10k {
  
- 	void *ce_priv;
+ 	u32 sta_tid_stats_mask;
  
 +	struct work_struct fwlog_tx_work;
 +	struct sk_buff_head fwlog_tx_queue;
@@ -83,6 +83,17 @@
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
+--- a/drivers/net/wireless/ath/ath10k/debug.h
++++ b/drivers/net/wireless/ath/ath10k/debug.h
+@@ -44,6 +44,7 @@ enum ath10k_debug_mask {
+ 	ATH10K_DBG_USB		= 0x00040000,
+ 	ATH10K_DBG_USB_BULK	= 0x00080000,
+ 	ATH10K_DBG_SNOC		= 0x00100000,
++	ATH10K_DBG_FWLOG        = 0x10000000,
+ 	ATH10K_DBG_ANY		= 0xffffffff,
+ };
+ 
+new file mode 100644
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/fwlog.c
 @@ -0,0 +1,1549 @@
@@ -1635,6 +1646,7 @@
 +		dev_kfree_skb(skb);
 +	}
 +}
+new file mode 100644
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/fwlog.h
 @@ -0,0 +1,24 @@
@@ -1662,64 +1674,9 @@
 +void ath10k_handle_fwlog_msg(struct ath10k *ar, struct sk_buff *skb);
 +#endif /* _FWLOG_ */
 +
---- a/drivers/net/wireless/ath/ath10k/wmi.c
-+++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -29,6 +29,7 @@
- #include "p2p.h"
- #include "hw.h"
- #include "hif.h"
-+#include "fwlog.h"
- 
- #define ATH10K_WMI_BARRIER_ECHO_ID 0xBA991E9
- #define ATH10K_WMI_BARRIER_TIMEOUT_HZ (3 * HZ)
-@@ -2570,7 +2571,7 @@ int ath10k_wmi_event_debug_mesg(struct a
- 		   skb->len);
- 
- 	trace_ath10k_wmi_dbglog(ar, skb->data, skb->len);
--
-+	ath10k_handle_fwlog_msg(ar, skb);
- 	return 0;
- }
- 
-@@ -5009,7 +5010,7 @@ static void ath10k_wmi_op_rx(struct ath1
- 	case WMI_DEBUG_MESG_EVENTID:
- 		ath10k_wmi_event_debug_mesg(ar, skb);
- 		ath10k_wmi_queue_set_coverage_class_work(ar);
--		break;
-+		return;
- 	case WMI_UPDATE_STATS_EVENTID:
- 		ath10k_wmi_event_update_stats(ar, skb);
- 		break;
-@@ -5146,7 +5147,7 @@ static void ath10k_wmi_10_1_op_rx(struct
- 	case WMI_10X_DEBUG_MESG_EVENTID:
- 		ath10k_wmi_event_debug_mesg(ar, skb);
- 		ath10k_wmi_queue_set_coverage_class_work(ar);
--		break;
-+		return;
- 	case WMI_10X_UPDATE_STATS_EVENTID:
- 		ath10k_wmi_event_update_stats(ar, skb);
- 		break;
-@@ -5277,7 +5278,7 @@ static void ath10k_wmi_10_2_op_rx(struct
- 	case WMI_10_2_DEBUG_MESG_EVENTID:
- 		ath10k_wmi_event_debug_mesg(ar, skb);
- 		ath10k_wmi_queue_set_coverage_class_work(ar);
--		break;
-+		return;
- 	case WMI_10_2_UPDATE_STATS_EVENTID:
- 		ath10k_wmi_event_update_stats(ar, skb);
- 		break;
-@@ -5416,7 +5417,7 @@ static void ath10k_wmi_10_4_op_rx(struct
- 	case WMI_10_4_DEBUG_MESG_EVENTID:
- 		ath10k_wmi_event_debug_mesg(ar, skb);
- 		ath10k_wmi_queue_set_coverage_class_work(ar);
--		break;
-+		return;
- 	case WMI_10_4_SERVICE_READY_EVENTID:
- 		ath10k_wmi_event_service_ready(ar, skb);
- 		return;
 --- a/drivers/net/wireless/ath/ath10k/wmi-tlv.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi-tlv.c
-@@ -458,7 +458,7 @@ static void ath10k_wmi_tlv_op_rx(struct
+@@ -515,7 +515,7 @@ static void ath10k_wmi_tlv_op_rx(struct ath10k *ar, struct sk_buff *skb)
  		break;
  	case WMI_TLV_DEBUG_MESG_EVENTID:
  		ath10k_wmi_event_debug_mesg(ar, skb);
@@ -1728,13 +1685,58 @@
  	case WMI_TLV_UPDATE_STATS_EVENTID:
  		ath10k_wmi_event_update_stats(ar, skb);
  		break;
---- a/drivers/net/wireless/ath/ath10k/debug.h
-+++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -42,6 +42,7 @@ enum ath10k_debug_mask {
- 	ATH10K_DBG_SDIO_DUMP	= 0x00020000,
- 	ATH10K_DBG_USB		= 0x00040000,
- 	ATH10K_DBG_USB_BULK	= 0x00080000,
-+	ATH10K_DBG_FWLOG        = 0x10000000,
- 	ATH10K_DBG_ANY		= 0xffffffff,
- };
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -31,6 +31,7 @@
+ #include "hw.h"
+ #include "hif.h"
+ #include "txrx.h"
++#include "fwlog.h"
  
+ #define ATH10K_WMI_BARRIER_ECHO_ID 0xBA991E9
+ #define ATH10K_WMI_BARRIER_TIMEOUT_HZ (3 * HZ)
+@@ -2576,7 +2577,7 @@ int ath10k_wmi_event_debug_mesg(struct ath10k *ar, struct sk_buff *skb)
+ 		   skb->len);
+ 
+ 	trace_ath10k_wmi_dbglog(ar, skb->data, skb->len);
+-
++	ath10k_handle_fwlog_msg(ar, skb);
+ 	return 0;
+ }
+ 
+@@ -5381,7 +5382,7 @@ static void ath10k_wmi_op_rx(struct ath10k *ar, struct sk_buff *skb)
+ 	case WMI_DEBUG_MESG_EVENTID:
+ 		ath10k_wmi_event_debug_mesg(ar, skb);
+ 		ath10k_wmi_queue_set_coverage_class_work(ar);
+-		break;
++		return;
+ 	case WMI_UPDATE_STATS_EVENTID:
+ 		ath10k_wmi_event_update_stats(ar, skb);
+ 		break;
+@@ -5518,7 +5519,7 @@ static void ath10k_wmi_10_1_op_rx(struct ath10k *ar, struct sk_buff *skb)
+ 	case WMI_10X_DEBUG_MESG_EVENTID:
+ 		ath10k_wmi_event_debug_mesg(ar, skb);
+ 		ath10k_wmi_queue_set_coverage_class_work(ar);
+-		break;
++		return;
+ 	case WMI_10X_UPDATE_STATS_EVENTID:
+ 		ath10k_wmi_event_update_stats(ar, skb);
+ 		break;
+@@ -5649,7 +5650,7 @@ static void ath10k_wmi_10_2_op_rx(struct ath10k *ar, struct sk_buff *skb)
+ 	case WMI_10_2_DEBUG_MESG_EVENTID:
+ 		ath10k_wmi_event_debug_mesg(ar, skb);
+ 		ath10k_wmi_queue_set_coverage_class_work(ar);
+-		break;
++		return;
+ 	case WMI_10_2_UPDATE_STATS_EVENTID:
+ 		ath10k_wmi_event_update_stats(ar, skb);
+ 		break;
+@@ -5788,7 +5789,7 @@ static void ath10k_wmi_10_4_op_rx(struct ath10k *ar, struct sk_buff *skb)
+ 	case WMI_10_4_DEBUG_MESG_EVENTID:
+ 		ath10k_wmi_event_debug_mesg(ar, skb);
+ 		ath10k_wmi_queue_set_coverage_class_work(ar);
+-		break;
++		return;
+ 	case WMI_10_4_SERVICE_READY_EVENTID:
+ 		ath10k_wmi_event_service_ready(ar, skb);
+ 		return;

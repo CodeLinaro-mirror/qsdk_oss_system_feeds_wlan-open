@@ -1,6 +1,47 @@
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2547,9 +2547,6 @@ void ath10k_dbg_gen_bug_on_fw_assert(struct ath10k *ar)
+ 	int ret, i, num_read;
+ 	u8 *addr, *pos;
+ 
+-	if (!bug_on_fw_assert)
+-		return;
+-
+ 	addr = (u8 *)ioremap(ATH10K_FW_IO_MEM_ADDR, ATH10K_FW_IO_MEM_SIZE);
+ 	if (!addr) {
+ 		ath10k_err(ar, "Cannot access memory to dump WLAN Firmware data\n");
+@@ -2795,6 +2792,9 @@ void ath10k_dbg_ipq40xx_bug_on_fw_assert(struct ath10k *ar)
+ 
+ void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar)
+ {
++	if (!bug_on_fw_assert || ar->stats.fw_crash_counter == 0)
++		return;
++
+ 	if (QCA_REV_99X0(ar))
+ 		ath10k_dbg_qca99x0_bug_on_fw_assert(ar);
+ 	else if (QCA_REV_40XX(ar))
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -149,6 +149,8 @@ enum ieee80211_ac_numbers {
+ 	IEEE80211_AC_BK		= 3,
+ };
+ 
++#define IEEE80211_NUM_SIGNAL   100
++
+ /**
+  * struct ieee80211_tx_queue_params - transmit queue configuration
+  *
+@@ -1479,6 +1481,7 @@ struct ieee80211_vif {
+ 	u32 driver_flags;
+ 
+ #ifdef CPTCFG_MAC80211_DEBUGFS
++	u64 rx_signal_pkt[IEEE80211_NUM_SIGNAL];
+ 	struct dentry *debugfs_dir;
+ #endif
+ 
 --- a/net/mac80211/debugfs.c
 +++ b/net/mac80211/debugfs.c
-@@ -372,6 +372,8 @@ void debugfs_hw_add(struct ieee80211_loc
+@@ -375,6 +375,8 @@ void debugfs_hw_add(struct ieee80211_local *local)
  	DEBUGFS_ADD(hwflags);
  	DEBUGFS_ADD(user_power);
  	DEBUGFS_ADD(power);
@@ -9,9 +50,51 @@
  
  	if (local->ops->wake_tx_queue)
  		DEBUGFS_ADD_MODE(aqm, 0600);
+--- a/net/mac80211/debugfs_netdev.c
++++ b/net/mac80211/debugfs_netdev.c
+@@ -30,7 +30,7 @@ static ssize_t ieee80211_if_read(
+ 	size_t count, loff_t *ppos,
+ 	ssize_t (*format)(const struct ieee80211_sub_if_data *, char *, int))
+ {
+-	char buf[200];
++	char buf[512];
+ 	ssize_t ret = -EINVAL;
+ 
+ 	read_lock(&dev_base_lock);
+@@ -472,6 +472,22 @@ static ssize_t ieee80211_if_parse_tdls_wider_bw(
+ }
+ IEEE80211_IF_FILE_RW(tdls_wider_bw);
+ 
++static ssize_t ieee80211_if_fmt_signal_stats(
++	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
++{
++	int len = 0, i;
++
++	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++) {
++		len += scnprintf(buf + len, buflen - len, " %llu ",
++				 sdata->vif.rx_signal_pkt[i]);
++		if ((i + 1) % 10 == 0)
++			len += scnprintf(buf + len, buflen - len, "\n");
++	}
++
++	return len;
++}
++IEEE80211_IF_FILE_R(signal_stats);
++
+ /* AP attributes */
+ IEEE80211_IF_FILE(num_mcast_sta, u.ap.num_mcast_sta, ATOMIC);
+ IEEE80211_IF_FILE(num_sta_ps, u.ap.ps.num_sta_ps, ATOMIC);
+@@ -658,6 +674,7 @@ static void add_common_files(struct ieee80211_sub_if_data *sdata)
+ 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_2ghz);
+ 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_5ghz);
+ 	DEBUGFS_ADD(hw_queues);
++	DEBUGFS_ADD(signal_stats);
+ 
+ 	if (sdata->local->ops->wake_tx_queue)
+ 		DEBUGFS_ADD(aqm);
 --- a/net/mac80211/debugfs_sta.c
 +++ b/net/mac80211/debugfs_sta.c
-@@ -388,116 +388,205 @@ STA_OPS(ht_capa);
+@@ -392,116 +392,205 @@ STA_OPS(ht_capa);
  static ssize_t sta_rx_stats_read(struct file *file, char __user *userbuf,
  				 size_t count, loff_t *ppos)
  {
@@ -302,7 +385,7 @@
  static ssize_t sta_vht_capa_read(struct file *file, char __user *userbuf,
  				 size_t count, loff_t *ppos)
  {
-@@ -615,6 +704,109 @@ STA_OPS(vht_capa);
+@@ -619,6 +708,109 @@ STA_OPS(vht_capa);
  		debugfs_create_u64(#name, 0400, sta->debugfs_dir,	\
  			(u64 *) &sta->field);
  
@@ -412,7 +495,7 @@
  void ieee80211_sta_debugfs_add(struct sta_info *sta)
  {
  	struct ieee80211_local *local = sta->local;
-@@ -648,6 +840,7 @@ void ieee80211_sta_debugfs_add(struct st
+@@ -652,6 +844,7 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
  	DEBUGFS_ADD(ht_capa);
  	DEBUGFS_ADD(vht_capa);
  	DEBUGFS_ADD(rx_stats);
@@ -422,7 +505,7 @@
  	DEBUGFS_ADD_COUNTER(rx_fragments, rx_stats.fragments);
 --- a/net/mac80211/debugfs_sta.h
 +++ b/net/mac80211/debugfs_sta.h
-@@ -6,9 +6,14 @@
+@@ -7,9 +7,14 @@
  #ifdef CPTCFG_MAC80211_DEBUGFS
  void ieee80211_sta_debugfs_add(struct sta_info *sta);
  void ieee80211_sta_debugfs_remove(struct sta_info *sta);
@@ -439,7 +522,7 @@
  #endif /* __MAC80211_DEBUGFS_STA_H */
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1364,6 +1364,8 @@ struct ieee80211_local {
+@@ -1365,6 +1365,8 @@ struct ieee80211_local {
  		struct dentry *rcdir;
  		struct dentry *keys;
  	} debugfs;
@@ -448,6 +531,30 @@
  #endif
  
  	/*
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -1986,6 +1986,9 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 	if (new_wdev)
+ 		*new_wdev = &sdata->wdev;
+ 
++	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++)
++		sdata->vif.rx_signal_pkt[i] =  0;
++
+ 	return 0;
+ }
+ 
+--- a/net/mac80211/main.c
++++ b/net/mac80211/main.c
+@@ -598,6 +598,9 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
+ 	local->hw.uapsd_queues = IEEE80211_DEFAULT_UAPSD_QUEUES;
+ 	local->hw.uapsd_max_sp_len = IEEE80211_DEFAULT_MAX_SP_LEN;
+ 	local->user_power_level = IEEE80211_UNSET_POWER_LEVEL;
++#ifdef CPTCFG_MAC80211_DEBUGFS
++	local->rx_stats_enabled = 1;
++#endif
+ 	wiphy->ht_capa_mod_mask = &mac80211_ht_capa_mod_mask;
+ 	wiphy->vht_capa_mod_mask = &mac80211_vht_capa_mod_mask;
+ 
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
 @@ -33,6 +33,7 @@
@@ -458,7 +565,7 @@
  
  static inline void ieee80211_rx_stats(struct net_device *dev, u32 len)
  {
-@@ -1577,118 +1578,6 @@ ieee80211_rx_h_uapsd_and_pspoll(struct i
+@@ -1579,118 +1580,6 @@ ieee80211_rx_h_uapsd_and_pspoll(struct ieee80211_rx_data *rx)
  	return RX_CONTINUE;
  }
  
@@ -579,7 +686,7 @@
  {
 --- a/net/mac80211/sta_info.h
 +++ b/net/mac80211/sta_info.h
-@@ -270,12 +270,13 @@ struct sta_ampdu_mlme {
+@@ -280,12 +280,13 @@ struct sta_ampdu_mlme {
  
  #define IEEE80211_FAST_XMIT_MAX_IV	18
  
@@ -599,7 +706,7 @@
  /**
   * struct ieee80211_fast_tx - TX fastpath information
   * @key: key to use for hw crypto
-@@ -562,6 +563,20 @@ struct sta_info {
+@@ -574,6 +575,20 @@ struct sta_info {
  
  #ifdef CPTCFG_MAC80211_DEBUGFS
  	struct dentry *debugfs_dir;
@@ -620,7 +727,7 @@
  #endif
  
  	enum ieee80211_sta_rx_bandwidth cur_max_bandwidth;
-@@ -575,19 +590,6 @@ struct sta_info {
+@@ -587,19 +602,6 @@ struct sta_info {
  
  	struct cfg80211_chan_def tdls_chandef;
  
@@ -640,110 +747,3 @@
  	/* keep last! */
  	struct ieee80211_sta sta;
  };
---- a/drivers/net/wireless/ath/ath10k/debug.c
-+++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2669,9 +2669,6 @@ void ath10k_dbg_gen_bug_on_fw_assert(str
- 	int ret, i, num_read;
- 	u8 *addr, *pos;
- 
--	if (!bug_on_fw_assert)
--		return;
--
- 	addr = (u8 *)ioremap(ATH10K_FW_IO_MEM_ADDR, ATH10K_FW_IO_MEM_SIZE);
- 	if (!addr) {
- 		ath10k_err(ar, "Cannot access memory to dump WLAN Firmware data\n");
-@@ -2917,6 +2914,9 @@ void ath10k_dbg_ipq40xx_bug_on_fw_assert
- 
- void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar)
- {
-+	if (!bug_on_fw_assert || ar->stats.fw_crash_counter == 0)
-+		return;
-+
- 	if (QCA_REV_99X0(ar))
- 		ath10k_dbg_qca99x0_bug_on_fw_assert(ar);
- 	else if (QCA_REV_40XX(ar))
---- a/net/mac80211/main.c
-+++ b/net/mac80211/main.c
-@@ -595,6 +595,9 @@ struct ieee80211_hw *ieee80211_alloc_hw_
- 	local->hw.uapsd_queues = IEEE80211_DEFAULT_UAPSD_QUEUES;
- 	local->hw.uapsd_max_sp_len = IEEE80211_DEFAULT_MAX_SP_LEN;
- 	local->user_power_level = IEEE80211_UNSET_POWER_LEVEL;
-+#ifdef CPTCFG_MAC80211_DEBUGFS
-+	local->rx_stats_enabled = 1;
-+#endif
- 	wiphy->ht_capa_mod_mask = &mac80211_ht_capa_mod_mask;
- 	wiphy->vht_capa_mod_mask = &mac80211_vht_capa_mod_mask;
- 
---- a/include/net/mac80211.h
-+++ b/include/net/mac80211.h
-@@ -148,6 +148,8 @@ enum ieee80211_ac_numbers {
- 	IEEE80211_AC_BK		= 3,
- };
- 
-+#define IEEE80211_NUM_SIGNAL   100
-+
- /**
-  * struct ieee80211_tx_queue_params - transmit queue configuration
-  *
-@@ -1472,6 +1474,7 @@ struct ieee80211_vif {
- 	u32 driver_flags;
- 
- #ifdef CPTCFG_MAC80211_DEBUGFS
-+	u64 rx_signal_pkt[IEEE80211_NUM_SIGNAL];
- 	struct dentry *debugfs_dir;
- #endif
- 
---- a/net/mac80211/debugfs_netdev.c
-+++ b/net/mac80211/debugfs_netdev.c
-@@ -30,7 +30,7 @@ static ssize_t ieee80211_if_read(
- 	size_t count, loff_t *ppos,
- 	ssize_t (*format)(const struct ieee80211_sub_if_data *, char *, int))
- {
--	char buf[200];
-+	char buf[512];
- 	ssize_t ret = -EINVAL;
- 
- 	read_lock(&dev_base_lock);
-@@ -472,6 +472,22 @@ static ssize_t ieee80211_if_parse_tdls_w
- }
- IEEE80211_IF_FILE_RW(tdls_wider_bw);
- 
-+static ssize_t ieee80211_if_fmt_signal_stats(
-+	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
-+{
-+	int len = 0, i;
-+
-+	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++) {
-+		len += scnprintf(buf + len, buflen - len, " %llu ",
-+				 sdata->vif.rx_signal_pkt[i]);
-+		if ((i + 1) % 10 == 0)
-+			len += scnprintf(buf + len, buflen - len, "\n");
-+	}
-+
-+	return len;
-+}
-+IEEE80211_IF_FILE_R(signal_stats);
-+
- /* AP attributes */
- IEEE80211_IF_FILE(num_mcast_sta, u.ap.num_mcast_sta, ATOMIC);
- IEEE80211_IF_FILE(num_sta_ps, u.ap.ps.num_sta_ps, ATOMIC);
-@@ -658,6 +674,7 @@ static void add_common_files(struct ieee
- 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_2ghz);
- 	DEBUGFS_ADD(rc_rateidx_vht_mcs_mask_5ghz);
- 	DEBUGFS_ADD(hw_queues);
-+	DEBUGFS_ADD(signal_stats);
- 
- 	if (sdata->local->ops->wake_tx_queue)
- 		DEBUGFS_ADD(aqm);
---- a/net/mac80211/iface.c
-+++ b/net/mac80211/iface.c
-@@ -2004,6 +2004,9 @@ int ieee80211_if_add(struct ieee80211_lo
- 	if (new_wdev)
- 		*new_wdev = &sdata->wdev;
- 
-+	for (i = 0; i < IEEE80211_NUM_SIGNAL; i++)
-+		sdata->vif.rx_signal_pkt[i] =  0;
-+
- 	return 0;
- }
- 

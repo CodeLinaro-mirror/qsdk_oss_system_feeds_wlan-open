@@ -1,13 +1,6 @@
---- a/local-symbols
-+++ b/local-symbols
-@@ -126,3 +126,4 @@ ATH10K_DEBUGFS=
- ATH10K_TRACING=
- ATH10K_DFS_CERTIFIED=
- ATH10K_PKTLOG=
-+ATH10K_SMART_ANT_ALG=
 --- a/drivers/net/wireless/ath/ath10k/Kconfig
 +++ b/drivers/net/wireless/ath/ath10k/Kconfig
-@@ -81,3 +81,9 @@ config ATH10K_PKTLOG
+@@ -88,3 +88,9 @@ config ATH10K_PKTLOG
  	and reception, rate information and ani state. The packet
  	log uses ring buffer to dump the data. The buffer size,
  	frame filters can be alterted by debugfs entries.
@@ -19,7 +12,7 @@
 +	This option enables smart antenna algorithm.
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
-@@ -13,16 +13,16 @@ ath10k_core-y += mac.o \
+@@ -14,10 +14,10 @@ ath10k_core-y += mac.o \
  		 hw.o \
  		 p2p.o \
  		 swap.o \
@@ -27,21 +20,22 @@
 -		 debug_smart_ant.o
 +		 fwlog.o
  
--ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o
-+ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o debug_smart_ant.o
+ ath10k_core-$(CPTCFG_ATH10K_SPECTRAL) += spectral.o
++ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += debug_smart_ant.o
  ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
  ath10k_core-$(CPTCFG_ATH10K_TRACING) += trace.o
  ath10k_core-$(CONFIG_THERMAL) += thermal.o
- ath10k_core-$(CPTCFG_MAC80211_DEBUGFS) += debugfs_sta.o
+@@ -25,6 +25,7 @@ ath10k_core-$(CPTCFG_MAC80211_DEBUGFS) += debugfs_sta.o
  ath10k_core-$(CPTCFG_ATH10K_PKTLOG) += pktlog.o
  ath10k_core-$(CONFIG_PM) += wow.o
+ ath10k_core-$(CONFIG_DEV_COREDUMP) += coredump.o
 +ath10k_core-$(CPTCFG_ATH10K_SMART_ANT_ALG) += smart_ant_alg.o
  
  obj-$(CPTCFG_ATH10K_PCI) += ath10k_pci.o
  ath10k_pci-y += pci.o \
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -1863,12 +1863,27 @@ static int ath10k_core_init_firmware_fea
+@@ -2020,12 +2020,27 @@ static int ath10k_core_init_firmware_features(struct ath10k *ar)
  	case ATH10K_FW_WMI_OP_VERSION_10_1:
  	case ATH10K_FW_WMI_OP_VERSION_10_2:
  	case ATH10K_FW_WMI_OP_VERSION_10_2_4:
@@ -76,7 +70,7 @@
  		ar->htt.max_num_pending_tx = TARGET_10X_NUM_MSDU_DESC;
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -38,6 +38,7 @@
+@@ -39,6 +39,7 @@
  #include "wow.h"
  #include "swap.h"
  #include "pktlog.h"
@@ -84,15 +78,15 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -373,6 +374,7 @@ struct ath10k_sta {
- 	bool aggr_mode;
- 	u64 rx_duration;
+@@ -460,6 +461,7 @@ struct ath10k_sta {
+ 	/* Protected with ar->data_lock */
+ 	struct ath10k_sta_tid_stats tid_stats[IEEE80211_NUM_TIDS + 1];
  #endif
 +	struct ath10k_smart_ant_sta *smart_ant_sta;
  };
  
  #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
-@@ -502,6 +504,7 @@ struct ath10k_debug {
+@@ -590,6 +592,7 @@ struct ath10k_debug {
  	struct ath_pktlog pktlog;
  	bool is_pkt_logging;
  #endif
@@ -100,7 +94,7 @@
  };
  
  enum ath10k_state {
-@@ -766,23 +769,6 @@ struct ath10k_per_peer_tx_stats {
+@@ -863,23 +866,6 @@ struct ath10k_per_peer_tx_stats {
  	u32	reserved2;
  };
  
@@ -126,7 +120,7 @@
  	struct ieee80211_hw *hw;
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -1992,7 +1992,8 @@ void ath10k_debug_stop(struct ath10k *ar
+@@ -1748,7 +1748,8 @@ void ath10k_debug_stop(struct ath10k *ar)
  	if (ar->debug.htt_stats_mask != 0)
  		cancel_delayed_work(&ar->debug.htt_stats_dwork);
  
@@ -136,7 +130,7 @@
  }
  
  static ssize_t ath10k_write_simulate_radar(struct file *file,
-@@ -2097,6 +2098,9 @@ static ssize_t ath10k_write_pktlog_filte
+@@ -1853,6 +1854,9 @@ static ssize_t ath10k_write_pktlog_filter(struct file *file,
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -144,9 +138,9 @@
 +		filter |= ATH10K_PKTLOG_SMART_ANT;
 +
  	if (ar->state != ATH10K_STATE_ON) {
- 		ar->debug.pktlog_filter = filter;
+ 		ar->pktlog_filter = filter;
  		ret = count;
-@@ -2116,10 +2120,18 @@ static ssize_t ath10k_write_pktlog_filte
+@@ -1872,10 +1876,18 @@ static ssize_t ath10k_write_pktlog_filter(struct file *file,
  			goto out;
  		}
  	} else {
@@ -171,26 +165,26 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -53,7 +53,7 @@ enum ath10k_pktlog_filter {
- 	ATH10K_PKTLOG_RCUPDATE   = 0x000000008,
+@@ -57,7 +57,7 @@ enum ath10k_pktlog_filter {
  	ATH10K_PKTLOG_DBG_PRINT  = 0x000000010,
- 	ATH10K_PKTLOG_SMART_ANT	 = 0x000000020,
--	ATH10K_PKTLOG_ANY        = 0x00000001f,
-+	ATH10K_PKTLOG_ANY        = 0x00000003f,
+ 	ATH10K_PKTLOG_SMART_ANT  = 0x000000020,
+ 	ATH10K_PKTLOG_PEER_STATS = 0x000000040,
+-	ATH10K_PKTLOG_ANY        = 0x00000005f,
++	ATH10K_PKTLOG_ANY        = 0x00000007f,
  };
  
  enum ath10k_dbg_aggr_mode {
 --- a/drivers/net/wireless/ath/ath10k/debug_smart_ant.c
 +++ b/drivers/net/wireless/ath/ath10k/debug_smart_ant.c
-@@ -46,16 +46,26 @@ static ssize_t ath10k_write_sa_enable_op
+@@ -46,16 +46,26 @@ static ssize_t ath10k_write_sa_enable_ops(struct file *file,
  			goto exit;
  
  		ret = ath10k_wmi_pdev_pktlog_enable(ar,
-+				ar->debug.pktlog_filter |
++				ar->pktlog_filter |
  				ATH10K_PKTLOG_SMART_ANT);
  		if (ret)
  			goto exit;
-+		ar->debug.pktlog_filter |= ATH10K_PKTLOG_SMART_ANT;
++		ar->pktlog_filter |= ATH10K_PKTLOG_SMART_ANT;
  	} else {
  		ret = ath10k_wmi_pdev_disable_smart_ant(ar,
  				WMI_SMART_ANT_MODE_PARALLEL, 0, 0);
@@ -198,10 +192,10 @@
  			goto exit;
  
 -		ath10k_wmi_pdev_pktlog_enable(ar, ATH10K_PKTLOG_SMART_ANT);
-+		ar->debug.pktlog_filter &= ~ATH10K_PKTLOG_SMART_ANT;
-+		if (ar->debug.pktlog_filter)
++		ar->pktlog_filter &= ~ATH10K_PKTLOG_SMART_ANT;
++		if (ar->pktlog_filter)
 +		{
-+			ath10k_wmi_pdev_pktlog_enable (ar, ar->debug.pktlog_filter);
++			ath10k_wmi_pdev_pktlog_enable (ar, ar->pktlog_filter);
 +		}
 +		else
 +		{
@@ -210,7 +204,7 @@
  	}
  	ar->smart_ant_info.enabled = enable;
  
-@@ -229,6 +239,137 @@ static const struct file_operations fops
+@@ -229,6 +239,137 @@ static const struct file_operations fops_sa_rx_ant_ops = {
  	.llseek = default_llseek,
  };
  
@@ -348,7 +342,7 @@
  static ssize_t ath10k_write_sa_train_info_ops(struct file *file,
  					      const char __user *user_buf,
  					      size_t count, loff_t *ppos)
-@@ -342,15 +483,29 @@ static const struct file_operations fops
+@@ -342,15 +483,29 @@ static const struct file_operations fops_sa_train_info_ops = {
  
  void ath10k_smart_ant_debugfs_init(struct ath10k *ar)
  {
@@ -384,7 +378,7 @@
  }
 --- a/drivers/net/wireless/ath/ath10k/hw.h
 +++ b/drivers/net/wireless/ath/ath10k/hw.h
-@@ -503,6 +503,14 @@ struct ath10k_hw_clk_params {
+@@ -489,6 +489,14 @@ struct ath10k_hw_clk_params {
  	u32 outdiv;
  };
  
@@ -399,7 +393,7 @@
  struct ath10k_hw_params {
  	u32 id;
  	u16 dev_id;
-@@ -636,11 +644,17 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
+@@ -636,11 +644,17 @@ ath10k_rx_desc_get_l3_pad_bytes(struct ath10k_hw_params *hw,
  #define TARGET_10X_MAC_AGGR_DELIM		0
  #define TARGET_10X_AST_SKID_LIMIT		128
  #define TARGET_10X_NUM_STATIONS			128
@@ -417,7 +411,7 @@
  #define TARGET_10X_NUM_OFFLOAD_PEERS		0
  #define TARGET_10X_NUM_OFFLOAD_REORDER_BUFS	0
  #define TARGET_10X_NUM_PEER_KEYS		2
-@@ -649,6 +663,10 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
+@@ -649,6 +663,10 @@ ath10k_rx_desc_get_l3_pad_bytes(struct ath10k_hw_params *hw,
  						    (TARGET_10X_NUM_PEERS) * 2)
  #define TARGET_10X_TX_STATS_NUM_TIDS		min((TARGET_10X_NUM_TIDS_MAX), \
  						    (TARGET_10X_TX_STATS_NUM_PEERS) * 2)
@@ -428,7 +422,7 @@
  #define TARGET_10X_TX_CHAIN_MASK		(BIT(0) | BIT(1) | BIT(2))
  #define TARGET_10X_RX_CHAIN_MASK		(BIT(0) | BIT(1) | BIT(2))
  #define TARGET_10X_RX_TIMEOUT_LO_PRI		100
-@@ -670,7 +688,6 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
+@@ -670,7 +688,6 @@ ath10k_rx_desc_get_l3_pad_bytes(struct ath10k_hw_params *hw,
  /* 10.2 parameters */
  #define TARGET_10_2_DMA_BURST_SIZE		0
  #define TARGET_10_2_SMART_ANT_ENABLE		1
@@ -591,7 +585,7 @@
  }
  
  /* This API is to process tx feedback information such as tx rate
-@@ -175,84 +43,7 @@ ath10k_smart_ant_proc_rx_feedback(struct
+@@ -175,84 +43,7 @@ ath10k_smart_ant_proc_rx_feedback(struct ath10k *ar,
  static inline void
  ath10k_smart_ant_proc_tx_feedback(struct ath10k *ar, u8 *data)
  {
@@ -677,7 +671,7 @@
  }
  
  /* In AP mode, this API notifies of disassociation of a station.
-@@ -262,11 +53,7 @@ ath10k_smart_ant_proc_tx_feedback(struct
+@@ -262,11 +53,7 @@ ath10k_smart_ant_proc_tx_feedback(struct ath10k *ar, u8 *data)
  static inline void
  ath10k_smart_ant_sta_disconnect(struct ath10k *ar, struct ieee80211_sta *sta)
  {
@@ -756,7 +750,7 @@
  }
  
  /* This API reverts the configurations done in ath10k_smart_ant_enable().
-@@ -344,6 +82,7 @@ ath10k_smart_ant_set_default(struct ath1
+@@ -344,6 +82,7 @@ ath10k_smart_ant_set_default(struct ath10k *ar, struct ath10k_vif *arvif)
  static inline void
  ath10k_smart_ant_disable(struct ath10k *ar, struct ath10k_vif *arvif)
  {
@@ -764,7 +758,7 @@
  }
  
  /* This smart antenna API configures fw with initial smart antenna params
-@@ -355,6 +94,6 @@ ath10k_smart_ant_disable(struct ath10k *
+@@ -355,6 +94,6 @@ ath10k_smart_ant_disable(struct ath10k *ar, struct ath10k_vif *arvif)
  static inline int
  ath10k_smart_ant_enable(struct ath10k *ar, struct ath10k_vif *arvif)
  {
@@ -772,6 +766,7 @@
 +	return ath10k_smart_ant_alg_enable(ar, arvif);
  }
  #endif
+new file mode 100644
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/smart_ant_alg.c
 @@ -0,0 +1,1817 @@
@@ -2587,11 +2582,12 @@
 +	/* Enable tx feedback through packetlog */
 +#ifdef CPTCFG_ATH10K_DEBUGFS
 +	return ath10k_wmi_pdev_pktlog_enable(ar,
-+			(ar->debug.pktlog_filter | ATH10K_PKTLOG_SMART_ANT));
++			(ar->pktlog_filter | ATH10K_PKTLOG_SMART_ANT));
 +#else
 +	return  ath10k_wmi_pdev_pktlog_enable(ar, ATH10K_PKTLOG_SMART_ANT);
 +#endif /* CPTCFG_ATH10K_DEBUGFS */
 +}
+new file mode 100644
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/smart_ant_alg.h
 @@ -0,0 +1,527 @@
@@ -3124,18 +3120,26 @@
 +#endif /* _SMART_ANT_ALG_ */
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -5762,11 +5762,13 @@ static struct sk_buff *ath10k_wmi_10_1_o
+@@ -6141,12 +6141,14 @@ static struct sk_buff *ath10k_wmi_10_1_op_gen_init(struct ath10k *ar)
  		config.num_peers =
  			__cpu_to_le32(min(TARGET_10_2_SMART_ANT_NUM_PEERS,
  					  TARGET_10X_NUM_PEERS));
 +		config.num_tids = __cpu_to_le32(min(TARGET_10_2_SMART_ANT_NUM_TIDS,
-+					    TARGET_10X_NUM_TIDS));
++						TARGET_10X_NUM_TIDS));
  	} else {
  		config.num_peers = __cpu_to_le32(TARGET_10X_NUM_PEERS);
 +		config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
  	}
+ 
  	config.num_peer_keys = __cpu_to_le32(TARGET_10X_NUM_PEER_KEYS);
 -	config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
  	config.ast_skid_limit = __cpu_to_le32(TARGET_10X_AST_SKID_LIMIT);
  	config.tx_chain_mask = __cpu_to_le32(TARGET_10X_TX_CHAIN_MASK);
  	config.rx_chain_mask = __cpu_to_le32(TARGET_10X_RX_CHAIN_MASK);
+--- a/local-symbols
++++ b/local-symbols
+@@ -128,3 +128,4 @@ ATH10K_SPECTRAL=
+ ATH10K_TRACING=
+ ATH10K_DFS_CERTIFIED=
+ ATH10K_PKTLOG=
++ATH10K_SMART_ANT_ALG=

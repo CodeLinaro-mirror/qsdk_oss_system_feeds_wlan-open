@@ -1,21 +1,6 @@
-From 3eb02f55ee680baeb88c28362b53a8605212bf8d Mon Sep 17 00:00:00 2001
-From: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
-Date: Fri, 13 Feb 2015 21:13:29 +0530
-Subject: [PATCH] smart antenna debugfs patch
-
----
- drivers/net/wireless/ath/ath10k/Makefile          |   3 +-
- drivers/net/wireless/ath/ath10k/core.h            |  10 +
- drivers/net/wireless/ath/ath10k/debug.c           |   3 +
- drivers/net/wireless/ath/ath10k/debug.h           |   3 +
- drivers/net/wireless/ath/ath10k/debug_smart_ant.c | 356 ++++++++++++++++++++++
- drivers/net/wireless/ath/ath10k/smart_ant.h       | 273 ++++++++++++++++-
- 6 files changed, 644 insertions(+), 4 deletions(-)
- create mode 100644 drivers/net/wireless/ath/ath10k/debug_smart_ant.c
-
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
-@@ -13,7 +13,8 @@ ath10k_core-y += mac.o \
+@@ -14,7 +14,8 @@ ath10k_core-y += mac.o \
  		 hw.o \
  		 p2p.o \
  		 swap.o \
@@ -23,11 +8,11 @@ Subject: [PATCH] smart antenna debugfs patch
 +		 fwlog.o \
 +		 debug_smart_ant.o
  
- ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o
+ ath10k_core-$(CPTCFG_ATH10K_SPECTRAL) += spectral.o
  ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -775,6 +775,14 @@ struct ath10k_peer_ratecode_list {
+@@ -872,6 +872,14 @@ struct ath10k_peer_ratecode_list {
  	u8 rt_count[WMI_RATE_COUNT_MAX];
  };
  
@@ -42,7 +27,7 @@ Subject: [PATCH] smart antenna debugfs patch
  struct ath10k {
  	struct ath_common ath_common;
  	struct ieee80211_hw *hw;
-@@ -1021,6 +1029,8 @@ struct ath10k {
+@@ -1128,6 +1136,8 @@ struct ath10k {
  	struct work_struct fwlog_tx_work;
  	struct sk_buff_head fwlog_tx_queue;
  
@@ -53,7 +38,7 @@ Subject: [PATCH] smart antenna debugfs patch
  };
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2510,6 +2510,8 @@ int ath10k_debug_register(struct ath10k
+@@ -2387,6 +2387,8 @@ int ath10k_debug_register(struct ath10k *ar)
  	debugfs_create_file("pktlog_filter", 0644, ar->debug.debugfs_phy, ar,
  			    &fops_pktlog_filter);
  
@@ -64,15 +49,15 @@ Subject: [PATCH] smart antenna debugfs patch
  	debugfs_create_file("quiet_period", 0644, ar->debug.debugfs_phy, ar,
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -42,6 +42,7 @@ enum ath10k_debug_mask {
- 	ATH10K_DBG_SDIO_DUMP	= 0x00020000,
+@@ -44,6 +44,7 @@ enum ath10k_debug_mask {
  	ATH10K_DBG_USB		= 0x00040000,
  	ATH10K_DBG_USB_BULK	= 0x00080000,
+ 	ATH10K_DBG_SNOC		= 0x00100000,
 +	ATH10K_DBG_SMART_ANT    = 0x01000000,
  	ATH10K_DBG_FWLOG        = 0x10000000,
  	ATH10K_DBG_ANY		= 0xffffffff,
  };
-@@ -167,6 +168,7 @@ static inline u32 ath10k_debug_get_fw_db
+@@ -201,6 +202,7 @@ static inline u32 ath10k_debug_get_fw_dbglog_level(struct ath10k *ar)
  	return ar->debug.fw_dbglog_level;
  }
  
@@ -80,7 +65,7 @@ Subject: [PATCH] smart antenna debugfs patch
  #else
  
  static inline int ath10k_debug_start(struct ath10k *ar)
-@@ -238,6 +240,7 @@ static inline int ath10k_debug_fw_devcor
+@@ -268,6 +270,7 @@ static inline u32 ath10k_debug_get_fw_dbglog_level(struct ath10k *ar)
  #define ath10k_debug_get_et_strings NULL
  #define ath10k_debug_get_et_sset_count NULL
  #define ath10k_debug_get_et_stats NULL
@@ -88,6 +73,7 @@ Subject: [PATCH] smart antenna debugfs patch
  
  #endif /* CPTCFG_ATH10K_DEBUGFS */
  #ifdef CPTCFG_MAC80211_DEBUGFS
+index 0000000..2c88a33
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/debug_smart_ant.c
 @@ -0,0 +1,356 @@
@@ -606,7 +592,7 @@ Subject: [PATCH] smart antenna debugfs patch
  }
  
  /* This API is to process tx feedback information such as tx rate
-@@ -40,6 +175,84 @@ ath10k_smart_ant_proc_rx_feedback(struct
+@@ -40,6 +175,84 @@ ath10k_smart_ant_proc_rx_feedback(struct ath10k *ar,
  static inline void
  ath10k_smart_ant_proc_tx_feedback(struct ath10k *ar, u8 *data)
  {
@@ -691,7 +677,7 @@ Subject: [PATCH] smart antenna debugfs patch
  }
  
  /* In AP mode, this API notifies of disassociation of a station.
-@@ -49,6 +262,11 @@ ath10k_smart_ant_proc_tx_feedback(struct
+@@ -49,6 +262,11 @@ ath10k_smart_ant_proc_tx_feedback(struct ath10k *ar, u8 *data)
  static inline void
  ath10k_smart_ant_sta_disconnect(struct ath10k *ar, struct ieee80211_sta *sta)
  {

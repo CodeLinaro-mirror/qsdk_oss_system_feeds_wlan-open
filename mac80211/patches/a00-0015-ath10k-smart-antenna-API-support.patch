@@ -1,25 +1,25 @@
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -40,6 +40,7 @@ static bool uart_print;
+@@ -42,6 +42,7 @@ static bool uart_print;
  static bool skip_otp;
  static bool rawmode;
  bool bug_on_fw_assert = true;
 +bool ath10k_enable_smart_antenna = false;
  
- module_param_named(debug_mask, ath10k_debug_mask, uint, 0644);
- module_param_named(cryptmode, ath10k_cryptmode_param, uint, 0644);
-@@ -47,6 +48,8 @@ module_param(uart_print, bool, 0644);
- module_param(skip_otp, bool, 0644);
+ /* Enable ATH10K_FW_CRASH_DUMP_REGISTERS and ATH10K_FW_CRASH_DUMP_CE_DATA
+  * by default.
+@@ -56,6 +57,8 @@ module_param(skip_otp, bool, 0644);
  module_param(rawmode, bool, 0644);
+ module_param_named(coredump_mask, ath10k_coredump_mask, ulong, 0444);
  module_param(bug_on_fw_assert, bool, 0644);
 +module_param_named(enable_smart_antenna, ath10k_enable_smart_antenna,
 +		   bool, 0644);
  
  MODULE_PARM_DESC(debug_mask, "Debugging mask");
  MODULE_PARM_DESC(uart_print, "Uart target debugging");
-@@ -54,6 +57,7 @@ MODULE_PARM_DESC(skip_otp, "Skip otp fai
- MODULE_PARM_DESC(cryptmode, "Crypto mode: 0-hardware, 1-software");
+@@ -64,6 +67,7 @@ MODULE_PARM_DESC(cryptmode, "Crypto mode
  MODULE_PARM_DESC(rawmode, "Use raw 802.11 frame datapath");
+ MODULE_PARM_DESC(coredump_mask, "Bitfield of what to include in firmware crash file");
  MODULE_PARM_DESC(bug_on_fw_assert, "Bug on firmware assert");
 +MODULE_PARM_DESC(enable_smart_antenna, "Enable smart antenna supprot in fw");
  
@@ -27,7 +27,7 @@
  	{
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -766,6 +766,15 @@ struct ath10k_per_peer_tx_stats {
+@@ -863,6 +863,15 @@ struct ath10k_per_peer_tx_stats {
  	u32	reserved2;
  };
  
@@ -43,9 +43,9 @@
  struct ath10k {
  	struct ath_common ath_common;
  	struct ieee80211_hw *hw;
-@@ -1025,6 +1034,22 @@ static inline bool ath10k_peer_stats_ena
- 	return false;
- }
+@@ -1134,6 +1143,22 @@ static inline bool ath10k_peer_stats_ena
+ 
+ extern unsigned long ath10k_coredump_mask;
  
 +extern bool ath10k_enable_smart_antenna;
 +
@@ -68,17 +68,17 @@
  				  enum ath10k_hw_rev hw_rev,
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -51,6 +51,7 @@ enum ath10k_pktlog_filter {
+@@ -54,6 +54,7 @@ enum ath10k_pktlog_filter {
  	ATH10K_PKTLOG_RCFIND     = 0x000000004,
  	ATH10K_PKTLOG_RCUPDATE   = 0x000000008,
  	ATH10K_PKTLOG_DBG_PRINT  = 0x000000010,
-+	ATH10K_PKTLOG_SMART_ANT	 = 0x000000020,
- 	ATH10K_PKTLOG_ANY        = 0x00000001f,
++	ATH10K_PKTLOG_SMART_ANT  = 0x000000020,
+ 	ATH10K_PKTLOG_PEER_STATS = 0x000000040,
+ 	ATH10K_PKTLOG_ANY        = 0x00000005f,
  };
- 
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -22,6 +22,7 @@
+@@ -23,6 +23,7 @@
  #include "debug.h"
  #include "trace.h"
  #include "mac.h"
@@ -86,7 +86,7 @@
  
  #include <linux/log2.h>
  
-@@ -358,6 +359,7 @@ static int ath10k_htt_rx_amsdu_pop(struc
+@@ -409,6 +410,7 @@ static int ath10k_htt_rx_amsdu_pop(struc
  
  		trace_ath10k_htt_rx_desc(ar, &rx_desc->attention,
  					 sizeof(*rx_desc) - sizeof(u32));
@@ -94,14 +94,14 @@
  
  		if (last_msdu)
  			break;
-@@ -2474,6 +2476,7 @@ bool ath10k_htt_t2h_msg_handler(struct a
- 					skb->len -
+@@ -2789,6 +2791,7 @@ bool ath10k_htt_t2h_msg_handler(struct a
  					offsetof(struct htt_resp,
  						 pktlog_msg.payload));
+ 
 +		ath10k_smart_ant_proc_tx_feedback(ar, resp->pktlog_msg.payload);
  		ath10k_process_pktlog(ar, resp->pktlog_msg.payload);
- 		break;
- 	}
+ 		if (ath10k_peer_stats_enabled(ar))
+ 			ath10k_fetch_10_2_tx_stats(ar,
 --- a/drivers/net/wireless/ath/ath10k/hw.h
 +++ b/drivers/net/wireless/ath/ath10k/hw.h
 @@ -669,6 +669,8 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
@@ -113,7 +113,7 @@
  
  /* Target specific defines for WMI-TLV firmware */
  #define TARGET_TLV_NUM_VDEVS			4
-@@ -901,6 +903,21 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
+@@ -907,6 +909,21 @@ ath10k_rx_desc_get_l3_pad_bytes(struct a
  
  #define PCIE_BAR_REG_ADDRESS			0x40030
  
@@ -137,7 +137,7 @@
  #define SYSTEM_SLEEP_OFFSET			SOC_SYSTEM_SLEEP_OFFSET
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -32,6 +32,7 @@
+@@ -33,6 +33,7 @@
  #include "wmi-tlv.h"
  #include "wmi-ops.h"
  #include "wow.h"
@@ -145,7 +145,7 @@
  
  /*********/
  /* Rates */
-@@ -6240,9 +6241,20 @@ static int ath10k_sta_state(struct ieee8
+@@ -6291,9 +6292,20 @@ static int ath10k_sta_state(struct ieee8
  			   sta->addr);
  
  		ret = ath10k_station_assoc(ar, vif, sta, false);
@@ -167,7 +167,7 @@
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTHORIZED &&
  		   sta->tdls) {
-@@ -6275,6 +6287,8 @@ static int ath10k_sta_state(struct ieee8
+@@ -6326,6 +6338,8 @@ static int ath10k_sta_state(struct ieee8
  		ath10k_dbg(ar, ATH10K_DBG_MAC, "mac sta %pM disassociated\n",
  			   sta->addr);
  
@@ -176,7 +176,7 @@
  		ret = ath10k_station_disassoc(ar, vif, sta);
  		if (ret)
  			ath10k_warn(ar, "failed to disassociate station: %pM vdev %i: %i\n",
-@@ -7274,6 +7288,8 @@ ath10k_mac_update_vif_chan(struct ath10k
+@@ -7340,6 +7354,8 @@ ath10k_mac_update_vif_chan(struct ath10k
  	 * should be available for the channel switch now.
  	 */
  
@@ -185,8 +185,8 @@
  	spin_lock_bh(&ar->data_lock);
  	ath10k_mac_update_rx_channel(ar, NULL, vifs, n_vifs);
  	spin_unlock_bh(&ar->data_lock);
-@@ -7513,6 +7529,21 @@ ath10k_mac_op_assign_vif_chanctx(struct
- 				    arvif->vdev_id, ret);
+@@ -7589,6 +7605,21 @@ ath10k_mac_op_assign_vif_chanctx(struct
+ 		}
  	}
  
 +	ret = ath10k_smart_ant_enable(ar, arvif);
@@ -305,10 +305,10 @@
 +#endif
 --- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-@@ -197,6 +197,23 @@ struct wmi_ops {
- 					(struct ath10k *ar,
- 					 enum wmi_bss_survey_req_type type);
+@@ -203,6 +203,23 @@ struct wmi_ops {
  	struct sk_buff *(*gen_echo)(struct ath10k *ar, u32 value);
+ 	struct sk_buff *(*gen_pdev_get_tpc_table_cmdid)(struct ath10k *ar,
+ 							u32 param);
 +	struct sk_buff *(*gen_pdev_enable_smart_ant)(struct ath10k *ar,
 +						     u32 mode, u32 tx_ant,
 +						     u32 rx_ant);
@@ -322,15 +322,15 @@
 +						     int n_ants);
 +	struct sk_buff *(*gen_pdev_set_rx_ant)(struct ath10k *ar, u32 antenna);
 +	struct sk_buff *(*gen_peer_cfg_smart_ant_fb)(struct ath10k *ar,
-+			const struct wmi_smart_ant_sta_cfg_arg *arg);
++	const struct wmi_smart_ant_sta_cfg_arg *arg);
 +	struct sk_buff *(*gen_peer_set_smart_ant_train_info)(struct ath10k *ar,
 +			u32 vdev_id, const u8 *mac_addr,
 +			const struct wmi_peer_sant_set_train_arg *arg);
+ 
  };
  
- int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1418,4 +1435,108 @@ ath10k_wmi_echo(struct ath10k *ar, u32 v
- 	return ath10k_wmi_cmd_send(ar, skb, wmi->cmd->echo_cmdid);
+@@ -1465,4 +1482,108 @@ ath10k_wmi_pdev_get_tpc_table_cmdid(stru
+ 				   ar->wmi.cmd->pdev_get_tpc_table_cmdid);
  }
  
 +static inline int
@@ -440,10 +440,10 @@
  #endif
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -196,6 +196,11 @@ static struct wmi_cmd_map wmi_cmd_map =
- 	.mu_cal_start_cmdid = WMI_CMD_UNSUPPORTED,
+@@ -199,6 +199,11 @@ static struct wmi_cmd_map wmi_cmd_map =
  	.set_cca_params_cmdid = WMI_CMD_UNSUPPORTED,
  	.pdev_bss_chan_info_request_cmdid = WMI_CMD_UNSUPPORTED,
+ 	.pdev_get_tpc_table_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_smart_ant_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_rx_ant_cmdid = WMI_CMD_UNSUPPORTED,
 +	.peer_set_smart_tx_ant_cmdid = WMI_CMD_UNSUPPORTED,
@@ -452,10 +452,10 @@
  };
  
  /* 10.X WMI cmd track */
-@@ -362,6 +367,11 @@ static struct wmi_cmd_map wmi_10x_cmd_ma
- 	.mu_cal_start_cmdid = WMI_CMD_UNSUPPORTED,
+@@ -366,6 +371,11 @@ static struct wmi_cmd_map wmi_10x_cmd_ma
  	.set_cca_params_cmdid = WMI_CMD_UNSUPPORTED,
  	.pdev_bss_chan_info_request_cmdid = WMI_CMD_UNSUPPORTED,
+ 	.pdev_get_tpc_table_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_smart_ant_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_rx_ant_cmdid = WMI_CMD_UNSUPPORTED,
 +	.peer_set_smart_tx_ant_cmdid = WMI_CMD_UNSUPPORTED,
@@ -464,10 +464,10 @@
  };
  
  /* 10.2.4 WMI cmd track */
-@@ -528,6 +538,14 @@ static struct wmi_cmd_map wmi_10_2_4_cmd
- 	.set_cca_params_cmdid = WMI_CMD_UNSUPPORTED,
+@@ -533,6 +543,14 @@ static struct wmi_cmd_map wmi_10_2_4_cmd
  	.pdev_bss_chan_info_request_cmdid =
  		WMI_10_2_PDEV_BSS_CHAN_INFO_REQUEST_CMDID,
+ 	.pdev_get_tpc_table_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_smart_ant_cmdid = WMI_10_2_PDEV_SMART_ANT_ENABLE_CMDID,
 +	.pdev_set_rx_ant_cmdid = WMI_10_2_PDEV_SMART_ANT_SET_RX_ANTENNA_CMDID,
 +	.peer_set_smart_tx_ant_cmdid =
@@ -479,10 +479,10 @@
  };
  
  /* 10.4 WMI cmd track */
-@@ -1480,6 +1498,14 @@ static struct wmi_cmd_map wmi_10_2_cmd_m
- 	.pdev_get_ani_cck_config_cmdid = WMI_CMD_UNSUPPORTED,
+@@ -1486,6 +1504,14 @@ static struct wmi_cmd_map wmi_10_2_cmd_m
  	.pdev_get_ani_ofdm_config_cmdid = WMI_CMD_UNSUPPORTED,
  	.pdev_reserve_ast_entry_cmdid = WMI_CMD_UNSUPPORTED,
+ 	.pdev_get_tpc_table_cmdid = WMI_CMD_UNSUPPORTED,
 +	.pdev_set_smart_ant_cmdid = WMI_10_2_PDEV_SMART_ANT_ENABLE_CMDID,
 +	.pdev_set_rx_ant_cmdid = WMI_10_2_PDEV_SMART_ANT_SET_RX_ANTENNA_CMDID,
 +	.peer_set_smart_tx_ant_cmdid =
@@ -494,7 +494,7 @@
  };
  
  static struct wmi_pdev_param_map wmi_10_4_pdev_param_map = {
-@@ -5361,9 +5387,10 @@ static void ath10k_wmi_10_2_op_rx(struct
+@@ -5733,9 +5759,10 @@ static void ath10k_wmi_10_2_op_rx(struct
  	case WMI_10_2_PDEV_BSS_CHAN_INFO_EVENTID:
  		ath10k_wmi_event_pdev_bss_chan_info(ar, skb);
  		break;
@@ -506,7 +506,7 @@
  	case WMI_10_2_GENERIC_BUFFER_EVENTID:
  	case WMI_10_2_MCAST_BUF_RELEASE_EVENTID:
  	case WMI_10_2_MCAST_LIST_AGEOUT_EVENTID:
-@@ -5731,7 +5758,13 @@ static struct sk_buff *ath10k_wmi_10_1_o
+@@ -6110,7 +6137,14 @@ static struct sk_buff *ath10k_wmi_10_1_o
  	u32 len, val;
  
  	config.num_vdevs = __cpu_to_le32(TARGET_10X_NUM_VDEVS);
@@ -518,10 +518,11 @@
 +	} else {
 +		config.num_peers = __cpu_to_le32(TARGET_10X_NUM_PEERS);
 +	}
++
  	config.num_peer_keys = __cpu_to_le32(TARGET_10X_NUM_PEER_KEYS);
  	config.num_tids = __cpu_to_le32(TARGET_10X_NUM_TIDS);
  	config.ast_skid_limit = __cpu_to_le32(TARGET_10X_AST_SKID_LIMIT);
-@@ -5868,6 +5901,11 @@ static struct sk_buff *ath10k_wmi_10_2_o
+@@ -6247,6 +6281,11 @@ static struct sk_buff *ath10k_wmi_10_2_o
  
  	cmd->resource_config.feature_mask = __cpu_to_le32(features);
  
@@ -533,7 +534,7 @@
  	memcpy(&cmd->resource_config.common, &config, sizeof(config));
  	ath10k_wmi_put_host_mem_chunks(ar, &cmd->mem_chunks);
  
-@@ -8019,6 +8057,212 @@ ath10k_wmi_barrier(struct ath10k *ar)
+@@ -8482,6 +8521,212 @@ ath10k_wmi_barrier(struct ath10k *ar)
  	return 0;
  }
  
@@ -746,7 +747,7 @@
  static const struct wmi_ops wmi_ops = {
  	.rx = ath10k_wmi_op_rx,
  	.map_svc = wmi_main_svc_map,
-@@ -8086,6 +8330,13 @@ static const struct wmi_ops wmi_ops = {
+@@ -8549,6 +8794,12 @@ static const struct wmi_ops wmi_ops = {
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -756,11 +757,10 @@
 +	/* .gen_pdev_set_rx_ant not implemented */
 +	/* .gen_peer_cfg_smart_ant_fb not implemented */
 +	/* .gen_peer_set_smart_ant_train_info not implemented */
-+
  };
  
  static const struct wmi_ops wmi_10_1_ops = {
-@@ -8156,6 +8407,13 @@ static const struct wmi_ops wmi_10_1_ops
+@@ -8619,6 +8870,12 @@ static const struct wmi_ops wmi_10_1_ops
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -770,11 +770,10 @@
 +	/* .gen_pdev_set_rx_ant not implemented */
 +	/* .gen_peer_cfg_smart_ant_fb not implemented */
 +	/* .gen_peer_set_smart_ant_train_info not implemented */
-+
  };
  
  static const struct wmi_ops wmi_10_2_ops = {
-@@ -8223,6 +8481,13 @@ static const struct wmi_ops wmi_10_2_ops
+@@ -8686,6 +8943,13 @@ static const struct wmi_ops wmi_10_2_ops
  	.fw_stats_fill = ath10k_wmi_10x_op_fw_stats_fill,
  	.get_vdev_subtype = ath10k_wmi_op_get_vdev_subtype,
  	/* .gen_pdev_enable_adaptive_cca not implemented */
@@ -788,7 +787,7 @@
  };
  
  static const struct wmi_ops wmi_10_2_4_ops = {
-@@ -8296,6 +8561,13 @@ static const struct wmi_ops wmi_10_2_4_o
+@@ -8759,6 +9023,13 @@ static const struct wmi_ops wmi_10_2_4_o
  	/* .gen_prb_tmpl not implemented */
  	/* .gen_p2p_go_bcn_ie not implemented */
  	/* .gen_adaptive_qcs not implemented */
@@ -804,7 +803,7 @@
  static const struct wmi_ops wmi_10_4_ops = {
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -937,6 +937,11 @@ struct wmi_cmd_map {
+@@ -960,6 +960,11 @@ struct wmi_cmd_map {
  	u32 vdev_sifs_trigger_time_cmdid;
  	u32 pdev_wds_entry_list_cmdid;
  	u32 tdls_set_offchan_mode_cmdid;
@@ -816,7 +815,7 @@
  };
  
  /*
-@@ -6870,6 +6875,82 @@ struct wmi_pdev_chan_info_req_cmd {
+@@ -6968,6 +6973,82 @@ struct wmi_pdev_chan_info_req_cmd {
  	__le32 reserved;
  } __packed;
  

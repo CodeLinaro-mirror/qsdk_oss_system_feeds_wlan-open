@@ -1,6 +1,51 @@
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -2846,6 +2846,9 @@ struct cfg80211_external_auth_params {
+  *	signal level is found to be outside the two values.  The driver should
+  *	set %NL80211_EXT_FEATURE_CQM_RSSI_LIST if this method is implemented.
+  *	If it is provided then there's no point providing @set_cqm_rssi_config.
++ * @set_cqm_tx_rate_config: Configure connection quality monitor TX RATE
++ *	threshold. After configuration, the driver should (soon) send an event
++ *	indicating the current level is above/below the configured threshold;
+  * @set_cqm_txe_config: Configure connection quality monitor TX error
+  *	thresholds.
+  * @sched_scan_start: Tell the driver to start a scheduled scan.
+@@ -3148,6 +3151,11 @@ struct cfg80211_ops {
+ 					     struct net_device *dev,
+ 					     s32 rssi_low, s32 rssi_high);
+ 
++	int	(*set_cqm_tx_rate_config)(struct wiphy *wiphy,
++					  struct net_device *dev,
++					  u32 low_txrate_thold,
++					  u32 high_txrate_thold);
++
+ 	int	(*set_cqm_txe_config)(struct wiphy *wiphy,
+ 				      struct net_device *dev,
+ 				      u32 rate, u32 pkts, u32 intvl);
+@@ -5712,6 +5720,20 @@ void cfg80211_cqm_rssi_notify(struct net_device *dev, const u8 *peer,
+ 			      s32 rssi_level, gfp_t gfp);
+ 
+ /**
++ * cfg80211_cqm_tx_rate_notify - connection quality monitoring tx rate event
++ * @dev: network device
++ * @peer: peer's MAC address
++ * @txrate_event: the triggered TX RATE event
++ * @txrate_level: new TX RATE level value or 0 if not available
++ * @gfp: context flags
++ *
++ * This function is called when a configured connection quality monitoring
++ * tx rate threshold reached event occurs.
++ */
++void cfg80211_cqm_tx_rate_notify(struct net_device *dev, const u8 *peer,
++			enum nl80211_cqm_txrate_threshold_event txrate_event,
++			u32 txrate_level, gfp_t gfp);
++/**
+  * cfg80211_cqm_pktloss_notify - notify userspace about packetloss to peer
+  * @dev: network device
+  * @peer: peer's MAC address
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -4124,6 +4124,17 @@ enum nl80211_ps_state {
+@@ -4184,6 +4184,17 @@ enum nl80211_ps_state {
   *	loss event
   * @NL80211_ATTR_CQM_RSSI_LEVEL: the RSSI value in dBm that triggered the
   *	RSSI threshold event.
@@ -18,7 +63,7 @@
   * @__NL80211_ATTR_CQM_AFTER_LAST: internal
   * @NL80211_ATTR_CQM_MAX: highest key attribute
   */
-@@ -4138,6 +4149,10 @@ enum nl80211_attr_cqm {
+@@ -4198,6 +4209,10 @@ enum nl80211_attr_cqm {
  	NL80211_ATTR_CQM_TXE_INTVL,
  	NL80211_ATTR_CQM_BEACON_LOSS_EVENT,
  	NL80211_ATTR_CQM_RSSI_LEVEL,
@@ -29,7 +74,7 @@
  
  	/* keep last */
  	__NL80211_ATTR_CQM_AFTER_LAST,
-@@ -4158,6 +4173,17 @@ enum nl80211_cqm_rssi_threshold_event {
+@@ -4218,6 +4233,17 @@ enum nl80211_cqm_rssi_threshold_event {
  	NL80211_CQM_RSSI_BEACON_LOSS_EVENT,
  };
  
@@ -49,7 +94,7 @@
   * enum nl80211_tx_power_setting - TX power adjustment
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -9692,6 +9692,10 @@ nl80211_attr_cqm_policy[NL80211_ATTR_CQM
+@@ -9822,6 +9822,10 @@ nl80211_attr_cqm_policy[NL80211_ATTR_CQM_MAX + 1] = {
  	[NL80211_ATTR_CQM_TXE_PKTS] = { .type = NLA_U32 },
  	[NL80211_ATTR_CQM_TXE_INTVL] = { .type = NLA_U32 },
  	[NL80211_ATTR_CQM_RSSI_LEVEL] = { .type = NLA_S32 },
@@ -60,7 +105,7 @@
  };
  
  static int nl80211_set_cqm_txe(struct genl_info *info,
-@@ -9834,6 +9838,24 @@ unlock:
+@@ -9964,6 +9968,24 @@ unlock:
  	return err;
  }
  
@@ -85,7 +130,7 @@
  static int nl80211_set_cqm(struct sk_buff *skb, struct genl_info *info)
  {
  	struct nlattr *attrs[NL80211_ATTR_CQM_MAX + 1];
-@@ -9864,6 +9886,17 @@ static int nl80211_set_cqm(struct sk_buf
+@@ -9994,6 +10016,17 @@ static int nl80211_set_cqm(struct sk_buff *skb, struct genl_info *info)
  					    hysteresis);
  	}
  
@@ -103,7 +148,7 @@
  	if (attrs[NL80211_ATTR_CQM_TXE_RATE] &&
  	    attrs[NL80211_ATTR_CQM_TXE_PKTS] &&
  	    attrs[NL80211_ATTR_CQM_TXE_INTVL]) {
-@@ -14430,6 +14463,40 @@ void cfg80211_cqm_rssi_notify(struct net
+@@ -14643,6 +14676,40 @@ void cfg80211_cqm_rssi_notify(struct net_device *dev, const u8 *peer,
  }
  EXPORT_SYMBOL(cfg80211_cqm_rssi_notify);
  
@@ -146,7 +191,7 @@
  			     u32 rate, u32 intvl, gfp_t gfp)
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -761,6 +761,21 @@ rdev_set_cqm_rssi_range_config(struct cf
+@@ -762,6 +762,21 @@ rdev_set_cqm_rssi_range_config(struct cfg80211_registered_device *rdev,
  }
  
  static inline int
@@ -170,7 +215,7 @@
  {
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -1339,6 +1339,29 @@ TRACE_EVENT(rdev_set_cqm_rssi_range_conf
+@@ -1340,6 +1340,29 @@ TRACE_EVENT(rdev_set_cqm_rssi_range_config,
  		  __entry->rssi_low, __entry->rssi_high)
  );
  
@@ -200,7 +245,7 @@
  TRACE_EVENT(rdev_set_cqm_txe_config,
  	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev, u32 rate,
  		 u32 pkts, u32 intvl),
-@@ -2597,6 +2620,28 @@ TRACE_EVENT(cfg80211_cqm_rssi_notify,
+@@ -2621,6 +2644,28 @@ TRACE_EVENT(cfg80211_cqm_rssi_notify,
  		  NETDEV_PR_ARG, __entry->rssi_event, __entry->rssi_level)
  );
  
@@ -229,48 +274,3 @@
  TRACE_EVENT(cfg80211_reg_can_beacon,
  	TP_PROTO(struct wiphy *wiphy, struct cfg80211_chan_def *chandef,
  		 enum nl80211_iftype iftype, bool check_no_ir),
---- a/include/net/cfg80211.h
-+++ b/include/net/cfg80211.h
-@@ -2797,6 +2797,9 @@ struct cfg80211_pmk_conf {
-  *	signal level is found to be outside the two values.  The driver should
-  *	set %NL80211_EXT_FEATURE_CQM_RSSI_LIST if this method is implemented.
-  *	If it is provided then there's no point providing @set_cqm_rssi_config.
-+ * @set_cqm_tx_rate_config: Configure connection quality monitor TX RATE
-+ *	threshold. After configuration, the driver should (soon) send an event
-+ *	indicating the current level is above/below the configured threshold;
-  * @set_cqm_txe_config: Configure connection quality monitor TX error
-  *	thresholds.
-  * @sched_scan_start: Tell the driver to start a scheduled scan.
-@@ -3096,6 +3099,11 @@ struct cfg80211_ops {
- 					     struct net_device *dev,
- 					     s32 rssi_low, s32 rssi_high);
- 
-+	int	(*set_cqm_tx_rate_config)(struct wiphy *wiphy,
-+					  struct net_device *dev,
-+					  u32 low_txrate_thold,
-+					  u32 high_txrate_thold);
-+
- 	int	(*set_cqm_txe_config)(struct wiphy *wiphy,
- 				      struct net_device *dev,
- 				      u32 rate, u32 pkts, u32 intvl);
-@@ -5642,6 +5650,20 @@ void cfg80211_cqm_rssi_notify(struct net
- 			      s32 rssi_level, gfp_t gfp);
- 
- /**
-+ * cfg80211_cqm_tx_rate_notify - connection quality monitoring tx rate event
-+ * @dev: network device
-+ * @peer: peer's MAC address
-+ * @txrate_event: the triggered TX RATE event
-+ * @txrate_level: new TX RATE level value or 0 if not available
-+ * @gfp: context flags
-+ *
-+ * This function is called when a configured connection quality monitoring
-+ * tx rate threshold reached event occurs.
-+ */
-+void cfg80211_cqm_tx_rate_notify(struct net_device *dev, const u8 *peer,
-+			enum nl80211_cqm_txrate_threshold_event txrate_event,
-+			u32 txrate_level, gfp_t gfp);
-+/**
-  * cfg80211_cqm_pktloss_notify - notify userspace about packetloss to peer
-  * @dev: network device
-  * @peer: peer's MAC address

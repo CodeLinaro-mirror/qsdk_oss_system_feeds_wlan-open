@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/wil6210/Makefile
 +++ b/drivers/net/wireless/ath/wil6210/Makefile
-@@ -19,6 +19,7 @@ wil6210-y += ethtool.o
+@@ -20,6 +20,7 @@ wil6210-y += ethtool.o
  wil6210-y += wil_crash_dump.o
  wil6210-y += wil_platform_ipq.o
  wil6210-y += p2p.o
@@ -133,7 +133,7 @@
  };
  
  static struct ieee80211_supported_band wil_band_60ghz = {
-@@ -2562,7 +2626,7 @@ static void wil_acs_report_channel(struc
+@@ -2634,7 +2698,7 @@ static void wil_acs_report_channel(struc
  
  	vendor_event = cfg80211_vendor_event_alloc(wil_to_wiphy(wil), NULL,
  			2 * sizeof(u8) + 4 + NLMSG_HDRLEN,
@@ -1574,7 +1574,7 @@
  	wil->wmi_wq = create_singlethread_workqueue(WIL_NAME "_wmi");
  	if (!wil->wmi_wq)
  		return -EAGAIN;
-@@ -637,6 +639,7 @@ void wil_priv_deinit(struct wil6210_priv
+@@ -636,6 +638,7 @@ void wil_priv_deinit(struct wil6210_priv
  {
  	wil_dbg_misc(wil, "priv_deinit\n");
  
@@ -1582,7 +1582,7 @@
  	wil_set_recovery_state(wil, fw_recovery_idle);
  	del_timer_sync(&wil->scan_timer);
  	del_timer_sync(&wil->p2p.discovery_timer);
-@@ -1204,6 +1207,8 @@ int __wil_down(struct wil6210_priv *wil)
+@@ -1435,6 +1438,8 @@ int __wil_down(struct wil6210_priv *wil)
  	}
  	wil_enable_irq(wil);
  
@@ -1593,7 +1593,7 @@
  	wil_abort_scan(wil, false);
 --- a/drivers/net/wireless/ath/wil6210/wil6210.h
 +++ b/drivers/net/wireless/ath/wil6210/wil6210.h
-@@ -25,6 +25,7 @@
+@@ -26,6 +26,7 @@
  #include <linux/types.h>
  #include "wmi.h"
  #include "wil_platform.h"
@@ -1601,7 +1601,7 @@
  
  extern bool no_fw_recovery;
  extern unsigned int mtu_max;
-@@ -726,6 +727,9 @@ struct wil6210_priv {
+@@ -781,6 +782,9 @@ struct wil6210_priv {
  
  	/* High Access Latency Policy voting */
  	struct wil_halp halp;
@@ -1611,7 +1611,7 @@
  #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
  	void *nss_ctx;
  #endif
-@@ -972,6 +976,8 @@ int wmi_led_cfg(struct wil6210_priv *wil
+@@ -1030,6 +1034,8 @@ int wmi_led_cfg(struct wil6210_priv *wil
  int wmi_abort_scan(struct wil6210_priv *wil);
  void wil_abort_scan(struct wil6210_priv *wil, bool sync);
  void wil6210_bus_request(struct wil6210_priv *wil, u32 kbps);
@@ -1620,9 +1620,9 @@
  void wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
  			u16 reason_code, bool from_event);
  void wil_probe_client_flush(struct wil6210_priv *wil);
-@@ -1024,4 +1030,18 @@ void wil_halp_unvote(struct wil6210_priv
- void wil6210_set_halp(struct wil6210_priv *wil);
- void wil6210_clear_halp(struct wil6210_priv *wil);
+@@ -1092,4 +1098,18 @@ int wmi_start_sched_scan(struct wil6210_
+ 			 struct cfg80211_sched_scan_request *request);
+ int wmi_stop_sched_scan(struct wil6210_priv *wil);
  
 +void wil_ftm_init(struct wil6210_priv *wil);
 +void wil_ftm_deinit(struct wil6210_priv *wil);
@@ -1641,7 +1641,7 @@
  #endif /* __WIL6210_H__ */
 --- a/drivers/net/wireless/ath/wil6210/wmi.c
 +++ b/drivers/net/wireless/ath/wil6210/wmi.c
-@@ -22,6 +22,7 @@
+@@ -23,6 +23,7 @@
  #include "txrx.h"
  #include "wmi.h"
  #include "trace.h"
@@ -1649,8 +1649,8 @@
  
  static uint max_assoc_sta = WIL6210_MAX_CID;
  module_param(max_assoc_sta, uint, 0644);
-@@ -851,6 +852,30 @@ __acquires(&sta->tid_rx_lock) __releases
- 	spin_unlock_bh(&sta->tid_rx_lock);
+@@ -1237,6 +1238,30 @@ wmi_evt_sched_scan_result(struct wil6210
+ 	cfg80211_sched_scan_results(wiphy, 0);
  }
  
 +static void wmi_evt_aoa_meas(struct wil6210_priv *wil, int id,
@@ -1680,17 +1680,18 @@
  /**
   * Some events are ignored for purpose; and need not be interpreted as
   * "unhandled events"
-@@ -879,6 +904,13 @@ static const struct {
- 	{WMI_DELBA_EVENTID,			wmi_evt_delba},
+@@ -1266,6 +1291,14 @@ static const struct {
  	{WMI_VRING_EN_EVENTID,			wmi_evt_vring_en},
  	{WMI_DATA_PORT_OPEN_EVENTID,		wmi_evt_ignore},
-+	{WMI_AOA_MEAS_EVENTID,			wmi_evt_aoa_meas},
-+	{WMI_TOF_SESSION_END_EVENTID,		wmi_evt_ftm_session_ended},
-+	{WMI_TOF_GET_CAPABILITIES_EVENTID,	wmi_evt_ignore},
-+	{WMI_TOF_SET_LCR_EVENTID,		wmi_evt_ignore},
-+	{WMI_TOF_SET_LCI_EVENTID,		wmi_evt_ignore},
-+	{WMI_TOF_FTM_PER_DEST_RES_EVENTID,	wmi_evt_per_dest_res},
-+	{WMI_TOF_CHANNEL_INFO_EVENTID,		wmi_evt_ignore},
+ 	{WMI_SCHED_SCAN_RESULT_EVENTID,		wmi_evt_sched_scan_result},
++	{WMI_AOA_MEAS_EVENTID,                  wmi_evt_aoa_meas},
++	{WMI_TOF_SESSION_END_EVENTID,           wmi_evt_ftm_session_ended},
++	{WMI_TOF_GET_CAPABILITIES_EVENTID,      wmi_evt_ignore},
++	{WMI_TOF_SET_LCR_EVENTID,               wmi_evt_ignore},
++	{WMI_TOF_SET_LCI_EVENTID,               wmi_evt_ignore},
++	{WMI_TOF_FTM_PER_DEST_RES_EVENTID,      wmi_evt_per_dest_res},
++	{WMI_TOF_CHANNEL_INFO_EVENTID,          wmi_evt_ignore},
++
  };
  
  /*

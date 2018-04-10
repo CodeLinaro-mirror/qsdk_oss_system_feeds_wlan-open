@@ -1,3 +1,139 @@
+--- a/drivers/net/wireless/ath/ath10k/Makefile
++++ b/drivers/net/wireless/ath/ath10k/Makefile
+@@ -17,7 +17,7 @@ ath10k_core-y += mac.o \
+ 		 fwlog.o
+ 
+ ath10k_core-$(CPTCFG_ATH10K_SPECTRAL) += spectral.o
+-ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += debug_smart_ant.o
++ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += debug_smart_ant.o debug_htt_stats.o
+ ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
+ ath10k_core-$(CPTCFG_ATH10K_TRACING) += trace.o
+ ath10k_core-$(CONFIG_THERMAL) += thermal.o
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -40,6 +40,7 @@
+ #include "swap.h"
+ #include "pktlog.h"
+ #include "smart_ant.h"
++#include "debug_htt_stats.h"
+ 
+ #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
+ #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
+@@ -571,6 +572,10 @@ struct ath10k_debug {
+ 	bool fw_stats_done;
+ 
+ 	unsigned long htt_stats_mask;
++	unsigned long rest_htt_stats;
++	u64 htt_req_cookie;
++	struct wlan_10_4_htt_stats htt_10_4;
++	struct wlan_10_2_htt_stats htt_10_2;
+ 	struct delayed_work htt_stats_dwork;
+ 	struct ath10k_dfs_stats dfs_stats;
+ 	struct ath_dfs_pool_stats dfs_pool_stats;
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -883,6 +883,7 @@ static int ath10k_debug_htt_stats_req(st
+ 		return 0;
+ 
+ 	cookie = get_jiffies_64();
++	ar->debug.htt_req_cookie = cookie;
+ 
+ 	ret = ath10k_htt_h2t_stats_req(&ar->htt, ar->debug.htt_stats_mask,
+ 				       cookie);
+@@ -934,8 +935,9 @@ static ssize_t ath10k_write_htt_stats_ma
+ 	if (ret)
+ 		return ret;
+ 
+-	/* max 8 bit masks (for now) */
+-	if (mask > 0xff)
++	if ((ar->running_fw->fw_file.wmi_op_version <
++	     ATH10K_FW_WMI_OP_VERSION_10_4 && mask > 0x31) ||
++	     mask > 0x1ffff)
+ 		return -E2BIG;
+ 
+ 	mutex_lock(&ar->conf_mutex);
+@@ -962,6 +964,44 @@ static const struct file_operations fops
+ 	.llseek = default_llseek,
+ };
+ 
++static ssize_t ath10k_write_rest_htt_stats(struct file *file,
++                                           const char __user *user_buf,
++                                           size_t count, loff_t *ppos)
++{
++        struct ath10k *ar = file->private_data;
++        unsigned long reset;
++        int ret;
++
++        ret = kstrtoul_from_user(user_buf, count, 0, &reset);
++        if (ret)
++                return ret;
++
++        if (reset == 0 || reset > 0x1ffff)
++                return -EINVAL;
++
++        mutex_lock(&ar->conf_mutex);
++
++        ar->debug.rest_htt_stats = reset;
++
++        ret = ath10k_debug_htt_stats_req(ar);
++        if (ret)
++                goto out;
++
++        ret = count;
++
++out:
++        mutex_unlock(&ar->conf_mutex);
++
++        return ret;
++}
++
++static const struct file_operations fops_rest_htt_stats = {
++	.write = ath10k_write_rest_htt_stats,
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.llseek = default_llseek,
++};
++
+ static ssize_t ath10k_read_htt_max_amsdu_ampdu(struct file *file,
+ 					       char __user *user_buf,
+ 					       size_t count, loff_t *ppos)
+@@ -2384,6 +2424,9 @@ int ath10k_debug_register(struct ath10k
+ 	debugfs_create_file("nf_cal_period", 0600, ar->debug.debugfs_phy, ar,
+ 			    &fops_nf_cal_period);
+ 
++	debugfs_create_file("reset_htt_stats", 0600, ar->debug.debugfs_phy, ar,
++			    &fops_rest_htt_stats);
++
+ 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED)) {
+ 		debugfs_create_file("dfs_simulate_radar", 0200, ar->debug.debugfs_phy,
+ 				    ar, &fops_simulate_radar);
+@@ -2403,6 +2446,8 @@ int ath10k_debug_register(struct ath10k
+ 
+ 	ath10k_init_pktlog(ar);
+ 
++	ath10k_htt_debug_stats_init(ar);
++
+ 	debugfs_create_file("quiet_period", 0644, ar->debug.debugfs_phy, ar,
+ 			    &fops_quiet_period);
+ 
+--- a/drivers/net/wireless/ath/ath10k/debug.h
++++ b/drivers/net/wireless/ath/ath10k/debug.h
+@@ -203,6 +203,7 @@ static inline u32 ath10k_debug_get_fw_db
+ }
+ 
+ void ath10k_smart_ant_debugfs_init(struct ath10k *ar);
++void ath10k_htt_debug_stats_init(struct ath10k *ar);
+ #else
+ 
+ static inline int ath10k_debug_start(struct ath10k *ar)
+@@ -271,6 +272,7 @@ static inline u32 ath10k_debug_get_fw_db
+ #define ath10k_debug_get_et_sset_count NULL
+ #define ath10k_debug_get_et_stats NULL
+ #define ath10k_smart_ant_debugfs_init NULL
++#define ath10k_htt_debug_stats_init NULL
+ 
+ #endif /* CPTCFG_ATH10K_DEBUGFS */
+ #ifdef CPTCFG_MAC80211_DEBUGFS
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath10k/debug_htt_stats.c
 @@ -0,0 +1,1998 @@
@@ -2610,150 +2746,6 @@
 +} __packed;
 +
 +#endif
---- a/drivers/net/wireless/ath/ath10k/core.h
-+++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -39,6 +39,7 @@
- #include "swap.h"
- #include "pktlog.h"
- #include "smart_ant.h"
-+#include "debug_htt_stats.h"
- 
- #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
- #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -481,6 +482,10 @@ struct ath10k_debug {
- 	bool fw_stats_done;
- 
- 	unsigned long htt_stats_mask;
-+	unsigned long rest_htt_stats;
-+	u64 htt_req_cookie;
-+	struct wlan_10_4_htt_stats htt_10_4;
-+	struct wlan_10_2_htt_stats htt_10_2;
- 	struct delayed_work htt_stats_dwork;
- 	struct ath10k_dfs_stats dfs_stats;
- 	struct ath_dfs_pool_stats dfs_pool_stats;
---- a/drivers/net/wireless/ath/ath10k/debug.c
-+++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -1140,6 +1140,7 @@ static int ath10k_debug_htt_stats_req(st
- 		return 0;
- 
- 	cookie = get_jiffies_64();
-+	ar->debug.htt_req_cookie = cookie;
- 
- 	ret = ath10k_htt_h2t_stats_req(&ar->htt, ar->debug.htt_stats_mask,
- 				       cookie);
-@@ -1191,8 +1192,9 @@ static ssize_t ath10k_write_htt_stats_ma
- 	if (ret)
- 		return ret;
- 
--	/* max 8 bit masks (for now) */
--	if (mask > 0xff)
-+	if ((ar->running_fw->fw_file.wmi_op_version <
-+	     ATH10K_FW_WMI_OP_VERSION_10_4 && mask > 0x31) ||
-+	     mask > 0x1ffff)
- 		return -E2BIG;
- 
- 	mutex_lock(&ar->conf_mutex);
-@@ -1219,6 +1221,44 @@ static const struct file_operations fops
- 	.llseek = default_llseek,
- };
- 
-+static ssize_t ath10k_write_rest_htt_stats(struct file *file,
-+                                           const char __user *user_buf,
-+                                           size_t count, loff_t *ppos)
-+{
-+        struct ath10k *ar = file->private_data;
-+        unsigned long reset;
-+        int ret;
-+
-+        ret = kstrtoul_from_user(user_buf, count, 0, &reset);
-+        if (ret)
-+                return ret;
-+
-+        if (reset == 0 || reset > 0x1ffff)
-+                return -EINVAL;
-+
-+        mutex_lock(&ar->conf_mutex);
-+
-+        ar->debug.rest_htt_stats = reset;
-+
-+        ret = ath10k_debug_htt_stats_req(ar);
-+        if (ret)
-+                goto out;
-+
-+        ret = count;
-+
-+out:
-+        mutex_unlock(&ar->conf_mutex);
-+
-+        return ret;
-+}
-+
-+static const struct file_operations fops_rest_htt_stats = {
-+	.write = ath10k_write_rest_htt_stats,
-+	.owner = THIS_MODULE,
-+	.open = simple_open,
-+	.llseek = default_llseek,
-+};
-+
- static ssize_t ath10k_read_htt_max_amsdu_ampdu(struct file *file,
- 					       char __user *user_buf,
- 					       size_t count, loff_t *ppos)
-@@ -2507,6 +2547,9 @@ int ath10k_debug_register(struct ath10k
- 	debugfs_create_file("nf_cal_period", 0600, ar->debug.debugfs_phy, ar,
- 			    &fops_nf_cal_period);
- 
-+	debugfs_create_file("reset_htt_stats", 0600, ar->debug.debugfs_phy, ar,
-+			    &fops_rest_htt_stats);
-+
- 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED)) {
- 		debugfs_create_file("dfs_simulate_radar", 0200, ar->debug.debugfs_phy,
- 				    ar, &fops_simulate_radar);
-@@ -2523,6 +2566,7 @@ int ath10k_debug_register(struct ath10k
- 			    &fops_pktlog_filter);
- 
- 	ath10k_smart_ant_debugfs_init(ar);
-+	ath10k_htt_debug_stats_init(ar);
- 
- 	ath10k_init_pktlog(ar);
- 
---- a/drivers/net/wireless/ath/ath10k/debug.h
-+++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -168,6 +168,7 @@ static inline u32 ath10k_debug_get_fw_db
- }
- 
- void ath10k_smart_ant_debugfs_init(struct ath10k *ar);
-+void ath10k_htt_debug_stats_init(struct ath10k *ar);
- #else
- 
- static inline int ath10k_debug_start(struct ath10k *ar)
-@@ -240,6 +241,7 @@ static inline int ath10k_debug_fw_devcor
- #define ath10k_debug_get_et_sset_count NULL
- #define ath10k_debug_get_et_stats NULL
- #define ath10k_smart_ant_debugfs_init NULL
-+#define ath10k_htt_debug_stats_init NULL
- 
- #endif /* CPTCFG_ATH10K_DEBUGFS */
- #ifdef CPTCFG_MAC80211_DEBUGFS
---- a/drivers/net/wireless/ath/ath10k/htt_rx.c
-+++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -23,6 +23,7 @@
- #include "trace.h"
- #include "mac.h"
- #include "smart_ant.h"
-+#include "debug_htt_stats.h"
- 
- #include <linux/log2.h>
- 
-@@ -2456,6 +2457,9 @@ bool ath10k_htt_t2h_msg_handler(struct a
- 		break;
- 	case HTT_T2H_MSG_TYPE_STATS_CONF:
- 		trace_ath10k_htt_stats(ar, skb->data, skb->len);
-+		spin_lock_bh(&ar->data_lock);
-+		ath10k_htt_process_stats(ar, skb);
-+		spin_unlock_bh(&ar->data_lock);
- 		break;
- 	case HTT_T2H_MSG_TYPE_TX_INSPECT_IND:
- 		/* Firmware can return tx frames if it's unable to fully
 --- a/drivers/net/wireless/ath/ath10k/htt.h
 +++ b/drivers/net/wireless/ath/ath10k/htt.h
 @@ -32,12 +32,24 @@
@@ -2787,18 +2779,38 @@
  
  	HTT_DBG_NUM_STATS /* keep this last */
  };
-@@ -1803,7 +1815,7 @@ void ath10k_htt_htc_tx_complete(struct a
+@@ -1934,7 +1946,7 @@ void ath10k_htt_htc_tx_complete(struct a
  void ath10k_htt_htc_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb);
  bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb);
  int ath10k_htt_h2t_ver_req_msg(struct ath10k_htt *htt);
 -int ath10k_htt_h2t_stats_req(struct ath10k_htt *htt, u8 mask, u64 cookie);
 +int ath10k_htt_h2t_stats_req(struct ath10k_htt *htt, u32 mask, u64 cookie);
- int ath10k_htt_send_frag_desc_bank_cfg(struct ath10k_htt *htt);
- int ath10k_htt_send_rx_ring_cfg_ll(struct ath10k_htt *htt);
  int ath10k_htt_h2t_aggr_cfg_msg(struct ath10k_htt *htt,
+ 				u8 max_subfrms_ampdu,
+ 				u8 max_subfrms_amsdu);
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -24,6 +24,7 @@
+ #include "trace.h"
+ #include "mac.h"
+ #include "smart_ant.h"
++#include "debug_htt_stats.h"
+ 
+ #include <linux/log2.h>
+ 
+@@ -2770,6 +2771,9 @@ bool ath10k_htt_t2h_msg_handler(struct a
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_STATS_CONF:
+ 		trace_ath10k_htt_stats(ar, skb->data, skb->len);
++		spin_lock_bh(&ar->data_lock);
++		ath10k_htt_process_stats(ar, skb);
++		spin_unlock_bh(&ar->data_lock);
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_TX_INSPECT_IND:
+ 		/* Firmware can return tx frames if it's unable to fully
 --- a/drivers/net/wireless/ath/ath10k/htt_tx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
-@@ -502,7 +502,7 @@ int ath10k_htt_h2t_ver_req_msg(struct at
+@@ -588,7 +588,7 @@ int ath10k_htt_h2t_ver_req_msg(struct at
  	return 0;
  }
  
@@ -2807,7 +2819,7 @@
  {
  	struct ath10k *ar = htt->ar;
  	struct htt_stats_req *req;
-@@ -525,11 +525,17 @@ int ath10k_htt_h2t_stats_req(struct ath1
+@@ -611,11 +611,17 @@ int ath10k_htt_h2t_stats_req(struct ath1
  
  	memset(req, 0, sizeof(*req));
  
@@ -2830,14 +2842,3 @@
  	req->stat_type = HTT_STATS_REQ_CFG_STAT_TYPE_INVALID;
  	req->cookie_lsb = cpu_to_le32(cookie & 0xffffffff);
  	req->cookie_msb = cpu_to_le32((cookie & 0xffffffff00000000ULL) >> 32);
---- a/drivers/net/wireless/ath/ath10k/Makefile
-+++ b/drivers/net/wireless/ath/ath10k/Makefile
-@@ -15,7 +15,7 @@ ath10k_core-y += mac.o \
- 		 swap.o \
- 		 fwlog.o
- 
--ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o debug_smart_ant.o
-+ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += spectral.o debug_smart_ant.o debug_htt_stats.o
- ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
- ath10k_core-$(CPTCFG_ATH10K_TRACING) += trace.o
- ath10k_core-$(CONFIG_THERMAL) += thermal.o
