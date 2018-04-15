@@ -1,6 +1,6 @@
---- a/drivers/net/wireless/ath/ath10k/core.c	2018-04-02 09:46:40.410841599 +0530
-+++ b/drivers/net/wireless/ath/ath10k/core.c	2018-04-02 09:25:47.190282318 +0530
-@@ -2673,11 +2673,20 @@
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -2675,11 +2675,20 @@ static void ath10k_core_register_work(struct work_struct *work)
  		goto err_spectral_destroy;
  	}
  
@@ -8,7 +8,7 @@
 +	if (status) {
 +		ath10k_err(ar, "Could not init cfr rfs: %d\n",
 +			   status);
-+		goto err_cfr_rfs_destroy;
++		goto err_thermal_unregister;
 +	}
 +
  	ath10k_fwlog_register(ar);
@@ -16,12 +16,12 @@
  	set_bit(ATH10K_FLAG_CORE_REGISTERED, &ar->dev_flags);
  	return;
  
-+err_cfr_rfs_destroy:
-+	ath10k_cfr_capture_destroy(ar);
++err_thermal_unregister:
++	ath10k_thermal_unregister(ar);
  err_spectral_destroy:
  	ath10k_spectral_destroy(ar);
  err_debug_destroy:
-@@ -2726,6 +2735,8 @@
+@@ -2728,6 +2737,8 @@ void ath10k_core_unregister(struct ath10k *ar)
  	 */
  	ath10k_spectral_destroy(ar);
  
@@ -30,43 +30,22 @@
  	/* We must unregister from mac80211 before we stop HTC and HIF.
  	 * Otherwise we will fail to submit commands to FW and mac80211 will be
  	 * unhappy about callback failures.
---- a/drivers/net/wireless/ath/ath10k/core.h	2018-04-02 09:46:40.414841613 +0530
-+++ b/drivers/net/wireless/ath/ath10k/core.h	2018-04-02 09:25:47.190282318 +0530
-@@ -455,6 +455,33 @@
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -454,6 +454,12 @@ struct ath10k_tx_stats {
+ 	u64 ack_fails;
  };
  
- 
-+#define WMI_PEER_CFR_CAPTURE_ENABLE   1
-+#define WMI_PEER_CFR_CAPTURE_DISABLE  0
-+
-+#define WMI_PEER_CFR_PERIODICITY_MIN  0
-+#define WMI_PEER_CFR_PERIODICITY_MAX  (10*60*1000)
-+
-+enum ath10k_wmi_cfr_capture_bw {
-+	WMI_PEER_CFR_CAPTURE_BW_20MHZ = 0,
-+	WMI_PEER_CFR_CAPTURE_BW_40MHZ = 1,
-+	WMI_PEER_CFR_CAPTURE_BW_80MHZ = 2,
-+	WMI_PEER_CFR_CAPTURE_BW_160MHZ   = 3,
-+	WMI_PEER_CFR_CAPTURE_BW_80_80MHZ = 4,
-+	WMI_PEER_CFR_CAPTURE_BW_MAX,
-+};
-+
-+enum ath10k_wmi_cfr_capture_method {
-+	WMI_PEER_CFR_CAPTURE_METHOD_NULL_FRAME = 0,
-+	WMI_PEER_CFR_CAPTURE_METHOD_MAX,
-+};
-+
 +struct ath10k_cfr_capture {
 +	u32 cfr_enable;
 +	u32 cfr_period;
 +	u32 cfr_bandwidth;
 +	u32 cfr_method;
 +};
-+
+ 
  struct ath10k_sta {
  	struct ath10k_vif *arvif;
- 
-@@ -480,6 +507,7 @@
+@@ -480,6 +486,7 @@ struct ath10k_sta {
  	u8 tpc;
  	u32 peer_ps_state;
  	enum nl80211_cqm_txrate_threshold_event last_event;
@@ -74,7 +53,7 @@
  };
  
  #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
-@@ -1152,11 +1180,21 @@
+@@ -1152,11 +1159,21 @@ struct ath10k {
  	bool radar_conf_waiting;
  	/*Status indicated by the Radar Confirmation Event*/
  	enum wmi_radar_conf_status radar_conf_status;
@@ -96,9 +75,9 @@
  static inline bool ath10k_peer_stats_enabled(struct ath10k *ar)
  {
  	if (test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags) &&
---- a/drivers/net/wireless/ath/ath10k/debug.c	2018-04-02 09:46:40.418841628 +0530
-+++ b/drivers/net/wireless/ath/ath10k/debug.c	2018-04-02 09:27:20.270585294 +0530
-@@ -2562,6 +2562,67 @@
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2562,6 +2562,74 @@ static const struct file_operations fops_btcoex_priority = {
  	.open = simple_open
  };
  
@@ -114,10 +93,17 @@
 +	if (kstrtou8_from_user(user_buf, count, 0, &cfr_enable))
 +		return -EINVAL;
 +
-+	if (cfr_enable > 1 || cfr_enable < 0)
-+		return -EINVAL;
-+
 +	mutex_lock(&ar->conf_mutex);
++
++	if (ar->state != ATH10K_STATE_ON) {
++		ret = -ENETDOWN;
++		goto exit;
++	}
++
++	if (cfr_enable > 1 || cfr_enable < 0) {
++		ret = -EINVAL;
++		goto exit;
++	}
 +
 +	if (ar->cfr_enable == cfr_enable) {
 +		ret = count;
@@ -166,19 +152,21 @@
  static ssize_t ath10k_write_peer_stats(struct file *file,
  				       const char __user *ubuf,
  				       size_t count, loff_t *ppos)
-@@ -2974,6 +3035,9 @@
+@@ -2974,6 +3042,11 @@ int ath10k_debug_register(struct ath10k *ar)
  	debugfs_create_file("fw_test", 0600, ar->debug.debugfs_phy, ar,
  			    &fops_fw_test);
  
-+	debugfs_create_file("periodic_cfr_start", 0600, ar->debug.debugfs_phy,
-+			    ar, &fops_cfr_enable);
++	if (test_bit(WMI_SERVICE_CFR_CAPTURE_SUPPORT, ar->wmi.svc_map))
++		debugfs_create_file("periodic_cfr_enable", 0600,
++				    ar->debug.debugfs_phy,
++				    ar, &fops_cfr_enable);
 +
  	return 0;
  }
  
---- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c	2018-04-02 09:46:40.358841401 +0530
-+++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c	2018-04-02 09:25:47.190282318 +0530
-@@ -797,6 +797,113 @@
+--- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
+@@ -797,6 +797,117 @@ static const struct file_operations fops_set_tpc = {
  	.llseek = default_llseek,
  };
  
@@ -190,17 +178,27 @@
 +	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
 +	struct ath10k *ar = arsta->arvif->ar;
 +	struct wmi_peer_cfr_capture_conf_arg arg;
-+	u32 per_peer_cfr_status, per_peer_cfr_bw;
-+	u32 per_peer_cfr_method, per_peer_cfr_period;
++	u32 per_peer_cfr_status = 0, per_peer_cfr_bw  = 0;
++	u32 per_peer_cfr_method = 0, per_peer_cfr_period = 0;
 +	int ret;
 +	char buf[64] = {0};
 +
 +	simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
 +
++	mutex_lock(&ar->conf_mutex);
++
++	if (ar->state != ATH10K_STATE_ON) {
++		ret = -ENETDOWN;
++		goto out;
++	}
++
 +	ret = sscanf(buf, "%u %u %u %u", &per_peer_cfr_status, &per_peer_cfr_bw,
 +		     &per_peer_cfr_period, &per_peer_cfr_method);
 +
-+	if (ret != 4)
++	if (ret < 1)
++		return -EINVAL;
++
++	if (per_peer_cfr_status && ret != 4)
 +		return -EINVAL;
 +
 +	if (per_peer_cfr_status == arsta->cfr_capture.cfr_enable &&
@@ -219,6 +217,7 @@
 +	    per_peer_cfr_period < WMI_PEER_CFR_PERIODICITY_MIN ||
 +	    per_peer_cfr_period > WMI_PEER_CFR_PERIODICITY_MAX)
 +		return -EINVAL;
++
 +	/*TODO: Need rework when base time is configurable*/
 +	if (per_peer_cfr_period % 10)
 +		return -EINVAL;
@@ -231,13 +230,6 @@
 +	arg.periodicity = per_peer_cfr_period;
 +	arg.bandwidth = per_peer_cfr_bw;
 +	arg.capture_method = per_peer_cfr_method;
-+
-+	mutex_lock(&ar->conf_mutex);
-+
-+	if (ar->state != ATH10K_STATE_ON) {
-+		ret = -ENETDOWN;
-+		goto out;
-+	}
 +
 +	ret = ath10k_wmi_peer_set_cfr_capture_conf(ar, arsta->arvif->vdev_id,
 +						   sta->addr, &arg);
@@ -292,15 +284,27 @@
  static ssize_t ath10k_dbg_sta_read_peer_tid_log(struct file *file, char __user *user_buf,
  						size_t count, loff_t *ppos)
  {
-@@ -876,4 +983,5 @@
+@@ -864,6 +975,8 @@ static const struct file_operations fops_peer_ps_state = {
+ void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			    struct ieee80211_sta *sta, struct dentry *dir)
+ {
++	struct ath10k *ar = hw->priv;
++
+ 	debugfs_create_file("aggr_mode", 0644, dir, sta, &fops_aggr_mode);
+ 	debugfs_create_file("addba", 0200, dir, sta, &fops_addba);
+ 	debugfs_create_file("addba_resp", 0200, dir, sta, &fops_addba_resp);
+@@ -876,4 +989,8 @@ void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
  			    &fops_set_tpc);
  	debugfs_create_file("peer_tid_log", S_IRUSR, dir, sta, &fops_peer_tid_log);
  	debugfs_create_file("peer_ps_state", S_IRUSR, dir, sta, &fops_peer_ps_state);
-+	debugfs_create_file("cfr_capture", 0644 , dir, sta, &fops_cfr_capture);
++
++	if (test_bit(WMI_SERVICE_CFR_CAPTURE_SUPPORT, ar->wmi.svc_map))
++		debugfs_create_file("cfr_capture", 0644 , dir,
++				    sta, &fops_cfr_capture);
  }
---- a/drivers/net/wireless/ath/ath10k/htt.c	2018-03-26 14:00:07.000000000 +0530
-+++ b/drivers/net/wireless/ath/ath10k/htt.c	2018-04-02 09:25:47.190282318 +0530
-@@ -139,6 +139,8 @@
+--- a/drivers/net/wireless/ath/ath10k/htt.c
++++ b/drivers/net/wireless/ath/ath10k/htt.c
+@@ -139,6 +139,8 @@ static const enum htt_t2h_msg_type htt_10_4_t2h_msg_types[] = {
  				HTT_T2H_MSG_TYPE_TX_MODE_SWITCH_IND,
  	[HTT_10_4_T2H_MSG_TYPE_PEER_STATS] =
  				HTT_T2H_MSG_TYPE_PEER_STATS,
@@ -309,9 +313,9 @@
  };
  
  int ath10k_htt_connect(struct ath10k_htt *htt)
---- a/drivers/net/wireless/ath/ath10k/htt.h	2018-04-02 09:46:40.394841538 +0530
-+++ b/drivers/net/wireless/ath/ath10k/htt.h	2018-04-02 09:25:47.190282318 +0530
-@@ -434,6 +434,7 @@
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -434,6 +434,7 @@ enum htt_10_4_t2h_msg_type {
  	/* 0x19 to 0x2f are reserved */
  	HTT_10_4_T2H_MSG_TYPE_TX_MODE_SWITCH_IND     = 0x30,
  	HTT_10_4_T2H_MSG_TYPE_PEER_STATS	     = 0x31,
@@ -319,7 +323,7 @@
  	/* keep this last */
  	HTT_10_4_T2H_NUM_MSGS
  };
-@@ -469,6 +470,7 @@
+@@ -469,6 +470,7 @@ enum htt_t2h_msg_type {
  	HTT_T2H_MSG_TYPE_TX_FETCH_CONFIRM,
  	HTT_T2H_MSG_TYPE_TX_MODE_SWITCH_IND,
  	HTT_T2H_MSG_TYPE_PEER_STATS,
@@ -327,7 +331,7 @@
  	/* keep this last */
  	HTT_T2H_NUM_MSGS
  };
-@@ -1509,6 +1511,45 @@
+@@ -1509,6 +1511,45 @@ struct htt_per_peer_tx_stats_ind {
  	__le32	reserved2;
  } __packed;
  
@@ -373,7 +377,7 @@
  struct htt_peer_tx_stats {
  	u8 num_ppdu;
  	u8 ppdu_len;
-@@ -1564,6 +1605,17 @@
+@@ -1564,6 +1605,17 @@ struct htt_cmd {
  	};
  } __packed;
  
@@ -391,7 +395,7 @@
  struct htt_resp {
  	struct htt_resp_hdr hdr;
  	union {
-@@ -1590,6 +1642,7 @@
+@@ -1590,6 +1642,7 @@ struct htt_resp {
  		struct htt_tx_mode_switch_ind tx_mode_switch_ind;
  		struct htt_channel_change chan_change;
  		struct htt_peer_tx_stats peer_tx_stats;
@@ -399,8 +403,8 @@
  	};
  } __packed;
  
---- a/drivers/net/wireless/ath/ath10k/htt_rx.c	2018-04-02 09:46:40.394841538 +0530
-+++ b/drivers/net/wireless/ath/ath10k/htt_rx.c	2018-04-02 09:25:47.194282330 +0530
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
 @@ -25,6 +25,7 @@
  #include "smart_ant.h"
  #include "debug_htt_stats.h"
@@ -409,7 +413,7 @@
  #include <linux/log2.h>
  #include <linux/bitfield.h>
  
-@@ -2452,6 +2453,130 @@
+@@ -2452,6 +2453,155 @@ out:
  	rcu_read_unlock();
  }
  
@@ -426,26 +430,51 @@
 +	void *vaddr;
 +	int i;
 +
++	/* Find host allocated memory for the request ID provied by firmware,
++	 * in HTT message, where CFR dump is wrriten by the firmware.
++	 *
++	 *  Host allocated memory layout:
++	 *     Read      Write                                     FW
++	 *    Index      Index   <-------   CFR data     ------->Magic Num
++	 *  --------------------------------------------------------------
++	 *  | 4 byte  | 4 byte   |      CFR dump                | 4 byte |
++	 *  --------------------------------------------------------------
++	 *    Updated   Updated                                  Updated
++	 *      by      by FW                                     by FW
++	 *     host
++	 **/
 +	for (i = 0 ; i < ar->wmi.num_mem_chunks; i++) {
 +		if (ar->wmi.mem_chunks[i].req_id == req_id)
 +			mem_chunk = &ar->wmi.mem_chunks[i];
 +	}
 +
-+	if (mem_chunk == NULL) {
++	if (!mem_chunk) {
 +		ath10k_warn(ar, "No memory allocated for req ID %d\n", req_id);
 +		return;
 +	}
 +
++	/* fetch the read index and write index pointers based on above memory
++	 * logic.
++	 **/
 +	vaddr = mem_chunk->vaddr;
 +	rindex = (u32 *)vaddr;
 +	windex = rindex + 1;
 +
++
++	/* mem_index is having the index of the address where CFR dump wrriten,
++	 * find data pointer from mem index and start address of memory.
++	 **/
 +	rfs_cfr_dump->cfr_dump = vaddr + mem_index;
++	/*Dont do relayfs when there is no data to realy*/
 +	if (msg_len)
 +		ath10k_cfr_dump_to_rfs(ar, rfs_cfr_dump->cfr_dump, msg_len);
 +
-+	/*Considering 4 byte of FW magic number,
-+	 *should not be overwritten by host
++	/* Updating the read index to the number of bytes read by host, it will
++	 * help in writing next capture.
++	 * ignoring 4 byte for FW magic number from the actual allocated memory
++	 * length to avoid courruption in magic number. This memory is circular
++	 * so after complation of one round, Skipping the first 8 byte as they
++	 * are for read index and write index.
 +	 */
 +	if (((*rindex) + msg_len) <= (mem_chunk->len - 4))
 +		(*rindex) += msg_len;
@@ -540,7 +569,7 @@
  void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
  {
  	struct ath10k_pktlog_hdr *hdr = (struct ath10k_pktlog_hdr *)data;
-@@ -2701,6 +2826,10 @@
+@@ -2701,6 +2851,10 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
  		if (ath10k_peer_stats_enabled(ar))
  			ath10k_htt_fetch_peer_stats(ar, skb);
  		break;
@@ -551,9 +580,9 @@
  	case HTT_T2H_MSG_TYPE_EN_STATS:
  	default:
  		ath10k_warn(ar, "htt event (%d) not handled\n",
---- a/drivers/net/wireless/ath/ath10k/spectral.c	2018-03-26 14:00:07.000000000 +0530
-+++ b/drivers/net/wireless/ath/ath10k/spectral.c	2018-04-02 09:25:47.194282330 +0530
-@@ -570,3 +570,44 @@
+--- a/drivers/net/wireless/ath/ath10k/spectral.c
++++ b/drivers/net/wireless/ath/ath10k/spectral.c
+@@ -570,3 +570,47 @@ void ath10k_spectral_destroy(struct ath10k *ar)
  		ar->spectral.rfs_chan_spec_scan = NULL;
  	}
  }
@@ -584,6 +613,9 @@
 +
 +int ath10k_cfr_capture_create(struct ath10k *ar)
 +{
++	if (!test_bit(WMI_SERVICE_CFR_CAPTURE_SUPPORT, ar->wmi.svc_map))
++		return 0;
++
 +	ar->rfs_cfr_capture = relay_open("cfr_dump",
 +			      ar->debug.debugfs_phy,
 +			      1100, 2000,
@@ -598,9 +630,9 @@
 +		ar->rfs_cfr_capture = NULL;
 +	}
 +}
---- a/drivers/net/wireless/ath/ath10k/spectral.h	2018-03-26 14:00:07.000000000 +0530
-+++ b/drivers/net/wireless/ath/ath10k/spectral.h	2018-04-02 09:25:47.194282330 +0530
-@@ -30,6 +30,30 @@
+--- a/drivers/net/wireless/ath/ath10k/spectral.h
++++ b/drivers/net/wireless/ath/ath10k/spectral.h
+@@ -30,6 +30,30 @@ struct ath10k_spec_scan {
  	u8 fft_size;
  };
  
@@ -631,7 +663,7 @@
  /* enum ath10k_spectral_mode:
   *
   * @SPECTRAL_DISABLED: spectral mode is disabled
-@@ -54,6 +78,11 @@
+@@ -54,6 +78,11 @@ int ath10k_spectral_start(struct ath10k *ar);
  int ath10k_spectral_vif_stop(struct ath10k_vif *arvif);
  int ath10k_spectral_create(struct ath10k *ar);
  void ath10k_spectral_destroy(struct ath10k *ar);
@@ -643,7 +675,7 @@
  
  #else
  
-@@ -85,6 +114,25 @@
+@@ -85,6 +114,25 @@ static inline void ath10k_spectral_destroy(struct ath10k *ar)
  {
  }
  
@@ -669,9 +701,9 @@
  #endif /* CPTCFG_ATH10K_DEBUGFS */
  
  #endif /* SPECTRAL_H */
---- a/drivers/net/wireless/ath/ath10k/wmi.c	2018-04-02 09:46:40.418841628 +0530
-+++ b/drivers/net/wireless/ath/ath10k/wmi.c	2018-04-02 09:25:47.194282330 +0530
-@@ -761,7 +761,8 @@
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -761,7 +761,8 @@ static struct wmi_cmd_map wmi_10_4_cmd_map = {
  	.tdls_peer_update_cmdid = WMI_10_4_TDLS_PEER_UPDATE_CMDID,
  	.tdls_set_offchan_mode_cmdid = WMI_10_4_TDLS_SET_OFFCHAN_MODE_CMDID,
  	.set_coex_param_cmdid = WMI_10_4_BTCOEX_CFG_CMDID,
@@ -681,7 +713,7 @@
  };
  
  /* MAIN WMI VDEV param map */
-@@ -1616,6 +1617,7 @@
+@@ -1616,6 +1617,7 @@ static struct wmi_pdev_param_map wmi_10_4_pdev_param_map = {
  	.arp_srcaddr = WMI_10_4_PDEV_PARAM_ARP_SRCADDR,
  	.arp_dstaddr = WMI_10_4_PDEV_PARAM_ARP_DSTADDR,
  	.enable_btcoex = WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
@@ -689,7 +721,7 @@
  };
  
  static const struct wmi_peer_flags_map wmi_peer_flags_map = {
-@@ -1952,6 +1954,35 @@
+@@ -1952,6 +1954,35 @@ ath10k_wmi_op_gen_mgmt_tx(struct ath10k *ar, struct sk_buff *msdu)
  	return skb;
  }
  
@@ -725,7 +757,7 @@
  static void ath10k_wmi_event_scan_started(struct ath10k *ar)
  {
  	lockdep_assert_held(&ar->data_lock);
-@@ -4747,6 +4778,7 @@
+@@ -4747,6 +4778,7 @@ static int ath10k_wmi_alloc_chunk(struct ath10k *ar, u32 req_id,
  	dma_addr_t paddr;
  	u32 pool_size;
  	int idx = ar->wmi.num_mem_chunks;
@@ -733,7 +765,7 @@
  	void *vaddr;
  
  	pool_size = num_units * round_up(unit_len, 4);
-@@ -4763,6 +4795,11 @@
+@@ -4763,6 +4795,11 @@ static int ath10k_wmi_alloc_chunk(struct ath10k *ar, u32 req_id,
  	ar->wmi.mem_chunks[idx].req_id = req_id;
  	ar->wmi.num_mem_chunks++;
  
@@ -745,7 +777,7 @@
  	return num_units;
  }
  
-@@ -8980,6 +9017,7 @@
+@@ -8980,6 +9017,7 @@ static const struct wmi_ops wmi_10_4_ops = {
  	.gen_update_fw_tdls_state = ath10k_wmi_10_4_gen_update_fw_tdls_state,
  	.gen_tdls_peer_update = ath10k_wmi_10_4_gen_tdls_peer_update,
  	.gen_radar_found = ath10k_wmi_10_4_gen_radar_found,
@@ -753,9 +785,9 @@
  
  	/* shared with 10.2 */
  	.pull_echo_ev = ath10k_wmi_op_pull_echo_ev,
---- a/drivers/net/wireless/ath/ath10k/wmi.h	2018-04-02 09:46:40.418841628 +0530
-+++ b/drivers/net/wireless/ath/ath10k/wmi.h	2018-04-02 09:25:47.194282330 +0530
-@@ -202,7 +202,7 @@
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
+@@ -202,7 +202,7 @@ enum wmi_service {
  	WMI_SERVICE_TPC_STATS_FINAL,
  	WMI_SERVICE_CFR_CAPTURE_SUPPORT,
  	WMI_SERVICE_TX_DATA_ACK_RSSI,
@@ -764,7 +796,7 @@
  	WMI_SERVICE_PER_PACKET_SW_ENCRYPT,
  	/* keep last */
  	WMI_SERVICE_MAX,
-@@ -352,7 +352,7 @@
+@@ -352,7 +352,7 @@ enum wmi_10_4_service {
  	WMI_10_4_SERVICE_TPC_STATS_FINAL,
  	WMI_10_4_SERVICE_CFR_CAPTURE_SUPPORT,
  	WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
@@ -773,7 +805,7 @@
  	WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  };
  
-@@ -470,7 +470,7 @@
+@@ -470,7 +470,7 @@ static inline char *wmi_service_name(int service_id)
  	SVCSTR(WMI_SERVICE_TPC_STATS_FINAL);
  	SVCSTR(WMI_SERVICE_CFR_CAPTURE_SUPPORT);
  	SVCSTR(WMI_SERVICE_TX_DATA_ACK_RSSI);
@@ -782,7 +814,7 @@
  	SVCSTR(WMI_SERVICE_PER_PACKET_SW_ENCRYPT);
  	default:
  		return NULL;
-@@ -784,8 +784,8 @@
+@@ -784,8 +784,8 @@ static inline void wmi_10_4_svc_map(const __le32 *in, unsigned long *out,
  	       WMI_SERVICE_CFR_CAPTURE_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
  	       WMI_SERVICE_TX_DATA_ACK_RSSI, len);
@@ -793,7 +825,7 @@
  	SVCMAP(WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  	       WMI_SERVICE_PER_PACKET_SW_ENCRYPT, len);
  }
-@@ -992,6 +992,7 @@
+@@ -992,6 +992,7 @@ struct wmi_cmd_map {
  	u32 peer_set_smart_ant_train_info_cmdid;
  	u32 set_coex_param_cmdid;
  	u32 radar_found_cmdid;
@@ -801,7 +833,7 @@
  };
  
  /*
-@@ -1831,6 +1832,7 @@
+@@ -1831,6 +1832,7 @@ enum wmi_10_4_cmd_id {
  	WMI_10_4_PDEV_SET_BRIDGE_MACADDR_CMDID,
  	WMI_10_4_ATF_GROUP_WMM_AC_CONFIG_REQUEST_CMDID,
  	WMI_10_4_RADAR_FOUND_CMDID,
@@ -809,7 +841,7 @@
  	WMI_10_4_PDEV_UTF_CMDID = WMI_10_4_END_CMDID - 1,
  };
  
-@@ -2183,6 +2185,10 @@
+@@ -2183,6 +2185,10 @@ enum wlan_mode_capability {
  	WHAL_WLAN_11AG_CAPABILITY  = 0x3,
  };
  
@@ -820,10 +852,30 @@
  /* structure used by FW for requesting host memory */
  struct wlan_host_mem_req {
  	/* ID of the request */
-@@ -3177,6 +3183,22 @@
+@@ -3177,6 +3183,42 @@ struct wmi_bssid_arg {
  	const u8 *bssid;
  };
  
++#define WMI_PEER_CFR_CAPTURE_ENABLE   1
++#define WMI_PEER_CFR_CAPTURE_DISABLE  0
++
++#define WMI_PEER_CFR_PERIODICITY_MIN  0
++#define WMI_PEER_CFR_PERIODICITY_MAX  (10*60*1000)
++
++enum ath10k_wmi_cfr_capture_bw {
++	WMI_PEER_CFR_CAPTURE_BW_20MHZ = 0,
++	WMI_PEER_CFR_CAPTURE_BW_40MHZ = 1,
++	WMI_PEER_CFR_CAPTURE_BW_80MHZ = 2,
++	WMI_PEER_CFR_CAPTURE_BW_160MHZ   = 3,
++	WMI_PEER_CFR_CAPTURE_BW_80_80MHZ = 4,
++	WMI_PEER_CFR_CAPTURE_BW_MAX,
++};
++
++enum ath10k_wmi_cfr_capture_method {
++	WMI_PEER_CFR_CAPTURE_METHOD_NULL_FRAME = 0,
++	WMI_PEER_CFR_CAPTURE_METHOD_MAX,
++};
++
 +struct wmi_peer_cfr_capture_conf_10_4_cmd {
 +	 __le32 request;
 +	struct wmi_mac_addr mac_addr;
@@ -843,7 +895,7 @@
  struct wmi_start_scan_arg {
  	u32 scan_id;
  	u32 scan_req_id;
-@@ -3741,6 +3763,7 @@
+@@ -3741,6 +3783,7 @@ struct wmi_pdev_param_map {
  	u32 arp_srcaddr;
  	u32 arp_dstaddr;
  	u32 enable_btcoex;
@@ -851,7 +903,7 @@
  };
  
  #define WMI_PDEV_PARAM_UNSUPPORTED 0
-@@ -4057,6 +4080,14 @@
+@@ -4057,6 +4100,14 @@ enum wmi_10_4_pdev_param {
  	WMI_10_4_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
  	WMI_10_4_PDEV_PARAM_ATF_SSID_GROUP_POLICY,
  	WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
@@ -866,9 +918,9 @@
  };
  
  struct wmi_pdev_set_param_cmd {
---- a/drivers/net/wireless/ath/ath10k/wmi-ops.h	2018-04-02 09:46:40.402841568 +0530
-+++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h	2018-04-02 09:25:47.194282330 +0530
-@@ -222,6 +222,9 @@
+--- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
++++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
+@@ -222,6 +222,9 @@ struct wmi_ops {
  			const struct wmi_peer_sant_set_train_arg *arg);
  	struct sk_buff *(*gen_set_coex_param)(struct ath10k *ar,
  					      u32 wlan_traffic_priority);
@@ -878,7 +930,7 @@
  };
  
  int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1606,4 +1609,22 @@
+@@ -1606,4 +1609,22 @@ ath10k_wmi_radar_found(struct ath10k *ar,
  	return ath10k_wmi_cmd_send(ar, skb,
  				   ar->wmi.cmd->radar_found_cmdid);
  }
