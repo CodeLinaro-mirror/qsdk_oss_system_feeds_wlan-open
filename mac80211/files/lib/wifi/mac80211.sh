@@ -101,10 +101,7 @@ detect_mac80211() {
 
 		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
 
-		[ "$vht_cap" -gt 0 ] && {
-			htmode="VHT40"
-			[ "$mode_band" = a ] && htmode="VHT80"
-		}
+		[ "$mode_band" = a ] && htmode="VHT80"
 
 		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
 
