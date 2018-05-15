@@ -675,7 +675,7 @@
  
  #else
  
-@@ -85,6 +114,24 @@ static inline void ath10k_spectral_destr
+@@ -85,6 +114,25 @@ static inline void ath10k_spectral_destr
  {
  }
  
@@ -697,44 +697,10 @@
 +static inline void ath10k_cfr_finlalize_relay(struct ath10k *ar)
 +{
 +}
++
  #endif /* CPTCFG_ATH10K_SPECTRAL */
  
  #endif /* SPECTRAL_H */
---- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
-+++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-@@ -228,6 +228,9 @@ struct wmi_ops {
- 			const struct wmi_peer_sant_set_train_arg *arg);
- 	struct sk_buff *(*gen_set_coex_param)(struct ath10k *ar,
- 					      u32 wlan_traffic_priority);
-+	struct sk_buff *(*gen_peer_cfr_capture_conf)(struct ath10k *ar,
-+						     u32 vdev_id, const u8 *mac,
-+						     const struct wmi_peer_cfr_capture_conf_arg *arg);
- };
- 
- int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1652,4 +1655,22 @@ ath10k_wmi_radar_found(struct ath10k *ar
- 	return ath10k_wmi_cmd_send(ar, skb,
- 				   ar->wmi.cmd->radar_found_cmdid);
- }
-+
-+static inline int
-+ath10k_wmi_peer_set_cfr_capture_conf(struct ath10k *ar,
-+				     u32 vdev_id, const u8 *mac,
-+				     const struct wmi_peer_cfr_capture_conf_arg *arg)
-+{
-+	struct sk_buff *skb;
-+
-+	if (!ar->wmi.ops->gen_peer_cfr_capture_conf)
-+		return -EOPNOTSUPP;
-+
-+	skb = ar->wmi.ops->gen_peer_cfr_capture_conf(ar, vdev_id, mac, arg);
-+	if (IS_ERR(skb))
-+		return PTR_ERR(skb);
-+
-+	return ath10k_wmi_cmd_send(ar, skb,
-+				   ar->wmi.cmd->peer_set_cfr_capture_conf_cmdid);
-+}
- #endif
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
 @@ -766,7 +766,8 @@ static struct wmi_cmd_map wmi_10_4_cmd_m
@@ -848,7 +814,7 @@
  	SVCSTR(WMI_SERVICE_PER_PACKET_SW_ENCRYPT);
  
  	default:
-@@ -578,8 +578,8 @@ static inline void wmi_10x_svc_map(const
+@@ -788,8 +788,8 @@ static inline void wmi_10_4_svc_map(cons
  	       WMI_SERVICE_CFR_CAPTURE_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
  	       WMI_SERVICE_TX_DATA_ACK_RSSI, len);
@@ -859,7 +825,7 @@
  	SVCMAP(WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  	       WMI_SERVICE_PER_PACKET_SW_ENCRYPT, len);
  }
-@@ -1001,6 +1001,7 @@ struct wmi_cmd_map {
+@@ -997,6 +997,7 @@ struct wmi_cmd_map {
  	u32 peer_set_smart_ant_train_info_cmdid;
  	u32 set_coex_param_cmdid;
  	u32 radar_found_cmdid;
@@ -867,7 +833,7 @@
  };
  
  /*
-@@ -1840,6 +1841,7 @@ enum wmi_10_4_cmd_id {
+@@ -1836,6 +1837,7 @@ enum wmi_10_4_cmd_id {
  	WMI_10_4_PDEV_SET_BRIDGE_MACADDR_CMDID,
  	WMI_10_4_ATF_GROUP_WMM_AC_CONFIG_REQUEST_CMDID,
  	WMI_10_4_RADAR_FOUND_CMDID,
@@ -875,7 +841,7 @@
  	WMI_10_4_PDEV_UTF_CMDID = WMI_10_4_END_CMDID - 1,
  };
  
-@@ -2192,6 +2194,10 @@ enum wlan_mode_capability {
+@@ -2188,6 +2190,10 @@ enum wlan_mode_capability {
  	WHAL_WLAN_11AG_CAPABILITY  = 0x3,
  };
  
@@ -886,7 +852,7 @@
  /* structure used by FW for requesting host memory */
  struct wlan_host_mem_req {
  	/* ID of the request */
-@@ -3189,6 +3195,42 @@ struct wmi_bssid_arg {
+@@ -3185,6 +3191,42 @@ struct wmi_bssid_arg {
  	const u8 *bssid;
  };
  
@@ -929,7 +895,7 @@
  struct wmi_start_scan_arg {
  	u32 scan_id;
  	u32 scan_req_id;
-@@ -3753,6 +3795,7 @@ struct wmi_pdev_param_map {
+@@ -3749,6 +3791,7 @@ struct wmi_pdev_param_map {
  	u32 arp_srcaddr;
  	u32 arp_dstaddr;
  	u32 enable_btcoex;
@@ -937,7 +903,7 @@
  };
  
  #define WMI_PDEV_PARAM_UNSUPPORTED 0
-@@ -4069,6 +4112,14 @@ enum wmi_10_4_pdev_param {
+@@ -4065,6 +4108,14 @@ enum wmi_10_4_pdev_param {
  	WMI_10_4_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
  	WMI_10_4_PDEV_PARAM_ATF_SSID_GROUP_POLICY,
  	WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
@@ -952,3 +918,38 @@
  };
  
  struct wmi_pdev_set_param_cmd {
+--- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
++++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
+@@ -228,6 +228,9 @@ struct wmi_ops {
+ 			const struct wmi_peer_sant_set_train_arg *arg);
+ 	struct sk_buff *(*gen_set_coex_param)(struct ath10k *ar,
+ 					      u32 wlan_traffic_priority);
++	struct sk_buff *(*gen_peer_cfr_capture_conf)(struct ath10k *ar,
++						     u32 vdev_id, const u8 *mac,
++						     const struct wmi_peer_cfr_capture_conf_arg *arg);
+ };
+ 
+ int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
+@@ -1652,4 +1655,22 @@ ath10k_wmi_radar_found(struct ath10k *ar
+ 	return ath10k_wmi_cmd_send(ar, skb,
+ 				   ar->wmi.cmd->radar_found_cmdid);
+ }
++
++static inline int
++ath10k_wmi_peer_set_cfr_capture_conf(struct ath10k *ar,
++				     u32 vdev_id, const u8 *mac,
++				     const struct wmi_peer_cfr_capture_conf_arg *arg)
++{
++	struct sk_buff *skb;
++
++	if (!ar->wmi.ops->gen_peer_cfr_capture_conf)
++		return -EOPNOTSUPP;
++
++	skb = ar->wmi.ops->gen_peer_cfr_capture_conf(ar, vdev_id, mac, arg);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	return ath10k_wmi_cmd_send(ar, skb,
++				   ar->wmi.cmd->peer_set_cfr_capture_conf_cmdid);
++}
+ #endif
