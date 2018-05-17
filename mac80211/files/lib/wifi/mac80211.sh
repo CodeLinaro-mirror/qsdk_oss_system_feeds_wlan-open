@@ -8,16 +8,20 @@ lookup_phy() {
 
 	local devpath
 	config_get devpath "$device" path
-	[ -n "$devpath" -a -d "/sys/devices/$devpath/ieee80211" ] && {
-		phy="$(ls /sys/devices/$devpath/ieee80211 | grep -m 1 phy)"
-		[ -n "$phy" ] && return
+	[ -n "$devpath" ] && {
+		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
+			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
+			*$devpath) return;;
+			esac
+		done
 	}
 
 	local macaddr="$(config_get "$device" macaddr | tr 'A-Z' 'a-z')"
 	[ -n "$macaddr" ] && {
-		for _phy in $(ls /sys/class/ieee80211 2>/dev/null); do
-			[ "$macaddr" = "$(cat /sys/class/ieee80211/${_phy}/macaddress)" ] || continue
-			phy="$_phy"
+		for _phy in /sys/class/ieee80211/*; do
+			[ -e "$_phy" ] || continue
+			[ "$macaddr" = "$(cat ${_phy}/macaddress)" ] || continue
+			phy="${_phy##*/}"
 			return
 		done
 	}
@@ -64,7 +68,9 @@ detect_mac80211() {
 		[ -n "$type" ] || break
 		devidx=$(($devidx + 1))
 	done
-	for dev in $(ls /sys/class/ieee80211); do
+	for _dev in /sys/class/ieee80211/*; do
+		[ -e "$_dev" ] || continue
+		dev="${_dev##*/}"
 		found=0
 		config_foreach check_mac80211_device wifi-device
 		[ "$found" -gt 0 ] && continue
@@ -73,28 +79,8 @@ detect_mac80211() {
 		mode_band="a"
 		channel="36"
 		htmode=""
+		ht_capab=""
 
-		ht_cap=0
-		for cap in $(iw phy "$dev" info | grep 'Capabilities:' | cut -d: -f2); do
-			ht_cap="$(($ht_cap | $cap))"
-		done
-		ht_capab="";
-		[ "$ht_cap" -gt 0 ] && {
-			mode_11n="n"
-			htmode="HT20"
-
-			list="	list ht_capab"
-			[ "$(($ht_cap & 1))" -eq 1 ] && append ht_capab "$list	LDPC" "$N"
-			[ "$(($ht_cap & 16))" -eq 16 ] && append ht_capab "$list	GF" "$N"
-			[ "$(($ht_cap & 32))" -eq 32 ] && append ht_capab "$list	SHORT-GI-20" "$N"
-			[ "$(($ht_cap & 64))" -eq 64 ] && append ht_capab "$list	SHORT-GI-40" "$N"
-			[ "$(($ht_cap & 128))" -eq 128 ] && append ht_capab "$list	TX-STBC" "$N"
-			[ "$(($ht_cap & 768))" -eq 256 ] && append ht_capab "$list	RX-STBC1" "$N"
-			[ "$(($ht_cap & 768))" -eq 512 ] && append ht_capab "$list	RX-STBC12" "$N"
-			[ "$(($ht_cap & 768))" -eq 768 ] && append ht_capab "$list	RX-STBC123" "$N"
-			[ "$(($ht_cap & 4096))" -eq 4096 ] && append ht_capab "$list	DSSS_CCK-40" "$N"
-			[ "$(($ht_cap & 16384))" -eq 16384 ] && append ht_capab "$list	40-INTOLERANT" "$N"
-		}
 		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
 		(iw phy "$dev" info | grep -q '5745 MHz' && !(iw phy "$dev" info | grep -q '5180 MHz')) && { mode_band="a"; channel="149"; }
 		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
@@ -105,9 +91,16 @@ detect_mac80211() {
 
 		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
 
-		if [ -x /usr/bin/readlink ]; then
+		if [ -x /usr/bin/readlink -a -h /sys/class/ieee80211/${dev} ]; then
 			path="$(readlink -f /sys/class/ieee80211/${dev}/device)"
+		else
+			path=""
+		fi
+		if [ -n "$path" ]; then
 			path="${path##/sys/devices/}"
+			case "$path" in
+				platform*/pci*) path="${path##platform/}";;
+			esac
 			dev_id="	option path	'$path'"
 		else
 			dev_id="	option macaddr	$(cat /sys/class/ieee80211/${dev}/macaddress)"
