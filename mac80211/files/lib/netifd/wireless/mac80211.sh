@@ -182,8 +182,10 @@ mac80211_hostapd_setup_base() {
 				0) idx=$(($channel - 2));;
 			esac
 			enable_ac=1
-			append base_cfg "vht_oper_chwidth=0" "$N"
-			append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ $channel -ge 36 ]; then
+				append base_cfg "vht_oper_chwidth=0" "$N"
+				append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			;;
 		VHT80)
 			case "$(( ($channel / 4) % 4 ))" in
