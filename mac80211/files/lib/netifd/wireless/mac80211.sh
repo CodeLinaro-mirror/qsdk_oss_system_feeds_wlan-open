@@ -57,7 +57,7 @@ drv_mac80211_init_iface_config() {
 
 	config_add_string 'macaddr:macaddr' ifname
 
-	config_add_boolean wds powersave
+	config_add_boolean wds extsta powersave
 	config_add_int maxassoc
 	config_add_int max_listen_int
 	config_add_int dtim_period start_disabled
@@ -463,12 +463,13 @@ mac80211_prepare_vif() {
 	json_get_vars vif
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr
+	json_get_vars ifname mode ssid wds extsta powersave macaddr
 
 	[ -n "$ifname" ] || ifname="wlan${phy#phy}${if_idx:+-$if_idx}"
 	if_idx=$((${if_idx:-0} + 1))
 
 	set_default wds 0
+	set_default extsta 0
 	set_default powersave 0
 
 	json_select ..
@@ -511,6 +512,8 @@ mac80211_prepare_vif() {
 			iw phy "$phy" interface add "$ifname" type monitor
 		;;
 		sta)
+			extsta_path=/sys/module/mac80211/parameters/extsta
+			[ -e $extsta_path ] && echo $extsta > $extsta_path
 			local wdsflag=
 			staidx="$(($staidx + 1))"
 			[ "$wds" -gt 0 ] && wdsflag="4addr on"
