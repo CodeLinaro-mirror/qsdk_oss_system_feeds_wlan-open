@@ -197,6 +197,9 @@ pre_mac80211() {
 				/usr/sbin/fst.sh stop
 			}
 			[ ! -f /etc/init.d/lbd ] || /etc/init.d/lbd stop
+
+			extsta_path=/sys/module/mac80211/parameters/extsta
+			[ -e $extsta_path ] && echo 0 > $extsta_path
 		;;
 	esac
 	return 0
