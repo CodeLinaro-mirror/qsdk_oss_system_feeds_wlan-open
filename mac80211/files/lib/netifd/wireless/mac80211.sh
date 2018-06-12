@@ -17,6 +17,41 @@ MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh
 MP_CONFIG_BOOL="mesh_auto_open_plinks mesh_fwding"
 MP_CONFIG_STRING="mesh_power_mode"
 
+find_net_config() {(
+        local vif="$1"
+        local cfg
+        local ifname
+
+        config_get cfg "$vif" network
+
+        [ -z "$cfg" ] && {
+                include /lib/network
+                scan_interfaces
+
+                config_get ifname "$vif" ifname
+
+                cfg="$(find_config "$ifname")"
+        }
+        [ -z "$cfg" ] && return 0
+        echo "$cfg"
+)}
+
+
+bridge_interface() {(
+        local cfg="$1"
+        [ -z "$cfg" ] && return 0
+
+        include /lib/network
+        scan_interfaces
+
+        for cfg in $cfg; do
+                config_get iftype "$cfg" type
+                [ "$iftype" = bridge ] && config_get "$cfg" ifname
+                prepare_interface_bridge "$cfg"
+                return $?
+        done
+)}
+
 drv_mac80211_init_device_config() {
 	hostapd_common_add_device_config
 
@@ -298,6 +333,13 @@ mac80211_hostapd_setup_bss() {
 
 	hostapd_cfg=
 	append hostapd_cfg "$type=$ifname" "$N"
+
+	local net_cfg bridge
+	net_cfg="$(find_net_config "$vif")"
+	[ -z "$net_cfg" -o "$isolate" = 1 -a "$mode" = "wrap" ] || {
+		bridge="$(bridge_interface "$net_cfg")"
+		config_set "$vif" bridge "$bridge"
+	}
 
 	hostapd_set_bss_options hostapd_cfg "$vif" || return 1
 	json_get_vars wds dtim_period max_listen_int
