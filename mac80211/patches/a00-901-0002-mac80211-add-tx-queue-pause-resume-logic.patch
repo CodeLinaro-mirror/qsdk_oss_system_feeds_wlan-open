@@ -1,27 +1,23 @@
---- a/net/mac80211/tx.c
-+++ b/net/mac80211/tx.c
-@@ -1550,6 +1550,9 @@ static bool ieee80211_queue_skb(struct i
- 	    sdata->vif.type == NL80211_IFTYPE_MONITOR)
- 		return false;
- 
-+	if (local->txqs_stopped)
-+		return false;
-+
- 	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
- 		sdata = container_of(sdata->bss,
- 				     struct ieee80211_sub_if_data, u.ap);
-@@ -1560,6 +1563,9 @@ static bool ieee80211_queue_skb(struct i
+Index: backports-20180329-3.14.77-7954640a/net/mac80211/tx.c
+===================================================================
+--- backports-20180329-3.14.77-7954640a.orig/net/mac80211/tx.c
++++ backports-20180329-3.14.77-7954640a/net/mac80211/tx.c
+@@ -1560,6 +1560,11 @@ static bool ieee80211_queue_skb(struct i
  	if (!txqi)
  		return false;
  
-+	if (unlikely(local->in_reconfig))
-+		return false;
++	if (local->txqs_stopped) {
++		kfree_skb(skb);
++		return true;
++	}
 +
  	spin_lock_bh(&fq->lock);
  	ieee80211_txq_enqueue(local, txqi, skb);
  	spin_unlock_bh(&fq->lock);
---- a/net/mac80211/ieee80211_i.h
-+++ b/net/mac80211/ieee80211_i.h
+Index: backports-20180329-3.14.77-7954640a/net/mac80211/ieee80211_i.h
+===================================================================
+--- backports-20180329-3.14.77-7954640a.orig/net/mac80211/ieee80211_i.h
++++ backports-20180329-3.14.77-7954640a/net/mac80211/ieee80211_i.h
 @@ -1145,6 +1145,11 @@ struct ieee80211_local {
  	/* also used to protect ampdu_ac_queue and amdpu_ac_stop_refcnt */
  	spinlock_t queue_stop_reason_lock;
@@ -34,8 +30,10 @@
  	int open_count;
  	int monitors, cooked_mntrs;
  	/* number of interfaces with corresponding FIF_ flags */
---- a/net/mac80211/util.c
-+++ b/net/mac80211/util.c
+Index: backports-20180329-3.14.77-7954640a/net/mac80211/util.c
+===================================================================
+--- backports-20180329-3.14.77-7954640a.orig/net/mac80211/util.c
++++ backports-20180329-3.14.77-7954640a/net/mac80211/util.c
 @@ -297,6 +297,9 @@ static void __ieee80211_wake_queue(struc
  	if (local->q_stop_reasons[queue][reason] == 0)
  		__clear_bit(reason, &local->queue_stop_reasons[queue]);
