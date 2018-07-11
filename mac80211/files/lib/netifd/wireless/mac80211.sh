@@ -681,7 +681,7 @@ mac80211_setup_adhoc() {
 	esac
 
 	iw dev "$ifname" ibss join "$ssid" $freq $ibss_htmode fixed-freq $bssid \
-		${beacon_int:+beacon-interval $beacon_int} \
+		beacon-interval $beacon_int \
 		${brstr:+basic-rates $brstr} \
 		${mcval:+mcast-rate $mcval} \
 		${keyspec:+keys $keyspec}
@@ -761,7 +761,9 @@ mac80211_setup_vif() {
 				esac
 
 				freq="$(get_freq "$phy" "$channel")"
-				iw dev "$ifname" mesh join "$mesh_id" freq $freq $mesh_htmode ${mcval:+mcast-rate $mcval}
+				iw dev "$ifname" mesh join "$mesh_id" freq $freq $mesh_htmode \
+					${mcval:+mcast-rate $mcval} \
+					beacon-interval $beacon_int
 
 			fi
 
@@ -874,7 +876,7 @@ drv_mac80211_setup() {
 		board_file \
 		txpower antenna_gain \
 		rxantenna txantenna \
-		frag rts beacon_int
+		frag rts beacon_int:100
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
