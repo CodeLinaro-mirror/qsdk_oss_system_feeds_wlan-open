@@ -620,7 +620,7 @@ mac80211_setup_supplicant() {
 
 mac80211_setup_supplicant_noctl() {
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
-	wpa_supplicant_add_network "$ifname"
+	wpa_supplicant_add_network "$ifname" "$freq" "$htmode"
 	wpa_supplicant_run "$ifname"
 }
 
@@ -730,6 +730,7 @@ mac80211_setup_vif() {
 					authsae_start_interface || failed=1
 				else
 					wireless_vif_parse_encryption
+					freq="$(get_freq "$phy" "$channel")"
 					mac80211_setup_supplicant_noctl || failed=1
 				fi
 			else
@@ -787,6 +788,7 @@ mac80211_setup_vif() {
 		adhoc)
 			wireless_vif_parse_encryption
 			if [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ]; then
+				freq="$(get_freq "$phy" "$channel")"
 				mac80211_setup_supplicant_noctl || failed=1
 			else
 				mac80211_setup_adhoc
