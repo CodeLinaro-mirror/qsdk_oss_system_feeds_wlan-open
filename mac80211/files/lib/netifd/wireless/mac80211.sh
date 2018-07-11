@@ -548,7 +548,12 @@ mac80211_prepare_vif() {
 			}
 		;;
 		mesh)
-			iw phy "$phy" interface add "$ifname" type mp
+			json_get_vars key mesh_id
+			if [ -n "$key" ]; then
+				iw phy "$phy" interface add "$ifname" type mp
+			else
+				iw phy "$phy" interface add "$ifname" type mp mesh_id "$mesh_id"
+			fi
 		;;
 		monitor)
 			iw phy "$phy" interface add "$ifname" type monitor
@@ -566,7 +571,7 @@ mac80211_prepare_vif() {
 	esac
 
 	case "$mode" in
-		monitor)
+		monitor|mesh)
 			[ "$auto_channel" -gt 0 ] || iw dev "$ifname" set channel "$channel" $htmode
 		;;
 	esac
@@ -684,6 +689,13 @@ mac80211_setup_vif() {
 	[ -z "$vif_txpower" ] || iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
 
 	case "$mode" in
+		mesh)
+			for var in $MP_CONFIG_INT $MP_CONFIG_BOOL $MP_CONFIG_STRING; do
+				json_get_var mp_val "$var"
+				[ -n "$mp_val" ] && iw dev "$ifname" set mesh_param "$var" "$mp_val"
+			done
+			# todo: authsae
+		;;
 		adhoc)
 			wireless_vif_parse_encryption
 			if [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ]; then
@@ -692,7 +704,7 @@ mac80211_setup_vif() {
 				mac80211_setup_adhoc
 			fi
 		;;
-		sta|mesh)
+		sta)
 			mac80211_setup_supplicant || failed=1
 		;;
 	esac
