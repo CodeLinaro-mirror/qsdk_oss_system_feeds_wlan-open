@@ -618,6 +618,12 @@ mac80211_setup_supplicant() {
 	wpa_supplicant_run "$ifname" ${hostapd_ctrl:+-H $hostapd_ctrl}
 }
 
+mac80211_setup_supplicant_noctl() {
+	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
+	wpa_supplicant_add_network "$ifname"
+	wpa_supplicant_run "$ifname"
+}
+
 mac80211_setup_adhoc() {
 	json_get_vars bssid ssid key mcast_rate
 
@@ -724,7 +730,7 @@ mac80211_setup_vif() {
 					authsae_start_interface || failed=1
 				else
 					wireless_vif_parse_encryption
-					mac80211_setup_supplicant || failed=1
+					mac80211_setup_supplicant_noctl || failed=1
 				fi
 			else
 				json_get_vars mesh_id mcast_rate
@@ -781,7 +787,7 @@ mac80211_setup_vif() {
 		adhoc)
 			wireless_vif_parse_encryption
 			if [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ]; then
-				mac80211_setup_supplicant || failed=1
+				mac80211_setup_supplicant_noctl || failed=1
 			else
 				mac80211_setup_adhoc
 			fi
