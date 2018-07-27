@@ -1,8 +1,8 @@
 --- a/drivers/net/wireless/ath/wil6210/cfg80211.c
 +++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
-@@ -20,6 +20,21 @@
- #include "wil6210.h"
+@@ -23,6 +23,21 @@
  #include "wmi.h"
+ #include "fw.h"
  
 +static unsigned short scan_dwell_time  = WMI_SCAN_DWELL_TIME_MS;
 +module_param(scan_dwell_time, ushort, S_IRUGO|S_IWUSR);
@@ -22,7 +22,7 @@
  #define WIL_MAX_ROC_DURATION_MS 5000
  
  bool disable_ap_sme;
-@@ -115,6 +130,7 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
+@@ -118,6 +133,7 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
  };
  
  enum qca_nl80211_vendor_subcmds {
@@ -30,7 +30,7 @@
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SECTOR_CFG = 139,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SECTOR_CFG = 140,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR = 141,
-@@ -133,6 +149,8 @@ static int wil_rf_sector_get_selected(st
+@@ -136,6 +152,8 @@ static int wil_rf_sector_get_selected(st
  static int wil_rf_sector_set_selected(struct wiphy *wiphy,
  				      struct wireless_dev *wdev,
  				      const void *data, int data_len);
@@ -39,7 +39,7 @@
  
  /* vendor specific commands */
  static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
-@@ -166,6 +184,61 @@ static const struct wiphy_vendor_command
+@@ -169,6 +187,61 @@ static const struct wiphy_vendor_command
  			 WIPHY_VENDOR_CMD_NEED_RUNNING,
  		.doit = wil_rf_sector_set_selected
  	},
@@ -101,7 +101,7 @@
  };
  
  static struct ieee80211_supported_band wil_band_60ghz = {
-@@ -1887,6 +1960,8 @@ static void wil_wiphy_init(struct wiphy
+@@ -2108,6 +2181,8 @@ static void wil_wiphy_init(struct wiphy
  
  	wiphy->n_vendor_commands = ARRAY_SIZE(wil_nl80211_vendor_commands);
  	wiphy->vendor_commands = wil_nl80211_vendor_commands;
@@ -110,14 +110,14 @@
  
  #ifdef CONFIG_PM
  	wiphy->wowlan = &wil_wowlan_support;
-@@ -2398,3 +2473,299 @@ static int wil_rf_sector_set_selected(st
+@@ -2701,3 +2776,300 @@ static int wil_rf_sector_set_selected(st
  
  	return rc;
  }
 +
 +static int wil_start_acs_survey(struct wil6210_priv *wil, uint dwell_time,
 +				struct ieee80211_channel *channels,
-+				u8 num_channels)
++				u8 num_channels, u8 mid)
 +{
 +	int rc, i;
 +	struct {
@@ -153,7 +153,7 @@
 +	/* send scan command with the requested channel and wait
 +	 * for results
 +	 */
-+	rc = wmi_send(wil, WMI_START_SCAN_CMDID, &scan_cmd, sizeof(scan_cmd));
++	rc = wmi_send(wil, WMI_START_SCAN_CMDID, mid, &scan_cmd, sizeof(scan_cmd));
 +	if (rc) {
 +		wil_err(wil, "ACS passive Scan failed (0x%08x)\n", rc);
 +		return rc;
@@ -288,7 +288,7 @@
 +	nla_nest_cancel(vendor_event, ((void **)vendor_event->cb)[2]);
 +
 +	ret_val = nla_put_u32(vendor_event, NL80211_ATTR_IFINDEX,
-+			      wil_to_ndev(wil)->ifindex);
++			      wil->main_ndev->ifindex);
 +	if (ret_val) {
 +		wil_err(wil, "NL80211_ATTR_IFINDEX put fail\n");
 +		kfree_skb(vendor_event);
@@ -327,6 +327,7 @@
 +		      const void *data, int data_len)
 +{
 +	struct wil6210_priv *wil = wdev_to_wil(wdev);
++	struct wil6210_vif *vif = wdev_to_vif(wil, wdev);
 +	struct sk_buff *temp_skbuff;
 +	int rc;
 +	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_ACS_MAX + 1];
@@ -396,7 +397,7 @@
 +
 +	/* start acs survey*/
 +	rc = wil_start_acs_survey(wil, scan_dwell_time, reg_channels,
-+				  num_channels);
++				  num_channels, vif->mid);
 +
 +	if (!rc)
 +		wil_acs_report_channel(wil);
@@ -412,7 +413,7 @@
 +
 --- a/drivers/net/wireless/ath/wil6210/debugfs.c
 +++ b/drivers/net/wireless/ath/wil6210/debugfs.c
-@@ -1683,6 +1683,65 @@ static const struct file_operations fops
+@@ -1753,6 +1753,65 @@ static const struct file_operations fops
  	.open  = simple_open,
  };
  
@@ -478,7 +479,7 @@
  /*----------------*/
  static void wil6210_debugfs_init_blobs(struct wil6210_priv *wil,
  				       struct dentry *dbg)
-@@ -1735,6 +1794,7 @@ static const struct {
+@@ -1806,6 +1865,7 @@ static const struct {
  	{"fw_capabilities",	0444,	&fops_fw_capabilities},
  	{"fw_version",	0444,		&fops_fw_version},
  	{"suspend_stats",	0644,	&fops_suspend_stats},
@@ -488,7 +489,7 @@
  static void wil6210_debugfs_init_files(struct wil6210_priv *wil,
 --- a/drivers/net/wireless/ath/wil6210/wil6210.h
 +++ b/drivers/net/wireless/ath/wil6210/wil6210.h
-@@ -784,6 +784,11 @@ struct wil6210_priv {
+@@ -809,6 +809,11 @@ struct wil6210_priv {
  #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
  	void *nss_ctx;
  #endif
@@ -502,8 +503,8 @@
  
 --- a/drivers/net/wireless/ath/wil6210/wmi.c
 +++ b/drivers/net/wireless/ath/wil6210/wmi.c
-@@ -801,6 +801,27 @@ static void wmi_evt_scan_complete(struct
- 	mutex_unlock(&wil->p2p_wdev_mutex);
+@@ -817,6 +817,27 @@ static void wmi_evt_scan_complete(struct
+ 	mutex_unlock(&wil->vif_mutex);
  }
  
 +static void wmi_evt_survey_complete(struct wil6210_priv *wil, int id,
@@ -527,12 +528,12 @@
 +	wake_up_interruptible(&wil->wq);
 +}
 +
- static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ static void wmi_evt_connect(struct wil6210_vif *vif, int id, void *d, int len)
  {
- 	struct net_device *ndev = wil_to_ndev(wil);
-@@ -1230,18 +1251,19 @@ static const struct {
- 	void (*handler)(struct wil6210_priv *wil, int eventid,
- 			void *data, int data_len);
+ 	struct wil6210_priv *wil = vif_to_wil(vif);
+@@ -1259,18 +1280,19 @@ static const struct {
+ 	void (*handler)(struct wil6210_vif *vif,
+ 			int eventid, void *data, int data_len);
  } wmi_evt_handlers[] = {
 -	{WMI_READY_EVENTID,		wmi_evt_ready},
 +	{WMI_READY_EVENTID,			wmi_evt_ready},

@@ -24,9 +24,9 @@
  
  static const struct ath10k_hw_params ath10k_hw_params_list[] = {
  	{
-@@ -2762,6 +2765,14 @@ static void ath10k_core_register_work(st
- 	/* peer stats are enabled by default */
+@@ -2822,6 +2825,14 @@ static void ath10k_core_register_work(st
  	set_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags);
+ 	ar->debug.enable_extd_tx_stats = true;
  
 +	if (ethernet_mode && rawmode) {
 +		ath10k_err(ar, "invalid configuration, ethernet and rawmode data path can not coexist\n");
@@ -41,7 +41,7 @@
  		ath10k_err(ar, "could not probe fw (%d)\n", status);
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -125,6 +125,7 @@ enum ath10k_skb_flags {
+@@ -127,6 +127,7 @@ enum ath10k_skb_flags {
  	ATH10K_SKB_F_DELIVER_CAB = BIT(2),
  	ATH10K_SKB_F_MGMT = BIT(3),
  	ATH10K_SKB_F_QOS = BIT(4),
@@ -49,7 +49,7 @@
  };
  
  struct ath10k_skb_cb {
-@@ -1208,6 +1209,8 @@ struct ath10k {
+@@ -1168,6 +1169,8 @@ struct ath10k {
  
  	struct ath10k_smart_ant_info smart_ant_info;
  
@@ -60,12 +60,13 @@
  };
 --- a/drivers/net/wireless/ath/ath10k/htt_tx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
-@@ -1059,6 +1059,9 @@ static u8 ath10k_htt_tx_get_tid(struct s
+@@ -1059,6 +1059,10 @@ static u8 ath10k_htt_tx_get_tid(struct s
  	struct ieee80211_hdr *hdr = (void *)skb->data;
  	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(skb);
  
++	/* Firmware takes care of tid classification for ethernet format */
 +	if (cb->flags & ATH10K_SKB_F_NO_80211_ENCAP)
-+		return  skb->priority & IEEE80211_QOS_CTL_TID_MASK;
++		return skb->priority % IEEE80211_QOS_CTL_TID_MASK;
 +
  	if (!is_eth && ieee80211_is_mgmt(hdr->frame_control))
  		return HTT_DATA_TX_EXT_TID_MGMT;
@@ -239,7 +240,7 @@
  		}
  		spin_unlock_bh(&ar->htt.tx_lock);
  	}
-@@ -8356,7 +8382,6 @@ int ath10k_mac_register(struct ath10k *a
+@@ -8379,7 +8405,6 @@ int ath10k_mac_register(struct ath10k *a
  	ieee80211_hw_set(ar->hw, HAS_RATE_CONTROL);
  	ieee80211_hw_set(ar->hw, AP_LINK_PS);
  	ieee80211_hw_set(ar->hw, SPECTRUM_MGMT);
@@ -247,7 +248,7 @@
  	ieee80211_hw_set(ar->hw, CONNECTION_MONITOR);
  	ieee80211_hw_set(ar->hw, SUPPORTS_PER_STA_GTK);
  	ieee80211_hw_set(ar->hw, WANT_MONITOR_VIF);
-@@ -8365,6 +8390,11 @@ int ath10k_mac_register(struct ath10k *a
+@@ -8388,6 +8413,11 @@ int ath10k_mac_register(struct ath10k *a
  	ieee80211_hw_set(ar->hw, SUPPORTS_TX_FRAG);
  	ieee80211_hw_set(ar->hw, REPORTS_LOW_ACK);
  
@@ -261,17 +262,17 @@
  
 --- a/drivers/net/wireless/ath/ath10k/txrx.c
 +++ b/drivers/net/wireless/ath/ath10k/txrx.c
-@@ -60,6 +60,8 @@ int ath10k_txrx_tx_unref(struct ath10k_h
- 	struct ath10k_skb_cb *skb_cb;
- 	struct ath10k_txq *artxq;
+@@ -63,6 +63,8 @@ int ath10k_txrx_tx_unref(struct ath10k_h
  	struct sk_buff *msdu;
+ 	struct ath10k_sta *arsta;
+ 	struct ieee80211_sta *sta = NULL;
 +	struct ieee80211_vif *vif;
 +	u8 flags;
  
  	ath10k_dbg(ar, ATH10K_DBG_HTT,
  		   "htt tx completion msdu_id %u status %d\n",
-@@ -88,6 +90,9 @@ int ath10k_txrx_tx_unref(struct ath10k_h
- 		artxq->num_fw_queued--;
+@@ -92,6 +94,9 @@ int ath10k_txrx_tx_unref(struct ath10k_h
+ 		sta = txq->sta;
  	}
  
 +	flags = skb_cb->flags;
@@ -280,8 +281,8 @@
  	ath10k_htt_tx_free_msdu_id(htt, tx_done->msdu_id);
  	ath10k_htt_tx_dec_pending(htt);
  	if (htt->num_pending_tx == 0)
-@@ -123,7 +128,11 @@ int ath10k_txrx_tx_unref(struct ath10k_h
- 			info->flags &= ~IEEE80211_TX_STAT_ACK;
+@@ -142,7 +147,11 @@ int ath10k_txrx_tx_unref(struct ath10k_h
+ 		spin_unlock_bh(&ar->data_lock);
  	}
  
 -	ieee80211_tx_status(htt->ar->hw, msdu);

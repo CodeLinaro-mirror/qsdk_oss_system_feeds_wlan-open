@@ -10,15 +10,15 @@
  CFLAGS_trace.o := -I$(src)
 --- a/drivers/net/wireless/ath/wil6210/cfg80211.c
 +++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
-@@ -19,6 +19,7 @@
- #include <net/netlink.h>
+@@ -22,6 +22,7 @@
  #include "wil6210.h"
  #include "wmi.h"
+ #include "fw.h"
 +#include "ftm.h"
  
  static unsigned short scan_dwell_time  = WMI_SCAN_DWELL_TIME_MS;
  module_param(scan_dwell_time, ushort, S_IRUGO|S_IWUSR);
-@@ -131,6 +132,15 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
+@@ -134,6 +135,15 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
  
  enum qca_nl80211_vendor_subcmds {
  	QCA_NL80211_VENDOR_SUBCMD_DO_ACS = 54,
@@ -34,7 +34,7 @@
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SECTOR_CFG = 139,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SECTOR_CFG = 140,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR = 141,
-@@ -158,14 +168,14 @@ static const struct wiphy_vendor_command
+@@ -161,14 +171,14 @@ static const struct wiphy_vendor_command
  		.info.vendor_id = QCA_NL80211_VENDOR_ID,
  		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SECTOR_CFG,
  		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
@@ -51,7 +51,7 @@
  		.doit = wil_rf_sector_set_cfg
  	},
  	{
-@@ -173,7 +183,7 @@ static const struct wiphy_vendor_command
+@@ -176,7 +186,7 @@ static const struct wiphy_vendor_command
  		.info.subcmd =
  			QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR,
  		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
@@ -60,7 +60,7 @@
  		.doit = wil_rf_sector_get_selected
  	},
  	{
-@@ -192,6 +202,48 @@ static const struct wiphy_vendor_command
+@@ -195,6 +205,48 @@ static const struct wiphy_vendor_command
  			 WIPHY_VENDOR_CMD_NEED_RUNNING,
  		.doit = wil_do_acs
  	},
@@ -109,7 +109,7 @@
  };
  
  /* Vendor id to be used in vendor specific command and events
-@@ -235,10 +287,22 @@ enum qca_nl80211_vendor_subcmds_index {
+@@ -238,10 +290,22 @@ enum qca_nl80211_vendor_subcmds_index {
  
  /* vendor specific events */
  static const struct nl80211_vendor_cmd_info wil_nl80211_vendor_events[] = {
@@ -133,7 +133,7 @@
  };
  
  static struct ieee80211_supported_band wil_band_60ghz = {
-@@ -2634,7 +2698,7 @@ static void wil_acs_report_channel(struc
+@@ -2937,7 +3001,7 @@ static void wil_acs_report_channel(struc
  
  	vendor_event = cfg80211_vendor_event_alloc(wil_to_wiphy(wil), NULL,
  			2 * sizeof(u8) + 4 + NLMSG_HDRLEN,
@@ -144,7 +144,7 @@
  		wil_err(wil, "cfg80211_vendor_event_alloc failed\n");
 --- /dev/null
 +++ b/drivers/net/wireless/ath/wil6210/ftm.c
-@@ -0,0 +1,902 @@
+@@ -0,0 +1,912 @@
 +/*
 + * Copyright (c) 2016, The Linux Foundation. All rights reserved.
 + *
@@ -341,6 +341,8 @@
 +static void wil_ftm_send_meas_result(struct wil6210_priv *wil,
 +				     struct wil_ftm_peer_meas_res *res)
 +{
++	struct net_device *ndev =  wil->main_ndev;
++	struct wil6210_vif *vif = ndev_to_vif(ndev);
 +	struct sk_buff *vendor_event = NULL;
 +	struct nlattr *nl_res;
 +	int rc = 0;
@@ -350,7 +352,7 @@
 +
 +	vendor_event = cfg80211_vendor_event_alloc(
 +				wil_to_wiphy(wil),
-+				wil->wdev,
++				&vif->wdev,
 +				WIL_FTM_MEAS_RESULT_MAX_LENGTH,
 +				QCA_NL80211_VENDOR_EVENT_FTM_MEAS_RESULT_INDEX,
 +				GFP_KERNEL);
@@ -417,6 +419,8 @@
 +wil_ftm_cfg80211_start_session(struct wil6210_priv *wil,
 +			       struct wil_ftm_session_request *request)
 +{
++	struct net_device *ndev =  wil->main_ndev;
++	struct wil6210_vif *vif = ndev_to_vif(ndev);
 +	int rc = 0;
 +	bool has_lci = false, has_lcr = false;
 +	u8 max_meas = 0, *ptr;
@@ -512,7 +516,7 @@
 +			cpu_to_le16(request->peers[i].params.burst_period);
 +	}
 +
-+	rc = wmi_send(wil, WMI_TOF_SESSION_START_CMDID, cmd, cmd_len);
++	rc = wmi_send(wil, WMI_TOF_SESSION_START_CMDID, vif->mid, cmd, cmd_len);
 +	kfree(cmd);
 +
 +	if (rc)
@@ -534,6 +538,8 @@
 +static void
 +wil_ftm_cfg80211_session_ended(struct wil6210_priv *wil, u32 status)
 +{
++	struct net_device *ndev =  wil->main_ndev;
++	struct wil6210_vif *vif = ndev_to_vif(ndev);
 +	struct sk_buff *vendor_event = NULL;
 +
 +	mutex_lock(&wil->ftm.lock);
@@ -555,7 +561,7 @@
 +
 +	vendor_event = cfg80211_vendor_event_alloc(
 +		wil_to_wiphy(wil),
-+		wil->wdev,
++		&vif->wdev,
 +		WIL_FTM_NL_EXTRA_ALLOC,
 +		QCA_NL80211_VENDOR_EVENT_FTM_SESSION_DONE_INDEX,
 +		GFP_KERNEL);
@@ -589,6 +595,8 @@
 +wil_aoa_cfg80211_start_measurement(struct wil6210_priv *wil,
 +				   struct wil_aoa_meas_request *request)
 +{
++	struct net_device *ndev =  wil->main_ndev;
++	struct wil6210_vif *vif = ndev_to_vif(ndev);
 +	int rc = 0;
 +	struct cfg80211_bss *bss;
 +	struct wmi_aoa_meas_cmd cmd;
@@ -620,7 +628,7 @@
 +	cmd.channel = bss->channel->hw_value - 1;
 +	cmd.aoa_meas_type = request->type;
 +
-+	rc = wmi_send(wil, WMI_AOA_MEAS_CMDID, &cmd, sizeof(cmd));
++	rc = wmi_send(wil, WMI_AOA_MEAS_CMDID, vif->mid, &cmd, sizeof(cmd));
 +	if (rc)
 +		goto out_bss;
 +
@@ -638,6 +646,8 @@
 +void wil_aoa_cfg80211_meas_result(struct wil6210_priv *wil,
 +				  struct wil_aoa_meas_result *result)
 +{
++	struct net_device *ndev =  wil->main_ndev;
++	struct wil6210_vif *vif = ndev_to_vif(ndev);
 +	struct sk_buff *vendor_event = NULL;
 +
 +	mutex_lock(&wil->ftm.lock);
@@ -651,7 +661,7 @@
 +
 +	vendor_event = cfg80211_vendor_event_alloc(
 +				wil_to_wiphy(wil),
-+				wil->wdev,
++				&vif->wdev,
 +				result->length + WIL_FTM_NL_EXTRA_ALLOC,
 +				QCA_NL80211_VENDOR_EVENT_AOA_MEAS_RESULT_INDEX,
 +				GFP_KERNEL);
@@ -1565,8 +1575,8 @@
 +#endif /* __WIL6210_FTM_H__ */
 --- a/drivers/net/wireless/ath/wil6210/main.c
 +++ b/drivers/net/wireless/ath/wil6210/main.c
-@@ -573,6 +573,8 @@ int wil_priv_init(struct wil6210_priv *w
- 	wil->net_queue_stopped = 1;
+@@ -580,6 +580,8 @@ int wil_priv_init(struct wil6210_priv *w
+ 	spin_lock_init(&wil->net_queue_lock);
  	init_waitqueue_head(&wil->wq);
  
 +	wil_ftm_init(wil);
@@ -1574,34 +1584,34 @@
  	wil->wmi_wq = create_singlethread_workqueue(WIL_NAME "_wmi");
  	if (!wil->wmi_wq)
  		return -EAGAIN;
-@@ -636,6 +638,7 @@ void wil_priv_deinit(struct wil6210_priv
+@@ -648,6 +650,7 @@ void wil_priv_deinit(struct wil6210_priv
  {
  	wil_dbg_misc(wil, "priv_deinit\n");
  
 +	wil_ftm_deinit(wil);
  	wil_set_recovery_state(wil, fw_recovery_idle);
- 	del_timer_sync(&wil->scan_timer);
- 	del_timer_sync(&wil->p2p.discovery_timer);
-@@ -1435,6 +1438,8 @@ int __wil_down(struct wil6210_priv *wil)
+ 	cancel_work_sync(&wil->fw_error_worker);
+ 	wmi_event_flush(wil);
+@@ -1492,6 +1495,8 @@ int __wil_down(struct wil6210_priv *wil)
  	}
  	wil_enable_irq(wil);
  
 +	wil_ftm_stop_operations(wil);
 +
- 	mutex_lock(&wil->p2p_wdev_mutex);
+ 	mutex_lock(&wil->vif_mutex);
  	wil_p2p_stop_radio_operations(wil);
- 	wil_abort_scan(wil, false);
+ 	wil_abort_scan_all_vifs(wil, false);
 --- a/drivers/net/wireless/ath/wil6210/wil6210.h
 +++ b/drivers/net/wireless/ath/wil6210/wil6210.h
-@@ -26,6 +26,7 @@
- #include <linux/types.h>
+@@ -27,6 +27,7 @@
  #include "wmi.h"
  #include "wil_platform.h"
+ #include "fw.h"
 +#include "ftm.h"
  
  extern bool no_fw_recovery;
  extern unsigned int mtu_max;
-@@ -781,6 +782,9 @@ struct wil6210_priv {
+@@ -806,6 +807,9 @@ struct wil6210_priv {
  
  	/* High Access Latency Policy voting */
  	struct wil_halp halp;
@@ -1611,16 +1621,16 @@
  #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
  	void *nss_ctx;
  #endif
-@@ -1030,6 +1034,8 @@ int wmi_led_cfg(struct wil6210_priv *wil
- int wmi_abort_scan(struct wil6210_priv *wil);
- void wil_abort_scan(struct wil6210_priv *wil, bool sync);
+@@ -1095,6 +1099,8 @@ int wmi_abort_scan(struct wil6210_vif *v
+ void wil_abort_scan(struct wil6210_vif *vif, bool sync);
+ void wil_abort_scan_all_vifs(struct wil6210_priv *wil, bool sync);
  void wil6210_bus_request(struct wil6210_priv *wil, u32 kbps);
 +int wmi_aoa_meas(struct wil6210_priv *wil, const void *mac_addr, u8 chan,
 +		 u8 type);
- void wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ void wil6210_disconnect(struct wil6210_vif *vif, const u8 *bssid,
  			u16 reason_code, bool from_event);
- void wil_probe_client_flush(struct wil6210_priv *wil);
-@@ -1092,4 +1098,18 @@ int wmi_start_sched_scan(struct wil6210_
+ void wil_probe_client_flush(struct wil6210_vif *vif);
+@@ -1159,4 +1165,18 @@ int wmi_start_sched_scan(struct wil6210_
  			 struct cfg80211_sched_scan_request *request);
  int wmi_stop_sched_scan(struct wil6210_priv *wil);
  
@@ -1649,7 +1659,7 @@
  
  static uint max_assoc_sta = WIL6210_MAX_CID;
  module_param(max_assoc_sta, uint, 0644);
-@@ -1237,6 +1238,30 @@ wmi_evt_sched_scan_result(struct wil6210
+@@ -1264,6 +1265,30 @@ wmi_evt_sched_scan_result(struct wil6210
  	cfg80211_sched_scan_results(wiphy, 0);
  }
  
@@ -1680,7 +1690,7 @@
  /**
   * Some events are ignored for purpose; and need not be interpreted as
   * "unhandled events"
-@@ -1266,6 +1291,14 @@ static const struct {
+@@ -1295,6 +1320,14 @@ static const struct {
  	{WMI_VRING_EN_EVENTID,			wmi_evt_vring_en},
  	{WMI_DATA_PORT_OPEN_EVENTID,		wmi_evt_ignore},
  	{WMI_SCHED_SCAN_RESULT_EVENTID,		wmi_evt_sched_scan_result},

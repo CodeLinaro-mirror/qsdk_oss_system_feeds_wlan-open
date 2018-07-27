@@ -1,6 +1,6 @@
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -4108,6 +4108,8 @@ struct cfg80211_cqm_config;
+@@ -4127,6 +4127,8 @@ struct cfg80211_cqm_config;
   *	set by driver (if supported) on add_interface BEFORE registering the
   *	netdev and may otherwise be used by driver read-only, will be update
   *	by cfg80211 on change_interface
@@ -9,7 +9,7 @@
   * @mgmt_registrations: list of registrations for management frames
   * @mgmt_registrations_lock: lock for the list
   * @mtx: mutex used to lock data in this struct, may be used by drivers
-@@ -4155,6 +4157,8 @@ struct wireless_dev {
+@@ -4174,6 +4176,8 @@ struct wireless_dev {
  
  	bool use_4addr, is_running;
  
@@ -640,7 +640,7 @@
 +#endif
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -34,6 +34,7 @@
+@@ -35,6 +35,7 @@
  #include "key.h"
  #include "sta_info.h"
  #include "debug.h"
@@ -648,7 +648,7 @@
  
  extern const struct cfg80211_ops mac80211_config_ops;
  
-@@ -980,6 +981,9 @@ struct ieee80211_sub_if_data {
+@@ -982,6 +983,9 @@ struct ieee80211_sub_if_data {
  
  	bool data_80211_encap_offloaded;
  
@@ -658,7 +658,7 @@
  	/* must be last, dynamically sized area in this! */
  	struct ieee80211_vif vif;
  };
-@@ -1895,6 +1899,10 @@ void ieee80211_xmit(struct ieee80211_sub
+@@ -1907,6 +1911,10 @@ void ieee80211_xmit(struct ieee80211_sub
  void __ieee80211_tx_skb_tid_band(struct ieee80211_sub_if_data *sdata,
  				 struct sk_buff *skb, int tid,
  				 enum nl80211_band band);
@@ -682,7 +682,7 @@
  
  bool is_nss_enable = true;
  module_param(is_nss_enable, bool, 0644);
-@@ -1141,6 +1145,9 @@ static void ieee80211_teardown_sdata(str
+@@ -1143,6 +1147,9 @@ static void ieee80211_teardown_sdata(str
  
  	if (ieee80211_vif_is_mesh(&sdata->vif))
  		ieee80211_mesh_teardown_sdata(sdata);
@@ -692,7 +692,7 @@
  }
  
  static void ieee80211_uninit(struct net_device *dev)
-@@ -1244,6 +1251,51 @@ static const struct net_device_ops ieee8
+@@ -1248,6 +1255,51 @@ static const struct net_device_ops ieee8
  #endif
  };
  
@@ -744,7 +744,7 @@
  #if LINUX_VERSION_IS_GEQ(3,14,0) || \
      (LINUX_VERSION_CODE == KERNEL_VERSION(3,13,11) && UTS_UBUNTU_RELEASE_ABI > 30)
  static u16 ieee80211_monitor_select_queue(struct net_device *dev,
-@@ -1551,6 +1603,7 @@ static void ieee80211_setup_sdata(struct
+@@ -1555,6 +1607,7 @@ static void ieee80211_setup_sdata(struct
  	sdata->vif.type = type;
  	sdata->vif.p2p = false;
  	sdata->wdev.iftype = type;
@@ -752,7 +752,7 @@
  
  	sdata->control_port_protocol = cpu_to_be16(ETH_P_PAE);
  	sdata->control_port_no_encrypt = false;
-@@ -1595,6 +1648,10 @@ static void ieee80211_setup_sdata(struct
+@@ -1599,6 +1652,10 @@ static void ieee80211_setup_sdata(struct
  		/* fall through */
  	case NL80211_IFTYPE_STATION:
  		sdata->vif.bss_conf.bssid = sdata->u.mgd.bssid;
@@ -763,7 +763,7 @@
  		ieee80211_sta_setup_sdata(sdata);
  		break;
  	case NL80211_IFTYPE_OCB:
-@@ -2024,10 +2081,19 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -2028,10 +2085,19 @@ int ieee80211_if_add(struct ieee80211_lo
  	if (ndev) {
  		if (params) {
  			ndev->ieee80211_ptr->use_4addr = params->use_4addr;
@@ -785,7 +785,7 @@
  		netdev_set_default_ethtool_ops(ndev, &ieee80211_ethtool_ops);
 --- a/net/mac80211/mlme.c
 +++ b/net/mac80211/mlme.c
-@@ -4173,6 +4173,9 @@ void ieee80211_sta_setup_sdata(struct ie
+@@ -4185,6 +4185,9 @@ void ieee80211_sta_setup_sdata(struct ie
  	spin_lock_init(&ifmgd->teardown_lock);
  	ifmgd->teardown_skb = NULL;
  	ifmgd->orig_teardown_skb = NULL;
@@ -805,20 +805,20 @@
  
  extern unsigned int mac80211_reorder_timeout;
  
-@@ -2407,6 +2408,10 @@ ieee80211_deliver_skb(struct ieee80211_r
- 		/* deliver to local stack */
- 		skb->protocol = eth_type_trans(skb, dev);
- 		memset(skb->cb, 0, sizeof(skb->cb));
+@@ -2339,6 +2340,10 @@ static void ieee80211_deliver_skb_to_loc
+ 					 be16_to_cpu(skb->protocol), noencrypt);
+ 		dev_kfree_skb(skb);
+ 	} else {
 +		skb_reset_network_header(skb);
 +		if (sdata->extsta_enabled)
 +			ieee80211_extsta_change_da(dev, skb);
 +
+ 		/* deliver to local stack */
  		if (rx->napi)
  			napi_gro_receive(rx->napi, skb);
- 		else {
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -3672,8 +3672,8 @@ static int ieee80211_change_da(struct sk
+@@ -3679,8 +3679,8 @@ static int ieee80211_change_da(struct sk
  	return 0;
  }
  
@@ -829,7 +829,7 @@
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  	const struct ethhdr *eth = (void *)skb->data;
-@@ -3715,7 +3715,7 @@ static bool ieee80211_multicast_to_unica
+@@ -3722,7 +3722,7 @@ static bool ieee80211_multicast_to_unica
  	return true;
  }
  
@@ -838,7 +838,7 @@
  ieee80211_convert_to_unicast(struct sk_buff *skb, struct net_device *dev,
  			     struct sk_buff_head *queue)
  {
-@@ -3971,6 +3971,18 @@ netdev_tx_t ieee80211_subif_8023_start_x
+@@ -3978,6 +3978,18 @@ netdev_tx_t ieee80211_subif_8023_start_x
  		return NETDEV_TX_OK;
  	}
  

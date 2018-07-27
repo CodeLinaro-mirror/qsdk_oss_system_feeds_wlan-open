@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
-@@ -2876,11 +2876,20 @@ static void ath10k_core_register_work(st
+@@ -2932,11 +2932,20 @@ static void ath10k_core_register_work(st
  		goto err_spectral_destroy;
  	}
  
@@ -21,7 +21,7 @@
  err_spectral_destroy:
  	ath10k_spectral_destroy(ar);
  err_debug_destroy:
-@@ -2931,6 +2940,8 @@ void ath10k_core_unregister(struct ath10
+@@ -2987,6 +2996,8 @@ void ath10k_core_unregister(struct ath10
  	 */
  	ath10k_spectral_destroy(ar);
  
@@ -32,8 +32,16 @@
  	 * unhappy about callback failures.
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -517,6 +517,12 @@ struct ath10k_tx_stats {
- 	u64 ack_fails;
+@@ -503,6 +503,7 @@ struct ath10k_sta {
+ 	u8 tpc;
+ 	u32 peer_ps_state;
+ 	enum nl80211_cqm_txrate_threshold_event last_event;
++	struct ath10k_cfr_capture cfr_capture;
+ };
+ 
+ #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
+@@ -875,6 +876,12 @@ enum ath10k_dt_btcoex_support_flag {
+ 	ATH10K_DT_BTCOEX_NOT_SUPPORTED,
  };
  
 +struct ath10k_cfr_capture {
@@ -43,17 +51,9 @@
 +	u32 cfr_method;
 +};
  
- struct ath10k_sta {
- 	struct ath10k_vif *arvif;
-@@ -546,6 +552,7 @@ struct ath10k_sta {
- 	u8 tpc;
- 	u32 peer_ps_state;
- 	enum nl80211_cqm_txrate_threshold_event last_event;
-+	struct ath10k_cfr_capture cfr_capture;
- };
- 
- #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
-@@ -1239,11 +1246,21 @@ struct ath10k {
+ struct ath10k_fw_file {
+ 	const struct firmware *firmware;
+@@ -1197,11 +1204,21 @@ struct ath10k {
  	bool radar_conf_waiting;
  	/*Status indicated by the Radar Confirmation Event*/
  	enum wmi_radar_conf_status radar_conf_status;
@@ -77,7 +77,7 @@
  	if (test_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags) &&
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2264,6 +2264,74 @@ static const struct file_operations fops
+@@ -2272,6 +2272,74 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -152,7 +152,7 @@
  static ssize_t ath10k_write_peer_stats(struct file *file,
  				       const char __user *ubuf,
  				       size_t count, loff_t *ppos)
-@@ -2809,6 +2877,11 @@ int ath10k_debug_register(struct ath10k
+@@ -2876,6 +2944,11 @@ int ath10k_debug_register(struct ath10k
  	debugfs_create_file("fw_test", 0600, ar->debug.debugfs_phy, ar,
  			    &fops_fw_test);
  
@@ -166,7 +166,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -1054,6 +1054,129 @@ static const struct file_operations fops
+@@ -787,6 +787,129 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -296,20 +296,14 @@
  static ssize_t ath10k_dbg_sta_read_peer_tid_log(struct file *file, char __user *user_buf,
  						size_t count, loff_t *ppos)
  {
-@@ -1121,6 +1232,8 @@ static const struct file_operations fops
- void ath10k_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
- 			    struct ieee80211_sta *sta, struct dentry *dir)
- {
-+	struct ath10k *ar = hw->priv;
-+
- 	debugfs_create_file("aggr_mode", 0644, dir, sta, &fops_aggr_mode);
- 	debugfs_create_file("addba", 0200, dir, sta, &fops_addba);
- 	debugfs_create_file("addba_resp", 0200, dir, sta, &fops_addba_resp);
-@@ -1135,4 +1248,8 @@ void ath10k_sta_add_debugfs(struct ieee8
+@@ -872,4 +995,11 @@ void ath10k_sta_add_debugfs(struct ieee8
  			    &fops_set_tpc);
  	debugfs_create_file("peer_tid_log", S_IRUSR, dir, sta, &fops_peer_tid_log);
  	debugfs_create_file("peer_ps_state", S_IRUSR, dir, sta, &fops_peer_ps_state);
 +
++	if (test_bit(WMI_SERVICE_CFR_CAPTURE_SUPPORT, ar->wmi.svc_map))
++		debugfs_create_file("cfr_capture", 0644 , dir,
++				    sta, &fops_cfr_capture);
 +	if (test_bit(WMI_SERVICE_CFR_CAPTURE_SUPPORT, ar->wmi.svc_map))
 +		debugfs_create_file("cfr_capture", 0644 , dir,
 +				    sta, &fops_cfr_capture);
@@ -327,7 +321,7 @@
  int ath10k_htt_connect(struct ath10k_htt *htt)
 --- a/drivers/net/wireless/ath/ath10k/htt.h
 +++ b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -487,6 +487,7 @@ enum htt_10_4_t2h_msg_type {
+@@ -501,6 +501,7 @@ enum htt_10_4_t2h_msg_type {
  	/* 0x19 to 0x2f are reserved */
  	HTT_10_4_T2H_MSG_TYPE_TX_MODE_SWITCH_IND     = 0x30,
  	HTT_10_4_T2H_MSG_TYPE_PEER_STATS	     = 0x31,
@@ -335,7 +329,7 @@
  	/* keep this last */
  	HTT_10_4_T2H_NUM_MSGS
  };
-@@ -522,6 +523,7 @@ enum htt_t2h_msg_type {
+@@ -536,6 +537,7 @@ enum htt_t2h_msg_type {
  	HTT_T2H_MSG_TYPE_TX_FETCH_CONFIRM,
  	HTT_T2H_MSG_TYPE_TX_MODE_SWITCH_IND,
  	HTT_T2H_MSG_TYPE_PEER_STATS,
@@ -343,7 +337,7 @@
  	/* keep this last */
  	HTT_T2H_NUM_MSGS
  };
-@@ -1583,6 +1585,45 @@ struct htt_per_peer_tx_stats_ind {
+@@ -1595,6 +1597,45 @@ struct htt_per_peer_tx_stats_ind {
  	__le32	reserved2;
  } __packed;
  
@@ -389,7 +383,7 @@
  struct htt_peer_tx_stats {
  	u8 num_ppdu;
  	u8 ppdu_len;
-@@ -1635,6 +1676,17 @@ struct htt_cmd {
+@@ -1647,6 +1688,17 @@ struct htt_cmd {
  	};
  } __packed;
  
@@ -407,7 +401,7 @@
  struct htt_resp {
  	struct htt_resp_hdr hdr;
  	union {
-@@ -1661,6 +1713,7 @@ struct htt_resp {
+@@ -1673,6 +1725,7 @@ struct htt_resp {
  		struct htt_tx_mode_switch_ind tx_mode_switch_ind;
  		struct htt_channel_change chan_change;
  		struct htt_peer_tx_stats peer_tx_stats;
@@ -425,7 +419,7 @@
  #include <linux/log2.h>
  #include <linux/bitfield.h>
  
-@@ -2650,6 +2651,155 @@ out:
+@@ -2788,6 +2789,155 @@ out:
  	rcu_read_unlock();
  }
  
@@ -581,7 +575,7 @@
  static void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
  {
  	struct ath10k_pktlog_hdr *hdr = (struct ath10k_pktlog_hdr *)data;
-@@ -2885,6 +3035,10 @@ bool ath10k_htt_t2h_msg_handler(struct a
+@@ -3030,6 +3180,10 @@ bool ath10k_htt_t2h_msg_handler(struct a
  	case HTT_T2H_MSG_TYPE_PEER_STATS:
  		ath10k_htt_fetch_peer_stats(ar, skb);
  		break;
@@ -715,7 +709,7 @@
  #endif /* SPECTRAL_H */
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -766,7 +766,8 @@ static struct wmi_cmd_map wmi_10_4_cmd_m
+@@ -770,7 +770,8 @@ static struct wmi_cmd_map wmi_10_4_cmd_m
  	.tdls_peer_update_cmdid = WMI_10_4_TDLS_PEER_UPDATE_CMDID,
  	.tdls_set_offchan_mode_cmdid = WMI_10_4_TDLS_SET_OFFCHAN_MODE_CMDID,
  	.set_coex_param_cmdid = WMI_10_4_BTCOEX_CFG_CMDID,
@@ -725,7 +719,7 @@
  };
  
  /* MAIN WMI VDEV param map */
-@@ -1622,6 +1623,7 @@ static struct wmi_pdev_param_map wmi_10_
+@@ -1627,6 +1628,7 @@ static struct wmi_pdev_param_map wmi_10_
  	.arp_srcaddr = WMI_10_4_PDEV_PARAM_ARP_SRCADDR,
  	.arp_dstaddr = WMI_10_4_PDEV_PARAM_ARP_DSTADDR,
  	.enable_btcoex = WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
@@ -733,7 +727,7 @@
  };
  
  static const struct wmi_peer_flags_map wmi_peer_flags_map = {
-@@ -1959,6 +1961,35 @@ ath10k_wmi_op_gen_mgmt_tx(struct ath10k
+@@ -1964,6 +1966,35 @@ ath10k_wmi_op_gen_mgmt_tx(struct ath10k
  	return skb;
  }
  
@@ -769,7 +763,7 @@
  static void ath10k_wmi_event_scan_started(struct ath10k *ar)
  {
  	lockdep_assert_held(&ar->data_lock);
-@@ -5072,6 +5103,7 @@ static int ath10k_wmi_alloc_chunk(struct
+@@ -5086,6 +5117,7 @@ static int ath10k_wmi_alloc_chunk(struct
  	dma_addr_t paddr;
  	u32 pool_size;
  	int idx = ar->wmi.num_mem_chunks;
@@ -777,7 +771,7 @@
  	void *vaddr;
  
  	pool_size = num_units * round_up(unit_len, 4);
-@@ -5088,6 +5120,11 @@ static int ath10k_wmi_alloc_chunk(struct
+@@ -5102,6 +5134,11 @@ static int ath10k_wmi_alloc_chunk(struct
  	ar->wmi.mem_chunks[idx].req_id = req_id;
  	ar->wmi.num_mem_chunks++;
  
@@ -789,7 +783,7 @@
  	return num_units;
  }
  
-@@ -9332,6 +9369,7 @@ static const struct wmi_ops wmi_10_4_ops
+@@ -9365,6 +9402,7 @@ static const struct wmi_ops wmi_10_4_ops
  	.gen_pdev_get_tpc_table_cmdid =
  			ath10k_wmi_10_4_op_gen_pdev_get_tpc_table_cmdid,
  	.gen_radar_found = ath10k_wmi_10_4_gen_radar_found,
@@ -806,9 +800,9 @@
 -	WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_1,
 +	WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LAGACY,
  	WMI_SERVICE_PER_PACKET_SW_ENCRYPT,
+ 	WMI_SERVICE_SPOOF_MAC_SUPPORT,
  
- 	/* keep last */
-@@ -355,7 +355,7 @@ enum wmi_10_4_service {
+@@ -356,7 +356,7 @@ enum wmi_10_4_service {
  	WMI_10_4_SERVICE_TPC_STATS_FINAL,
  	WMI_10_4_SERVICE_CFR_CAPTURE_SUPPORT,
  	WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
@@ -817,15 +811,15 @@
  	WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  };
  
-@@ -473,7 +473,7 @@ static inline char *wmi_service_name(int
- 	SVCSTR(WMI_SERVICE_RESET_CHIP);
+@@ -474,7 +474,7 @@ static inline char *wmi_service_name(int
+  	SVCSTR(WMI_SERVICE_RESET_CHIP);
  	SVCSTR(WMI_SERVICE_CFR_CAPTURE_SUPPORT);
  	SVCSTR(WMI_SERVICE_TX_DATA_ACK_RSSI);
 -	SVCSTR(WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_1);
 +	SVCSTR(WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LAGACY);
  	SVCSTR(WMI_SERVICE_PER_PACKET_SW_ENCRYPT);
- 
  	default:
+ 		return NULL;
 @@ -788,8 +788,8 @@ static inline void wmi_10_4_svc_map(cons
  	       WMI_SERVICE_CFR_CAPTURE_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
@@ -837,7 +831,7 @@
  	SVCMAP(WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  	       WMI_SERVICE_PER_PACKET_SW_ENCRYPT, len);
  }
-@@ -997,6 +997,7 @@ struct wmi_cmd_map {
+@@ -998,6 +998,7 @@ struct wmi_cmd_map {
  	u32 peer_set_smart_ant_train_info_cmdid;
  	u32 set_coex_param_cmdid;
  	u32 radar_found_cmdid;
@@ -845,7 +839,7 @@
  };
  
  /*
-@@ -1836,6 +1837,7 @@ enum wmi_10_4_cmd_id {
+@@ -1838,6 +1839,7 @@ enum wmi_10_4_cmd_id {
  	WMI_10_4_PDEV_SET_BRIDGE_MACADDR_CMDID,
  	WMI_10_4_ATF_GROUP_WMM_AC_CONFIG_REQUEST_CMDID,
  	WMI_10_4_RADAR_FOUND_CMDID,
@@ -853,7 +847,7 @@
  	WMI_10_4_PDEV_UTF_CMDID = WMI_10_4_END_CMDID - 1,
  };
  
-@@ -2188,6 +2190,10 @@ enum wlan_mode_capability {
+@@ -2190,6 +2192,10 @@ enum wlan_mode_capability {
  	WHAL_WLAN_11AG_CAPABILITY  = 0x3,
  };
  
@@ -907,7 +901,7 @@
  struct wmi_start_scan_arg {
  	u32 scan_id;
  	u32 scan_req_id;
-@@ -3749,6 +3791,7 @@ struct wmi_pdev_param_map {
+@@ -3757,6 +3799,7 @@ struct wmi_pdev_param_map {
  	u32 arp_srcaddr;
  	u32 arp_dstaddr;
  	u32 enable_btcoex;
@@ -915,7 +909,7 @@
  };
  
  #define WMI_PDEV_PARAM_UNSUPPORTED 0
-@@ -4065,6 +4108,14 @@ enum wmi_10_4_pdev_param {
+@@ -4073,6 +4116,14 @@ enum wmi_10_4_pdev_param {
  	WMI_10_4_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
  	WMI_10_4_PDEV_PARAM_ATF_SSID_GROUP_POLICY,
  	WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
@@ -932,7 +926,7 @@
  struct wmi_pdev_set_param_cmd {
 --- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-@@ -228,6 +228,9 @@ struct wmi_ops {
+@@ -234,6 +234,9 @@ struct wmi_ops {
  			const struct wmi_peer_sant_set_train_arg *arg);
  	struct sk_buff *(*gen_set_coex_param)(struct ath10k *ar,
  					      u32 wlan_traffic_priority);
@@ -942,7 +936,7 @@
  };
  
  int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1652,4 +1655,22 @@ ath10k_wmi_radar_found(struct ath10k *ar
+@@ -1698,4 +1701,22 @@ ath10k_wmi_radar_found(struct ath10k *ar
  	return ath10k_wmi_cmd_send(ar, skb,
  				   ar->wmi.cmd->radar_found_cmdid);
  }

@@ -1,22 +1,20 @@
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -9200,9 +9200,11 @@ int ath10k_mac_register(struct ath10k *a
+@@ -9222,6 +9222,11 @@ int ath10k_mac_register(struct ath10k *a
+ 	}
  
  	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_VHT_IBSS);
- 
--	if (test_bit(WMI_SERVICE_TX_DATA_ACK_RSSI, ar->wmi.svc_map))
 +	if (test_bit(WMI_SERVICE_TX_DATA_ACK_RSSI, ar->wmi.svc_map) ||
 +		test_bit(WMI_SERVICE_HTT_MGMT_TX_COMP_VALID_FLAGS,
 +			ar->wmi.svc_map))
- 		wiphy_ext_feature_set(ar->hw->wiphy,
--			NL80211_EXT_FEATURE_DATA_ACK_SIGNAL_SUPPORT);
++ 		wiphy_ext_feature_set(ar->hw->wiphy,
 +			NL80211_EXT_FEATURE_ACK_SIGNAL_SUPPORT);
  
  	/*
  	 * on LL hardware queues are managed entirely by the FW
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -2949,8 +2949,8 @@ enum nl80211_sta_bss_param {
+@@ -2980,8 +2980,8 @@ enum nl80211_sta_bss_param {
   *	received from the station (u64, usec)
   * @NL80211_STA_INFO_PAD: attribute used for padding for 64-bit alignment
   * @NL80211_STA_INFO_ACK_SIGNAL: signal strength of the last ACK frame(u8, dBm)
@@ -27,7 +25,7 @@
   * @__NL80211_STA_INFO_AFTER_LAST: internal
   * @NL80211_STA_INFO_MAX: highest possible station info attribute
   */
-@@ -2990,7 +2990,7 @@ enum nl80211_sta_info {
+@@ -3021,7 +3021,7 @@ enum nl80211_sta_info {
  	NL80211_STA_INFO_RX_DURATION,
  	NL80211_STA_INFO_PAD,
  	NL80211_STA_INFO_ACK_SIGNAL,
@@ -36,34 +34,24 @@
  
  	/* keep last */
  	__NL80211_STA_INFO_AFTER_LAST,
-@@ -5028,9 +5028,17 @@ enum nl80211_feature_flags {
-  * @NL80211_EXT_FEATURE_LOW_SPAN_SCAN: Driver supports low span scan.
-  * @NL80211_EXT_FEATURE_LOW_POWER_SCAN: Driver supports low power scan.
-  * @NL80211_EXT_FEATURE_HIGH_ACCURACY_SCAN: Driver supports high accuracy scan.
+@@ -5068,9 +5068,9 @@ enum nl80211_feature_flags {
+  * @NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211: Driver supports sending and
+  *	receiving control port frames over nl80211 instead of the netdevice.
+  *
 - * @NL80211_EXT_FEATURE_DATA_ACK_SIGNAL_SUPPORT: This Driver support data ack
 - *     rssi if firmware support, this flag is to intimate about ack rssi
 - *     support to nl80211.
-+ * @NL80211_EXT_FEATURE_DFS_OFFLOAD: HW/driver will offload DFS actions.
-+ *	Device or driver will do all DFS-related actions by itself,
-+ *	informing user-space about CAC progress, radar detection event,
-+ *	channel change triggered by radar detection event.
-+ *	No need to start CAC from user-space, no need to react to
-+ *	"radar detected" event.
-+ * @NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211: Driver supports sending and
-+ *	receiving control port frames over nl80211 instead of the netdevice.
 + * @NL80211_EXT_FEATURE_ACK_SIGNAL_SUPPORT: Driver support ack rssi if firmware
 + *	support, this flag is to intimate about ack rssi support
 + *	to nl80211.
-  *
   * @NUM_NL80211_EXT_FEATURES: number of extended features.
   * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
-@@ -5061,7 +5069,9 @@ enum nl80211_ext_feature_index {
- 	NL80211_EXT_FEATURE_LOW_SPAN_SCAN,
- 	NL80211_EXT_FEATURE_LOW_POWER_SCAN,
+  */
+@@ -5102,7 +5102,7 @@ enum nl80211_ext_feature_index {
  	NL80211_EXT_FEATURE_HIGH_ACCURACY_SCAN,
+ 	NL80211_EXT_FEATURE_DFS_OFFLOAD,
+ 	NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211,
 -	NL80211_EXT_FEATURE_DATA_ACK_SIGNAL_SUPPORT,
-+	NL80211_EXT_FEATURE_DFS_OFFLOAD,
-+	NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211,
 +	NL80211_EXT_FEATURE_ACK_SIGNAL_SUPPORT,
  
  	/* add new features before the definition below */
@@ -102,19 +90,9 @@
  		}
  	}
  }
---- a/net/mac80211/status.c
-+++ b/net/mac80211/status.c
-@@ -1045,6 +1045,7 @@ void ieee80211_tx_status_8023(struct iee
- 			        (s8) info->status.ack_signal;
- 			ewma_avg_signal_add(&sta->avg_ack_signal,
- 				-(info->status.ack_signal));
-+			sta->status_stats.ack_signal_filled = true;
- 		}
- 		if (info->flags & IEEE80211_TX_STAT_ACK) {
- 			if (sta->status_stats.lost_packets)
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -4492,10 +4492,11 @@ static int nl80211_send_station(struct s
+@@ -4496,10 +4496,11 @@ static int nl80211_send_station(struct s
  	PUT_SINFO_U64(RX_DROP_MISC, rx_dropped_misc);
  	PUT_SINFO_U64(BEACON_RX, rx_beacon);
  	PUT_SINFO(BEACON_SIGNAL_AVG, rx_beacon_signal_avg, u8);

@@ -1,15 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -1633,11 +1633,15 @@ static void ath10k_tpc_stats_print(struc
- 	*len += scnprintf(buf + *len, buf_len - *len,
- 			  "********************************\n");
- 	*len += scnprintf(buf + *len, buf_len - *len,
--			  "No.  Preamble Rate_code tpc_value1 tpc_value2 tpc_value3\n");
-+			  "No.  Preamble Rate_code ");
-+
-+	for (i = 0; i < WMI_TPC_TX_N_CHAIN; i++)
-+		*len += scnprintf(buf + *len, buf_len - *len,
-+				  "tpc_value%d ", i);
+@@ -1649,7 +1649,7 @@ static void ath10k_tpc_stats_print(struc
  
  	for (i = 0; i < tpc_stats->rate_max; i++) {
  		*len += scnprintf(buf + *len, buf_len - *len,
@@ -20,7 +11,34 @@
  				  tpc_stats->tpc_table[j].tpc_value[i]);
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -4634,10 +4634,17 @@ void ath10k_wmi_event_pdev_tpc_config(st
+@@ -4639,14 +4639,14 @@ void ath10k_wmi_event_pdev_tpc_config(st
+ 
+ 	tpc_stats = kzalloc(sizeof(*tpc_stats), GFP_ATOMIC);
+ 	if (!tpc_stats)
+-		return;
++		goto exit;
+ 
+ 	num_tx_chain = __le32_to_cpu(ev->num_tx_chain);
+ 
+ 	if (num_tx_chain > WMI_TPC_TX_N_CHAIN) {
+ 		ath10k_warn(ar, "number of tx chain is %d greater than TPC configured tx chain %d\n",
+ 			    num_tx_chain, WMI_TPC_TX_N_CHAIN);
+-		return;
++		goto exit;
+ 	}
+ 
+ 	ath10k_wmi_tpc_config_get_rate_code(rate_code, pream_table,
+@@ -4688,6 +4688,9 @@ void ath10k_wmi_event_pdev_tpc_config(st
+ 		   __le32_to_cpu(ev->twice_max_rd_power) / 2,
+ 		   __le32_to_cpu(ev->num_tx_chain),
+ 		   __le32_to_cpu(ev->rate_max));
++
++exit:
++	complete(&ar->debug.tpc_complete);
+ }
+ 
+ static u8
+@@ -4885,10 +4888,17 @@ void ath10k_wmi_event_tpc_final_table(st
  
  	tpc_stats = kzalloc(sizeof(*tpc_stats), GFP_ATOMIC);
  	if (!tpc_stats)
@@ -39,7 +57,7 @@
  	ath10k_wmi_tpc_config_get_rate_code(rate_code, pream_table,
  					    num_tx_chain);
  
-@@ -4677,6 +4684,9 @@ void ath10k_wmi_event_pdev_tpc_config(st
+@@ -4928,6 +4938,9 @@ void ath10k_wmi_event_tpc_final_table(st
  		   __le32_to_cpu(ev->twice_max_rd_power) / 2,
  		   __le32_to_cpu(ev->num_tx_chain),
  		   __le32_to_cpu(ev->rate_max));
@@ -48,17 +66,4 @@
 +	complete(&ar->debug.tpc_complete);
  }
  
- static u8
---- a/drivers/net/wireless/ath/ath10k/wmi.h
-+++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -4081,9 +4081,9 @@ struct wmi_pdev_get_tpc_config_cmd {
- } __packed;
- 
- #define WMI_TPC_CONFIG_PARAM		1
--#define WMI_TPC_RATE_MAX		160
- #define WMI_TPC_FINAL_RATE_MAX		240
- #define WMI_TPC_TX_N_CHAIN		4
-+#define WMI_TPC_RATE_MAX		(WMI_TPC_TX_N_CHAIN * 65)
- #define WMI_TPC_PREAM_TABLE_MAX		10
- #define WMI_TPC_FLAG			3
- #define WMI_TPC_BUF_SIZE		10
+ static void
