@@ -131,7 +131,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
-	json_get_vars noscan htmode
+	json_get_vars noscan
 	json_get_values ht_capab_list ht_capab
 
 	ieee80211n=1
@@ -759,10 +759,7 @@ mac80211_setup_vif() {
 						esac
 					;;
 					VHT80)
-						mesh_htmode="80Mhz"
-					;;
-					VHT160)
-						mesh_htmode="160Mhz"
+						mesh_htmode="80MHz"
 					;;
 					*) mesh_htmode="NOHT" ;;
 				esac
@@ -884,7 +881,8 @@ drv_mac80211_setup() {
 		board_file \
 		txpower antenna_gain \
 		rxantenna txantenna \
-		frag rts beacon_int:100
+		frag rts beacon_int:100 \
+		htmode
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
