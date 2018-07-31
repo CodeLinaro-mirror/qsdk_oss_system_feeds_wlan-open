@@ -260,7 +260,6 @@ mac80211_hostapd_setup_base() {
 		tx_antenna_pattern:1 \
 		vht_max_mpdu:11454 \
 		rx_stbc:4 \
-		tx_stbc:4 \
 		vht_link_adapt:3 \
 		vht160:2
 
@@ -272,13 +271,13 @@ mac80211_hostapd_setup_base() {
 
 		cap_rx_stbc=$((($vht_cap >> 8) & 7))
 		[ "$rx_stbc" -lt "$cap_rx_stbc" ] && cap_rx_stbc="$rx_stbc"
-		ht_cap_mask="$(( ($vht_cap & ~(0x700)) | ($cap_rx_stbc << 8) ))"
+		vht_cap="$(( ($vht_cap & ~(0x700)) | ($cap_rx_stbc << 8) ))"
 
 		mac80211_add_capabilities vht_capab $vht_cap \
 		RXLDPC:0x10::$rxldpc \
 		SHORT-GI-80:0x20::$short_gi_80 \
 		SHORT-GI-160:0x40::$short_gi_160 \
-		TX-STBC-2BY1:0x80::$tx_stbc \
+		TX-STBC-2BY1:0x80::$tx_stbc_2by1 \
 		SU-BEAMFORMER:0x800::$su_beamformer \
 		SU-BEAMFORMEE:0x1000::$su_beamformee \
 		MU-BEAMFORMER:0x80000::$mu_beamformer \
@@ -287,10 +286,10 @@ mac80211_hostapd_setup_base() {
 		HTC-VHT:0x400000::$htc_vht \
 		RX-ANTENNA-PATTERN:0x10000000::$rx_antenna_pattern \
 		TX-ANTENNA-PATTERN:0x20000000::$tx_antenna_pattern \
-		RX-STBC1:0x700:0x100:1 \
-		RX-STBC12:0x700:0x200:1 \
-		RX-STBC123:0x700:0x300:1 \
-		RX-STBC1234:0x700:0x400:1 \
+		RX-STBC-1:0x700:0x100:1 \
+		RX-STBC-12:0x700:0x200:1 \
+		RX-STBC-123:0x700:0x300:1 \
+		RX-STBC-1234:0x700:0x400:1 \
 
 		#beamforming related configurationss
 
@@ -485,9 +484,12 @@ mac80211_generate_mac() {
 
 find_phy() {
 	[ -n "$phy" -a -d /sys/class/ieee80211/$phy ] && return 0
-	[ -n "$path" -a -d "/sys/devices/$path/ieee80211" ] && {
-		phy="$(ls /sys/devices/$path/ieee80211 | grep -m 1 phy)"
-		[ -n "$phy" ] && return 0
+	[ -n "$path" ] && {
+		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
+			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
+				*$path) return 0;;
+			esac
+		done
 	}
 	[ -n "$macaddr" ] && {
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
@@ -566,7 +568,7 @@ mac80211_prepare_vif() {
 	esac
 
 	case "$mode" in
-		monitor)
+		monitor|mesh)
 			[ "$auto_channel" -gt 0 ] || iw dev "$ifname" set channel "$channel" $htmode
 		;;
 	esac
@@ -665,6 +667,7 @@ mac80211_setup_adhoc() {
 
 mac80211_setup_vif() {
 	local name="$1"
+	local failed
 
 	json_select data
 	json_get_vars ifname
@@ -684,6 +687,67 @@ mac80211_setup_vif() {
 	[ -z "$vif_txpower" ] || iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
 
 	case "$mode" in
+		mesh)
+			# authsae or wpa_supplicant
+			json_get_vars key
+			if [ -n "$key" ]; then
+				if [ -e "/lib/wifi/authsae.sh" ]; then
+					. /lib/wifi/authsae.sh
+					authsae_start_interface || failed=1
+				else
+					wireless_vif_parse_encryption
+					mac80211_setup_supplicant || failed=1
+				fi
+			else
+				json_get_vars mesh_id mcast_rate
+
+				mcval=
+				[ -n "$mcast_rate" ] && wpa_supplicant_add_rate mcval "$mcast_rate"
+
+				case "$htmode" in
+					VHT20|HT20) mesh_htmode=HT20;;
+					HT40*|VHT40)
+						case "$hwmode" in
+							a)
+								case "$(( ($channel / 4) % 2 ))" in
+									1) mesh_htmode="HT40+" ;;
+									0) mesh_htmode="HT40-";;
+								esac
+							;;
+						*)
+								case "$htmode" in
+									HT40+) mesh_htmode="HT40+";;
+									HT40-) mesh_htmode="HT40-";;
+									*)
+										if [ "$channel" -lt 7 ]; then
+											mesh_htmode="HT40+"
+										else
+											mesh_htmode="HT40-"
+										fi
+									;;
+								esac
+							;;
+						esac
+					;;
+					VHT80)
+						mesh_htmode="80Mhz"
+					;;
+					VHT160)
+						mesh_htmode="160Mhz"
+					;;
+					*) mesh_htmode="NOHT" ;;
+				esac
+
+				freq="$(get_freq "$phy" "$channel")"
+				iw dev "$ifname" mesh join "$mesh_id" freq $freq $mesh_htmode ${mcval:+mcast-rate $mcval}
+
+			fi
+
+			for var in $MP_CONFIG_INT $MP_CONFIG_BOOL $MP_CONFIG_STRING; do
+				json_get_var mp_val "$var"
+				[ -n "$mp_val" ] && iw dev "$ifname" set mesh_param "$var" "$mp_val"
+			done
+		;;
 		adhoc)
 			wireless_vif_parse_encryption
 			if [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ]; then
@@ -692,7 +756,7 @@ mac80211_setup_vif() {
 				mac80211_setup_adhoc
 			fi
 		;;
-		sta|mesh)
+		sta)
 			mac80211_setup_supplicant || failed=1
 		;;
 	esac
