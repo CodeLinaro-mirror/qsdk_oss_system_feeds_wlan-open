@@ -32,16 +32,8 @@
  	 * unhappy about callback failures.
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -503,6 +503,7 @@ struct ath10k_sta {
- 	u8 tpc;
- 	u32 peer_ps_state;
- 	enum nl80211_cqm_txrate_threshold_event last_event;
-+	struct ath10k_cfr_capture cfr_capture;
- };
- 
- #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
-@@ -875,6 +876,12 @@ enum ath10k_dt_btcoex_support_flag {
- 	ATH10K_DT_BTCOEX_NOT_SUPPORTED,
+@@ -477,6 +477,13 @@ struct ath10k_htt_tx_stats {
+ 	u64 ack_fails;
  };
  
 +struct ath10k_cfr_capture {
@@ -50,9 +42,26 @@
 +	u32 cfr_bandwidth;
 +	u32 cfr_method;
 +};
++
+ struct ath10k_sta {
+ 	struct ath10k_vif *arvif;
  
+@@ -503,6 +510,7 @@ struct ath10k_sta {
+ 	u8 tpc;
+ 	u32 peer_ps_state;
+ 	enum nl80211_cqm_txrate_threshold_event last_event;
++	struct ath10k_cfr_capture cfr_capture;
+ };
+ 
+ #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
+@@ -875,7 +883,6 @@ enum ath10k_dt_btcoex_support_flag {
+ 	ATH10K_DT_BTCOEX_NOT_SUPPORTED,
+ };
+ 
+-
  struct ath10k_fw_file {
  	const struct firmware *firmware;
+ 
 @@ -1197,11 +1204,21 @@ struct ath10k {
  	bool radar_conf_waiting;
  	/*Status indicated by the Radar Confirmation Event*/
@@ -799,16 +808,16 @@
  	.pull_echo_ev = ath10k_wmi_op_pull_echo_ev,
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
-@@ -204,7 +204,7 @@ enum wmi_service {
- 	WMI_SERVICE_RESET_CHIP,
+@@ -205,7 +205,7 @@ enum wmi_service {
+ 	WMI_SERVICE_SPOOF_MAC_SUPPORT,
  	WMI_SERVICE_CFR_CAPTURE_SUPPORT,
  	WMI_SERVICE_TX_DATA_ACK_RSSI,
 -	WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_1,
 +	WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LAGACY,
  	WMI_SERVICE_PER_PACKET_SW_ENCRYPT,
- 	WMI_SERVICE_SPOOF_MAC_SUPPORT,
+ 	WMI_SERVICE_VDEV_BCN_RATE_CONTROL,
  
-@@ -356,7 +356,7 @@ enum wmi_10_4_service {
+@@ -359,7 +359,7 @@ enum wmi_10_4_service {
  	WMI_10_4_SERVICE_TPC_STATS_FINAL,
  	WMI_10_4_SERVICE_CFR_CAPTURE_SUPPORT,
  	WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
@@ -817,16 +826,16 @@
  	WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  };
  
-@@ -474,7 +474,7 @@ static inline char *wmi_service_name(int
+@@ -477,7 +477,7 @@ static inline char *wmi_service_name(int
   	SVCSTR(WMI_SERVICE_RESET_CHIP);
  	SVCSTR(WMI_SERVICE_CFR_CAPTURE_SUPPORT);
  	SVCSTR(WMI_SERVICE_TX_DATA_ACK_RSSI);
 -	SVCSTR(WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_1);
 +	SVCSTR(WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LAGACY);
  	SVCSTR(WMI_SERVICE_PER_PACKET_SW_ENCRYPT);
- 	default:
- 		return NULL;
-@@ -788,8 +788,8 @@ static inline void wmi_10_4_svc_map(cons
+ 	SVCSTR(WMI_SERVICE_VDEV_BCN_RATE_CONTROL);
+ 
+@@ -797,8 +797,8 @@ static inline void wmi_10_4_svc_map(cons
  	       WMI_SERVICE_CFR_CAPTURE_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_TX_DATA_ACK_RSSI,
  	       WMI_SERVICE_TX_DATA_ACK_RSSI, len);
@@ -837,7 +846,7 @@
  	SVCMAP(WMI_10_4_SERVICE_PER_PACKET_SW_ENCRYPT,
  	       WMI_SERVICE_PER_PACKET_SW_ENCRYPT, len);
  }
-@@ -998,6 +998,7 @@ struct wmi_cmd_map {
+@@ -1007,6 +1007,7 @@ struct wmi_cmd_map {
  	u32 peer_set_smart_ant_train_info_cmdid;
  	u32 set_coex_param_cmdid;
  	u32 radar_found_cmdid;
@@ -845,7 +854,7 @@
  };
  
  /*
-@@ -1838,6 +1839,7 @@ enum wmi_10_4_cmd_id {
+@@ -1847,6 +1848,7 @@ enum wmi_10_4_cmd_id {
  	WMI_10_4_PDEV_SET_BRIDGE_MACADDR_CMDID,
  	WMI_10_4_ATF_GROUP_WMM_AC_CONFIG_REQUEST_CMDID,
  	WMI_10_4_RADAR_FOUND_CMDID,
@@ -853,7 +862,7 @@
  	WMI_10_4_PDEV_UTF_CMDID = WMI_10_4_END_CMDID - 1,
  };
  
-@@ -2190,6 +2192,10 @@ enum wlan_mode_capability {
+@@ -2199,6 +2201,10 @@ enum wlan_mode_capability {
  	WHAL_WLAN_11AG_CAPABILITY  = 0x3,
  };
  
@@ -864,7 +873,7 @@
  /* structure used by FW for requesting host memory */
  struct wlan_host_mem_req {
  	/* ID of the request */
-@@ -3185,6 +3191,42 @@ struct wmi_bssid_arg {
+@@ -3194,6 +3200,42 @@ struct wmi_bssid_arg {
  	const u8 *bssid;
  };
  
@@ -907,7 +916,7 @@
  struct wmi_start_scan_arg {
  	u32 scan_id;
  	u32 scan_req_id;
-@@ -3757,6 +3799,7 @@ struct wmi_pdev_param_map {
+@@ -3766,6 +3808,7 @@ struct wmi_pdev_param_map {
  	u32 arp_srcaddr;
  	u32 arp_dstaddr;
  	u32 enable_btcoex;
@@ -915,7 +924,7 @@
  };
  
  #define WMI_PDEV_PARAM_UNSUPPORTED 0
-@@ -4073,6 +4116,14 @@ enum wmi_10_4_pdev_param {
+@@ -4082,6 +4125,14 @@ enum wmi_10_4_pdev_param {
  	WMI_10_4_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
  	WMI_10_4_PDEV_PARAM_ATF_SSID_GROUP_POLICY,
  	WMI_10_4_PDEV_PARAM_ENABLE_BTCOEX,
