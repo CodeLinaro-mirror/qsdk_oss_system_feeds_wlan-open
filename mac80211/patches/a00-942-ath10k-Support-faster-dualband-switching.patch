@@ -1,7 +1,7 @@
 Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/bmi.h
 ===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/bmi.h	2018-08-03 17:53:00.565026305 +0530
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/bmi.h	2018-08-03 17:53:00.561026308 +0530
+--- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/bmi.h	2018-08-24 11:53:56.403772150 +0530
++++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/bmi.h	2018-08-24 11:53:56.395772152 +0530
 @@ -86,9 +86,9 @@
  #define BMI_PARAM_GET_FLASH_BOARD_ID 0x8000
  #define BMI_PARAM_FLASH_SECTION_ALL 0x10000
@@ -25,8 +25,8 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/bmi.h
  	__le32 id; /* enum bmi_cmd_id */
 Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.c
 ===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/core.c	2018-08-03 17:53:00.565026305 +0530
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.c	2018-08-03 17:53:00.561026308 +0530
+--- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/core.c	2018-08-24 11:53:56.403772150 +0530
++++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.c	2018-08-24 11:54:42.935763139 +0530
 @@ -42,7 +42,6 @@
  EXPORT_SYMBOL(ath10k_debug_mask);
  
@@ -62,7 +62,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  		},
  		.sw_decrypt_mcast_mgmt = true,
  		.hw_ops = &qca99x0_ops,
-@@ -794,877 +793,1011 @@
+@@ -794,877 +793,1035 @@
  	return 0;
  }
  
@@ -1003,19 +1003,18 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  	}
  
 -	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot otp execute result %d\n", result);
--
--	if (!(skip_otp || test_bit(ATH10K_FW_FEATURE_IGNORE_OTP_RESULT,
--				   ar->running_fw->fw_file.fw_features)) &&
--	    result != 0) {
--		ath10k_err(ar, "otp calibration failed: %d", result);
--		return -EINVAL;
 +	ar->bd_api = 2;
 +	ret = ath10k_core_fetch_board_data_api_n(ar, boardname,
 +						 fallback_boardname,
 +						 ATH10K_BOARD_API2_FILE);
 +	if (!ret)
 +		goto success;
-+
+ 
+-	if (!(skip_otp || test_bit(ATH10K_FW_FEATURE_IGNORE_OTP_RESULT,
+-				   ar->running_fw->fw_file.fw_features)) &&
+-	    result != 0) {
+-		ath10k_err(ar, "otp calibration failed: %d", result);
+-		return -EINVAL;
 +fallback:
 +	ar->bd_api = 1;
 +	ret = ath10k_core_fetch_board_data_api_1(ar, bd_ie_type);
@@ -1050,12 +1049,12 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +			    "failed to retrieve ext board id ,invalid otp\n");
 +		return -ENODATA;
 +	}
- 
--	ret = ath10k_swap_code_seg_configure(ar, &ar->running_fw->fw_file);
++
 +	ath10k_dbg(ar, ATH10K_DBG_BOOT,
 +		   "boot upload otp to 0x%x len %zd for ext board id\n",
 +		   address, ar->normal_mode_fw.fw_file.otp_len);
-+
+ 
+-	ret = ath10k_swap_code_seg_configure(ar, &ar->running_fw->fw_file);
 +	ret = ath10k_bmi_fast_download(ar, address,
 +				       ar->normal_mode_fw.fw_file.otp_data,
 +				       ar->normal_mode_fw.fw_file.otp_len);
@@ -1111,29 +1110,30 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  {
 -	if (!IS_ERR(ar->normal_mode_fw.fw_file.firmware))
 -		release_firmware(ar->normal_mode_fw.fw_file.firmware);
-+	u32 board_data_size = ar->hw_params.fw.board_size;
-+	u32 eboard_data_size = ar->hw_params.fw.ext_board_size;
-+	u32 board_address;
-+	u32 ext_board_address;
-+	int ret;
- 
+-
 -	if (!IS_ERR(ar->cal_file))
 -		release_firmware(ar->cal_file);
++	u32 board_data_size = ar->hw_params.fw.board_size;
++	u32 board_address;
++	int ret;
+ 
+-	if (!IS_ERR(ar->pre_cal_file))
+-		release_firmware(ar->pre_cal_file);
 +	ret = ath10k_push_board_ext_data(ar, data, data_len);
 +	if (ret) {
 +		ath10k_err(ar, "could not push board ext data (%d)\n", ret);
 +		goto exit;
 +	}
  
--	if (!IS_ERR(ar->pre_cal_file))
--		release_firmware(ar->pre_cal_file);
+-	ath10k_swap_code_seg_release(ar, &ar->normal_mode_fw.fw_file);
 +	ret = ath10k_bmi_read32(ar, hi_board_data, &board_address);
 +	if (ret) {
 +		ath10k_err(ar, "could not read board data addr (%d)\n", ret);
 +		goto exit;
 +	}
  
--	ath10k_swap_code_seg_release(ar, &ar->normal_mode_fw.fw_file);
+-	ar->normal_mode_fw.fw_file.otp_data = NULL;
+-	ar->normal_mode_fw.fw_file.otp_len = 0;
 +	ret = ath10k_bmi_write_memory(ar, board_address, data,
 +				      min_t(u32, board_data_size,
 +					    data_len));
@@ -1142,19 +1142,64 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +		goto exit;
 +	}
  
--	ar->normal_mode_fw.fw_file.otp_data = NULL;
--	ar->normal_mode_fw.fw_file.otp_len = 0;
+-	ar->normal_mode_fw.fw_file.firmware = NULL;
+-	ar->normal_mode_fw.fw_file.firmware_data = NULL;
+-	ar->normal_mode_fw.fw_file.firmware_len = 0;
 +	ret = ath10k_bmi_write32(ar, hi_board_data_initialized, 1);
 +	if (ret) {
 +		ath10k_err(ar, "could not write board data bit (%d)\n", ret);
 +		goto exit;
 +	}
-+	if (!ar->id.ext_bid_supported)
-+		goto exit;
  
--	ar->normal_mode_fw.fw_file.firmware = NULL;
--	ar->normal_mode_fw.fw_file.firmware_data = NULL;
--	ar->normal_mode_fw.fw_file.firmware_len = 0;
+-	ar->cal_file = NULL;
+-	ar->pre_cal_file = NULL;
++exit:
++       return ret;
+ }
+ 
+-static int ath10k_fetch_cal_file(struct ath10k *ar)
++static int ath10k_download_eboard_data(struct ath10k *ar)
+ {
+-	char filename[100];
+-
+-	/* pre-cal-<bus>-<id>.bin */
+-	scnprintf(filename, sizeof(filename), "pre-cal-%s-%s.bin",
+-		  ath10k_bus_str(ar->hif.bus), dev_name(ar->dev));
+-
+-	ar->pre_cal_file = ath10k_fetch_fw_file(ar, ATH10K_FW_DIR, filename);
+-	if (!IS_ERR(ar->pre_cal_file))
+-		goto success;
+-
+-	/* cal-<bus>-<id>.bin */
+-	scnprintf(filename, sizeof(filename), "cal-%s-%s.bin",
+-		  ath10k_bus_str(ar->hif.bus), dev_name(ar->dev));
++	u32 eboard_data_size = ar->hw_params.fw.ext_board_size;
++	u32 board_address, ext_board_address;
++	int ret;
+ 
+-	ar->cal_file = ath10k_fetch_fw_file(ar, ATH10K_FW_DIR, filename);
+-	if (IS_ERR(ar->cal_file))
+-		/* calibration file is optional, don't print any warnings */
+-		return PTR_ERR(ar->cal_file);
+-success:
+-	ath10k_dbg(ar, ATH10K_DBG_BOOT, "found calibration file %s/%s\n",
+-		   ATH10K_FW_DIR, filename);
++	if (!ar->id.ext_bid_supported)
++		return -EOPNOTSUPP;
+ 
+-	return 0;
+-}
++	ret = ath10k_bmi_read32(ar, hi_board_data, &board_address);
++	if (ret) {
++		ath10k_err(ar, "could not read board data addr (%d)\n", ret);
++		goto exit;
++	}
+ 
+-static int ath10k_core_fetch_board_data_api_1(struct ath10k *ar)
+-{
+-	if (!ar->hw_params.fw.board) {
+-		ath10k_err(ar, "failed to find board file fw entry\n");
+-		return -EINVAL;
 +	/* Extended board data download */
 +	ret = ath10k_core_get_ext_board_id_from_otp(ar);
 +	/* Not fetching ext_board_data if ext board id is 0 */
@@ -1164,14 +1209,19 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +	} else if (ret) {
 +		ath10k_err(ar, "could not get ext board id, (%d)\n", ret);
 +		goto exit;
-+	}
+ 	}
  
--	ar->cal_file = NULL;
--	ar->pre_cal_file = NULL;
+-	ar->normal_mode_fw.board = ath10k_fetch_fw_file(ar,
+-							ar->hw_params.fw.dir,
+-							ar->hw_params.fw.board);
+-	if (IS_ERR(ar->normal_mode_fw.board))
+-		return PTR_ERR(ar->normal_mode_fw.board);
 +	ret = ath10k_core_fetch_board_file(ar, ATH10K_BD_IE_BOARD_EXT);
 +	if (ret)
 +		goto exit;
-+
+ 
+-	ar->normal_mode_fw.board_data = ar->normal_mode_fw.board->data;
+-	ar->normal_mode_fw.board_len = ar->normal_mode_fw.board->size;
 +	if (ar->normal_mode_fw.ext_board_data) {
 +		ext_board_address = board_address + EXT_BOARD_ADDRESS_OFFSET;
 +		ath10k_dbg(ar, ATH10K_DBG_BOOT,
@@ -1179,58 +1229,63 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +							ext_board_address);
 +		ret = ath10k_bmi_write_memory(ar, ext_board_address,
 +					      ar->normal_mode_fw.ext_board_data,
-+					      min_t(u32, eboard_data_size, data_len));
++					      min_t(u32, eboard_data_size,
++					      ar->normal_mode_fw.ext_board_len));
 +		if (ret)
 +			ath10k_err(ar, "could not write ext board data (%d)\n", ret);
 +	}
-+
+ 
+-	return 0;
 +exit:
 +	return ret;
  }
  
--static int ath10k_fetch_cal_file(struct ath10k *ar)
+-static int ath10k_core_parse_bd_ie_board(struct ath10k *ar,
+-					 const void *buf, size_t buf_len,
+-					 const char *boardname)
 +static int ath10k_verify_mtd_cal_data_chksum(u32 *data, u32 len)
  {
--	char filename[100];
--
--	/* pre-cal-<bus>-<id>.bin */
--	scnprintf(filename, sizeof(filename), "pre-cal-%s-%s.bin",
--		  ath10k_bus_str(ar->hif.bus), dev_name(ar->dev));
+-	const struct ath10k_fw_ie *hdr;
+-	bool name_match_found;
+-	int ret, board_ie_id;
+-	size_t board_ie_len;
+-	const void *board_ie_data;
 +	u16 *buf = (u16 *)data;
 +	u16 sum;
 +	int i;
  
--	ar->pre_cal_file = ath10k_fetch_fw_file(ar, ATH10K_FW_DIR, filename);
--	if (!IS_ERR(ar->pre_cal_file))
--		goto success;
+-	name_match_found = false;
 +	sum = 0;
  
--	/* cal-<bus>-<id>.bin */
--	scnprintf(filename, sizeof(filename), "cal-%s-%s.bin",
--		  ath10k_bus_str(ar->hif.bus), dev_name(ar->dev));
+-	/* go through ATH10K_BD_IE_BOARD_ elements */
+-	while (buf_len > sizeof(struct ath10k_fw_ie)) {
+-		hdr = buf;
+-		board_ie_id = le32_to_cpu(hdr->id);
+-		board_ie_len = le32_to_cpu(hdr->len);
+-		board_ie_data = hdr->data;
 +	for (i = 0; i < (len / 2); i++)
 +		sum ^= le16_to_cpu(*buf++);
  
--	ar->cal_file = ath10k_fetch_fw_file(ar, ATH10K_FW_DIR, filename);
--	if (IS_ERR(ar->cal_file))
--		/* calibration file is optional, don't print any warnings */
--		return PTR_ERR(ar->cal_file);
--success:
--	ath10k_dbg(ar, ATH10K_DBG_BOOT, "found calibration file %s/%s\n",
--		   ATH10K_FW_DIR, filename);
+-		buf_len -= sizeof(*hdr);
+-		buf += sizeof(*hdr);
 +	if (sum != 0xffff)
 +		return -EINVAL;
  
- 	return 0;
- }
+-		if (buf_len < ALIGN(board_ie_len, 4)) {
+-			ath10k_err(ar, "invalid ATH10K_BD_IE_BOARD length: %zu < %zu\n",
+-				   buf_len, ALIGN(board_ie_len, 4));
+-			ret = -EINVAL;
+-			goto out;
+-		}
++	return 0;
++}
  
--static int ath10k_core_fetch_board_data_api_1(struct ath10k *ar)
+-		switch (board_ie_id) {
+-		case ATH10K_BD_IE_BOARD_NAME:
+-			ath10k_dbg_dump(ar, ATH10K_DBG_BOOT, "board name", "",
+-					board_ie_data, board_ie_len);
 +static int ath10k_download_cal_data_mtd(struct ath10k *ar)
- {
--	if (!ar->hw_params.fw.board) {
--		ath10k_err(ar, "failed to find board file fw entry\n");
--		return -EINVAL;
--	}
++{
 +	struct device_node *node;
 +	struct mtd_info *mtd;
 +	size_t retlen;
@@ -1238,11 +1293,8 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +	const char *mtd_name;
 +	int ret, i;
  
--	ar->normal_mode_fw.board = ath10k_fetch_fw_file(ar,
--							ar->hw_params.fw.dir,
--							ar->hw_params.fw.board);
--	if (IS_ERR(ar->normal_mode_fw.board))
--		return PTR_ERR(ar->normal_mode_fw.board);
+-			if (board_ie_len != strlen(boardname))
+-				break;
 +	node = ar->dev->of_node;
 +	if (!node) {
 +		/* Device Tree is optional, don't print any warnings if
@@ -1251,100 +1303,12 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 +		return -ENOENT;
 +	}
  
--	ar->normal_mode_fw.board_data = ar->normal_mode_fw.board->data;
--	ar->normal_mode_fw.board_len = ar->normal_mode_fw.board->size;
-+	ret = of_property_read_u32(node, "qcom,cal-len", &len);
-+	if (ret)
-+		return -ENOENT;
- 
--	return 0;
--}
-+	ret = of_property_read_u32(node, "qcom,cal-offset", &addr);
-+	if (ret)
-+		return -ENOENT;
- 
--static int ath10k_core_parse_bd_ie_board(struct ath10k *ar,
--					 const void *buf, size_t buf_len,
--					 const char *boardname)
--{
--	const struct ath10k_fw_ie *hdr;
--	bool name_match_found;
--	int ret, board_ie_id;
--	size_t board_ie_len;
--	const void *board_ie_data;
-+	mtd_name = of_get_property(node, "qcom,mtd-name", NULL);
-+	if (!mtd_name)
-+		return -ENOENT;
- 
--	name_match_found = false;
-+	if (len != ar->hw_params.cal_data_len) {
-+		ath10k_warn(ar, "invalid cal data length in DT: %d\n", len);
-+		return -EMSGSIZE;
-+	}
- 
--	/* go through ATH10K_BD_IE_BOARD_ elements */
--	while (buf_len > sizeof(struct ath10k_fw_ie)) {
--		hdr = buf;
--		board_ie_id = le32_to_cpu(hdr->id);
--		board_ie_len = le32_to_cpu(hdr->len);
--		board_ie_data = hdr->data;
-+	ath10k_dbg(ar, ATH10K_DBG_BOOT, "mtd name: %s addr: 0x%x len: %d\n",
-+		   mtd_name, addr, len);
- 
--		buf_len -= sizeof(*hdr);
--		buf += sizeof(*hdr);
-+	buf = vmalloc(len);
-+	if (!buf) {
-+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+			   "failed to alloc memory for mtd caldata\n");
-+		return -ENOMEM;
-+	}
- 
--		if (buf_len < ALIGN(board_ie_len, 4)) {
--			ath10k_err(ar, "invalid ATH10K_BD_IE_BOARD length: %zu < %zu\n",
--				   buf_len, ALIGN(board_ie_len, 4));
--			ret = -EINVAL;
--			goto out;
--		}
-+	mtd = get_mtd_device_nm(mtd_name);
-+	if (IS_ERR_OR_NULL(mtd)) {
-+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+			   "mtd device %s not found to read caldata\n",
-+			   mtd_name);
-+		ret = PTR_ERR(mtd);
-+		goto release_buf;
-+	}
- 
--		switch (board_ie_id) {
--		case ATH10K_BD_IE_BOARD_NAME:
--			ath10k_dbg_dump(ar, ATH10K_DBG_BOOT, "board name", "",
--					board_ie_data, board_ie_len);
-+	ret = mtd_read(mtd, addr, len, &retlen, (u_char *)buf);
-+	if (ret) {
-+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+			   "failed to read caldata from mtd device %s: %d\n",
-+			   mtd_name, ret);
-+		goto release_mtd;
-+	}
- 
--			if (board_ie_len != strlen(boardname))
--				break;
-+	if (retlen != len) {
-+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+			   "got only %d bytes from mtd (requested: %d)\n",
-+			   retlen, len);
-+		goto release_mtd;
-+	}
- 
 -			ret = memcmp(board_ie_data, boardname, strlen(boardname));
 -			if (ret)
 -				break;
-+	ret = ath10k_verify_mtd_cal_data_chksum(buf, len);
-+	if (ret) {
-+		ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+			   "checksum verification failed\n");
-+		goto release_mtd;
-+	}
++	ret = of_property_read_u32(node, "qcom,cal-len", &len);
++	if (ret)
++		return -ENOENT;
  
 -			name_match_found = true;
 -			ath10k_dbg(ar, ATH10K_DBG_BOOT,
@@ -1355,23 +1319,23 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -			if (!name_match_found)
 -				/* no match found */
 -				break;
-+	for (i = 0; i < (len / 4); i++)
-+		buf[i] = cpu_to_le32(buf[i]);
++	ret = of_property_read_u32(node, "qcom,cal-offset", &addr);
++	if (ret)
++		return -ENOENT;
  
 -			ath10k_dbg(ar, ATH10K_DBG_BOOT,
 -				   "boot found board data for '%s'",
 -				   boardname);
-+	ret = ath10k_download_board_data(ar, (const void *)buf,
-+					 (size_t)len);
-+	if (ret) {
-+		ath10k_err(ar, "failed to download mtd caldata: %d\n", ret);
-+		goto release_mtd;
-+	}
++	mtd_name = of_get_property(node, "qcom,mtd-name", NULL);
++	if (!mtd_name)
++		return -ENOENT;
  
 -			ar->normal_mode_fw.board_data = board_ie_data;
 -			ar->normal_mode_fw.board_len = board_ie_len;
-+	ath10k_dbg(ar, ATH10K_DBG_BOOT,
-+		   "cal data downloaded successfully\n");
++	if (len != ar->hw_params.cal_data_len) {
++		ath10k_warn(ar, "invalid cal data length in DT: %d\n", len);
++		return -EMSGSIZE;
++	}
  
 -			ret = 0;
 -			goto out;
@@ -1380,69 +1344,87 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -				    board_ie_id);
 -			break;
 -		}
-+	put_mtd_device(mtd);
-+	vfree(buf);
++	ath10k_dbg(ar, ATH10K_DBG_BOOT, "mtd name: %s addr: 0x%x len: %d\n",
++		   mtd_name, addr, len);
  
 -		/* jump over the padding */
 -		board_ie_len = ALIGN(board_ie_len, 4);
-+	return 0;
++	buf = vmalloc(len);
++	if (!buf) {
++		ath10k_dbg(ar, ATH10K_DBG_BOOT,
++			   "failed to alloc memory for mtd caldata\n");
++		return -ENOMEM;
++	}
  
 -		buf_len -= board_ie_len;
 -		buf += board_ie_len;
--	}
-+release_mtd:
-+	put_mtd_device(mtd);
++	mtd = get_mtd_device_nm(mtd_name);
++	if (IS_ERR_OR_NULL(mtd)) {
++		ath10k_dbg(ar, ATH10K_DBG_BOOT,
++			   "mtd device %s not found to read caldata\n",
++			   mtd_name);
++		ret = PTR_ERR(mtd);
++		goto release_buf;
+ 	}
  
 -	/* no match found */
 -	ret = -ENOENT;
-+release_buf:
-+	vfree(buf);
++	ret = mtd_read(mtd, addr, len, &retlen, (u_char *)buf);
++	if (ret) {
++		ath10k_dbg(ar, ATH10K_DBG_BOOT,
++			   "failed to read caldata from mtd device %s: %d\n",
++			   mtd_name, ret);
++		goto release_mtd;
++	}
  
 -out:
- 	return ret;
- }
+-	return ret;
+-}
++	if (retlen != len) {
++		ath10k_dbg(ar, ATH10K_DBG_BOOT,
++			   "got only %d bytes from mtd (requested: %d)\n",
++			   retlen, len);
++		goto release_mtd;
++	}
  
 -static int ath10k_core_search_bd(struct ath10k *ar,
 -				 const char *boardname,
 -				 const u8 *data,
 -				 size_t len)
-+static int ath10k_download_and_run_otp(struct ath10k *ar)
- {
+-{
 -	size_t ie_len;
 -	struct ath10k_fw_ie *hdr;
 -	int ret = -ENOENT, ie_id;
-+	u32 result, address = ar->hw_params.patch_load_addr;
-+	u32 bmi_otp_exe_param = ar->hw_params.otp_exe_param;
-+	int ret;
++	ret = ath10k_verify_mtd_cal_data_chksum(buf, len);
++	if (ret) {
++		ath10k_dbg(ar, ATH10K_DBG_BOOT,
++			   "checksum verification failed\n");
++		goto release_mtd;
++	}
  
 -	while (len > sizeof(struct ath10k_fw_ie)) {
 -		hdr = (struct ath10k_fw_ie *)data;
 -		ie_id = le32_to_cpu(hdr->id);
 -		ie_len = le32_to_cpu(hdr->len);
-+	ret = ath10k_download_board_data(ar,
-+					 ar->running_fw->board_data,
-+					 ar->running_fw->board_len);
-+	if (ret) {
-+		ath10k_err(ar, "failed to download board data: %d\n", ret);
-+		return ret;
-+	}
++	for (i = 0; i < (len / 4); i++)
++		buf[i] = cpu_to_le32(buf[i]);
  
 -		len -= sizeof(*hdr);
 -		data = hdr->data;
-+	/* OTP is optional */
++	ret = ath10k_download_board_data(ar, (const void *)buf,
++					 (size_t)len);
++	if (ret) {
++		ath10k_err(ar, "failed to download mtd caldata: %d\n", ret);
++		goto release_mtd;
++	}
  
 -		if (len < ALIGN(ie_len, 4)) {
 -			ath10k_err(ar, "invalid length for board ie_id %d ie_len %zu len %zu\n",
 -				   ie_id, ie_len, len);
 -			return -EINVAL;
 -		}
-+	if (!ar->running_fw->fw_file.otp_data ||
-+	    !ar->running_fw->fw_file.otp_len) {
-+		ath10k_warn(ar, "Not running otp, calibration will be incorrect (otp-data %pK otp_len %zd)!\n",
-+			    ar->running_fw->fw_file.otp_data,
-+			    ar->running_fw->fw_file.otp_len);
-+		return 0;
-+	}
++	ath10k_dbg(ar, ATH10K_DBG_BOOT,
++		   "cal data downloaded successfully\n");
  
 -		switch (ie_id) {
 -		case ATH10K_BD_IE_BOARD:
@@ -1451,59 +1433,40 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -			if (ret == -ENOENT)
 -				/* no match found, continue */
 -				break;
-+	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot upload otp to 0x%x len %zd\n",
-+		   address, ar->running_fw->fw_file.otp_len);
++	put_mtd_device(mtd);
++	vfree(buf);
  
 -			/* either found or error, so stop searching */
 -			goto out;
 -		}
-+	ret = ath10k_bmi_fast_download(ar, address,
-+				       ar->running_fw->fw_file.otp_data,
-+				       ar->running_fw->fw_file.otp_len);
-+	if (ret) {
-+		ath10k_err(ar, "could not write otp (%d)\n", ret);
-+		return ret;
-+	}
++	return 0;
  
 -		/* jump over the padding */
 -		ie_len = ALIGN(ie_len, 4);
-+	/* As of now pre-cal is valid for 10_4 variants */
-+	if (ar->cal_mode == ATH10K_PRE_CAL_MODE_DT ||
-+	    ar->cal_mode == ATH10K_PRE_CAL_MODE_FILE)
-+		bmi_otp_exe_param = BMI_PARAM_FLASH_SECTION_ALL;
++release_mtd:
++	put_mtd_device(mtd);
  
 -		len -= ie_len;
 -		data += ie_len;
-+	ret = ath10k_bmi_execute(ar, address, bmi_otp_exe_param, &result);
-+	if (ret) {
-+		ath10k_err(ar, "could not execute otp (%d)\n", ret);
-+		return ret;
- 	}
+-	}
++release_buf:
++	vfree(buf);
  
 -out:
 -	/* return result of parse_bd_ie_board() or -ENOENT */
--	return ret;
-+	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot otp execute result %d\n", result);
-+
-+	if (!(skip_otp || test_bit(ATH10K_FW_FEATURE_IGNORE_OTP_RESULT,
-+				   ar->running_fw->fw_file.fw_features)) &&
-+	    result != 0) {
-+		ath10k_err(ar, "otp calibration failed: %d", result);
-+		return -EINVAL;
-+	}
-+
-+	return 0;
+ 	return ret;
  }
  
 -static int ath10k_core_fetch_board_data_api_n(struct ath10k *ar,
 -					      const char *boardname,
 -					      const char *fallback_boardname,
 -					      const char *filename)
-+static int ath10k_download_cal_file(struct ath10k *ar,
-+				    const struct firmware *file)
++static int ath10k_download_and_run_otp(struct ath10k *ar)
  {
 -	size_t len, magic_len;
 -	const u8 *data;
++	u32 result, address = ar->hw_params.patch_load_addr;
++	u32 bmi_otp_exe_param = ar->hw_params.otp_exe_param;
  	int ret;
  
 -	ar->normal_mode_fw.board = ath10k_fetch_fw_file(ar,
@@ -1514,9 +1477,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -
 -	data = ar->normal_mode_fw.board->data;
 -	len = ar->normal_mode_fw.board->size;
-+	if (!file)
-+		return -ENOENT;
- 
+-
 -	/* magic has extra null byte padded */
 -	magic_len = strlen(ATH10K_BOARD_MAGIC) + 1;
 -	if (len < magic_len) {
@@ -1524,17 +1485,22 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -			   ar->hw_params.fw.dir, filename, len);
 -		ret = -EINVAL;
 -		goto err;
--	}
-+	if (IS_ERR(file))
-+		return PTR_ERR(file);
++	ret = ath10k_download_board_data(ar,
++					 ar->running_fw->board_data,
++					 ar->running_fw->board_len);
++	if (ret) {
++		ath10k_err(ar, "failed to download board data: %d\n", ret);
++		return ret;
+ 	}
  
 -	if (memcmp(data, ATH10K_BOARD_MAGIC, magic_len)) {
 -		ath10k_err(ar, "found invalid board magic\n");
 -		ret = -EINVAL;
 -		goto err;
-+	ret = ath10k_download_board_data(ar, file->data, file->size);
-+	if (ret) {
-+		ath10k_err(ar, "failed to download cal_file data: %d\n", ret);
++	/* Extended board data download */
++	ret = ath10k_download_eboard_data(ar);
++	if (ret && ret != -EOPNOTSUPP) {
++		ath10k_err(ar, "failed to download eboard data: %d\n", ret);
 +		return ret;
  	}
  
@@ -1545,86 +1511,83 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -			   ar->hw_params.fw.dir, filename, len);
 -		ret = -EINVAL;
 -		goto err;
--	}
-+	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot cal file downloaded\n");
++	/* OTP is optional */
++
++	if (!ar->running_fw->fw_file.otp_data ||
++	    !ar->running_fw->fw_file.otp_len) {
++		ath10k_warn(ar, "Not running otp, calibration will be incorrect (otp-data %pK otp_len %zd)!\n",
++			    ar->running_fw->fw_file.otp_data,
++			    ar->running_fw->fw_file.otp_len);
++		return 0;
+ 	}
  
 -	data += magic_len;
 -	len -= magic_len;
-+	return 0;
-+}
++	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot upload otp to 0x%x len %zd\n",
++		   address, ar->running_fw->fw_file.otp_len);
  
 -	/* attempt to find boardname in the IE list */
 -	ret = ath10k_core_search_bd(ar, boardname, data, len);
-+static int ath10k_download_cal_dt(struct ath10k *ar, const char *dt_name)
-+{
-+	struct device_node *node;
-+	int data_len;
-+	void *data;
-+	int ret;
++	ret = ath10k_bmi_fast_download(ar, address,
++				       ar->running_fw->fw_file.otp_data,
++				       ar->running_fw->fw_file.otp_len);
++	if (ret) {
++		ath10k_err(ar, "could not write otp (%d)\n", ret);
++		return ret;
++	}
  
 -	/* if we didn't find it and have a fallback name, try that */
 -	if (ret == -ENOENT && fallback_boardname)
 -		ret = ath10k_core_search_bd(ar, fallback_boardname, data, len);
-+	node = ar->dev->of_node;
-+	if (!node)
-+		/* Device Tree is optional, don't print any warnings if
-+		 * there's no node for ath10k.
-+		 */
-+		return -ENOENT;
++	/* As of now pre-cal is valid for 10_4 variants */
++	if (ar->cal_mode == ATH10K_PRE_CAL_MODE_DT ||
++	    ar->cal_mode == ATH10K_PRE_CAL_MODE_FILE ||
++	    ar->cal_mode == ATH10K_PRE_CAL_MODE_FLASH_MTD)
++		bmi_otp_exe_param = BMI_PARAM_FLASH_SECTION_ALL;
  
 -	if (ret == -ENOENT) {
 -		ath10k_err(ar,
 -			   "failed to fetch board data for %s from %s/%s\n",
 -			   boardname, ar->hw_params.fw.dir, filename);
 -		ret = -ENODATA;
-+	if (!of_get_property(node, dt_name, &data_len)) {
-+		/* The calibration data node is optional */
-+		return -ENOENT;
++	ret = ath10k_bmi_execute(ar, address, bmi_otp_exe_param, &result);
++	if (ret) {
++		ath10k_err(ar, "could not execute otp (%d)\n", ret);
++		return ret;
  	}
  
 -	if (ret)
 -		goto err;
-+	if (data_len != ar->hw_params.cal_data_len) {
-+		ath10k_warn(ar, "invalid calibration data length in DT: %d\n",
-+			    data_len);
-+		ret = -EMSGSIZE;
-+		goto out;
-+	}
++	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot otp execute result %d\n", result);
  
 -	return 0;
-+	data = kmalloc(data_len, GFP_KERNEL);
-+	if (!data) {
-+		ret = -ENOMEM;
-+		goto out;
++	if (!(skip_otp || test_bit(ATH10K_FW_FEATURE_IGNORE_OTP_RESULT,
++				   ar->running_fw->fw_file.fw_features)) &&
++	    result != 0) {
++		ath10k_err(ar, "otp calibration failed: %d", result);
++		return -EINVAL;
 +	}
  
 -err:
 -	ath10k_core_free_board_files(ar);
 -	return ret;
--}
-+	ret = of_property_read_u8_array(node, dt_name, data, data_len);
-+	if (ret) {
-+		ath10k_warn(ar, "failed to read calibration data from DT: %d\n",
-+			    ret);
-+		goto out_free;
-+	}
++	return 0;
+ }
  
 -static int ath10k_core_create_board_name(struct ath10k *ar, char *name,
 -					 size_t name_len, bool with_variant)
--{
++static int ath10k_download_cal_file(struct ath10k *ar,
++				    const struct firmware *file)
+ {
 -	/* strlen(',variant=') + strlen(ar->id.bdf_ext) */
 -	char variant[9 + ATH10K_SMBIOS_BDF_EXT_STR_LENGTH] = { 0 };
-+	ret = ath10k_download_board_data(ar, data, data_len);
-+	if (ret) {
-+		ath10k_warn(ar, "failed to download calibration data from Device Tree: %d\n",
-+			    ret);
-+		goto out_free;
-+	}
++	int ret;
  
 -	if (with_variant && ar->id.bdf_ext[0] != '\0')
 -		scnprintf(variant, sizeof(variant), ",variant=%s",
 -			  ar->id.bdf_ext);
-+	ret = 0;
++	if (!file)
++		return -ENOENT;
  
 -	if (ar->id.bmi_ids_valid) {
 -		scnprintf(name, name_len,
@@ -1633,39 +1596,69 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
 -			  ar->id.bmi_chip_id,
 -			  ar->id.bmi_board_id, variant);
 -		goto out;
--	}
-+out_free:
-+	kfree(data);
++	if (IS_ERR(file))
++		return PTR_ERR(file);
++
++	ret = ath10k_download_board_data(ar, file->data, file->size);
++	if (ret) {
++		ath10k_err(ar, "failed to download cal_file data: %d\n", ret);
++		return ret;
+ 	}
  
 -	scnprintf(name, name_len,
 -		  "bus=%s,vendor=%04x,device=%04x,subsystem-vendor=%04x,subsystem-device=%04x%s",
 -		  ath10k_bus_str(ar->hif.bus),
 -		  ar->id.vendor, ar->id.device,
 -		  ar->id.subsystem_vendor, ar->id.subsystem_device, variant);
- out:
+-out:
 -	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot using board name '%s'\n", name);
--
--	return 0;
-+	return ret;
++	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot cal file downloaded\n");
+ 
+ 	return 0;
  }
  
 -static int ath10k_core_fetch_board_file(struct ath10k *ar)
-+static int ath10k_download_cal_eeprom(struct ath10k *ar)
++static int ath10k_download_cal_dt(struct ath10k *ar, const char *dt_name)
  {
 -	char boardname[100], fallback_boardname[100];
-+	size_t data_len;
-+	void *data = NULL;
++	struct device_node *node;
++	int data_len;
++	void *data;
  	int ret;
  
 -	ret = ath10k_core_create_board_name(ar, boardname,
 -					    sizeof(boardname), true);
-+	ret = ath10k_hif_fetch_cal_eeprom(ar, &data, &data_len);
++	node = ar->dev->of_node;
++	if (!node)
++		/* Device Tree is optional, don't print any warnings if
++		 * there's no node for ath10k.
++		 */
++		return -ENOENT;
++
++	if (!of_get_property(node, dt_name, &data_len)) {
++		/* The calibration data node is optional */
++		return -ENOENT;
++	}
++
++	if (data_len != ar->hw_params.cal_data_len) {
++		ath10k_warn(ar, "invalid calibration data length in DT: %d\n",
++			    data_len);
++		ret = -EMSGSIZE;
++		goto out;
++	}
++
++	data = kmalloc(data_len, GFP_KERNEL);
++	if (!data) {
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	ret = of_property_read_u8_array(node, dt_name, data, data_len);
  	if (ret) {
 -		ath10k_err(ar, "failed to create board name: %d", ret);
 -		return ret;
-+		if (ret != -EOPNOTSUPP)
-+			ath10k_warn(ar, "failed to read calibration data from EEPROM: %d\n",
-+				    ret);
++		ath10k_warn(ar, "failed to read calibration data from DT: %d\n",
++			    ret);
 +		goto out_free;
  	}
  
@@ -1675,7 +1668,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  	if (ret) {
 -		ath10k_err(ar, "failed to create fallback board name: %d", ret);
 -		return ret;
-+		ath10k_warn(ar, "failed to download calibration data from EEPROM: %d\n",
++		ath10k_warn(ar, "failed to download calibration data from Device Tree: %d\n",
 +			    ret);
 +		goto out_free;
  	}
@@ -1690,22 +1683,50 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  
 -	ar->bd_api = 1;
 -	ret = ath10k_core_fetch_board_data_api_1(ar);
--	if (ret) {
++out_free:
++	kfree(data);
++
++out:
++	return ret;
++}
++
++static int ath10k_download_cal_eeprom(struct ath10k *ar)
++{
++	size_t data_len;
++	void *data = NULL;
++	int ret;
++
++	ret = ath10k_hif_fetch_cal_eeprom(ar, &data, &data_len);
+ 	if (ret) {
 -		ath10k_err(ar, "failed to fetch board-2.bin or board.bin from %s\n",
 -			   ar->hw_params.fw.dir);
 -		return ret;
--	}
-+out_free:
-+	kfree(data);
++		if (ret != -EOPNOTSUPP)
++			ath10k_warn(ar, "failed to read calibration data from EEPROM: %d\n",
++				    ret);
++		goto out_free;
+ 	}
  
 -success:
 -	ath10k_dbg(ar, ATH10K_DBG_BOOT, "using board api %d\n", ar->bd_api);
 -	return 0;
++	ret = ath10k_download_board_data(ar, data, data_len);
++	if (ret) {
++		ath10k_warn(ar, "failed to download calibration data from EEPROM: %d\n",
++			    ret);
++		goto out_free;
++	}
++
++	ret = 0;
++
++out_free:
++	kfree(data);
++
 +	return ret;
  }
  
  int ath10k_core_fetch_firmware_api_n(struct ath10k *ar, const char *name,
-@@ -2835,7 +2968,7 @@
+@@ -2835,7 +2992,7 @@
  			ath10k_dbg(ar, ATH10K_DBG_BOOT, "DT bdf variant name not set.\n");
  
  skip_get_board_id:
@@ -1716,9 +1737,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  			goto err_free_firmware_files;
 Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.h
 ===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/core.h	2018-08-03 17:53:00.565026305 +0530
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.h	2018-08-03 17:53:00.561026308 +0530
-@@ -1172,6 +1172,9 @@
+--- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/core.h	2018-08-24 11:53:56.403772150 +0530
++++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.h	2018-08-24 11:53:56.399772151 +0530
+@@ -947,6 +947,9 @@
  	const struct firmware *board;
  	const void *board_data;
  	size_t board_len;
@@ -1728,7 +1749,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  
  	struct ath10k_fw_file fw_file;
  };
-@@ -1260,7 +1263,9 @@
+@@ -1035,7 +1038,9 @@
  
  		bool bmi_ids_valid;
  		u8 bmi_board_id;
@@ -1740,8 +1761,8 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  	} id;
 Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/hw.h
 ===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/hw.h	2018-08-03 17:53:00.565026305 +0530
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/hw.h	2018-08-03 17:53:00.561026308 +0530
+--- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/hw.h	2018-08-24 11:53:56.403772150 +0530
++++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/hw.h	2018-08-24 11:53:56.399772151 +0530
 @@ -109,6 +109,7 @@
  #define QCA9984_HW_1_0_CHIP_ID_REV	0x0
  #define QCA9984_HW_1_0_FW_DIR		ATH10K_FW_DIR "/QCA9984/hw1.0"
@@ -1758,7 +1779,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/hw.h
  };
  
  enum ath10k_bd_ie_board_type {
-@@ -549,6 +551,8 @@
+@@ -548,6 +550,8 @@
  		const char *dir;
  		const char *board;
  		size_t board_size;
@@ -1769,8 +1790,8 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/hw.h
  
 Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/targaddrs.h
 ===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/targaddrs.h	2018-08-03 17:53:00.565026305 +0530
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/targaddrs.h	2018-08-03 17:53:00.561026308 +0530
+--- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/targaddrs.h	2018-08-24 11:53:56.403772150 +0530
++++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/targaddrs.h	2018-08-24 11:53:56.399772151 +0530
 @@ -484,6 +484,10 @@
  #define QCA99X0_BOARD_DATA_SZ	  12288
  #define QCA99X0_BOARD_EXT_DATA_SZ 0
