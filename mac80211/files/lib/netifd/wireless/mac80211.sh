@@ -576,6 +576,7 @@ mac80211_prepare_vif() {
 				mac80211_iw_interface_add "$phy" "$ifname" managed || return
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
 			}
+			ap_ifname=$ifname
 		;;
 		mesh)
 			mac80211_iw_interface_add "$phy" "$ifname" mp || return
@@ -592,6 +593,7 @@ mac80211_prepare_vif() {
 			mac80211_iw_interface_add "$phy" "$ifname" managed "$wdsflag" || return
 			[ "$powersave" -gt 0 ] && powersave="on" || powersave="off"
 			iw "$ifname" set power_save "$powersave"
+			sta_ifname=$ifname
 		;;
 	esac
 
@@ -615,7 +617,7 @@ mac80211_prepare_vif() {
 mac80211_setup_supplicant() {
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
 	wpa_supplicant_add_network "$ifname"
-	wpa_supplicant_run "$ifname" ${hostapd_ctrl:+-H $hostapd_ctrl}
+	wpa_supplicant_run "$ifname"
 }
 
 mac80211_setup_supplicant_noctl() {
@@ -986,6 +988,12 @@ drv_mac80211_setup() {
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
 	wireless_set_up
+
+	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
+		[ -f "/lib/apsta_mode.sh" ] && {
+			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
+		}
+	fi
 }
 
 list_phy_interfaces() {
