@@ -537,6 +537,8 @@ mac80211_prepare_vif() {
 
 	json_get_vars ifname mode ssid wds extsta powersave macaddr
 
+	[ -z "$ifname" ] && ifname=$(ls /sys/class/ieee80211/$phy/device/net/ | head -1)
+
 	[ -n "$ifname" ] || ifname="wlan${phy#phy}${if_idx:+-$if_idx}"
 	if_idx=$((${if_idx:-0} + 1))
 
