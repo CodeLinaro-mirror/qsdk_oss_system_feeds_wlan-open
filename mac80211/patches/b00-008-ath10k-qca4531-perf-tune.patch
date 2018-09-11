@@ -1,0 +1,96 @@
+diff --git a/.local-symbols b/.local-symbols
+index d872db9..96175ca 100644
+--- a/.local-symbols
++++ b/.local-symbols
+@@ -121,3 +121,4 @@ ATH10K_TRACING=
+ ATH10K_DFS_CERTIFIED=
+ ATH10K_PKTLOG=
+ ATH10K_SMART_ANT_ALG=
++ATH10K_QCA4531_PERF=
+diff --git a/drivers/net/wireless/ath/ath10k/Kconfig b/drivers/net/wireless/ath/ath10k/Kconfig
+index f4aa629..ed87df5 100644
+--- a/drivers/net/wireless/ath/ath10k/Kconfig
++++ b/drivers/net/wireless/ath/ath10k/Kconfig
+@@ -70,3 +70,10 @@ config ATH10K_SMART_ANT_ALG
+ 	depends on ATH10K
+ 	---help---
+ 	This option enables smart antenna algorithm.
++
++config ATH10K_QCA4531_PERF
++	bool "QCA4531 PERF tuning"
++       depends on ATH10K
++       default n
++       ---help---
++       This option enables QCA4531 PERF tuning.
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index f6851b5..d4b98c9 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -185,7 +185,12 @@ static void ath10k_htt_rx_msdu_buff_replenish(struct ath10k_htt *htt)
+ 	 * improves the average and stability. */
+ 	spin_lock_bh(&htt->rx_ring.lock);
+ 	num_deficit = htt->rx_ring.fill_level - htt->rx_ring.fill_cnt;
++#ifndef CPTCFG_ATH10K_QCA4531_PERF
+ 	num_to_fill = min(ATH10K_HTT_MAX_NUM_REFILL, num_deficit);
++#else
++#define ATH10K_AR4531_HTT_MAX_NUM_REFILL 16
++	num_to_fill = min(ATH10K_AR4531_HTT_MAX_NUM_REFILL, num_deficit);
++#endif
+ 	num_deficit -= num_to_fill;
+ 	ret = ath10k_htt_rx_ring_fill_n(htt, num_to_fill);
+ 	if (ret == -ENOMEM) {
+@@ -940,6 +945,7 @@ static void ath10k_process_rx(struct ath10k *ar, struct sk_buff *skb)
+ 
+ 	status = IEEE80211_SKB_RXCB(skb);
+ 
++#ifndef CPTCFG_ATH10K_QCA4531_PERF
+ 	ath10k_dbg(ar, ATH10K_DBG_DATA,
+ 		   "rx skb %pK len %u peer %pM %s %s sn %u %s%s%s%s%s %srate_idx %u vht_nss %u freq %u band %u flag 0x%llx fcs-err %i mic-err %i amsdu-more %i\n",
+ 		   skb,
+@@ -967,6 +973,7 @@ static void ath10k_process_rx(struct ath10k *ar, struct sk_buff *skb)
+ 			skb->data, skb->len);
+ 	trace_ath10k_rx_hdr(ar, skb->data, skb->len);
+ 	trace_ath10k_rx_payload(ar, skb->data, skb->len);
++#endif
+ 
+ 	ieee80211_rx_napi(ar->hw, NULL, skb, &ar->napi);
+ }
+diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
+index 9c4539a..565755a 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -8372,8 +8372,10 @@ int ath10k_mac_register(struct ath10k *ar)
+ 	 * more work anyway so disable the wake_tx_queue unless firmware
+ 	 * supports the pull-push mechanism.
+ 	 */
++#ifndef CPTCFG_ATH10K_QCA4531_PERF
+ 	if (!test_bit(ATH10K_FW_FEATURE_PEER_FLOW_CONTROL,
+ 		      ar->running_fw->fw_file.fw_features))
++#endif
+ 		ar->ops->wake_tx_queue = NULL;
+ 
+ 	ret = ath10k_mac_init_rd(ar);
+diff --git a/drivers/net/wireless/ath/ath10k/pci.c b/drivers/net/wireless/ath/ath10k/pci.c
+index c2ff679..e056a59 100644
+--- a/drivers/net/wireless/ath/ath10k/pci.c
++++ b/drivers/net/wireless/ath/ath10k/pci.c
+@@ -2823,15 +2823,19 @@ static int ath10k_pci_napi_poll(struct napi_struct *ctx, int budget)
+ 		 * interrupts safer to check for pending interrupts for
+ 		 * immediate servicing.
+ 		 */
++#ifndef CPTCFG_ATH10K_QCA4531_PERF
+ 		if (CE_INTERRUPT_SUMMARY(ar)) {
+ 			napi_reschedule(ctx);
+ 			goto out;
+ 		}
++#endif
+ 		ath10k_pci_enable_legacy_irq(ar);
+ 		ath10k_pci_irq_msi_fw_unmask(ar);
+ 	}
+ 
++#ifndef CPTCFG_ATH10K_QCA4531_PERF
+ out:
++#endif
+ 	return done;
+ }
+ 
