@@ -1,0 +1,99 @@
+diff --git a/drivers/net/wireless/ath/ath10k/debug.c b/drivers/net/wireless/ath/ath10k/debug.c
+index c6e68a1..d317e02 100644
+--- a/drivers/net/wireless/ath/ath10k/debug.c
++++ b/drivers/net/wireless/ath/ath10k/debug.c
+@@ -2604,6 +2604,44 @@ static const struct file_operations fops_ps_state_enable = {
+ 	.llseek = default_llseek,
+ };
+ 
++#ifdef CPTCFG_ATH10K_QCA4531_PERF
++static ssize_t ath10k_write_htt_max_num_refill(struct file *file,
++					    const char __user *user_buf,
++					    size_t count, loff_t *ppos)
++{
++	struct ath10k *ar = file->private_data;
++	u8 htt_max_num_refill;
++
++	if (kstrtou8_from_user(user_buf, count, 0, &htt_max_num_refill))
++		return -EINVAL;
++
++	ar->htt.max_num_refill = htt_max_num_refill;
++
++	return count;
++}
++
++static ssize_t ath10k_read_htt_max_num_refill(struct file *file, char __user *user_buf,
++					   size_t count, loff_t *ppos)
++{
++	struct ath10k *ar = file->private_data;
++	int len = 0;
++	char buf[32];
++
++	len = scnprintf(buf, sizeof(buf) - len, "%d\n",
++			ar->htt.max_num_refill);
++
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static const struct file_operations fops_htt_max_num_refill = {
++	.read = ath10k_read_htt_max_num_refill,
++	.write = ath10k_write_htt_max_num_refill,
++	.open = simple_open,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++#endif
++
+ int ath10k_debug_create(struct ath10k *ar)
+ {
+ 	ar->debug.fw_crash_data = vzalloc(sizeof(*ar->debug.fw_crash_data));
+@@ -2753,6 +2791,11 @@ int ath10k_debug_register(struct ath10k *ar)
+ 	debugfs_create_file("ps_state_enable", S_IRUSR | S_IWUSR,
+ 			    ar->debug.debugfs_phy, ar, &fops_ps_state_enable);
+ 
++#ifdef CPTCFG_ATH10K_QCA4531_PERF
++	debugfs_create_file("htt_max_num_refill", S_IRUSR | S_IWUSR,
++			    ar->debug.debugfs_phy, ar, &fops_htt_max_num_refill);
++#endif
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
+index 6074782..77b426a 100644
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -1755,6 +1755,9 @@ struct ath10k_htt {
+ 	} tx_q_state;
+ 
+ 	bool tx_mem_allocated;
++#ifdef CPTCFG_ATH10K_QCA4531_PERF
++	u8 max_num_refill;
++#endif
+ };
+ 
+ #define RX_HTT_HDR_STATUS_LEN 64
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index cf978e6..67dc4fa 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -188,8 +188,7 @@ static void ath10k_htt_rx_msdu_buff_replenish(struct ath10k_htt *htt)
+ #ifndef CPTCFG_ATH10K_QCA4531_PERF
+ 	num_to_fill = min(ATH10K_HTT_MAX_NUM_REFILL, num_deficit);
+ #else
+-#define ATH10K_AR4531_HTT_MAX_NUM_REFILL 16
+-	num_to_fill = min(ATH10K_AR4531_HTT_MAX_NUM_REFILL, num_deficit);
++	num_to_fill = min(htt->max_num_refill, num_deficit);
+ #endif
+ 	num_deficit -= num_to_fill;
+ 	ret = ath10k_htt_rx_ring_fill_n(htt, num_to_fill);
+@@ -520,6 +519,9 @@ int ath10k_htt_rx_alloc(struct ath10k_htt *htt)
+ 
+ 	spin_lock_init(&htt->rx_ring.lock);
+ 
++#ifdef CPTCFG_ATH10K_QCA4531_PERF
++	htt->max_num_refill = ATH10K_HTT_MAX_NUM_REFILL;
++#endif
+ 	htt->rx_ring.fill_cnt = 0;
+ 	htt->rx_ring.sw_rd_idx.msdu_payld = 0;
+ 	hash_init(htt->rx_ring.skb_table);
