@@ -1,0 +1,195 @@
+--- a/drivers/net/wireless/ath/wil6210/cfg80211.c
++++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
+@@ -65,6 +65,19 @@ static struct ieee80211_channel wil_60ghz_channels[] = {
+ /* channel 4 not supported yet */
+ };
+ 
++static void
++wil_memdup_ie(u8 **pdst, size_t *pdst_len, const u8 *src, size_t src_len)
++{
++	kfree(*pdst);
++	*pdst = NULL;
++	*pdst_len = 0;
++	if (src_len > 0) {
++		*pdst = kmemdup(src, src_len, GFP_KERNEL);
++		if (*pdst)
++			*pdst_len = src_len;
++	}
++}
++
+ /* Vendor id to be used in vendor specific command and events
+  * to user space.
+  * NOTE: The authoritative place for definition of QCA_NL80211_VENDOR_ID,
+@@ -1242,8 +1255,16 @@ static int wil_cfg80211_add_key(struct wiphy *wiphy,
+ 
+ 	rc = wmi_add_cipher_key(wil, key_index, mac_addr, params->key_len,
+ 				params->key, key_usage);
+-	if (!rc)
++	if (!rc) {
++		/* update local storage used for AP recovery */
++		if (key_usage == WMI_KEY_USE_TX_GROUP && params->key &&
++		    params->key_len <= WMI_MAX_KEY_LEN) {
++			wil->gtk_index = key_index;
++			memcpy(wil->gtk, params->key, params->key_len);
++			wil->gtk_len = params->key_len;
++		}
+ 		wil_set_crypto_rx(key_index, key_usage, cs, params);
++	}
+ 
+ 	return rc;
+ }
+@@ -1417,6 +1438,14 @@ static int _wil_cfg80211_set_ies(struct wiphy *wiphy,
+ 		proberesp = f->u.probe_resp.variable;
+ 		proberesp_len = bcon->probe_resp_len - hlen;
+ 	}
++	/* update local storage used for AP recovery */
++	wil_memdup_ie(&wil->proberesp, &wil->proberesp_len, bcon->probe_resp,
++		      bcon->probe_resp_len);
++	wil_memdup_ie(&wil->proberesp_ies, &wil->proberesp_ies_len,
++		      bcon->proberesp_ies, bcon->proberesp_ies_len);
++	wil_memdup_ie(&wil->assocresp_ies, &wil->assocresp_ies_len,
++		      bcon->assocresp_ies, bcon->assocresp_ies_len);
++
+ 	rc = _wil_cfg80211_merge_extra_ies(proberesp,
+ 					   proberesp_len,
+ 					   bcon->proberesp_ies,
+@@ -1489,6 +1518,9 @@ static int _wil_cfg80211_start_ap(struct wiphy *wiphy,
+ 	wil->channel = chan;
+ 	wil->hidden_ssid = hidden_ssid;
+ 	wil->pbss = pbss;
++	wil->bi = bi;
++	memcpy(wil->ssid, ssid, ssid_len);
++	wil->ssid_len = ssid_len;
+ 
+ 	netif_carrier_on(ndev);
+ 	wil6210_bus_request(wil, WIL_MAX_BUS_REQUEST_KBPS);
+@@ -1513,6 +1545,52 @@ out:
+ 	return rc;
+ }
+ 
++void wil_cfg80211_ap_recovery(struct wil6210_priv *wil)
++{
++	int rc;
++	struct wiphy *wiphy = wil_to_wiphy(wil);
++	struct net_device *ndev = wil_to_ndev(wil);
++	struct cfg80211_beacon_data bcon = {};
++	struct key_params key_params = {};
++
++	if (wil->ssid_len == 0)
++		return;
++
++	bcon.proberesp_ies = wil->proberesp_ies;
++	bcon.assocresp_ies = wil->assocresp_ies;
++	bcon.probe_resp = wil->proberesp;
++	bcon.proberesp_ies_len = wil->proberesp_ies_len;
++	bcon.assocresp_ies_len = wil->assocresp_ies_len;
++	bcon.probe_resp_len = wil->proberesp_len;
++
++	wil_info(wil,
++		 "AP recovery: privacy %d, bi %d, channel %d, hidden %d, pbss %d\n",
++		 wil->privacy, wil->bi, wil->channel,
++		 wil->hidden_ssid, wil->pbss);
++	wil_hex_dump_misc("SSID ", DUMP_PREFIX_OFFSET, 16, 1,
++			  wil->ssid, wil->ssid_len, true);
++	rc = _wil_cfg80211_start_ap(wiphy, ndev,
++				    wil->ssid, wil->ssid_len,
++				    wil->privacy, wil->bi,
++				    wil->channel, &bcon,
++				    wil->hidden_ssid, wil->pbss);
++	if (rc) {
++		wil_err(wil, "AP recovery failed (%d)\n", rc);
++		return;
++	}
++
++	if (!wil->privacy || wil->gtk_len == 0)
++		return;
++
++	key_params.key = wil->gtk;
++	key_params.key_len = wil->gtk_len;
++	key_params.seq_len = IEEE80211_GCMP_PN_LEN;
++	rc = wil_cfg80211_add_key(wiphy, ndev, wil->gtk_index, false,
++				  NULL, &key_params);
++	if (rc)
++		wil_err(wil, "AP recovery add key failed (%d)\n", rc);
++}
++
+ static int wil_cfg80211_change_beacon(struct wiphy *wiphy,
+ 				      struct net_device *ndev,
+ 				      struct cfg80211_beacon_data *bcon)
+@@ -1622,6 +1700,12 @@ static int wil_cfg80211_stop_ap(struct wiphy *wiphy,
+ 	mutex_lock(&wil->mutex);
+ 
+ 	wmi_pcp_stop(wil);
++	wil->ssid_len = 0;
++	wil_memdup_ie(&wil->proberesp, &wil->proberesp_len, NULL, 0);
++	wil_memdup_ie(&wil->proberesp_ies, &wil->proberesp_ies_len, NULL, 0);
++	wil_memdup_ie(&wil->assocresp_ies, &wil->assocresp_ies_len, NULL, 0);
++	memset(wil->gtk, 0, WMI_MAX_KEY_LEN);
++	wil->gtk_len = 0;
+ 
+ 	__wil_down(wil);
+ 
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -397,7 +397,6 @@ static void wil_fw_error_worker(struct work_struct *work)
+ 						fw_error_worker);
+ 	struct wireless_dev *wdev = wil->wdev;
+ 	struct net_device *ndev = wil_to_ndev(wil);
+-	int rc;
+ 
+ 	wil_dbg_misc(wil, "fw error worker\n");
+ 
+@@ -444,15 +443,11 @@ static void wil_fw_error_worker(struct work_struct *work)
+ 	case NL80211_IFTYPE_P2P_GO:
+ 		if (no_fw_recovery) /* upper layers do recovery */
+ 			break;
+-		/* upper layers will see down/up events */
+-		wil_info(wil, "Recovery for AP-like interface - ifdown...\n");
+-		mutex_unlock(&wil->mutex); /* protected by rtnl_lock */
+-		dev_close(ndev); /* never returns error */
+-		msleep(1000);
+-		wil_info(wil, "... ifup...\n");
+-		rc = dev_open(ndev);
+-		if (rc)
+-			wil_err(wil, "dev_open: %d\n", rc);
++		/* silent recovery, upper layers will see disconnect */
++		__wil_down(wil);
++		__wil_up(wil);
++		mutex_unlock(&wil->mutex);
++		wil_cfg80211_ap_recovery(wil);
+ 		mutex_lock(&wil->mutex);
+ 		wil_info(wil, "... completed\n");
+ 		break;
+@@ -461,6 +456,7 @@ static void wil_fw_error_worker(struct work_struct *work)
+ 			wdev->iftype);
+ 		break;
+ 	}
++
+ 	mutex_unlock(&wil->mutex);
+ 	rtnl_unlock();
+ }
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -702,6 +702,14 @@ struct wil6210_priv {
+ 	struct pmc_ctx pmc;
+ 
+ 	bool pbss;
++	int bi;
++	u8 *proberesp, *proberesp_ies, *assocresp_ies;
++	size_t proberesp_len, proberesp_ies_len, assocresp_ies_len;
++	u8 ssid[IEEE80211_MAX_SSID_LEN];
++	size_t ssid_len;
++	u8 gtk_index;
++	u8 gtk[WMI_MAX_KEY_LEN];
++	size_t gtk_len;
+ 
+ 	struct wil_p2p_info p2p;
+ 
+@@ -935,6 +943,7 @@ int wmi_stop_discovery(struct wil6210_priv *wil);
+ int wil_cfg80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 			 struct cfg80211_mgmt_tx_params *params,
+ 			 u64 *cookie);
++void wil_cfg80211_ap_recovery(struct wil6210_priv *wil);
+ 
+ int wil6210_debugfs_init(struct wil6210_priv *wil);
+ void wil6210_debugfs_remove(struct wil6210_priv *wil);
