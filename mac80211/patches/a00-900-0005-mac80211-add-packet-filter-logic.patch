@@ -1,7 +1,5 @@
-Index: backports-20180329-3.14.77-7954640a/include/linux/ieee80211.h
-===================================================================
---- backports-20180329-3.14.77-7954640a.orig/include/linux/ieee80211.h
-+++ backports-20180329-3.14.77-7954640a/include/linux/ieee80211.h
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
 @@ -669,6 +669,8 @@ struct ieee80211s_hdr {
  #define MESH_FLAGS_AE		0x3
  #define MESH_FLAGS_PS_DEEP	0x4
@@ -11,11 +9,9 @@ Index: backports-20180329-3.14.77-7954640a/include/linux/ieee80211.h
  /**
   * enum ieee80211_preq_flags - mesh PREQ element flags
   *
-Index: backports-20180329-3.14.77-7954640a/net/mac80211/rx.c
-===================================================================
---- backports-20180329-3.14.77-7954640a.orig/net/mac80211/rx.c
-+++ backports-20180329-3.14.77-7954640a/net/mac80211/rx.c
-@@ -1714,6 +1714,27 @@ ieee80211_rx_h_sta_process(struct ieee80
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -1714,6 +1714,40 @@ ieee80211_rx_h_sta_process(struct ieee80
  	return RX_CONTINUE;
  } /* ieee80211_rx_h_sta_process */
  
@@ -25,6 +21,19 @@ Index: backports-20180329-3.14.77-7954640a/net/mac80211/rx.c
 +	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 +	struct ieee80211s_hdr *mesh_hdr __maybe_unused;
 +	u32 snap_offset = 0;
++	u16 sc;
++	unsigned int frag;
++
++	sc = le16_to_cpu(hdr->seq_ctrl);
++	frag = sc & IEEE80211_SCTL_FRAG;
++
++	/* Fragments do not have snap headers, so bypassing the
++	 * snap header sanity check filter.
++	 */
++	if (frag) {
++		return false;
++		//TODO Handle corrupted fragments
++	}
 +
 +	snap_offset = ieee80211_hdrlen(hdr->frame_control) +
 +			ieee80211_crypto_hdrlen(rx->key->conf.cipher);
@@ -43,19 +52,20 @@ Index: backports-20180329-3.14.77-7954640a/net/mac80211/rx.c
  static ieee80211_rx_result debug_noinline
  ieee80211_rx_h_decrypt(struct ieee80211_rx_data *rx)
  {
-@@ -1898,6 +1919,11 @@ ieee80211_rx_h_decrypt(struct ieee80211_
+@@ -1898,6 +1932,12 @@ ieee80211_rx_h_decrypt(struct ieee80211_
  		return RX_DROP_MONITOR;
  	}
  
 +	if (unlikely(ieee80211_is_data(hdr->frame_control) &&
 +		     status->flag & RX_FLAG_DECRYPTED &&
++		     !(status->flag & RX_FLAG_MMIC_ERROR) &&
 +		     ieee80211_rx_filter_packet(rx)))
 +		return RX_DROP_UNUSABLE;
 +
  	switch (rx->key->conf.cipher) {
  	case WLAN_CIPHER_SUITE_WEP40:
  	case WLAN_CIPHER_SUITE_WEP104:
-@@ -2545,6 +2571,9 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
+@@ -2568,6 +2608,9 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
  	if (!mesh_hdr->ttl)
  		return RX_DROP_MONITOR;
  
@@ -65,10 +75,8 @@ Index: backports-20180329-3.14.77-7954640a/net/mac80211/rx.c
  	if (mesh_hdr->flags & MESH_FLAGS_AE) {
  		struct mesh_path *mppath;
  		char *proxied_addr;
-Index: backports-20180329-3.14.77-7954640a/net/mac80211/wpa.c
-===================================================================
---- backports-20180329-3.14.77-7954640a.orig/net/mac80211/wpa.c
-+++ backports-20180329-3.14.77-7954640a/net/mac80211/wpa.c
+--- a/net/mac80211/wpa.c
++++ b/net/mac80211/wpa.c
 @@ -1257,3 +1257,30 @@ ieee80211_crypto_hw_decrypt(struct ieee8
  
  	return RX_DROP_UNUSABLE;
@@ -100,10 +108,8 @@ Index: backports-20180329-3.14.77-7954640a/net/mac80211/wpa.c
 +
 +	return 0;
 +}
-Index: backports-20180329-3.14.77-7954640a/net/mac80211/wpa.h
-===================================================================
---- backports-20180329-3.14.77-7954640a.orig/net/mac80211/wpa.h
-+++ backports-20180329-3.14.77-7954640a/net/mac80211/wpa.h
+--- a/net/mac80211/wpa.h
++++ b/net/mac80211/wpa.h
 @@ -51,5 +51,6 @@ ieee80211_tx_result
  ieee80211_crypto_gcmp_encrypt(struct ieee80211_tx_data *tx);
  ieee80211_rx_result
