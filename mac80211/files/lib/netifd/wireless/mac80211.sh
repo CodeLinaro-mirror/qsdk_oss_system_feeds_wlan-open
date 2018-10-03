@@ -381,6 +381,11 @@ mac80211_hostapd_setup_bss() {
 	hostapd_cfg=
 	append hostapd_cfg "$type=$ifname" "$N"
 
+        # 11ad uses cqm notification for packet loss. hostapd requires
+        # setting disassoc_low_ack=1 in hostapd config file to disconnect
+        # on packet loss indication
+        [ $hwmode == "ad" ] && append hostapd_cfg "disassoc_low_ack=1" "$N"
+
 	local net_cfg bridge
 	net_cfg="$(find_net_config "$vif")"
 	[ -z "$net_cfg" -o "$isolate" = 1 -a "$mode" = "wrap" ] || {
