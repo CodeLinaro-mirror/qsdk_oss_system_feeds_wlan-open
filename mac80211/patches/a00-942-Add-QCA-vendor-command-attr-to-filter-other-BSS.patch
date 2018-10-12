@@ -1,0 +1,1338 @@
+--- a/drivers/net/wireless/ath/ath10k/Makefile
++++ b/drivers/net/wireless/ath/ath10k/Makefile
+@@ -14,7 +14,8 @@ ath10k_core-y += mac.o \
+ 		 hw.o \
+ 		 p2p.o \
+ 		 swap.o \
+-		 fwlog.o
++		 fwlog.o \
++		 vendor.o
+ 
+ ath10k_core-$(CPTCFG_ATH10K_SPECTRAL) += spectral.o
+ ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += debug_smart_ant.o debug_htt_stats.o
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -41,6 +41,7 @@
+ #include "pktlog.h"
+ #include "smart_ant.h"
+ #include "debug_htt_stats.h"
++#include "vendor.h"
+ 
+ #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
+ #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
+@@ -1237,6 +1238,8 @@ struct ath10k {
+ 	u32	cfr_enable;
+ 	struct rchan *rfs_cfr_capture;
+ 
++	struct ath10k_vendor vendor;
++
+ 	/* must be last */
+ 	u8 drv_priv[0] __aligned(sizeof(void *));
+ };
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -25,6 +25,7 @@
+ #include "mac.h"
+ #include "smart_ant.h"
+ #include "debug_htt_stats.h"
++#include "vendor.h"
+ 
+ #include "spectral.h"
+ #include <linux/log2.h>
+@@ -1792,6 +1793,10 @@ static bool ath10k_htt_rx_amsdu_allowed(
+ 		return false;
+ 	}
+ 
++	/* Do the Neighbor BSSID filter if configured */
++	if (ath10k_vendor_rx_h_bssid_filter(&ar->vendor, amsdu, rx_status))
++		return false;
++
+ 	return true;
+ }
+ 
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -5471,6 +5471,8 @@ static void ath10k_remove_interface(stru
+ 
+ 	mutex_lock(&ar->conf_mutex);
+ 
++	ath10k_vendor_bss_filter_cleanup(arvif);
++
+ 	spin_lock_bh(&ar->data_lock);
+ 	ath10k_mac_vif_beacon_cleanup(arvif);
+ 	spin_unlock_bh(&ar->data_lock);
+@@ -9070,10 +9072,16 @@ int ath10k_mac_register(struct ath10k *a
+ 
+ 	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
+ 
++	ret = ath10k_vendor_register(ar);
++	if (ret) {
++		ath10k_err(ar, "failed to register vendor: %d\n", ret);
++		goto err_dfs_detector_exit;
++	}
++
+ 	ret = ieee80211_register_hw(ar->hw);
+ 	if (ret) {
+ 		ath10k_err(ar, "failed to register ieee80211: %d\n", ret);
+-		goto err_dfs_detector_exit;
++		goto err_vendor_unregister;
+ 	}
+ 
+ 	if (!ath_is_world_regd(&ar->ath_common.regulatory)) {
+@@ -9088,6 +9096,9 @@ int ath10k_mac_register(struct ath10k *a
+ err_unregister:
+ 	ieee80211_unregister_hw(ar->hw);
+ 
++err_vendor_unregister:
++	ath10k_vendor_unregister(ar);
++
+ err_dfs_detector_exit:
+ 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED) && ar->dfs_detector)
+ 		ar->dfs_detector->exit(ar->dfs_detector);
+@@ -9104,6 +9115,8 @@ void ath10k_mac_unregister(struct ath10k
+ {
+ 	ieee80211_unregister_hw(ar->hw);
+ 
++	ath10k_vendor_unregister(ar);
++
+ 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED) && ar->dfs_detector)
+ 		ar->dfs_detector->exit(ar->dfs_detector);
+ 
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath10k/vendor.c
+@@ -0,0 +1,770 @@
++/*
++ * Copyright (c) 2018 The Linux Foundation. All rights reserved.
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#include <net/netlink.h>
++#include <net/mac80211.h>
++
++#include "core.h"
++#include "wmi-ops.h"
++#include "debug.h"
++
++static int ath10k_vendor_bss_filter_vendor_handler(struct wiphy *wiphy,
++						   struct wireless_dev *wdev,
++						   const void *data,
++						   int data_len);
++
++static const struct nla_policy
++ath10k_vendor_bss_filter_policy[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAX + 1] = {
++	[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR] = { .len = ETH_ALEN },
++	[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE] = { .type = NLA_U8 },
++	[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION] = { .type = NLA_U8 },
++	[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS] = { .type = NLA_NESTED },
++};
++
++static struct wiphy_vendor_command ath10k_vendor_commands[] = {
++	{
++		.info.vendor_id = QCA_NL80211_VENDOR_ID,
++		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER,
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_RUNNING,
++		.doit = ath10k_vendor_bss_filter_vendor_handler,
++	}
++};
++
++static u32
++ath10k_vendor_unassoc_sta_table_hash(const void *addr, u32 len, u32 seed)
++{
++	/* Use last four bytes of hw addr as hash index */
++	return jhash_1word(*(u32 *)(addr + 2), seed);
++}
++
++static const struct rhashtable_params ath10k_vendor_unassoc_sta_rht = {
++	.nelem_hint = 2,
++	.automatic_shrinking = true,
++	.key_len = ETH_ALEN,
++	.key_offset = offsetof(struct ath10k_vendor_unassoc_sta, stats.addr),
++	.head_offset = offsetof(struct ath10k_vendor_unassoc_sta, rhash),
++	.hashfn = ath10k_vendor_unassoc_sta_table_hash,
++};
++
++struct ath10k_vendor_unassoc_sta *
++ath10k_vendor_unassoc_sta_lookup(struct ath10k_vendor_unassoc_sta_tbl *tbl,
++				 u8 *addr)
++{
++	return rhashtable_lookup_fast(&tbl->rhead,
++				      addr, ath10k_vendor_unassoc_sta_rht);
++}
++
++static u8 ath10k_vendor_bssid_filter_get_free_idx(struct ath10k *ar, u8 *addr)
++{
++	struct ath10k_vendor_bssid_info *bssid;
++	u8 idx = ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX, loop = 0;
++
++	while (loop < ar->vendor.bss_filter.max) {
++		bssid = &ar->vendor.bss_filter.bssid[loop];
++
++		/* check given MAC already configured */
++		if (addr && !is_zero_ether_addr(addr)) {
++			if (memcmp(bssid->addr, addr, ETH_ALEN) == 0) {
++				idx = loop;
++				break;
++			}
++		}
++
++		/* Get the least free index */
++		if (idx == ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX &&
++		    is_zero_ether_addr(bssid->addr)) {
++			idx = loop;
++		}
++
++		loop++;
++	}
++	return idx;
++}
++
++static int ath10k_vendor_bssid_filter_add(struct ath10k *ar, u8 *addr,
++					  u32 vdev_id)
++{
++	struct ath10k_vendor_bssid_info *bssid;
++	int ret;
++	u8 idx;
++
++	/* If monitor started then no point to enable other bss filter */
++	if (ar->monitor_started) {
++		ath10k_warn(ar, "not able to enable other bss filter if monitor alive\n");
++		return -EBUSY;
++	}
++
++	idx = ath10k_vendor_bssid_filter_get_free_idx(ar, addr);
++	if (idx == ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX) {
++		ath10k_warn(ar, "No Free idx to add BSS filter\n");
++		return -EBUSY;
++	}
++
++	bssid = &ar->vendor.bss_filter.bssid[idx];
++
++	/* If valid MAC already configured in the given index, check both are
++	 * same one or not. If its same, just add the reference count
++	 * otherwise throw error.
++	 */
++	if (!is_zero_ether_addr(bssid->addr)) {
++		if (memcmp(bssid->addr, addr, ETH_ALEN) != 0) {
++			ath10k_warn(ar, "Already used idx %d\n", idx);
++			return -EINVAL;
++		}
++		goto add_ref;
++	}
++
++	/* Send wmi message to receive the given BSSID frames, zeroth
++	 * index is reserved so we cannot use that index.
++	 */
++	ret = ath10k_wmi_set_neighbor_rx_param(ar, vdev_id,
++					       addr, idx + 1,
++					       WMI_NEIGHBOR_RX_ACTION_ADD,
++					       WMI_NEIGHBOR_RX_TYPE_BSSID);
++	if (ret) {
++		ath10k_warn(ar, "BSS Add Filter failed on idx %d addr %pM\n",
++			    idx, addr);
++		return ret;
++	}
++
++	ether_addr_copy(bssid->addr, addr);
++
++	spin_lock_bh(&ar->data_lock);
++	ar->vendor.bss_filter.n_bssid++;
++	spin_unlock_bh(&ar->data_lock);
++
++add_ref:
++	/*If the VAP already configured, then no need to add reference count */
++	if (!(bssid->vdev_map & (1LL << vdev_id))) {
++		bssid->ref++;
++		bssid->vdev_map |= 1LL << vdev_id;
++	}
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Filter added vdev %d idx %d addr %pM\n",
++		   vdev_id, idx, addr);
++	return 0;
++}
++
++static int ath10k_vendor_bssid_filter_delete(struct ath10k *ar, u8 *addr,
++					     u8 idx, u32 vdev_id)
++{
++	struct ath10k_vendor_bssid_info *bssid;
++	int ret;
++
++	if (idx >= ar->vendor.bss_filter.max) {
++		ath10k_warn(ar, "Invalid idx %d\n", idx);
++		return -EINVAL;
++	}
++
++	bssid = ar->vendor.bss_filter.bssid;
++	/* Check this bssid filter configured by the given VAP */
++	if (!(bssid[idx].vdev_map & (1LL << vdev_id))) {
++		ath10k_warn(ar, "BSS Filter addr %pM not configured by vdev %d\n",
++			    addr, vdev_id);
++		return -EINVAL;
++	}
++
++	bssid[idx].ref--;
++	bssid[idx].vdev_map &= ~(1LL << vdev_id);
++
++	/* If no reference count, then Send wmi message to not receive
++	 * the given BSSID frames, zeroth index is reserved so we cannot
++	 * use that index.
++	 */
++	if (!bssid[idx].ref) {
++		ret = ath10k_wmi_set_neighbor_rx_param(ar,
++						       vdev_id,
++						       addr, idx + 1,
++						       WMI_NEIGHBOR_RX_ACTION_DEL,
++						       WMI_NEIGHBOR_RX_TYPE_BSSID);
++		if (ret) {
++			ath10k_warn(ar, "wmi filter delete failed ret %d\n", ret);
++			bssid[idx].ref++;
++			bssid[idx].vdev_map &= ~(1LL << vdev_id);
++			return ret;
++		}
++
++		ath10k_dbg(ar, ATH10K_DBG_MAC, "Filter deleted vdev %d addr %pM\n",
++			   vdev_id, addr);
++
++		memset(bssid[idx].addr, 0, ETH_ALEN);
++
++		spin_lock_bh(&ar->data_lock);
++		ar->vendor.bss_filter.n_bssid--;
++		spin_unlock_bh(&ar->data_lock);
++	}
++
++	return 0;
++}
++
++static int
++ath10k_vendor_bssid_filter_action(struct ath10k *ar,
++				  u8 *addr,
++				  enum qca_wlan_vendor_bss_filter_type type,
++				  enum qca_wlan_vendor_bss_filter_action action,
++				  u32 vdev_id)
++{
++	struct ath10k_vendor_bssid_info *bssid;
++	int ret;
++	u8 loop, idx = ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX;
++
++	if (!is_valid_ether_addr(addr))
++		return -EINVAL;
++
++	if (action == QCA_WLAN_VENDOR_BSS_FILTER_ACTION_ADD) {
++		ret = ath10k_vendor_bssid_filter_add(ar, addr, vdev_id);
++	} else if (action == QCA_WLAN_VENDOR_BSS_FILTER_ACTION_DEL) {
++		if (!ar->vendor.bss_filter.n_bssid) {
++			ath10k_warn(ar, "No BSS Filter to delete\n");
++			return -EINVAL;
++		}
++
++		bssid = ar->vendor.bss_filter.bssid;
++		loop = 0;
++		while (loop < ar->vendor.bss_filter.max) {
++			if (memcmp(bssid[loop].addr,
++				   addr, ETH_ALEN) == 0) {
++				idx = loop;
++				break;
++			}
++
++			loop++;
++		}
++
++		if (idx == ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX) {
++			ath10k_warn(ar, "Invalid BSS addr %pM\n", addr);
++			return -EINVAL;
++		}
++
++		ret = ath10k_vendor_bssid_filter_delete(ar, addr, idx, vdev_id);
++	} else {
++		ath10k_warn(ar, "Invalid action %d\n", action);
++		return -EINVAL;
++	}
++
++	return ret;
++}
++
++static int ath10k_vendor_unassoc_sta_filter_add(struct ath10k *ar, u8 *addr)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = &ar->vendor.bss_filter.tbl;
++	struct ath10k_vendor_unassoc_sta *sta, *tmp = NULL;
++	int ret;
++
++	if (!ar->vendor.bss_filter.max) {
++		ath10k_warn(ar, "Not supported by platform\n");
++		return -EOPNOTSUPP;
++	}
++
++	sta = kzalloc(sizeof(*sta), GFP_KERNEL);
++	if (!sta)
++		return -ENOMEM;
++
++	if (!tbl->entries)
++		rhashtable_init(&ar->vendor.bss_filter.tbl.rhead,
++				&ath10k_vendor_unassoc_sta_rht);
++
++	ether_addr_copy(sta->stats.addr, addr);
++
++	rcu_read_lock();
++	do {
++		ret = rhashtable_lookup_insert_fast(&tbl->rhead,
++						    &sta->rhash,
++						    ath10k_vendor_unassoc_sta_rht);
++		if (ret == -EEXIST)
++			tmp = rhashtable_lookup_fast(&tbl->rhead,
++						     sta->stats.addr,
++						     ath10k_vendor_unassoc_sta_rht);
++	} while (unlikely(ret == -EEXIST && !tmp));
++
++	if (ret)
++		goto error;
++
++	tbl->entries++;
++	rcu_read_unlock();
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Unassoc sta %pM added\n", addr);
++	return 0;
++
++error:
++	rcu_read_unlock();
++	kfree(sta);
++	return ret;
++}
++
++static void
++ath10k_vendor_unassoc_sta_delete(struct ath10k_vendor_unassoc_sta_tbl *tbl,
++				 struct ath10k_vendor_unassoc_sta *sta)
++{
++	if (!tbl || !sta)
++		return;
++
++	tbl->entries--;
++	kfree_rcu(sta, rcu);
++}
++
++static void ath10k_vendor_unassoc_sta_rht_free(void *ptr, void *tblptr)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = tblptr;
++	struct ath10k_vendor_unassoc_sta *sta = ptr;
++
++	ath10k_vendor_unassoc_sta_delete(tbl, sta);
++}
++
++static int ath10k_vendor_unassoc_sta_filter_delete(struct ath10k *ar, u8 *addr)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = &ar->vendor.bss_filter.tbl;
++	struct ath10k_vendor_unassoc_sta *sta;
++
++	if (!tbl->entries) {
++		ath10k_warn(ar, "No sta to delete\n");
++		return -EINVAL;
++	}
++
++	rcu_read_lock();
++	sta = rhashtable_lookup_fast(&tbl->rhead,
++				     addr,
++				     ath10k_vendor_unassoc_sta_rht);
++	if (!sta) {
++		rcu_read_unlock();
++		ath10k_warn(ar, "Failed: Given addr %pM not in the list\n", addr);
++		return -ENXIO;
++	}
++
++	rhashtable_remove_fast(&tbl->rhead, &sta->rhash,
++			       ath10k_vendor_unassoc_sta_rht);
++	tbl->entries--;
++	kfree_rcu(sta, rcu);
++	rcu_read_unlock();
++
++	if (!tbl->entries)
++		rhashtable_destroy(&tbl->rhead);
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Unassoc sta %pM deleted\n", addr);
++
++	return 0;
++}
++
++static int
++ath10k_vendor_get_unassoc_sta_stats(struct ath10k *ar, u8 *addr,
++				    struct ath10k_vendor_bss_filter_get_reply *reply)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = &ar->vendor.bss_filter.tbl;
++	struct ath10k_vendor_unassoc_sta *sta;
++	struct ath10k_vendor_unassoc_sta_stats *sta_s;
++
++	if (!tbl->entries) {
++		ath10k_warn(ar, "No sta exist to get statistics\n");
++		return -EINVAL;
++	}
++
++	rcu_read_lock();
++
++	sta = rhashtable_lookup_fast(&tbl->rhead,
++				     addr,
++				     ath10k_vendor_unassoc_sta_rht);
++	if (!sta) {
++		ath10k_warn(ar, "sta %pM not exist\n", addr);
++		rcu_read_unlock();
++		return -ENXIO;
++	}
++
++	reply->n_sta = 1;
++	sta_s = (struct ath10k_vendor_unassoc_sta_stats *)reply->data;
++	memcpy(sta_s, &sta->stats, sizeof(sta->stats));
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Get unassoc stats sta %pM rssi %d ts 0x%llx\n",
++		   sta_s->addr, sta_s->rssi, sta_s->rssi_ts);
++
++	rcu_read_unlock();
++
++	return 0;
++}
++
++static int
++ath10k_vendor_dump_unassoc_sta_stats(struct ath10k *ar,
++				     struct ath10k_vendor_bss_filter_get_reply *reply)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = &ar->vendor.bss_filter.tbl;
++	struct ath10k_vendor_unassoc_sta *sta;
++	struct rhashtable_iter iter;
++	struct ath10k_vendor_unassoc_sta_stats *sta_s;
++	int ret, idx;
++
++	if (!tbl->entries) {
++		ath10k_warn(ar, "No sta exist to get statistics\n");
++		return -EINVAL;
++	}
++
++	ret = rhashtable_walk_init(&tbl->rhead, &iter, GFP_ATOMIC);
++	if (ret) {
++		ath10k_warn(ar, "rhashtbl walk init Failed ret %d\n", ret);
++		return ret;
++	}
++
++	rhashtable_walk_start(&iter);
++
++	idx = 0;
++	sta_s = (struct ath10k_vendor_unassoc_sta_stats *)reply->data;
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Get All Statistics\n");
++
++	while ((sta = rhashtable_walk_next(&iter))) {
++		if (IS_ERR(sta) && PTR_ERR(sta) == -EAGAIN)
++			continue;
++
++		if (IS_ERR(sta)) {
++			ret = -EINVAL;
++			break;
++		}
++
++		if (idx >= reply->n_sta)
++			break;
++
++		memcpy(sta_s, &sta->stats, sizeof(sta->stats));
++		ath10k_dbg(ar, ATH10K_DBG_MAC, "[%d] sta %pM rssi %d ts 0x%llx\n",
++			   idx, sta_s->addr, sta_s->rssi, (u64)(sta_s->rssi_ts));
++		sta_s++;
++		idx++;
++	}
++	reply->n_sta = idx;
++
++	rhashtable_walk_stop(&iter);
++	rhashtable_walk_exit(&iter);
++	return ret;
++}
++
++static int
++ath10k_vendor_unassoc_sta_filter_action(struct ath10k *ar,
++					u8 *addr,
++					enum qca_wlan_vendor_bss_filter_type type,
++					enum qca_wlan_vendor_bss_filter_action action)
++{
++	struct ath10k_vendor_bss_filter_get_reply *reply_msg;
++	struct ath10k_vendor_unassoc_sta_stats *sta;
++	struct sk_buff *reply_skb;
++	struct nlattr *nl_stats, *nl_sta;
++	int msglen, n_sta, ret, i;
++	bool all;
++
++	switch (action) {
++	case QCA_WLAN_VENDOR_BSS_FILTER_ACTION_ADD:
++		if (!is_valid_ether_addr(addr)) {
++			ret = -EINVAL;
++			goto out;
++		}
++
++		ret = ath10k_vendor_unassoc_sta_filter_add(ar, addr);
++		if (ret) {
++			ath10k_warn(ar, "sta add failed ret %d\n", ret);
++			goto out;
++		}
++		break;
++	case QCA_WLAN_VENDOR_BSS_FILTER_ACTION_DEL:
++		ret = ath10k_vendor_unassoc_sta_filter_delete(ar, addr);
++		if (ret) {
++			ath10k_warn(ar, "sta delete failed ret %d\n", ret);
++			goto out;
++		}
++		break;
++	case QCA_WLAN_VENDOR_BSS_FILTER_ACTION_GET:
++		/* If the given MAC is Broadcast address , then we need to get
++		 * the statistics for all the stations
++		 */
++		if (is_broadcast_ether_addr(addr)) {
++			n_sta = ar->vendor.bss_filter.tbl.entries;
++			all = true;
++		} else if (is_valid_ether_addr(addr)) {
++			n_sta = 1;
++			all = false;
++		} else {
++			ath10k_warn(ar, "Invalid addr %pM\n", addr);
++			ret = -EINVAL;
++			goto out;
++		}
++
++		msglen = sizeof(*reply_msg) + (n_sta * sizeof(*sta));
++		reply_msg = kzalloc(msglen, GFP_KERNEL);
++		if (!reply_msg) {
++			ath10k_warn(ar, "Failed to alloc %d bytes\n", msglen);
++			ret = -ENOMEM;
++			goto out;
++		}
++
++		reply_msg->n_sta = n_sta;
++		if (all) {
++			ret = ath10k_vendor_dump_unassoc_sta_stats(ar,
++								   reply_msg);
++		} else {
++			ret = ath10k_vendor_get_unassoc_sta_stats(ar, addr,
++								  reply_msg);
++		}
++
++		if (ret) {
++			ath10k_warn(ar, "Get stats Failed ret %d\n", ret);
++			goto free_reply_msg;
++		}
++
++		/* Send a response to the command */
++		reply_skb = cfg80211_vendor_cmd_alloc_reply_skb(ar->hw->wiphy,
++								msglen);
++		if (!reply_skb) {
++			ret = -ENOMEM;
++			goto free_reply_msg;
++		}
++
++		nl_stats = nla_nest_start(reply_skb,
++					  QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS);
++		if (!nl_stats) {
++			ret = -ENOBUFS;
++			goto nla_put_failure;
++		}
++
++		sta = (struct ath10k_vendor_unassoc_sta_stats *)reply_msg->data;
++		for (i = 0; i < reply_msg->n_sta; i++) {
++			nl_sta = nla_nest_start(reply_skb, i);
++			if (!nl_sta) {
++				ret = -ENOBUFS;
++				goto nla_put_failure;
++			}
++
++			if (nla_put
++			       (reply_skb,
++				QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_MAC,
++				ETH_ALEN, sta->addr)) {
++				ret = -ENOBUFS;
++				goto nla_put_failure;
++			}
++
++			if (sta->filled & (1ULL << NL80211_STA_INFO_SIGNAL) &&
++			    nla_put_u8
++			       (reply_skb,
++				QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_RSSI,
++				sta->rssi)) {
++				ret = -ENOBUFS;
++				goto nla_put_failure;
++			}
++
++			if (sta->filled & (1ULL << NL80211_STA_INFO_SIGNAL) &&
++			    nla_put_u64_64bit
++			       (reply_skb,
++				QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_RSSI_TS,
++				sta->rssi_ts,
++				QCA_WLAN_VENDOR_ATTR_BSS_FILTER_PAD)) {
++				ret = -ENOBUFS;
++				goto nla_put_failure;
++			}
++
++			nla_nest_end(reply_skb, nl_sta);
++			sta++;
++		}
++
++		nla_nest_end(reply_skb, nl_stats);
++
++		ath10k_dbg(ar, ATH10K_DBG_MAC, "sending vendor cmd reply\n");
++
++		ret = cfg80211_vendor_cmd_reply(reply_skb);
++		if (ret) {
++			ath10k_warn(ar, "failed to send vendor reply %d\n", ret);
++			goto free_reply_msg;
++		}
++
++		kfree(reply_msg);
++		break;
++	default:
++		ath10k_warn(ar, "Invalid action %d\n", action);
++		ret = -EINVAL;
++		goto out;
++	}
++
++	return 0;
++
++nla_put_failure:
++	kfree_skb(reply_skb);
++free_reply_msg:
++	kfree(reply_msg);
++out:
++	return ret;
++}
++
++static void ath10k_vendor_unassoc_sta_cleanup(struct ath10k *ar)
++{
++	struct ath10k_vendor_unassoc_sta_tbl *tbl = &ar->vendor.bss_filter.tbl;
++
++	if (!tbl->entries)
++		return;
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "unassoc sta cleanup\n");
++	rhashtable_free_and_destroy(&tbl->rhead,
++				    ath10k_vendor_unassoc_sta_rht_free, tbl);
++	tbl->entries = 0;
++}
++
++void ath10k_vendor_bss_filter_cleanup(struct ath10k_vif *arvif)
++{
++	struct ath10k *ar = arvif->ar;
++	struct ath10k_vendor_bssid_info *bssid;
++	u32 vdev_id;
++	u8 i;
++
++	if (!ar->vendor.bss_filter.max || arvif->vdev_type != WMI_VDEV_TYPE_AP)
++		return;
++
++	if (!ar->vendor.bss_filter.n_bssid)
++		goto sta_cleanup;
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "BSS filter cleanup\n");
++	vdev_id = arvif->vdev_id;
++	i = 0;
++	bssid = ar->vendor.bss_filter.bssid;
++	while (i < ar->vendor.bss_filter.max) {
++		if (is_valid_ether_addr(bssid[i].addr)) {
++			ath10k_vendor_bssid_filter_delete(ar, bssid[i].addr, i,
++							  vdev_id);
++		}
++		i++;
++	}
++
++sta_cleanup:
++	/* Do station cleanup only no other bss filter enabled */
++	if (!ar->vendor.bss_filter.n_bssid)
++		ath10k_vendor_unassoc_sta_cleanup(ar);
++}
++
++static int ath10k_vendor_bss_filter_vendor_handler(struct wiphy *wiphy,
++						   struct wireless_dev *wdev,
++						   const void *data,
++						   int data_len)
++{
++	struct ieee80211_vif *vif;
++	struct ath10k_vif *arvif;
++	struct ath10k *ar;
++	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAX + 1];
++	u8 addr[ETH_ALEN];
++	enum qca_wlan_vendor_bss_filter_type type;
++	enum qca_wlan_vendor_bss_filter_action action;
++	int ret;
++
++	if (!wdev)
++		return -EINVAL;
++
++	vif = wdev_to_ieee80211_vif(wdev);
++	if (!vif)
++		return -EINVAL;
++
++	arvif = (void *)vif->drv_priv;
++	if (!arvif)
++		return -EINVAL;
++
++	ar = arvif->ar;
++
++	mutex_lock(&ar->conf_mutex);
++
++	/* Check BSSID filter is supported in the platform and then allow
++	 * filter only for the AP VAP.
++	 */
++	if (!ar->vendor.bss_filter.max || arvif->vdev_type != WMI_VDEV_TYPE_AP) {
++		ath10k_warn(ar, "BSS filter not supported Max %d vdev type %d\n",
++			    ar->vendor.bss_filter.max, arvif->vdev_type);
++		ret = -EOPNOTSUPP;
++		goto out;
++	}
++
++	/* Check the given Data is valid */
++	if (!data) {
++		ath10k_warn(ar, "invalid Data\n");
++		ret = -EINVAL;
++		goto out;
++	}
++
++	ret = nla_parse(tb, QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAX, data, data_len,
++			ath10k_vendor_bss_filter_policy, NULL);
++	if (ret) {
++		ath10k_warn(ar, "invalid BSS filter policy ATTR\n");
++		goto out;
++	}
++
++	if (!tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR] ||
++	    !tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE] ||
++	    !tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION]) {
++		ath10k_warn(ar, "invalid BSS filter ATTR\n");
++		ret = -EINVAL;
++		goto out;
++	}
++
++	ether_addr_copy(addr,
++			nla_data(tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR]));
++	type = nla_get_u8(tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE]);
++	action = nla_get_u8(tb[QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION]);
++
++	ath10k_dbg(ar, ATH10K_DBG_MAC, "Req MAC %pM type %d action %d\n",
++		   addr, type, action);
++
++	if (type == QCA_WLAN_VENDOR_BSS_FILTER_TYPE_BSSID) {
++		ret = ath10k_vendor_bssid_filter_action(arvif->ar, addr, type,
++							action, arvif->vdev_id);
++	} else if (type == QCA_WLAN_VENDOR_BSS_FILTER_TYPE_STA) {
++		ret = ath10k_vendor_unassoc_sta_filter_action(arvif->ar, addr,
++							      type, action);
++	} else {
++		ath10k_warn(ar, "invalid BSS filter type %d\n", type);
++		ret = -EINVAL;
++		goto out;
++	}
++
++out:
++	mutex_unlock(&ar->conf_mutex);
++	return ret;
++}
++
++int ath10k_vendor_register(struct ath10k *ar)
++{
++	int ret;
++	int len;
++	u8 count;
++
++	/* Initialize other BSS filter, If platform support */
++	if (test_bit(WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS, ar->wmi.svc_map)) {
++		count = ATH10K_VENDOR_BSSID_FILTER_COUNT;
++		len = count * sizeof(struct ath10k_vendor_bssid_info);
++
++		ar->vendor.bss_filter.bssid = kzalloc(len, GFP_KERNEL);
++		if (!ar->vendor.bss_filter.bssid) {
++			ret = -ENOMEM;
++			goto err;
++		}
++
++		ar->vendor.bss_filter.max = count;
++		ar->vendor.bss_filter.tbl.entries = 0;
++	}
++
++	ar->hw->wiphy->vendor_commands = ath10k_vendor_commands;
++	ar->hw->wiphy->n_vendor_commands = ARRAY_SIZE(ath10k_vendor_commands);
++
++	return 0;
++
++err:
++	return ret;
++}
++
++void ath10k_vendor_unregister(struct ath10k *ar)
++{
++	if (ar->vendor.bss_filter.bssid) {
++		ar->vendor.bss_filter.max = 0;
++		kfree(ar->vendor.bss_filter.bssid);
++		ar->vendor.bss_filter.bssid = NULL;
++	}
++	return;
++}
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath10k/vendor.h
+@@ -0,0 +1,289 @@
++/*
++ * Copyright (c) 2018 The Linux Foundation. All rights reserved.
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef _VENDOR_H_
++#define _VENDOR_H_
++
++#include <linux/rhashtable.h>
++#include <net/mac80211.h>
++#include <linux/ktime.h>
++
++#include "htt.h"
++
++#define ATH10K_VENDOR_BSSID_FILTER_INVALID_IDX	0xFF
++#define ATH10K_VENDOR_BSSID_FILTER_COUNT	0x3
++
++/* Vendor id to be used in vendor specific command and events to user space
++ * NOTE: The authoritative place for definition of QCA_NL80211_VENDOR_ID,
++ * vendor subcmd definitions prefixed with QCA_NL80211_VENDOR_SUBCMD, and
++ * qca_wlan_vendor_attr is open source file src/common/qca-vendor.h in
++ * git://w1.fi/srv/git/hostap.git; the values here are just a copy of that
++ */
++#define QCA_NL80211_VENDOR_ID 0x001374
++
++/* enum qca_nl80211_vendor_subcmds - QCA nl80211 vendor command identifiers */
++enum qca_nl80211_vendor_subcmds {
++	/* This command is used to configure an RX filter to receive frames
++	 * from stations that are active on the operating channel, but not
++	 * associated with the local device (e.g., STAs associated with other
++	 * APs). Filtering is done based on a list of BSSIDs and STA MAC
++	 * addresses added by the user. This command is also used to fetch the
++	 * statistics of unassociated stations. The attributes used with this
++	 * command are defined in enum qca_wlan_vendor_attr_bss_filter.
++	 */
++	QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER = 170,
++};
++
++/**
++ * enum qca_wlan_vendor_attr_bss_filter - Used by the vendor command
++ * QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER.
++ * The user can add/delete the filter by specifying the BSSID/STA MAC address in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR, filter type in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE, add/delete action in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION in the request. The user can get the
++ * statistics of an unassociated station by specifying the MAC address in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR, station type in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE, GET action in
++ * QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION in the request. The user also can get
++ * the statistics of all unassociated stations by specifying the Broadcast MAC
++ * address (ff:ff:ff:ff:ff:ff) in QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR with
++ * above procedure. In the response, driver shall specify statistics
++ * information nested in QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS.
++ */
++enum qca_wlan_vendor_attr_bss_filter {
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_INVALID = 0,
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAC_ADDR = 1,
++
++	/* Other BSS filter type, unsigned 8 bit value. One of the values
++	 * in enum qca_wlan_vendor_bss_filter_type.
++	 */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_TYPE = 2,
++
++	/* Other BSS filter action, unsigned 8 bit value. One of the values
++	 * in enum qca_wlan_vendor_bss_filter_action.
++	 */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_ACTION = 3,
++
++	/* Array of nested attributes where each entry is the statistics
++	 * information of the specified station that belong to another BSS.
++	 * Attributes for each entry are taken from enum
++	 * qca_wlan_vendor_bss_filter_sta_stats.
++	 * Other BSS station configured in
++	 * QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER with filter type
++	 * QCA_WLAN_VENDOR_BSS_FILTER_TYPE_STA.
++	 * Statistics returned by QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER
++	 * with filter action QCA_WLAN_VENDOR_BSS_FILTER_ACTION_GET.
++	 */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS = 4,
++
++	/* Dummy (NOP) attribute for 64 bit padding */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_PAD = 13,
++
++	/* keep last */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_MAX
++};
++
++/* enum qca_wlan_vendor_bss_filter_type - Type of
++ * filter used in other BSS filter operations. Used by the vendor command
++ * QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER.
++ */
++enum qca_wlan_vendor_bss_filter_type {
++	/* BSSID filter */
++	QCA_WLAN_VENDOR_BSS_FILTER_TYPE_BSSID,
++
++	/* Station MAC address filter */
++	QCA_WLAN_VENDOR_BSS_FILTER_TYPE_STA
++};
++
++/* enum qca_wlan_vendor_bss_filter_action - Type of
++ * action in other BSS filter operations. Used by the vendor command
++ * QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER.
++ */
++enum qca_wlan_vendor_bss_filter_action {
++	/* Add filter */
++	QCA_WLAN_VENDOR_BSS_FILTER_ACTION_ADD,
++
++	/* Delete filter */
++	QCA_WLAN_VENDOR_BSS_FILTER_ACTION_DEL,
++
++	/* Get the statistics */
++	QCA_WLAN_VENDOR_BSS_FILTER_ACTION_GET
++};
++
++/* enum qca_wlan_vendor_bss_filter_sta_stats - Attributes for
++ * the statistics of a specific unassociated station belong to another BSS.
++ * The statistics provides information of the unassociated station
++ * filtered by other BSS operation - such as MAC, signal value.
++ * Used by the vendor command QCA_NL80211_VENDOR_SUBCMD_BSS_FILTER.
++ */
++enum qca_wlan_vendor_attr_bss_filter_sta_stats {
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_INVALID,
++
++	/* MAC address of the station */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_MAC,
++
++	/* Last received signal strength of the station.
++	 * Unsigned 8 bit number containing RSSI.
++	 */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_RSSI,
++
++	/* Time stamp of the host driver for the last received RSSI.
++	 * Unsigned 64 bit number containing nanoseconds from the boottime.
++	 */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_RSSI_TS,
++
++	/* Keep last */
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_AFTER_LAST,
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_MAX =
++	QCA_WLAN_VENDOR_ATTR_BSS_FILTER_STA_STATS_AFTER_LAST - 1
++};
++
++/* struct ath10k_vendor_bssid_info - BSSID information */
++struct ath10k_vendor_bssid_info {
++	/* vdev map used to indicate which VAPs are own */
++	unsigned long long vdev_map;
++
++	/* BSSID */
++	u8 addr[ETH_ALEN];
++	u16 ref;
++};
++
++/* struct ath10k_vendor_unassoc_sta_stats - Unassociated station statistics
++ * information.
++ */
++struct ath10k_vendor_unassoc_sta_stats {
++	/* bitflag of flags using the bits of &enum nl80211_sta_info to
++	 * indicate the relevant values in this struct for them
++	 */
++	u64 filled;
++
++	/* host driver time stamp for the signal (rssi) */
++	u64 rssi_ts;
++
++	/* signal value of the station */
++	s8 rssi;
++
++	/* MAC address of the station */
++	u8 addr[ETH_ALEN];
++};
++
++/* struct ath10k_vendor_unassoc_sta - Unassociated station information
++ * This structure protected by rcu lock.
++ */
++struct ath10k_vendor_unassoc_sta {
++	struct ath10k_vendor_unassoc_sta_stats stats;
++
++	/* rhashtable list pointer */
++	struct rhash_head rhash;
++
++	/* rcu head for freeing unassociated station */
++	struct rcu_head rcu;
++};
++
++/* struct ath10k_vendor_unassoc_sta_tbl - Unassociated station table info */
++struct ath10k_vendor_unassoc_sta_tbl {
++	/* The rhashtable containing struct ath10k_vendor_unassoc_sta, keyed
++	 * by MAC addr
++	 */
++	struct rhashtable rhead;
++
++	/* Total Number of entries */
++	u16 entries;
++};
++
++/* struct ath10k_vendor_bss_filter - BSS filter information */
++struct ath10k_vendor_bss_filter {
++	/* Array of BSSID information */
++	struct ath10k_vendor_bssid_info *bssid;
++
++	/* Unassociated station table */
++	struct ath10k_vendor_unassoc_sta_tbl tbl;
++
++	/* Maximum other bss filter supported by the platform */
++	u8 max;
++
++	/* number of bssid filter configured by user */
++	u8 n_bssid;
++};
++
++struct ath10k_vendor_bss_filter_get_reply {
++	u32 n_sta;		/* Number of stations */
++	u8 data[0];		/* Array of ath10k_vendor_unassoc_sta_stats */
++};
++
++struct ath10k_vendor {
++	/* BSS filter */
++	struct ath10k_vendor_bss_filter bss_filter;
++};
++
++struct ath10k_vendor_unassoc_sta *
++ath10k_vendor_unassoc_sta_lookup(struct ath10k_vendor_unassoc_sta_tbl *tbl, u8 *addr);
++void ath10k_vendor_bss_filter_cleanup(struct ath10k_vif *arvif);
++int ath10k_vendor_register(struct ath10k *ar);
++void ath10k_vendor_unregister(struct ath10k *ar);
++
++static inline bool
++ath10k_vendor_rx_h_bssid_filter(struct ath10k_vendor *vendor,
++				struct sk_buff_head *amsdu,
++				struct ieee80211_rx_status *rx_status)
++{
++	struct sk_buff *first;
++	struct htt_rx_desc *rxd;
++	struct ath10k_vendor_unassoc_sta_tbl *tbl;
++	struct ath10k_vendor_unassoc_sta *sta;
++	struct ieee80211_hdr *hdr;
++
++	/* If BSS filter are not enabled, then
++	 * no need to filter sta so allow all frames
++	 */
++	if (!vendor->bss_filter.n_bssid)
++		return false;
++
++	first = skb_peek(amsdu);
++	rxd = (void *)first->data - sizeof(*rxd);
++
++	if (!rxd)
++		return false;
++
++	/* other bssid frames are with invalid peer idx flags */
++	if (rxd->attention.flags &
++	    __cpu_to_le32(RX_ATTENTION_FLAGS_PEER_IDX_INVALID)) {
++		tbl = &vendor->bss_filter.tbl;
++
++		/* If unassociacted sta configured, then do lookup
++		 * and maintain the last rssi value.
++		 * Don't allow other bssid frames.
++		 */
++		if (tbl->entries) {
++			hdr = (void *)rxd->rx_hdr_status;
++			rcu_read_lock();
++
++			sta = ath10k_vendor_unassoc_sta_lookup(tbl, hdr->addr2);
++			if (sta) {
++				sta->stats.rssi = rx_status->signal;
++				sta->stats.rssi_ts = ktime_to_ns(ktime_get_boottime());
++				sta->stats.filled |= BIT(NL80211_STA_INFO_SIGNAL);
++			}
++
++			rcu_read_unlock();
++		}
++		return true;
++	}
++
++	return false;
++}
++
++#endif /* _VENDOR_H_ */
+--- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
++++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
+@@ -239,6 +239,12 @@ struct wmi_ops {
+ 						     const struct wmi_peer_cfr_capture_conf_arg *arg);
+ 	struct sk_buff *(*gen_per_peer_per_tid_cfg)(struct ath10k *ar,
+ 						    const struct wmi_per_peer_per_tid_cfg_arg *arg);
++	struct sk_buff *(*gen_vdev_set_neighbor_rx_param)(struct ath10k *ar,
++							  u32 vdev_id,
++							  const u8 *addr,
++							  u32 idx,
++							  u32 action,
++							  u32 type);
+ };
+ 
+ int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
+@@ -1738,4 +1744,26 @@ ath10k_wmi_set_per_peer_per_tid_cfg(stru
+ 	return ath10k_wmi_cmd_send(ar, skb,
+ 				   ar->wmi.cmd->per_peer_per_tid_config_cmdid);
+ }
++
++static inline int
++ath10k_wmi_set_neighbor_rx_param(struct ath10k *ar, u32 vdev_id,
++				 const u8 *addr, u32 idx,
++				 u32 action, u32 type)
++{
++	struct sk_buff *skb;
++	u32 cmdid;
++
++	if (!ar->wmi.ops->gen_vdev_set_neighbor_rx_param)
++		return -EOPNOTSUPP;
++
++	cmdid = ar->wmi.cmd->vdev_filter_neighbor_rx_packets_cmdid;
++	skb = ar->wmi.ops->gen_vdev_set_neighbor_rx_param(ar,
++							  vdev_id, addr,
++							  idx, action, type);
++
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	return ath10k_wmi_cmd_send(ar, skb, cmdid);
++}
+ #endif
+--- a/drivers/net/wireless/ath/ath10k/wmi.c
++++ b/drivers/net/wireless/ath/ath10k/wmi.c
+@@ -9061,6 +9061,37 @@ ath10k_wmi_10_4_op_gen_set_coex_param(st
+ 	return skb;
+ }
+ 
++static struct sk_buff *
++ath10k_wmi_10_4_op_gen_vdev_set_neighbor_rx_param(struct ath10k *ar,
++						  u32 vdev_id,
++						  const u8 *addr,
++						  u32 idx, u32 action,
++						  u32 type)
++{
++	struct wmi_set_vdev_filter_nrp_10_4_cmd *cmd;
++	struct sk_buff *skb;
++
++	skb = ath10k_wmi_alloc_skb(ar, sizeof(*cmd));
++	if (!skb)
++		return ERR_PTR(-ENOMEM);
++
++	cmd = (struct wmi_set_vdev_filter_nrp_10_4_cmd *)skb->data;
++
++	cmd->vdev_id = __cpu_to_le32(vdev_id);
++	cmd->action = __cpu_to_le32(action);
++	cmd->type = __cpu_to_le32(type);
++	cmd->idx = __cpu_to_le32(idx);
++
++	ether_addr_copy(cmd->macaddr.addr, addr);
++
++	ath10k_dbg(ar, ATH10K_DBG_WMI,
++		   "vdev id:0x%x Macaddr[0x%x]:[0x%x] idx:0x%x action:0x%x type:0x%x flag:0x%x\n",
++		   cmd->vdev_id, cmd->macaddr.addr[0], cmd->macaddr.addr[5],
++		   cmd->idx, cmd->action, cmd->type, cmd->flag);
++
++	return skb;
++}
++
+ static const struct wmi_ops wmi_ops = {
+ 	.rx = ath10k_wmi_op_rx,
+ 	.map_svc = wmi_main_svc_map,
+@@ -9444,6 +9475,8 @@ static const struct wmi_ops wmi_10_4_ops
+ 	.gen_echo = ath10k_wmi_op_gen_echo,
+ 	.gen_pdev_get_tpc_config = ath10k_wmi_10_2_4_op_gen_pdev_get_tpc_config,
+ 	.gen_set_coex_param = ath10k_wmi_10_4_op_gen_set_coex_param,
++	.gen_vdev_set_neighbor_rx_param =
++		ath10k_wmi_10_4_op_gen_vdev_set_neighbor_rx_param,
+ };
+ 
+ int ath10k_wmi_attach(struct ath10k *ar)
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
+@@ -210,6 +210,7 @@ enum wmi_service {
+ 	WMI_SERVICE_VDEV_BCN_RATE_CONTROL,
+ 	WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT,
+ 	WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT,
++	WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
+ 
+ 	/* keep last */
+ 	WMI_SERVICE_MAX,
+@@ -366,6 +367,8 @@ enum wmi_10_4_service {
+ 	WMI_10_4_SERVICE_PEER_TID_CONFIGS_SUPPORT,
+ 	WMI_10_4_SERVICE_VDEV_BCN_RATE_CONTROL,
+ 	WMI_10_4_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT,
++	WMI_10_4_SERVICE_HTT_ASSERT_TRIGGER_SUPPORT,
++	WMI_10_4_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
+ };
+ 
+ static inline char *wmi_service_name(int service_id)
+@@ -487,6 +490,7 @@ static inline char *wmi_service_name(int
+ 	SVCSTR(WMI_SERVICE_VDEV_BCN_RATE_CONTROL);
+ 	SVCSTR(WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT);
+ 	SVCSTR(WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT);
++	SVCSTR(WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS);
+ 
+ 	default:
+ 		return NULL;
+@@ -814,6 +818,8 @@ static inline void wmi_10_4_svc_map(cons
+ 	       WMI_SERVICE_VDEV_BCN_RATE_CONTROL, len);
+ 	SVCMAP(WMI_10_4_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT,
+ 	        WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT, len);
++	SVCMAP(WMI_10_4_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
++	        WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS, len);
+ }
+ 
+ #undef SVCMAP
+@@ -7274,6 +7280,45 @@ struct wmi_peer_sant_set_train_arg {
+ 	u32 num_pkts;
+ };
+ 
++/* enum wmi_neighbor_rx_action - Neighbor Rx Packets add/remove filter */
++enum wmi_neighbor_rx_action {
++	WMI_NEIGHBOR_RX_ACTION_ADD = 1,
++	WMI_NEIGHBOR_RX_ACTION_DEL,
++};
++
++/* enum wmi_neighbor_rx_type - Neighbor Rx Packets ap/client addr */
++enum wmi_neighbor_rx_type {
++	WMI_NEIGHBOR_RX_TYPE_BSSID = 1,
++	WMI_NEIGHBOR_RX_TYPE_CLIENT,
++};
++
++/* enum wmi_neighbor_rx_capture_flag - Neighbor Rx Packets flags */
++enum wmi_neighbor_rx_capture_flag {
++	WMI_NEIGHBOR_RX_CAPTURE_ONLY_RX_PKT = 1,
++	WMI_NEIGHBOR_RX_CAPTURE_ONLY_TX_PKT,
++	WMI_NEIGHBOR_RX_CAPTURE_BOTH_TXRX_PKT
++};
++
++/* Filter for Neighbor Rx Packets  */
++struct wmi_set_vdev_filter_nrp_10_4_cmd {
++	__le32 vdev_id;
++
++	/* AP Bssid or Client Mac-addr */
++	struct wmi_mac_addr macaddr;
++
++	/* see enum wmi_neighbor_rx_action */
++	__le32 action;
++
++	/* see enum wmi_neighbor_rx_type */
++	__le32 type;
++
++	/* enum wmi_neighbor_rx_capture_flag */
++	__le32 flag;
++
++	/* BSSID index - index of the BSSID register */
++	__le32 idx;
++} __packed;
++
+ struct ath10k;
+ struct ath10k_vif;
+ struct ath10k_fw_stats_pdev;

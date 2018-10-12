@@ -468,7 +468,6 @@ define Build/Prepare
 		$(PKG_BUILD_DIR)/include/net/ieee80211.h
 
 	echo 'compat-wireless-$(PKG_VERSION)-$(PKG_RELEASE)-$(REVISION)' > $(PKG_BUILD_DIR)/compat_version
-	$(CP) ./files/regdb.txt $(PKG_BUILD_DIR)/net/wireless/db.txt
 endef
 
 ifneq ($(CONFIG_PACKAGE_kmod-cfg80211)$(CONFIG_PACKAGE_kmod-lib80211),)
