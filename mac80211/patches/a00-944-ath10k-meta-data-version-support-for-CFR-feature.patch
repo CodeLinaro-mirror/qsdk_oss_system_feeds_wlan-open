@@ -1,0 +1,137 @@
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index 9d1659c..30e3e8d 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -100,8 +100,41 @@
+ /* Upper limit/default retry count for a ppdu */
+ #define	ATH10K_MAX_RETRY_COUNT 30
+ 
++#define QCA_CFR_VENDORID 0x8CFDF0
++
+ struct ath10k;
+ 
++enum ath10k_cfr_metaversion {
++	ATH10K_CFR_META_VERSION_NONE,
++	ATH10K_CFR_META_VERSION_1,
++	ATH10K_CFR_META_VERSION_MAX = 0xFF,
++};
++
++enum ath10k_cfr_dataversion {
++	ATH10K_CFR_DATA_VERSION_NONE,
++	ATH10K_CFR_DATA_VERSION_1,
++	ATH10K_CFR_DATA_VERSION_MAX = 0xFF,
++};
++
++enum ath10k_cfr_platformtype {
++	ATH10K_CFR_PLATFORM_TYPE_NONE,
++	ATH10K_CFR_PLATFORM_TYPE_MIPS,
++	ATH10K_CFR_PLATFORM_TYPE_ARM,
++	ATH10K_CFR_PLATFFORM_TYPE_MAX = 0xFF,
++};
++
++enum ath10k_cfr_radiotype {
++	ATH10K_CFR_CAPTURE_RADIO_NONE,
++	ATH10K_CFR_CAPTURE_RADIO_QCA988X = 17,
++	ATH10K_CFR_CAPTURE_RADIO_QCA9887,
++	ATH10K_CFR_CAPTURE_RADIO_QCA99X0,
++	ATH10K_CFR_CAPTURE_RADIO_QCA9984,
++	ATH10K_CFR_CAPTURE_RADIO_QCA4019,
++	ATH10K_CFR_CAPTURE_RADIO_QCA9888,
++	ATH10K_CFR_CAPTURE_RADIO_QCA6174,
++	ATH10K_CFR_CAPTURE_RADIO_MAX = 0xFF,
++};
++
+ enum ath10k_bus {
+ 	ATH10K_BUS_PCI,
+ 	ATH10K_BUS_AHB,
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index da6aa5d..010e159 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2877,7 +2877,6 @@ ath10k_htt_populate_rfs_cfr_header(struct ath10k *ar,
+ 				   struct ath10k_rfs_cfr_hdr *cfr_hdr,
+ 				   struct htt_peer_cfr_dump_ind_lagacy *cfr_ind)
+ {
+-	u8 rx_chain_mask;
+ 
+ 	cfr_hdr->head_magic_num = 0xDEADBEAF;
+ 	ether_addr_copy(cfr_hdr->addr, cfr_ind->mac_addr.addr);
+@@ -2893,18 +2892,44 @@ ath10k_htt_populate_rfs_cfr_header(struct ath10k *ar,
+ 	cfr_hdr->center_freq2 =  __le32_to_cpu(cfr_ind->center_freq2);
+ 	cfr_hdr->phy_mode = __le32_to_cpu(cfr_ind->chan_phy_mode);
+ 
+-	rx_chain_mask = ar->cfg_rx_chainmask;
+-
+-	while (rx_chain_mask) {
+-		if (rx_chain_mask & BIT(0))
+-			cfr_hdr->num_rx_chain++;
+-
+-		rx_chain_mask >>= 1;
+-	}
++	cfr_hdr->rx_chain_mask = ar->cfg_rx_chainmask;
+ 
+ 	cfr_hdr->length = __le32_to_cpu(cfr_ind->length);
+ 
+ 	cfr_hdr->timestamp = __le32_to_cpu(cfr_ind->timestamp);
++	cfr_hdr->vendorid = __le32_to_cpu(QCA_CFR_VENDORID);
++	cfr_hdr->cfr_metadata_version = ATH10K_CFR_META_VERSION_1;
++	cfr_hdr->cfr_data_version = ATH10K_CFR_DATA_VERSION_1;
++
++	switch (ar->hw_rev) {
++	case ATH10K_HW_QCA988X:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA988X;
++		break;
++	case ATH10K_HW_QCA6174:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA6174;
++		break;
++	case ATH10K_HW_QCA99X0:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA99X0;
++		break;
++	case ATH10K_HW_QCA9888:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA9888;
++		break;
++	case ATH10K_HW_QCA9984:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA9984;
++		break;
++	case ATH10K_HW_QCA4019:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA4019;
++		break;
++	case ATH10K_HW_QCA9887:
++		cfr_hdr->chip_type = ATH10K_CFR_CAPTURE_RADIO_QCA9887;
++		break;
++	default:
++		ath10k_warn(ar, "unsupported CFR capture for hardware = %d\n",
++			    ar->hw_rev);
++		break;
++	}
++
++	cfr_hdr->pltform_type = ATH10K_CFR_PLATFORM_TYPE_ARM;
+ 
+ 	ath10k_cfr_dump_to_rfs(ar , cfr_hdr, sizeof(struct ath10k_rfs_cfr_hdr));
+ }
+diff --git a/drivers/net/wireless/ath/ath10k/spectral.h b/drivers/net/wireless/ath/ath10k/spectral.h
+index 5cd7c32..9d5ac12 100644
+--- a/drivers/net/wireless/ath/ath10k/spectral.h
++++ b/drivers/net/wireless/ath/ath10k/spectral.h
+@@ -32,6 +32,12 @@ struct ath10k_spec_scan {
+ 
+ struct ath10k_rfs_cfr_hdr {
+ 	u32 head_magic_num;
++	u32 vendorid;
++	u8 cfr_metadata_version;
++	u8 cfr_data_version;
++	u8 chip_type;
++	u8 pltform_type;
++	u32 Reserved;
+ 	u8  addr[6];
+ 	u8 status;
+ 	u8 capture_bw;
+@@ -43,7 +49,7 @@ struct ath10k_rfs_cfr_hdr {
+ 	u8 capture_mode;
+ 	u8 capture_type;
+ 	u8 sts_count;
+-	u8 num_rx_chain;
++	u8 rx_chain_mask;
+ 	u32 timestamp;
+ 	u32 length;
+ } __packed;
