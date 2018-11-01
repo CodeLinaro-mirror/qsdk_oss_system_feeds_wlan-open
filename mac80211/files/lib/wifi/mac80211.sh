@@ -181,6 +181,7 @@ post_mac80211() {
 		[ -f "/lib/update_smp_affinity.sh" ] && {
 			. /lib/update_smp_affinity.sh
 			enable_smp_affinity_wifi
+			enable_smp_affinity_wigig
 		}
 	fi
 	case "${action}" in
