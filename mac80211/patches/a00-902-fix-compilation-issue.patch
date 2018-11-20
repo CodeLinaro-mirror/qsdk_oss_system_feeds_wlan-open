@@ -1,6 +1,58 @@
+--- a/backport-include/linux/mm.h
++++ b/backport-include/linux/mm.h
+@@ -3,7 +3,6 @@
+ #include_next <linux/mm.h>
+ #include <linux/page_ref.h>
+ #include <linux/sched.h>
+-#include <linux/overflow.h>
+ #include <linux/vmalloc.h>
+ #include <linux/slab.h>
+ 
+@@ -105,12 +104,10 @@ static inline void *kvmalloc(size_t size, gfp_t flags)
+ #define kvmalloc_array LINUX_BACKPORT(kvmalloc_array)
+ static inline void *kvmalloc_array(size_t n, size_t size, gfp_t flags)
+ {
+-	size_t bytes;
+-
+-	if (unlikely(check_mul_overflow(n, size, &bytes)))
++	if (size != 0 && n > SIZE_MAX / size)
+ 		return NULL;
+ 
+-	return kvmalloc(bytes, flags);
++	return kvmalloc(n * size, flags);
+ }
+ 
+ #define kvzalloc LINUX_BACKPORT(kvzalloc)
+--- a/backport-include/linux/netdevice.h
++++ b/backport-include/linux/netdevice.h
+@@ -333,7 +333,7 @@ static inline void netif_trans_update(struct net_device *dev)
+ 
+ #if LINUX_VERSION_IS_LESS(4,11,9)
+ #define netdev_set_priv_destructor(_dev, _destructor) \
+-	(_dev)->destructor = __ ## _destructor
++	(_dev)->destructor = _destructor
+ #define netdev_set_def_destructor(_dev) \
+ 	(_dev)->destructor = free_netdev
+ #else
+--- a/backport-include/linux/timekeeping.h
++++ b/backport-include/linux/timekeeping.h
+@@ -82,10 +82,10 @@ static inline struct timespec64 timespec_to_timespec64(const struct timespec ts)
+ static inline void ktime_get_raw_ts64(struct timespec64 *ts)
+ {
+ #if LINUX_VERSION_IS_LESS(3,19,0)
+-	struct timespec64 ts64;
++	struct timespec _ts;
+ 
+-	getrawmonotonic(&ts64);
+-	*ts = timespec_to_timespec64(ts64);
++	getrawmonotonic(&_ts);
++	*ts = timespec_to_timespec64(_ts);
+ #else
+ 	return getrawmonotonic64(ts);
+ #endif /* < 3.19 */
 --- a/drivers/net/wireless/ath/ath10k/ahb.c
 +++ b/drivers/net/wireless/ath/ath10k/ahb.c
-@@ -197,40 +197,35 @@ static int ath10k_ahb_rst_ctrl_init(stru
+@@ -191,40 +191,35 @@ static int ath10k_ahb_rst_ctrl_init(struct ath10k *ar)
  
  	dev = &ar_ahb->pdev->dev;
  
@@ -58,7 +110,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -8203,6 +8203,8 @@ struct ath10k_vif *ath10k_get_arvif(stru
+@@ -8392,6 +8392,8 @@ struct ath10k_vif *ath10k_get_arvif(struct ath10k *ar, u32 vdev_id)
  	return arvif_iter.arvif;
  }
  
@@ -67,7 +119,7 @@
  #define WRD_METHOD "WRDD"
  #define WRDD_WIFI  (0x07)
  
-@@ -8289,6 +8291,13 @@ static int ath10k_mac_get_wrdd_regulator
+@@ -8478,6 +8480,13 @@ static int ath10k_mac_get_wrdd_regulatory(struct ath10k *ar, u16 *rd)
  	*rd |= COUNTRY_ERD_FLAG;
  	return 0;
  }
@@ -83,7 +135,7 @@
  {
 --- a/drivers/net/wireless/ath/ath9k/ar9003_phy.c
 +++ b/drivers/net/wireless/ath/ath9k/ar9003_phy.c
-@@ -577,7 +577,7 @@ static void ar9003_hw_spur_mitigate_ofdm
+@@ -577,7 +577,7 @@ static void ar9003_hw_spur_mitigate_ofdm(struct ath_hw *ah,
  		if (AR_SREV_9531(ah)) {
  			spur_num = 2;
  			scale = 10; /* avoid floating calculate */
@@ -107,7 +159,7 @@
 +#endif /* __BP_BUILD_BUG_H */
 --- a/net/mac80211/debugfs_sta.c
 +++ b/net/mac80211/debugfs_sta.c
-@@ -735,14 +735,14 @@ void ieee80211_rx_h_sta_stats(struct sta
+@@ -1094,14 +1094,14 @@ void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
  		return;
  
  	/* Not support 5Mhz and 10Mhz currently  */
@@ -126,7 +178,7 @@
  		bw_idx = 1;
  	else
  		bw_idx = 0;
-@@ -750,7 +750,7 @@ void ieee80211_rx_h_sta_stats(struct sta
+@@ -1109,7 +1109,7 @@ void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
  	i = abs(status->signal);
  	sta->sdata->vif.rx_signal_pkt[i]++;
  
@@ -135,7 +187,7 @@
  		mcs_idx = status->rate_idx;
  		nss_idx = mcs_idx >> 3;
  
-@@ -764,9 +764,9 @@ void ieee80211_rx_h_sta_stats(struct sta
+@@ -1123,9 +1123,9 @@ void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
  		sta->rx_nss_byte[nss_idx] += pkt_len;
  		/* To fit into rate table for HT packets */
  		mcs_idx = mcs_idx % 8;
@@ -147,7 +199,7 @@
  
  		if (nss_idx > IEEE80211_NSS_NUM - 1 ||
  		    mcs_idx > (IEEE80211_VHT_MCS_NUM - 1))
-@@ -778,13 +778,13 @@ void ieee80211_rx_h_sta_stats(struct sta
+@@ -1137,13 +1137,13 @@ void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
  		sta->rx_nss_byte[nss_idx] += pkt_len;
  	}
  
@@ -163,7 +215,7 @@
  		/* Update Rate table for HT and VHT packets */
  		i = mcs_idx * 8 + 8 * 10 * nss_idx;
  		i += bw_idx * 2 + gi_idx;
-@@ -793,14 +793,13 @@ void ieee80211_rx_h_sta_stats(struct sta
+@@ -1152,14 +1152,13 @@ void ieee80211_rx_h_sta_stats(struct sta_info *sta, struct sk_buff *skb)
  	} else {
  		struct ieee80211_supported_band *sband;
  		struct ieee80211_sub_if_data *sdata = sta->sdata;
@@ -179,29 +231,39 @@
  		brate = sband->bitrates[status->rate_idx].bitrate;
  		legacy_rate = DIV_ROUND_UP(brate, 1 << shift);
  		i = legacy_rate_to_index(legacy_rate);
---- a/net/mac80211/iface.c
-+++ b/net/mac80211/iface.c
-@@ -1241,7 +1241,11 @@ static const struct net_device_ops ieee8
- 	.ndo_set_rx_mode        = ieee80211_set_multicast_list,
- 	.ndo_set_mac_address    = ieee80211_change_mac,
- 	.ndo_select_queue       = ieee80211_netdev_select_queue,
--	.ndo_get_stats64        = ieee80211_get_stats64,
-+#if LINUX_VERSION_IS_GEQ(4,11,0)
-+        .ndo_get_stats64        = ieee80211_get_stats64,
+--- a/drivers/net/wireless/ath/wil6210/pcie_bus.c
++++ b/drivers/net/wireless/ath/wil6210/pcie_bus.c
+@@ -215,7 +215,11 @@ static int wil_if_pcie_enable(struct wil6210_priv *wil)
+ 	}
+ 
+ 	if (n_msi == 3 &&
++#if LINUX_VERSION_IS_GEQ(4,8,0)
+ 	    pci_alloc_irq_vectors(pdev, n_msi, n_msi, PCI_IRQ_MSI) < n_msi) {
 +#else
-+        .ndo_get_stats64 = bp_ieee80211_get_stats64,
++	    true) {
 +#endif
- };
+ 		wil_err(wil, "3 MSI mode failed, try 1 MSI\n");
+ 		n_msi = 1;
+ 	}
+@@ -250,7 +254,11 @@ static int wil_if_pcie_enable(struct wil6210_priv *wil)
+ 	wil6210_fini_irq(wil, pdev->irq);
+  release_vectors:
+ 	/* safe to call if no allocation */
++#if LINUX_VERSION_IS_GEQ(4,8,0)
+ 	pci_free_irq_vectors(pdev);
++#else
++	pci_disable_msi(pdev);
++#endif
+  stop_master:
+ 	pci_clear_master(pdev);
+ 	return rc;
+--- a/compat/Makefile
++++ b/compat/Makefile
+@@ -36,7 +36,6 @@ compat-$(CPTCFG_KERNEL_4_6) += backport-4.6.o
+ compat-$(CPTCFG_KERNEL_4_7) += backport-4.7.o
+ compat-$(CPTCFG_KERNEL_4_8) += backport-4.8.o
+ compat-$(CPTCFG_KERNEL_4_10) += backport-4.10.o
+-compat-$(CPTCFG_KERNEL_4_18) += backport-4.18.o
+ compat-$(CPTCFG_KERNEL_4_20) += backport-4.20.o
  
- #if LINUX_VERSION_IS_GEQ(3,14,0) || \
---- a/backport-include/linux/netdevice.h
-+++ b/backport-include/linux/netdevice.h
-@@ -323,7 +323,7 @@ static inline void netif_trans_update(st
- 
- #if LINUX_VERSION_IS_LESS(4,11,9)
- #define netdev_set_priv_destructor(_dev, _destructor) \
--	(_dev)->destructor = __ ## _destructor
-+	(_dev)->destructor = _destructor
- #define netdev_set_def_destructor(_dev) \
- 	(_dev)->destructor = free_netdev
- #else
+ compat-$(CPTCFG_KERNEL_4_20) += backport-genetlink.o

@@ -1,0 +1,53 @@
+--- a/net/mac80211/debugfs_netdev.c
++++ b/net/mac80211/debugfs_netdev.c
+@@ -585,9 +585,14 @@ static ssize_t ieee80211_if_fmt_aqm(
+ 	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
+ {
+ 	struct ieee80211_local *local = sdata->local;
+-	struct txq_info *txqi = to_txq_info(sdata->vif.txq);
++	struct txq_info *txqi;
+ 	int len;
+ 
++	if (!sdata->vif.txq)
++		return 0;
++
++	txqi = to_txq_info(sdata->vif.txq);
++
+ 	spin_lock_bh(&local->fq.lock);
+ 	rcu_read_lock();
+ 
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -1586,7 +1586,7 @@ static void sta_ps_start(struct sta_info *sta)
+ 		return;
+ 
+ 	for (tid = 0; tid < IEEE80211_NUM_TIDS; tid++) {
+-		if (txq_has_queue(sta->sta.txq[tid]))
++		if (sta->sta.txq[tid] && txq_has_queue(sta->sta.txq[tid]))
+ 			set_bit(tid, &sta->txq_buffered_tids);
+ 		else
+ 			clear_bit(tid, &sta->txq_buffered_tids);
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -2258,6 +2258,9 @@ void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo,
+ 		for (i = 0; i < IEEE80211_NUM_TIDS + 1; i++) {
+ 			struct cfg80211_tid_stats *tidstats = &sinfo->pertid[i];
+ 
++			if (!sta->sta.txq[i])
++				continue;
++
+ 			sta_set_tidstats(sta, tidstats, i);
+ 		}
+ 	}
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -264,6 +264,9 @@ static void __ieee80211_wake_txqs(struct ieee80211_sub_if_data *sdata, int ac)
+ 		for (i = 0; i < ARRAY_SIZE(sta->sta.txq); i++) {
+ 			struct ieee80211_txq *txq = sta->sta.txq[i];
+ 
++			if (!txq)
++				continue;
++
+ 			txqi = to_txq_info(txq);
+ 
+ 			if (ac != txq->ac)

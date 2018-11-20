@@ -1,25 +1,8 @@
-From b37bc86d5efb7bcf7723e2f73b20253c93b503ab Mon Sep 17 00:00:00 2001
-From: Manikanta Pubbisetty <mpubbise@codeaurora.org>
-Date: Wed, 17 Oct 2018 17:10:13 +0530
-Subject: [PATCH] ath10k: tx airtime reporting
-
-Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
----
- drivers/net/wireless/ath/ath10k/core.c   |  3 ++
- drivers/net/wireless/ath/ath10k/htt.h    | 24 ++++++++++++-
- drivers/net/wireless/ath/ath10k/htt_rx.c | 58 ++++++++++++++++++++++++++++++--
- drivers/net/wireless/ath/ath10k/mac.c    |  3 ++
- drivers/net/wireless/ath/ath10k/txrx.c   |  2 +-
- drivers/net/wireless/ath/ath10k/wmi.h    | 11 +++++-
- 6 files changed, 96 insertions(+), 5 deletions(-)
-
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.c
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/core.c
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.c
-@@ -2764,6 +2764,9 @@ int ath10k_core_start(struct ath10k *ar,
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -2805,6 +2805,9 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
  			     ar->wmi.svc_map))
- 			val |= WMI_10_4_TDLS_UAPSD_BUFFER_STA;
+ 			val |= WMI_10_4_TX_DATA_ACK_RSSI;
  
 +		if (test_bit(WMI_SERVICE_REPORT_AIRTIME, ar->wmi.svc_map))
 +			val |= WMI_10_4_REPORT_AIRTIME;
@@ -27,11 +10,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/core.
  		status = ath10k_mac_ext_resource_config(ar, val);
  		if (status) {
  			ath10k_err(ar,
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt.h
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/htt.h
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt.h
-@@ -580,6 +580,7 @@ struct htt_mgmt_tx_completion {
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -579,6 +579,7 @@ struct htt_mgmt_tx_completion {
  #define HTT_RX_INDICATION_INFO0_EXT_TID_LSB   (0)
  #define HTT_RX_INDICATION_INFO0_FLUSH_VALID   (1 << 5)
  #define HTT_RX_INDICATION_INFO0_RELEASE_VALID (1 << 6)
@@ -39,9 +20,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt.h
  
  #define HTT_RX_INDICATION_INFO1_FLUSH_START_SEQNO_MASK   0x0000003F
  #define HTT_RX_INDICATION_INFO1_FLUSH_START_SEQNO_LSB    0
-@@ -592,6 +593,11 @@ struct htt_mgmt_tx_completion {
- #define HTT_RX_INDICATION_INFO1_NUM_MPDU_RANGES_MASK     0xFF000000
- #define HTT_RX_INDICATION_INFO1_NUM_MPDU_RANGES_LSB      24
+@@ -593,6 +594,11 @@ struct htt_mgmt_tx_completion {
+ 
+ #define HTT_TX_CMPL_FLAG_DATA_RSSI BIT(0)
  
 +#define HTT_TX_CMPL_FLAG_DATA_RSSI		BIT(0)
 +#define HTT_TX_CMPL_FLAG_PPID_PRESENT		BIT(1)
@@ -51,12 +32,7 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt.h
  struct htt_rx_indication_hdr {
  	u8 info0; /* %HTT_RX_INDICATION_INFO0_ */
  	__le16 peer_id;
-@@ -855,10 +861,25 @@ struct htt_data_tx_completion {
- 		} __packed;
- 	} __packed;
- 	u8 num_msdus;
--	u8 rsvd0;
-+	u8 flags2;
+@@ -881,6 +887,21 @@ struct htt_data_tx_completion {
  	__le16 msdus[0]; /* variable length based on %num_msdus */
  } __packed;
  
@@ -78,16 +54,13 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt.h
  struct htt_tx_compl_ind_base {
  	u32 hdr;
  	u16 payload[1/*or more*/];
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt_rx.c
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/htt_rx.c
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -1908,8 +1908,13 @@ static void ath10k_htt_rx_tx_compl_ind(s
- 	struct htt_resp *resp = (struct htt_resp *)skb->data;
- 	struct htt_tx_done tx_done = {};
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2031,8 +2031,12 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
  	int status = MS(resp->data_tx_completion.flags, HTT_DATA_TX_STATUS);
--	__le16 msdu_id;
-+	__le16 msdu_id, *msdus;
+ 	__le16 msdu_id, *msdus;
+ 	bool rssi_enabled = false;
+-	u8 msdu_count = 0;
  	int i;
 +	u8 msdu_count = 0, num_airtime_records, tid;
 +	struct htt_data_tx_compl_ppdu_dur *ppdu_info;
@@ -97,23 +70,21 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt_r
  
  	switch (status) {
  	case HTT_DATA_TX_STATUS_NO_ACK:
-@@ -1929,11 +1934,14 @@ static void ath10k_htt_rx_tx_compl_ind(s
- 		break;
- 	}
- 
-+	msdu_count = resp->data_tx_completion.num_msdus;
-+	msdus = resp->data_tx_completion.msdus;
-+
- 	ath10k_dbg(ar, ATH10K_DBG_HTT, "htt tx completion num_msdus %d\n",
+@@ -2056,12 +2060,12 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
  		   resp->data_tx_completion.num_msdus);
  
- 	for (i = 0; i < resp->data_tx_completion.num_msdus; i++) {
--		msdu_id = resp->data_tx_completion.msdus[i];
-+		msdu_id = msdus[i];
+ 	msdu_count = resp->data_tx_completion.num_msdus;
++	msdus = resp->data_tx_completion.msdus;
+ 
+ 	if (resp->data_tx_completion.flags2 & HTT_TX_CMPL_FLAG_DATA_RSSI)
+ 		rssi_enabled = true;
+ 
+ 	for (i = 0; i < msdu_count; i++) {
+-		msdus = resp->data_tx_completion.msdus;
+ 		msdu_id = msdus[i];
  		tx_done.msdu_id = __le16_to_cpu(msdu_id);
  
- 		/* kfifo_put: In practice firmware shouldn't fire off per-CE
-@@ -1950,6 +1958,51 @@ static void ath10k_htt_rx_tx_compl_ind(s
+@@ -2093,6 +2097,51 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
  			ath10k_txrx_tx_unref(htt, &tx_done);
  		}
  	}
@@ -165,11 +136,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/htt_r
  }
  
  static void ath10k_htt_rx_addba(struct ath10k *ar, struct htt_resp *resp)
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/mac.c
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/mac.c
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -4092,6 +4092,9 @@ static u32 ath10k_mac_update_airtime(str
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -4108,6 +4108,9 @@ static u32 ath10k_mac_update_airtime(struct ath10k *ar,
  	if (!txq || !txq->sta)
  		return airtime;
  
@@ -179,11 +148,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/mac.c
  	spin_lock_bh(&ar->data_lock);
  	arsta = (struct ath10k_sta *)txq->sta->drv_priv;
  
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/txrx.c
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/txrx.c
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/txrx.c
-@@ -103,7 +103,7 @@ int ath10k_txrx_tx_unref(struct ath10k_h
+--- a/drivers/net/wireless/ath/ath10k/txrx.c
++++ b/drivers/net/wireless/ath/ath10k/txrx.c
+@@ -103,7 +103,7 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
  		wake_up(&htt->empty_tx_wq);
  	spin_unlock_bh(&htt->tx_lock);
  
@@ -191,14 +158,12 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/txrx.
 +	if (sta && skb_cb->airtime_est)
  		ieee80211_sta_register_airtime(sta, txq->tid, skb_cb->airtime_est, 0);
  
- 	dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
-Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/wmi.h
-===================================================================
---- backports-20180529-3.14.77-8442d41b.orig/drivers/net/wireless/ath/ath10k/wmi.h
-+++ backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/wmi.h
+ 	if (ar->dev_type != ATH10K_DEV_TYPE_HL)
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
 @@ -211,6 +211,12 @@ enum wmi_service {
+ 	WMI_SERVICE_VDEV_BCN_RATE_CONTROL,
  	WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT,
- 	WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT,
  	WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
 +	WMI_SERVICE_VDEV_DISABLE_4_ADDR_SRC_LRN_SUPPORT,
 +	WMI_SERVICE_PEER_CHWIDTH_CHANGE,
@@ -222,9 +187,9 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/wmi.h
  };
  
  static inline char *wmi_service_name(int service_id)
-@@ -491,6 +503,12 @@ static inline char *wmi_service_name(int
+@@ -491,6 +503,13 @@ static inline char *wmi_service_name(int service_id)
+ 	SVCSTR(WMI_SERVICE_VDEV_BCN_RATE_CONTROL);
  	SVCSTR(WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT);
- 	SVCSTR(WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT);
  	SVCSTR(WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS);
 +	SVCSTR(WMI_SERVICE_VDEV_DISABLE_4_ADDR_SRC_LRN_SUPPORT);
 +	SVCSTR(WMI_SERVICE_PEER_CHWIDTH_CHANGE);
@@ -232,15 +197,13 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/wmi.h
 +	SVCSTR(WMI_SERVICE_RTT_RESPONDER_ROLE);
 +	SVCSTR(WMI_SERVICE_EXT_PEER_TID_CONFIGS_SUPPORT);
 +	SVCSTR(WMI_SERVICE_REPORT_AIRTIME);
- 
++
  	default:
  		return NULL;
-@@ -817,9 +835,21 @@ static inline void wmi_10_4_svc_map(cons
+ 	}
+@@ -818,7 +837,19 @@ static inline void wmi_10_4_svc_map(const __le32 *in, unsigned long *out,
  	SVCMAP(WMI_10_4_SERVICE_VDEV_BCN_RATE_CONTROL,
  	       WMI_SERVICE_VDEV_BCN_RATE_CONTROL, len);
- 	SVCMAP(WMI_10_4_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT,
--	        WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT, len);
-+	       WMI_SERVICE_VDEV_DIFFERENT_BEACON_INTERVAL_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
 -	        WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS, len);
 +	       WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS, len);
@@ -259,10 +222,11 @@ Index: backports-20180529-3.14.77-8442d41b/drivers/net/wireless/ath/ath10k/wmi.h
  }
  
  #undef SVCMAP
-@@ -3003,7 +3033,12 @@ enum wmi_10_4_feature_mask {
+@@ -3003,8 +3034,12 @@ enum wmi_10_4_feature_mask {
  	WMI_10_4_TDLS_UAPSD_SLEEP_STA		= BIT(10),
  	WMI_10_4_TDLS_CONN_TRACKER_IN_HOST_MODE = BIT(11),
  	WMI_10_4_TDLS_EXPLICIT_MODE_ONLY	= BIT(12),
+-	WMI_10_4_TX_DATA_ACK_RSSI               = BIT(16),
 -
 +	WMI_10_4_TDLS_WIDER_BANDWIDTH		= BIT(13),
 +	WMI_10_4_VOW_FEATURES			= BIT(14),

@@ -1,10 +1,8 @@
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index 690e22e..03e7ec3 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -3523,9 +3523,14 @@ enum ieee80211_reconfig_type {
-  *	ieee80211_nan_func_terminated() with
-  *	NL80211_NAN_FUNC_TERM_REASON_USER_REQUEST reason code upon removal.
+@@ -3625,9 +3625,14 @@ enum ieee80211_reconfig_type {
+  *	between the skbs should be symmetric and transitive. Note that while
+  *	skb is always a real frame, head may or may not be an A-MSDU.
   *
 - * @set_noack_tid_bitmap: Set NoAck policy TID bitmap for a virtual interface.
 - *	Drivers mplementing this callback must take care of setting NoAck policy
@@ -20,9 +18,9 @@ index 690e22e..03e7ec3 100644
   */
  struct ieee80211_ops {
  	void (*tx)(struct ieee80211_hw *hw,
-@@ -3809,7 +3814,8 @@ struct ieee80211_ops {
- 			    u8 instance_id);
- 
+@@ -3914,7 +3919,8 @@ struct ieee80211_ops {
+ 				       struct sk_buff *head,
+ 				       struct sk_buff *skb);
  	int (*set_noack_tid_bitmap)(struct ieee80211_hw *hw,
 -				    struct ieee80211_vif *vif, int noack_map);
 +				    struct ieee80211_vif *vif,
@@ -30,8 +28,6 @@ index 690e22e..03e7ec3 100644
  };
  
  /**
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 3363efd..3261d0d 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
 @@ -348,18 +348,51 @@ static int ieee80211_set_noack_map(struct wiphy *wiphy,
@@ -91,11 +87,9 @@ index 3363efd..3261d0d 100644
  }
  
  static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
-diff --git a/net/mac80211/driver-ops.h b/net/mac80211/driver-ops.h
-index 301da99..d142152 100644
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -1252,6 +1252,7 @@ static inline void drv_del_nan_func(struct ieee80211_local *local,
+@@ -1264,6 +1264,7 @@ static inline void drv_del_nan_func(struct ieee80211_local *local,
  
  static inline int drv_set_noack_tid_bitmap(struct ieee80211_local *local,
  					   struct ieee80211_sub_if_data *sdata,
@@ -103,7 +97,7 @@ index 301da99..d142152 100644
  					   int noack_map)
  {
  	int ret;
-@@ -1265,7 +1266,7 @@ static inline int drv_set_noack_tid_bitmap(struct ieee80211_local *local,
+@@ -1277,7 +1278,7 @@ static inline int drv_set_noack_tid_bitmap(struct ieee80211_local *local,
  
  	trace_drv_set_noack_tid_bitmap(local, sdata, noack_map);
  	ret = local->ops->set_noack_tid_bitmap(&local->hw, &sdata->vif,
@@ -112,11 +106,9 @@ index 301da99..d142152 100644
  	trace_drv_return_int(local, ret);
  
  	return ret;
-diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
-index 0cc080c..484b26b 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -642,7 +642,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
+@@ -644,7 +644,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
  				goto err_del_interface;
  
  			if (sdata->noack_map)
@@ -125,11 +117,9 @@ index 0cc080c..484b26b 100644
  							 sdata->noack_map);
  		}
  
-diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
-index 67ed8bd..43eac83 100644
 --- a/net/mac80211/sta_info.c
 +++ b/net/mac80211/sta_info.c
-@@ -599,6 +599,8 @@ static int sta_info_insert_finish(struct sta_info *sta) __acquires(RCU)
+@@ -606,6 +606,8 @@ static int sta_info_insert_finish(struct sta_info *sta) __acquires(RCU)
  	cfg80211_new_sta(sdata->dev, sta->sta.addr, sinfo, GFP_KERNEL);
  	kfree(sinfo);
  
@@ -138,26 +128,21 @@ index 67ed8bd..43eac83 100644
  	sta_dbg(sdata, "Inserted STA %pM\n", sta->sta.addr);
  
  	/* move reference to rcu-protected */
-diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
-index cc26355..70d11dd 100644
 --- a/net/mac80211/sta_info.h
 +++ b/net/mac80211/sta_info.h
-@@ -608,6 +608,10 @@ struct sta_info {
+@@ -608,6 +608,9 @@ struct sta_info {
+ 	int last_cqm_event_signal;
  	int count_rx_signal;
  
- 	struct ewma_avg_signal avg_ack_signal;
-+
 +	/* TID bitmap for station's NoAck policy */
 +	int noack_map;
 +
  	/* keep last! */
  	struct ieee80211_sta sta;
  };
-diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
-index 9aac36c..b20c944 100644
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -2843,7 +2843,9 @@ void ieee80211_check_fast_xmit(struct sta_info *sta)
+@@ -2899,7 +2899,9 @@ void ieee80211_check_fast_xmit(struct sta_info *sta)
  	    test_sta_flag(sta, WLAN_STA_CLEAR_PS_FILT))
  		goto out;
  
@@ -168,8 +153,6 @@ index 9aac36c..b20c944 100644
  		goto out;
  
  	/* fast-xmit doesn't handle fragmentation at all */
-diff --git a/net/mac80211/wme.c b/net/mac80211/wme.c
-index 04738d2..e0e9d67 100644
 --- a/net/mac80211/wme.c
 +++ b/net/mac80211/wme.c
 @@ -227,6 +227,38 @@ u16 ieee80211_select_queue(struct ieee80211_sub_if_data *sdata,

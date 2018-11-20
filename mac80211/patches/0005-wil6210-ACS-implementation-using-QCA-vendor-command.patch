@@ -22,7 +22,7 @@
  #define WIL_MAX_ROC_DURATION_MS 5000
  
  bool disable_ap_sme;
-@@ -118,6 +133,7 @@ nla_policy wil_rf_sector_cfg_policy[QCA_
+@@ -138,6 +153,7 @@ nla_policy wil_rf_sector_cfg_policy[QCA_ATTR_DMG_RF_SECTOR_CFG_MAX + 1] = {
  };
  
  enum qca_nl80211_vendor_subcmds {
@@ -30,7 +30,7 @@
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SECTOR_CFG = 139,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_SET_SECTOR_CFG = 140,
  	QCA_NL80211_VENDOR_SUBCMD_DMG_RF_GET_SELECTED_SECTOR = 141,
-@@ -136,6 +152,8 @@ static int wil_rf_sector_get_selected(st
+@@ -156,6 +172,8 @@ static int wil_rf_sector_get_selected(struct wiphy *wiphy,
  static int wil_rf_sector_set_selected(struct wiphy *wiphy,
  				      struct wireless_dev *wdev,
  				      const void *data, int data_len);
@@ -39,7 +39,7 @@
  
  /* vendor specific commands */
  static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
-@@ -169,6 +187,61 @@ static const struct wiphy_vendor_command
+@@ -189,6 +207,61 @@ static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
  			 WIPHY_VENDOR_CMD_NEED_RUNNING,
  		.doit = wil_rf_sector_set_selected
  	},
@@ -101,7 +101,7 @@
  };
  
  static struct ieee80211_supported_band wil_band_60ghz = {
-@@ -2108,6 +2181,8 @@ static void wil_wiphy_init(struct wiphy
+@@ -2340,6 +2413,8 @@ static void wil_wiphy_init(struct wiphy *wiphy)
  
  	wiphy->n_vendor_commands = ARRAY_SIZE(wil_nl80211_vendor_commands);
  	wiphy->vendor_commands = wil_nl80211_vendor_commands;
@@ -110,7 +110,7 @@
  
  #ifdef CONFIG_PM
  	wiphy->wowlan = &wil_wowlan_support;
-@@ -2701,3 +2776,300 @@ static int wil_rf_sector_set_selected(st
+@@ -2937,3 +3012,300 @@ static int wil_rf_sector_set_selected(struct wiphy *wiphy,
  
  	return rc;
  }
@@ -413,8 +413,8 @@
 +
 --- a/drivers/net/wireless/ath/wil6210/debugfs.c
 +++ b/drivers/net/wireless/ath/wil6210/debugfs.c
-@@ -1753,6 +1753,65 @@ static const struct file_operations fops
- 	.open  = simple_open,
+@@ -2407,6 +2407,65 @@ static const struct file_operations fops_compressed_rx_status = {
+ 	.llseek	= seq_lseek,
  };
  
 +/*---------Survey results------------*/
@@ -479,17 +479,17 @@
  /*----------------*/
  static void wil6210_debugfs_init_blobs(struct wil6210_priv *wil,
  				       struct dentry *dbg)
-@@ -1806,6 +1865,7 @@ static const struct {
+@@ -2459,6 +2518,7 @@ static const struct {
  	{"fw_capabilities",	0444,	&fops_fw_capabilities},
  	{"fw_version",	0444,		&fops_fw_version},
  	{"suspend_stats",	0644,	&fops_suspend_stats},
 +	{"survey",      S_IRUGO,                &fops_survey},
- };
- 
- static void wil6210_debugfs_init_files(struct wil6210_priv *wil,
+ 	{"compressed_rx_status", 0644,	&fops_compressed_rx_status},
+ 	{"srings",	0444,		&fops_srings},
+ 	{"status_msg",	0444,		&fops_status_msg},
 --- a/drivers/net/wireless/ath/wil6210/wil6210.h
 +++ b/drivers/net/wireless/ath/wil6210/wil6210.h
-@@ -809,6 +809,11 @@ struct wil6210_priv {
+@@ -1008,6 +1008,11 @@ struct wil6210_priv {
  #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
  	void *nss_ctx;
  #endif
@@ -503,7 +503,7 @@
  
 --- a/drivers/net/wireless/ath/wil6210/wmi.c
 +++ b/drivers/net/wireless/ath/wil6210/wmi.c
-@@ -817,6 +817,27 @@ static void wmi_evt_scan_complete(struct
+@@ -924,6 +924,27 @@ static void wmi_evt_scan_complete(struct wil6210_vif *vif, int id,
  	mutex_unlock(&wil->vif_mutex);
  }
  
@@ -531,39 +531,17 @@
  static void wmi_evt_connect(struct wil6210_vif *vif, int id, void *d, int len)
  {
  	struct wil6210_priv *wil = vif_to_wil(vif);
-@@ -1259,18 +1280,19 @@ static const struct {
- 	void (*handler)(struct wil6210_vif *vif,
- 			int eventid, void *data, int data_len);
- } wmi_evt_handlers[] = {
--	{WMI_READY_EVENTID,		wmi_evt_ready},
-+	{WMI_READY_EVENTID,			wmi_evt_ready},
- 	{WMI_FW_READY_EVENTID,			wmi_evt_ignore},
--	{WMI_RX_MGMT_PACKET_EVENTID,	wmi_evt_rx_mgmt},
-+	{WMI_RX_MGMT_PACKET_EVENTID,		wmi_evt_rx_mgmt},
+@@ -1790,6 +1811,7 @@ static const struct {
+ 	{WMI_RX_MGMT_PACKET_EVENTID,	wmi_evt_rx_mgmt},
  	{WMI_TX_MGMT_PACKET_EVENTID,		wmi_evt_tx_mgmt},
--	{WMI_SCAN_COMPLETE_EVENTID,	wmi_evt_scan_complete},
--	{WMI_CONNECT_EVENTID,		wmi_evt_connect},
--	{WMI_DISCONNECT_EVENTID,	wmi_evt_disconnect},
--	{WMI_EAPOL_RX_EVENTID,		wmi_evt_eapol_rx},
--	{WMI_BA_STATUS_EVENTID,		wmi_evt_ba_status},
--	{WMI_RCP_ADDBA_REQ_EVENTID,	wmi_evt_addba_rx_req},
--	{WMI_DELBA_EVENTID,		wmi_evt_delba},
--	{WMI_VRING_EN_EVENTID,		wmi_evt_vring_en},
-+	{WMI_SCAN_COMPLETE_EVENTID,		wmi_evt_scan_complete},
+ 	{WMI_SCAN_COMPLETE_EVENTID,	wmi_evt_scan_complete},
 +	{WMI_ACS_PASSIVE_SCAN_COMPLETE_EVENTID, wmi_evt_survey_complete},
-+	{WMI_CONNECT_EVENTID,			wmi_evt_connect},
-+	{WMI_DISCONNECT_EVENTID,		wmi_evt_disconnect},
-+	{WMI_EAPOL_RX_EVENTID,			wmi_evt_eapol_rx},
-+	{WMI_BA_STATUS_EVENTID,			wmi_evt_ba_status},
-+	{WMI_RCP_ADDBA_REQ_EVENTID,		wmi_evt_addba_rx_req},
-+	{WMI_DELBA_EVENTID,			wmi_evt_delba},
-+	{WMI_VRING_EN_EVENTID,			wmi_evt_vring_en},
- 	{WMI_DATA_PORT_OPEN_EVENTID,		wmi_evt_ignore},
- 	{WMI_SCHED_SCAN_RESULT_EVENTID,		wmi_evt_sched_scan_result},
- };
+ 	{WMI_CONNECT_EVENTID,		wmi_evt_connect},
+ 	{WMI_DISCONNECT_EVENTID,	wmi_evt_disconnect},
+ 	{WMI_EAPOL_RX_EVENTID,		wmi_evt_eapol_rx},
 --- a/drivers/net/wireless/ath/wil6210/wmi.h
 +++ b/drivers/net/wireless/ath/wil6210/wmi.h
-@@ -35,7 +35,9 @@
+@@ -34,7 +34,9 @@
  #define WMI_MAC_LEN			(6)
  #define WMI_PROX_RANGE_NUM		(3)
  #define WMI_MAX_LOSS_DMG_BEACONS	(20)
