@@ -1,0 +1,71 @@
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index b947550..30473f2 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -756,6 +756,28 @@ static inline u8 ath10k_bw_to_mac80211_bw(u8 bw)
+ 	return ret;
+ }
+ 
++static inline u8 mac80211_bw_to_ath10k_bw(u8 bw)
++{
++	u8 ret = 0;
++
++	switch (bw) {
++	case RATE_INFO_BW_20:
++		ret = 0;
++		break;
++	case RATE_INFO_BW_40:
++		ret = 1;
++		break;
++	case RATE_INFO_BW_80:
++		ret = 2;
++		break;
++	case RATE_INFO_BW_160:
++		ret = 3;
++		break;
++	}
++
++	return ret;
++}
++
+ static void ath10k_htt_rx_h_rates(struct ath10k *ar,
+ 				  struct ieee80211_rx_status *status,
+ 				  struct htt_rx_desc *rxd)
+@@ -2602,22 +2624,22 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ 		return;
+ 
+ 	tx_stats = arsta->tx_stats;
+-	gi = (arsta->txrate.flags & RATE_INFO_FLAGS_SHORT_GI);
+-	ht_idx = txrate->mcs + txrate->nss * 8;
++	gi = !!(arsta->txrate.flags & RATE_INFO_FLAGS_SHORT_GI);
++	ht_idx = txrate->mcs + (txrate->nss - 1) * 8;
+ 	mcs = txrate->mcs;
+-	bw = txrate->bw;
+-	nss = txrate->nss;
++	bw = mac80211_bw_to_ath10k_bw(txrate->bw);
++	nss = txrate->nss - 1;
+ 
+ #define STATS_OP_FMT(name) tx_stats->stats[ATH10K_STATS_TYPE_##name]
+ 
+-	if (txrate->flags == RATE_INFO_FLAGS_VHT_MCS) {
++	if (txrate->flags & RATE_INFO_FLAGS_VHT_MCS) {
+ 		STATS_OP_FMT(SUCC).vht[0][mcs] += pstats->succ_bytes;
+ 		STATS_OP_FMT(SUCC).vht[1][mcs] += pstats->succ_pkts;
+ 		STATS_OP_FMT(FAIL).vht[0][mcs] += pstats->failed_bytes;
+ 		STATS_OP_FMT(FAIL).vht[1][mcs] += pstats->failed_pkts;
+ 		STATS_OP_FMT(RETRY).vht[0][mcs] += pstats->retry_bytes;
+ 		STATS_OP_FMT(RETRY).vht[1][mcs] += pstats->retry_pkts;
+-	} else if (txrate->flags == RATE_INFO_FLAGS_MCS) {
++	} else if (txrate->flags & RATE_INFO_FLAGS_MCS) {
+ 		STATS_OP_FMT(SUCC).ht[0][ht_idx] += pstats->succ_bytes;
+ 		STATS_OP_FMT(SUCC).ht[1][ht_idx] += pstats->succ_pkts;
+ 		STATS_OP_FMT(FAIL).ht[0][ht_idx] += pstats->failed_bytes;
+@@ -2640,7 +2662,7 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ 	if (ATH10K_HW_AMPDU(pstats->flags)) {
+ 		tx_stats->ba_fails += ATH10K_HW_BA_FAIL(pstats->flags);
+ 
+-		if (txrate->flags == RATE_INFO_FLAGS_MCS) {
++		if (txrate->flags & RATE_INFO_FLAGS_MCS) {
+ 			STATS_OP_FMT(AMPDU).ht[0][ht_idx] +=
+ 				pstats->succ_bytes + pstats->retry_bytes;
+ 			STATS_OP_FMT(AMPDU).ht[1][ht_idx] +=
