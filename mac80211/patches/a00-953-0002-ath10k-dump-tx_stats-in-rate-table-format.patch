@@ -1,0 +1,101 @@
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -513,6 +513,7 @@ struct ath10k_htt_data_stats {
+ 	u64 bw[ATH10K_COUNTER_TYPE_MAX][NUM_BW];
+ 	u64 nss[ATH10K_COUNTER_TYPE_MAX][NUM_NSS];
+ 	u64 gi[ATH10K_COUNTER_TYPE_MAX][NUM_GI];
++	u64 rate_table[ATH10K_COUNTER_TYPE_MAX][ATH10K_RATE_TABLE_NUM];
+ };
+ 
+ struct ath10k_htt_tx_stats {
+--- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
+@@ -668,6 +668,16 @@ static int ath10k_dump_htt_tx_stats(char *buf, int len, int size,
+ 		len += scnprintf(buf + len, size - len, "%llu ",
+ 				 stats.legacy[type][i]);
+ 	len += scnprintf(buf + len, size - len, "\n");
++	len += scnprintf(buf + len, size - len,
++			 " Rate table %s (1,2 ... Mbps)\n  ",
++			 str[type]);
++	for (i = 0; i < ATH10K_RATE_TABLE_NUM; i++) {
++		len += scnprintf(buf + len, size - len, "%llu ",
++				stats.rate_table[type][i]);
++		if (!((i + 1) % 8))
++			len +=
++			scnprintf(buf + len, size - len, "\n  ");
++	}
+ 
+ 	return len;
+ }
+@@ -682,7 +692,7 @@ static ssize_t ath10k_dbg_sta_dump_tx_stats(struct file *file,
+ 	char *buf;
+ 	static const char *str_name[ATH10K_STATS_TYPE_MAX] = {
+ 				"succ", "fail", "retry", "ampdu"};
+-	int len = 0, i, j, retval = 0, size = 16 * 1024;
++	int len = 0, i, j, retval = 0, size = 16 * 4096;
+ 
+ 	if (!ar->debug.enable_extd_tx_stats)
+ 		return -1;
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2618,7 +2618,7 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ {
+ 	struct rate_info *txrate = &arsta->txrate;
+ 	struct ath10k_htt_tx_stats *tx_stats;
+-	int ht_idx, gi, mcs, bw, nss;
++	int idx, ht_idx, gi, mcs, bw, nss;
+ 
+ 	if (!arsta->tx_stats)
+ 		return;
+@@ -2633,6 +2633,8 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ 	mcs = txrate->mcs;
+ 	bw = mac80211_bw_to_ath10k_bw(txrate->bw);
+ 	nss = txrate->nss - 1;
++	idx = mcs * 8 + 8 * 10 * nss;
++	idx += bw * 2 + gi;
+ 
+ #define STATS_OP_FMT(name) tx_stats->stats[ATH10K_STATS_TYPE_##name]
+ 
+@@ -2683,12 +2685,16 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ 			pstats->succ_bytes + pstats->retry_bytes;
+ 		STATS_OP_FMT(AMPDU).gi[0][gi] +=
+ 			pstats->succ_bytes + pstats->retry_bytes;
++		STATS_OP_FMT(AMPDU).rate_table[0][idx] +=
++			pstats->succ_bytes + pstats->retry_bytes;
+ 		STATS_OP_FMT(AMPDU).bw[1][bw] +=
+ 			pstats->succ_pkts + pstats->retry_pkts;
+ 		STATS_OP_FMT(AMPDU).nss[1][nss] +=
+ 			pstats->succ_pkts + pstats->retry_pkts;
+ 		STATS_OP_FMT(AMPDU).gi[1][gi] +=
+ 			pstats->succ_pkts + pstats->retry_pkts;
++		STATS_OP_FMT(AMPDU).rate_table[1][idx] +=
++			pstats->succ_pkts + pstats->retry_pkts;
+ 	} else {
+ 		tx_stats->ack_fails +=
+ 				ATH10K_HW_BA_FAIL(pstats->flags);
+@@ -2717,6 +2723,15 @@ ath10k_accumulate_per_peer_tx_stats(struct ath10k *ar,
+ 	STATS_OP_FMT(RETRY).bw[1][bw] += pstats->retry_pkts;
+ 	STATS_OP_FMT(RETRY).nss[1][nss] += pstats->retry_pkts;
+ 	STATS_OP_FMT(RETRY).gi[1][gi] += pstats->retry_pkts;
++
++	if (txrate->flags >= RATE_INFO_FLAGS_MCS) {
++		STATS_OP_FMT(SUCC).rate_table[0][idx] += pstats->succ_bytes;
++		STATS_OP_FMT(SUCC).rate_table[1][idx] += pstats->succ_pkts;
++		STATS_OP_FMT(FAIL).rate_table[0][idx] += pstats->failed_bytes;
++		STATS_OP_FMT(FAIL).rate_table[1][idx] += pstats->failed_pkts;
++		STATS_OP_FMT(RETRY).rate_table[0][idx] += pstats->retry_bytes;
++		STATS_OP_FMT(RETRY).rate_table[1][idx] += pstats->retry_pkts;
++	}
+ }
+ 
+ static void
+--- a/drivers/net/wireless/ath/ath10k/wmi.h
++++ b/drivers/net/wireless/ath/ath10k/wmi.h
+@@ -5119,6 +5119,7 @@ enum wmi_rate_preamble {
+ #define NUM_LEGACY	12
+ #define NUM_GI		2
+ #define NUM_HT_MCS	32
++#define ATH10K_RATE_TABLE_NUM	320
+ 
+ /* Value to disable fixed rate setting */
+ #define WMI_FIXED_RATE_NONE    (0xff)
