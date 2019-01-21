@@ -1,0 +1,423 @@
+Index: backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/cfg80211.c
+===================================================================
+--- backports-20161201-4.4.60-9ab3068.orig/drivers/net/wireless/ath/wil6210/cfg80211.c	2018-12-30 11:12:14.893434385 +0200
++++ backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/cfg80211.c	2018-12-30 11:32:10.351379358 +0200
+@@ -65,6 +65,49 @@
+ /* channel 4 not supported yet */
+ };
+ 
++enum wil_nl_60g_cmd_type {
++	NL_60G_CMD_FW_WMI,
++	NL_60G_CMD_DEBUG,
++	NL_60G_CMD_STATISTICS,
++	NL_60G_CMD_REGISTER,
++};
++
++enum wil_nl_60g_evt_type {
++	NL_60G_EVT_DRIVER_ERROR,
++	NL_60G_EVT_FW_ERROR,
++	NL_60G_EVT_FW_WMI,
++	NL_60G_EVT_DRIVER_SHUTOWN,
++	NL_60G_EVT_DRIVER_DEBUG_EVENT,
++};
++
++enum wil_nl_60g_debug_cmd {
++	NL_60G_DBG_FORCE_WMI_SEND,
++};
++
++struct wil_nl_60g_send_receive_wmi {
++	u32 cmd_id; /* enum wmi_command_id or enum wmi_event_id */
++	u8 reserved[2];
++	u8 dev_id; /* mid */
++	u16 buf_len;
++	u8 buf[0];
++} __packed;
++
++struct wil_nl_60g_event {
++	u32 evt_type; /* wil_nl_60g_evt_type */
++	u32 buf_len;
++	u8 reserved[9];
++	u8 buf[0];
++} __packed;
++
++struct wil_nl_60g_debug { /* NL_60G_CMD_DEBUG */
++	u32 cmd_id; /* wil_nl_60g_debug_cmd */
++} __packed;
++
++struct wil_nl_60g_debug_force_wmi {
++	struct wil_nl_60g_debug hdr;
++	u32 enable;
++} __packed;
++
+ static void
+ wil_memdup_ie(u8 **pdst, size_t *pdst_len, const u8 *src, size_t src_len)
+ {
+@@ -118,6 +161,8 @@
+ 
+ enum qca_wlan_vendor_attr_wil {
+ 	QCA_ATTR_MAC_ADDR = 6,
++	QCA_ATTR_FEATURE_FLAGS = 7,
++	QCA_ATTR_TEST = 8,
+ 	QCA_ATTR_PAD = 13,
+ 	QCA_ATTR_TSF = 29,
+ 	QCA_ATTR_DMG_RF_SECTOR_INDEX = 30,
+@@ -129,6 +174,9 @@
+ 	QCA_ATTR_WIL_MAX,
+ };
+ 
++#define WIL_ATTR_60G_CMD_TYPE QCA_ATTR_FEATURE_FLAGS
++#define WIL_ATTR_60G_BUF QCA_ATTR_TEST
++
+ enum qca_wlan_vendor_attr_dmg_rf_sector_type {
+ 	QCA_ATTR_DMG_RF_SECTOR_TYPE_RX,
+ 	QCA_ATTR_DMG_RF_SECTOR_TYPE_TX,
+@@ -185,7 +233,14 @@
+ 	[QCA_ATTR_DMG_RF_SECTOR_CFG_DTYPE_X16] = { .type = NLA_U32 },
+ };
+ 
++static const struct
++nla_policy wil_nl_60g_policy[QCA_ATTR_WIL_MAX + 1] = {
++	[WIL_ATTR_60G_CMD_TYPE] = { .type = NLA_U32 },
++	[WIL_ATTR_60G_BUF] = { .type = NLA_BINARY },
++};
++
+ enum qca_nl80211_vendor_subcmds {
++	QCA_NL80211_VENDOR_SUBCMD_UNSPEC = 0,
+ 	QCA_NL80211_VENDOR_SUBCMD_DO_ACS = 54,
+ 	QCA_NL80211_VENDOR_SUBCMD_LOC_GET_CAPA = 128,
+ 	QCA_NL80211_VENDOR_SUBCMD_FTM_START_SESSION = 129,
+@@ -223,6 +278,8 @@
+ 				      const void *data, int data_len);
+ static int wil_brp_set_ant_limit(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 				 const void *data, int data_len);
++static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
++				 const void *data, int data_len);
+ 
+ /* vendor specific commands */
+ static const struct wiphy_vendor_command wil_nl80211_vendor_commands[] = {
+@@ -313,6 +370,13 @@
+ 			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+ 		.doit = wil_brp_set_ant_limit
+ 	},
++	{
++		.info.vendor_id = QCA_NL80211_VENDOR_ID,
++		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_UNSPEC,
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.doit = wil_nl_60g_handle_cmd
++	},
+ };
+ 
+ /* vendor specific events */
+@@ -333,6 +397,10 @@
+ 			.vendor_id = QCA_NL80211_VENDOR_ID,
+ 			.subcmd = QCA_NL80211_VENDOR_SUBCMD_AOA_MEAS_RESULT
+ 	},
++	[QCA_NL80211_VENDOR_EVENT_UNSPEC_INDEX] = {
++			.vendor_id = QCA_NL80211_VENDOR_ID,
++			.subcmd = QCA_NL80211_VENDOR_SUBCMD_UNSPEC
++	},
+ };
+ 
+ static struct ieee80211_supported_band wil_band_60ghz = {
+@@ -2907,3 +2975,170 @@
+ 	return wil_brp_wmi_set_ant_limit(wil, cid, limit_mode,
+ 					 antenna_num_limit);
+ }
++
++static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
++				 const void *data, int data_len)
++{
++	struct wil6210_priv *wil = wdev_to_wil(wdev);
++	struct nlattr *tb[QCA_ATTR_WIL_MAX + 1];
++	struct wil_nl_60g_send_receive_wmi *cmd;
++	struct wil_nl_60g_debug_force_wmi debug_force_wmi;
++	int rc, len;
++	u32 wil_nl_60g_cmd_type, publish;
++
++	rc = nla_parse(tb, QCA_ATTR_WIL_MAX, data, data_len,
++		       wil_nl_60g_policy);
++	if (rc) {
++		wil_err(wil, "Invalid nl_60g_cmd ATTR\n");
++		return rc;
++	}
++
++	if (!tb[WIL_ATTR_60G_CMD_TYPE]) {
++		wil_err(wil, "Invalid nl_60g_cmd type\n");
++		return -EINVAL;
++	}
++
++	wil_nl_60g_cmd_type = nla_get_u32(tb[WIL_ATTR_60G_CMD_TYPE]);
++
++	switch (wil_nl_60g_cmd_type) {
++	case NL_60G_CMD_REGISTER:
++		if (!tb[WIL_ATTR_60G_BUF]) {
++			wil_err(wil, "Invalid nl_60g_cmd spec\n");
++			return -EINVAL;
++		}
++
++		len = nla_len(tb[WIL_ATTR_60G_BUF]);
++		if (len != sizeof(publish)) {
++			wil_err(wil, "cmd buffer wrong len %d\n", len);
++			return -EINVAL;
++		}
++		memcpy(&publish, nla_data(tb[WIL_ATTR_60G_BUF]), len);
++		wil->publish_nl_evt = publish;
++
++		wil_dbg_wmi(wil, "Publish wmi event %s\n",
++			    publish ? "enabled" : "disabled");
++		break;
++	case NL_60G_CMD_DEBUG:
++		if (!tb[WIL_ATTR_60G_BUF]) {
++			wil_err(wil, "Invalid nl_60g_cmd spec\n");
++			return -EINVAL;
++		}
++
++		len = nla_len(tb[WIL_ATTR_60G_BUF]);
++		if (len < sizeof(struct wil_nl_60g_debug)) {
++			wil_err(wil, "cmd buffer too short %d\n", len);
++			return -EINVAL;
++		}
++
++		memcpy(&debug_force_wmi, nla_data(tb[WIL_ATTR_60G_BUF]),
++		       sizeof(struct wil_nl_60g_debug));
++
++		switch (debug_force_wmi.hdr.cmd_id) {
++		case NL_60G_DBG_FORCE_WMI_SEND:
++			if (len != sizeof(debug_force_wmi)) {
++				wil_err(wil, "cmd buffer wrong len %d\n", len);
++				return -EINVAL;
++			}
++
++			memcpy(&debug_force_wmi, nla_data(tb[WIL_ATTR_60G_BUF]),
++			       sizeof(debug_force_wmi));
++			wil->force_wmi_send = debug_force_wmi.enable;
++
++			wil_dbg_wmi(wil, "force sending wmi commands %d\n",
++				    wil->force_wmi_send);
++			break;
++		default:
++			rc = -EINVAL;
++			wil_err(wil, "invalid debug_cmd id %d",
++				debug_force_wmi.hdr.cmd_id);
++		}
++		break;
++	case NL_60G_CMD_FW_WMI:
++		if (!tb[WIL_ATTR_60G_BUF]) {
++			wil_err(wil, "Invalid nl_60g_cmd spec\n");
++			return -EINVAL;
++		}
++
++		len = nla_len(tb[WIL_ATTR_60G_BUF]);
++		if (len < offsetof(struct wil_nl_60g_send_receive_wmi, buf)) {
++			wil_err(wil, "wmi cmd buffer too small\n");
++			return -EINVAL;
++		}
++
++		cmd = kmalloc(len, GFP_KERNEL);
++		if (!cmd)
++			return -ENOMEM;
++
++		memcpy(cmd, nla_data(tb[WIL_ATTR_60G_BUF]), (unsigned int)len);
++
++		wil_dbg_wmi(wil, "sending user-space command (0x%04x) [%d]\n",
++			    cmd->cmd_id, cmd->buf_len);
++
++		if (wil->force_wmi_send)
++			rc = wmi_force_send(wil, cmd->cmd_id, cmd->dev_id,
++					    cmd->buf, cmd->buf_len);
++		else
++			rc = wmi_send(wil, cmd->cmd_id, cmd->buf,
++				      cmd->buf_len);
++
++		kfree(cmd);
++		break;
++	default:
++		rc = -EINVAL;
++		wil_err(wil, "invalid nl_60g_cmd type %d", wil_nl_60g_cmd_type);
++	}
++
++	return rc;
++}
++
++void wil_nl_60g_receive_wmi_evt(struct wil6210_priv *wil, u8 *cmd, int len)
++{
++	struct sk_buff *vendor_event = NULL;
++	struct wil_nl_60g_event *evt;
++	struct wil_nl_60g_send_receive_wmi *wmi_buf;
++	struct wmi_cmd_hdr *wmi_hdr = (struct wmi_cmd_hdr *)cmd;
++	int data_len;
++
++	if (!wil->publish_nl_evt)
++		return;
++
++	wil_dbg_wmi(wil, "report wmi event to user-space (0x%04x) [%d]\n",
++		    le16_to_cpu(wmi_hdr->command_id), len);
++
++	data_len = len - sizeof(struct wmi_cmd_hdr);
++
++	evt = kzalloc(sizeof(*evt) + sizeof(*wmi_buf) + data_len, GFP_KERNEL);
++	if (!evt)
++		return;
++
++	evt->evt_type = NL_60G_EVT_FW_WMI;
++	evt->buf_len = sizeof(*wmi_buf) + data_len;
++
++	wmi_buf = (struct wil_nl_60g_send_receive_wmi *)evt->buf;
++
++	wmi_buf->cmd_id = le16_to_cpu(wmi_hdr->command_id);
++	wmi_buf->dev_id = wmi_hdr->mid;
++	wmi_buf->buf_len = data_len;
++	memcpy(wmi_buf->buf, cmd + sizeof(struct wmi_cmd_hdr), data_len);
++
++	vendor_event = cfg80211_vendor_event_alloc(
++				wil_to_wiphy(wil),
++				NULL,
++				data_len + 4 + NLMSG_HDRLEN +
++				sizeof(*evt) + sizeof(*wmi_buf),
++				QCA_NL80211_VENDOR_EVENT_UNSPEC_INDEX,
++				GFP_KERNEL);
++	if (!vendor_event)
++		goto out;
++
++	if (nla_put(vendor_event, WIL_ATTR_60G_BUF,
++		    sizeof(*evt) + sizeof(*wmi_buf) + data_len, evt)) {
++		wil_err(wil, "failed to fill WIL_ATTR_60G_BUF\n");
++		goto out;
++	}
++
++	cfg80211_vendor_event(vendor_event, GFP_KERNEL);
++
++out:
++	kfree(evt);
++}
+Index: backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/ftm.h
+===================================================================
+--- backports-20161201-4.4.60-9ab3068.orig/drivers/net/wireless/ath/wil6210/ftm.h	2018-12-30 11:12:13.937439333 +0200
++++ backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/ftm.h	2018-12-30 11:23:29.865872955 +0200
+@@ -418,6 +418,7 @@
+ 	QCA_NL80211_VENDOR_EVENT_FTM_MEAS_RESULT_INDEX,
+ 	QCA_NL80211_VENDOR_EVENT_FTM_SESSION_DONE_INDEX,
+ 	QCA_NL80211_VENDOR_EVENT_AOA_MEAS_RESULT_INDEX,
++	QCA_NL80211_VENDOR_EVENT_UNSPEC_INDEX,
+ };
+ 
+ /* measurement parameters. Specified for each peer as part
+Index: backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/main.c
+===================================================================
+--- backports-20161201-4.4.60-9ab3068.orig/drivers/net/wireless/ath/wil6210/main.c	2018-12-30 11:12:14.897434365 +0200
++++ backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/main.c	2018-12-30 11:22:48.378095397 +0200
+@@ -1055,6 +1055,8 @@
+ 
+ 	wmi_event_flush(wil);
+ 
++	wil->force_wmi_send = false;
++
+ 	flush_workqueue(wil->wq_service);
+ 	flush_workqueue(wil->wmi_wq);
+ 
+Index: backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/wil6210.h
+===================================================================
+--- backports-20161201-4.4.60-9ab3068.orig/drivers/net/wireless/ath/wil6210/wil6210.h	2018-12-30 11:12:14.897434365 +0200
++++ backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/wil6210.h	2018-12-30 11:22:01.290347357 +0200
+@@ -739,6 +739,8 @@
+ 	struct notifier_block pm_notify;
+ #endif /* CONFIG_PM_SLEEP */
+ #endif /* CONFIG_PM */
++	bool publish_nl_evt; /* deliver WMI events to user space */
++	bool force_wmi_send; /* allow WMI command while FW in sysassert */
+ };
+ 
+ #define wil_to_wiphy(i) (i->wdev->wiphy)
+@@ -873,6 +875,8 @@
+ int wmi_read_hdr(struct wil6210_priv *wil, __le32 ptr,
+ 		 struct wil6210_mbox_hdr *hdr);
+ int wmi_send(struct wil6210_priv *wil, u16 cmdid, void *buf, u16 len);
++int wmi_force_send(struct wil6210_priv *wil, u16 cmdid, u8 mid, void *buf,
++		   u16 len);
+ void wmi_recv_cmd(struct wil6210_priv *wil);
+ int wmi_call(struct wil6210_priv *wil, u16 cmdid, void *buf, u16 len,
+ 	     u16 reply_id, void *reply, u8 reply_size, int to_msec);
+@@ -1027,6 +1031,7 @@
+ void wil_aoa_evt_meas(struct wil6210_priv *wil,
+ 		      struct wmi_aoa_meas_event *evt,
+ 		      int len);
++void wil_nl_60g_receive_wmi_evt(struct wil6210_priv *wil, u8 *cmd, int len);
+ /* link loss */
+ int wmi_link_maintain_cfg_write(struct wil6210_priv *wil,
+ 				const u8 *addr,
+Index: backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/wmi.c
+===================================================================
+--- backports-20161201-4.4.60-9ab3068.orig/drivers/net/wireless/ath/wil6210/wmi.c	2018-12-30 11:12:14.769435027 +0200
++++ backports-20161201-4.4.60-9ab3068/drivers/net/wireless/ath/wil6210/wmi.c	2018-12-30 11:18:47.607377770 +0200
+@@ -197,7 +197,8 @@
+ 	return 0;
+ }
+ 
+-static int __wmi_send(struct wil6210_priv *wil, u16 cmdid, void *buf, u16 len)
++static int __wmi_send(struct wil6210_priv *wil, u16 cmdid, void *buf, u16 len,
++		      bool force_send)
+ {
+ 	struct {
+ 		struct wil6210_mbox_hdr hdr;
+@@ -229,7 +230,7 @@
+ 
+ 	might_sleep();
+ 
+-	if (!test_bit(wil_status_fwready, wil->status)) {
++	if (!test_bit(wil_status_fwready, wil->status) && !force_send) {
+ 		wil_err(wil, "WMI: cannot send command while FW not ready\n");
+ 		return -EAGAIN;
+ 	}
+@@ -258,7 +259,7 @@
+ 	wil_dbg_wmi(wil, "Head 0x%08x -> 0x%08x\n", r->head, next_head);
+ 	/* wait till FW finish with previous command */
+ 	for (retry = 5; retry > 0; retry--) {
+-		if (!test_bit(wil_status_fwready, wil->status)) {
++		if (!test_bit(wil_status_fwready, wil->status) && !force_send) {
+ 			wil_err(wil, "WMI: cannot send command while FW not ready\n");
+ 			rc = -EAGAIN;
+ 			goto out;
+@@ -312,12 +313,24 @@
+ 	int rc;
+ 
+ 	mutex_lock(&wil->wmi_mutex);
+-	rc = __wmi_send(wil, cmdid, buf, len);
++	rc = __wmi_send(wil, cmdid, buf, len, false);
+ 	mutex_unlock(&wil->wmi_mutex);
+ 
+ 	return rc;
+ }
+ 
++int wmi_force_send(struct wil6210_priv *wil, u16 cmdid, u8 mid, void *buf,
++		   u16 len)
++{
++	int rc;
++
++	mutex_lock(&wil->wmi_mutex);
++	rc = __wmi_send(wil, cmdid, buf, len, true);
++	mutex_unlock(&wil->wmi_mutex);
++
++	return rc;
++}
++
+ /*=== Event handlers ===*/
+ static void wmi_evt_ready(struct wil6210_priv *wil, int id, void *d, int len)
+ {
+@@ -970,6 +983,7 @@
+ 			struct wmi_cmd_hdr *wmi = &evt->event.wmi;
+ 			u16 id = le16_to_cpu(wmi->command_id);
+ 			u32 tstamp = le32_to_cpu(wmi->fw_timestamp);
++			wil_nl_60g_receive_wmi_evt(wil, cmd, len);
+ 			spin_lock_irqsave(&wil->wmi_ev_lock, flags);
+ 			if (wil->reply_id && wil->reply_id == id) {
+ 				if (wil->reply_buf) {
+@@ -1029,7 +1043,7 @@
+ 	reinit_completion(&wil->wmi_call);
+ 	spin_unlock(&wil->wmi_ev_lock);
+ 
+-	rc = __wmi_send(wil, cmdid, buf, len);
++	rc = __wmi_send(wil, cmdid, buf, len, false);
+ 	if (rc)
+ 		goto out;
+ 
