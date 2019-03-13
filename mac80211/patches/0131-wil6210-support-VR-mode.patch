@@ -1,0 +1,365 @@
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -27,6 +27,8 @@
+ 
+ #define WAIT_FOR_HALP_VOTE_MS 100
+ #define WAIT_FOR_SCAN_ABORT_MS 1000
++#define WIL6210_ITR_VR_RX_MAX_BURST_DURATION (5) /* usec */
++#define WIL6210_VR_TX_RING_ORDER 10
+ 
+ bool debug_fw; /* = false; */
+ module_param(debug_fw, bool, 0444);
+@@ -999,6 +1001,38 @@ int wil_ps_update(struct wil6210_priv *wil, enum wmi_ps_profile_type ps_profile)
+ 	return rc;
+ }
+ 
++int wil_vr_update_profile(struct wil6210_priv *wil, u8 profile)
++{
++	int rc;
++
++	if (profile == WMI_VR_PROFILE_DISABLED) {
++		/* Switch from VR mode to normal (non-VR) mode is not
++		 * supported at runtime - it requires FW re-loading.
++		 * It is assumed here that FW is not running when VR disable
++		 * is requested
++		 */
++		wil->ps_profile = WMI_PS_PROFILE_TYPE_DEFAULT;
++		tx_ring_order = WIL_TX_RING_SIZE_ORDER_DEFAULT;
++		drop_if_ring_full = false;
++		wil->rx_max_burst_duration =
++			WIL6210_ITR_RX_MAX_BURST_DURATION_DEFAULT;
++
++		return 0;
++	}
++
++	rc = wmi_set_vr_profile(wil, profile);
++	if (rc)
++		return rc;
++
++	/* VR default configuration */
++	wil->ps_profile = WMI_PS_PROFILE_TYPE_PS_DISABLED;
++	tx_ring_order = WIL6210_VR_TX_RING_ORDER;
++	drop_if_ring_full = true;
++	wil->rx_max_burst_duration = WIL6210_ITR_VR_RX_MAX_BURST_DURATION;
++
++	return 0;
++}
++
+ /*
+  * We reset all the structures, and we reset the UMAC.
+  * After calling this routine, you're expected to reload
+@@ -1118,7 +1152,6 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 	reinit_completion(&wil->halp.comp);
+ 
+ 	if (load_fw) {
+-		wil_configure_interrupt_moderation(wil);
+ 		wil_unmask_irq(wil);
+ 
+ 		/* we just started MAC, wait for FW ready */
+@@ -1133,11 +1166,16 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 			return rc;
+ 		}
+ 
+-		if (wil->ps_profile != WMI_PS_PROFILE_TYPE_DEFAULT)
+-			wil_ps_update(wil, wil->ps_profile);
++		/* Update VR mode before configuring interrupt moderation */
++		if (wil->vr_profile != WMI_VR_PROFILE_DISABLED)
++			wil_vr_update_profile(wil, wil->vr_profile);
+ 
++		wil_configure_interrupt_moderation(wil);
+ 		wil_collect_fw_info(wil);
+ 
++		if (wil->ps_profile != WMI_PS_PROFILE_TYPE_DEFAULT)
++			wil_ps_update(wil, wil->ps_profile);
++
+ 		if (wil->platform_ops.notify) {
+ 			rc = wil->platform_ops.notify(wil->platform_handle,
+ 						      WIL_PLATFORM_EVT_FW_RDY);
+diff --git a/drivers/net/wireless/ath/wil6210/pm.c b/drivers/net/wireless/ath/wil6210/pm.c
+index 2ae4fe8..4d99edc 100644
+--- a/drivers/net/wireless/ath/wil6210/pm.c
++++ b/drivers/net/wireless/ath/wil6210/pm.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2014,2017 Qualcomm Atheros, Inc.
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -43,6 +44,13 @@ int wil_can_suspend(struct wil6210_priv *wil, bool is_runtime)
+ 	switch (wdev->iftype) {
+ 	case NL80211_IFTYPE_MONITOR:
+ 	case NL80211_IFTYPE_STATION:
++		if (test_bit(wil_status_fwconnected, wil->status) &&
++		    wil->vr_profile != WMI_VR_PROFILE_DISABLED) {
++			wil_dbg_pm(wil,
++				   "Reject suspend in VR mode when connected\n");
++			return false;
++		}
++		/* fallthrough */
+ 	case NL80211_IFTYPE_P2P_CLIENT:
+ 		if (test_bit(wil_status_fwconnecting, wil->status)) {
+ 			wil_dbg_pm(wil, "Delay suspend when connecting\n");
+diff --git a/drivers/net/wireless/ath/wil6210/sysfs.c b/drivers/net/wireless/ath/wil6210/sysfs.c
+index 3d26dd4..a183002 100644
+--- a/drivers/net/wireless/ath/wil6210/sysfs.c
++++ b/drivers/net/wireless/ath/wil6210/sysfs.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2016 Qualcomm Atheros, Inc.
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -204,10 +205,66 @@ static DEVICE_ATTR(fst_link_loss, 0644,
+ 		   wil_fst_link_loss_sysfs_show,
+ 		   wil_fst_link_loss_sysfs_store);
+ 
++static ssize_t
++wil_vr_profile_show(struct device *dev, struct device_attribute *attr,
++		    char *buf)
++{
++	struct wil6210_priv *wil = dev_get_drvdata(dev);
++	ssize_t len;
++
++	len = snprintf(buf, PAGE_SIZE, "%s\n",
++		       wil_get_vr_profile_name(wil->vr_profile));
++
++	return len;
++}
++
++static ssize_t
++wil_vr_profile_store(struct device *dev, struct device_attribute *attr,
++		     const char *buf, size_t count)
++{
++	struct wil6210_priv *wil = dev_get_drvdata(dev);
++	u8 profile;
++	int rc = 0;
++
++	if (kstrtou8(buf, 0, &profile))
++		return -EINVAL;
++
++	if (test_bit(wil_status_fwready, wil->status)) {
++		wil_err(wil, "Cannot set VR while interface is up\n");
++		return -EIO;
++	}
++
++	if (profile == wil->vr_profile) {
++		wil_info(wil, "Ignore same VR profile %s\n",
++			 wil_get_vr_profile_name(wil->vr_profile));
++		return count;
++	}
++
++	wil_info(wil, "Sysfs: set VR profile to %s\n",
++		 wil_get_vr_profile_name(profile));
++
++	/* Enabling of VR mode is done from wil_reset after FW is ready.
++	 * Disabling is done from here.
++	 */
++	if (profile == WMI_VR_PROFILE_DISABLED) {
++		rc = wil_vr_update_profile(wil, profile);
++		if (rc)
++			return rc;
++	}
++	wil->vr_profile = profile;
++
++	return count;
++}
++
++static DEVICE_ATTR(vr_profile, 0644,
++		   wil_vr_profile_show,
++		   wil_vr_profile_store);
++
+ static struct attribute *wil6210_sysfs_entries[] = {
+ 	&dev_attr_ftm_txrx_offset.attr,
+ 	&dev_attr_board_file.attr,
+ 	&dev_attr_fst_link_loss.attr,
++	&dev_attr_vr_profile.attr,
+ 	NULL
+ };
+ 
+diff --git a/drivers/net/wireless/ath/wil6210/txrx.c b/drivers/net/wireless/ath/wil6210/txrx.c
+index 8904457..49da3d2 100644
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -44,7 +44,7 @@ bool rx_large_buf;
+ module_param(rx_large_buf, bool, 0444);
+ MODULE_PARM_DESC(rx_large_buf, " allocate 8KB RX buffers, default - no");
+ 
+-static bool drop_if_ring_full;
++bool drop_if_ring_full;
+ module_param(drop_if_ring_full, bool, 0444);
+ MODULE_PARM_DESC(drop_if_ring_full,
+ 		 " drop Tx packets in case tx ring is full");
+diff --git a/drivers/net/wireless/ath/wil6210/wil6210.h b/drivers/net/wireless/ath/wil6210/wil6210.h
+index 4b1c767..75c7c21 100644
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -37,6 +37,7 @@ extern bool rx_align_2;
+ extern bool rx_large_buf;
+ extern bool debug_fw;
+ extern bool disable_ap_sme;
++extern bool drop_if_ring_full;
+ 
+ #define WIL_NAME "wil6210"
+ 
+@@ -739,6 +740,9 @@ struct wil6210_priv {
+ 
+ 	struct wil_ftm_priv ftm;
+ 
++	/* VR profile, VR is disabled on profile 0 */
++	u8 vr_profile;
++
+ #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
+ 	void *nss_ctx;
+ #endif
+@@ -885,6 +889,7 @@ int __wil_down(struct wil6210_priv *wil);
+ void wil_mbox_ring_le2cpus(struct wil6210_mbox_ring *r);
+ int wil_find_cid(struct wil6210_priv *wil, const u8 *mac);
+ void wil_set_ethtoolops(struct net_device *ndev);
++int wil_vr_update_profile(struct wil6210_priv *wil, u8 profile);
+ 
+ void __iomem *wmi_buffer(struct wil6210_priv *wil, __le32 ptr);
+ void __iomem *wmi_addr(struct wil6210_priv *wil, u32 ptr);
+@@ -1034,6 +1039,10 @@ void wil_halp_unvote(struct wil6210_priv *wil);
+ void wil6210_set_halp(struct wil6210_priv *wil);
+ void wil6210_clear_halp(struct wil6210_priv *wil);
+ 
++int wmi_set_vr_profile(struct wil6210_priv *wil, u8 profile);
++const char *
++wil_get_vr_profile_name(enum wmi_vr_profile profile);
++
+ void wil_ftm_init(struct wil6210_priv *wil);
+ void wil_ftm_deinit(struct wil6210_priv *wil);
+ void wil_ftm_stop_operations(struct wil6210_priv *wil);
+diff --git a/drivers/net/wireless/ath/wil6210/wmi.c b/drivers/net/wireless/ath/wil6210/wmi.c
+index 391e15c..351de03 100644
+--- a/drivers/net/wireless/ath/wil6210/wmi.c
++++ b/drivers/net/wireless/ath/wil6210/wmi.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2012-2016 Qualcomm Atheros, Inc.
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -38,6 +39,8 @@ module_param(led_id, byte, 0444);
+ MODULE_PARM_DESC(led_id,
+ 		 " 60G device led enablement. Set the led ID (0-2) to enable");
+ 
++#define WIL_WMI_CALL_GENERAL_TO_MS 100
++
+ /**
+  * WMI event receiving - theory of operations
+  *
+@@ -1976,3 +1979,49 @@ void wmi_event_worker(struct work_struct *work)
+ 	}
+ 	wil_dbg_wmi(wil, "event_worker: Finished\n");
+ }
++
++
++const char *
++wil_get_vr_profile_name(enum wmi_vr_profile profile)
++{
++	switch (profile) {
++	case WMI_VR_PROFILE_DISABLED:
++		return "DISABLED";
++	case WMI_VR_PROFILE_COMMON_AP:
++		return "COMMON_AP";
++	case WMI_VR_PROFILE_COMMON_STA:
++		return "COMMON_STA";
++	default:
++		return "unknown";
++	}
++}
++
++int wmi_set_vr_profile(struct wil6210_priv *wil, u8 profile)
++{
++	int rc;
++	struct wmi_set_vr_profile_cmd cmd = {0};
++	struct {
++		struct wmi_cmd_hdr hdr;
++		struct wmi_set_vr_profile_event evt;
++	} __packed reply = {
++		.evt = {.status = WMI_FW_STATUS_FAILURE},
++	};
++
++	cmd.profile = profile;
++	wil_info(wil, "sending set vr config command, profile=%d\n", profile);
++	rc = wmi_call(wil, WMI_SET_VR_PROFILE_CMDID, &cmd, sizeof(cmd),
++		      WMI_SET_VR_PROFILE_EVENTID, &reply, sizeof(reply),
++		      WIL_WMI_CALL_GENERAL_TO_MS);
++	if (rc) {
++		wil_err(wil, "WMI_SET_VR_PROFILE_CMDID failed, rc %d\n", rc);
++		return rc;
++	}
++
++	if (reply.evt.status != WMI_FW_STATUS_SUCCESS) {
++		wil_err(wil, "set vr profile failed, status %d\n",
++			reply.evt.status);
++		return -EINVAL;
++	}
++
++	return 0;
++}
+diff --git a/drivers/net/wireless/ath/wil6210/wmi.h b/drivers/net/wireless/ath/wil6210/wmi.h
+index fd9c9a8..10845bb 100644
+--- a/drivers/net/wireless/ath/wil6210/wmi.h
++++ b/drivers/net/wireless/ath/wil6210/wmi.h
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2012-2016 Qualcomm Atheros, Inc.
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+  * Copyright (c) 2006-2012 Wilocity
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+@@ -211,6 +212,7 @@ enum wmi_command_id {
+ 	WMI_PRIO_TX_SECTORS_ORDER_CMDID			= 0x9A5,
+ 	WMI_PRIO_TX_SECTORS_NUMBER_CMDID		= 0x9A6,
+ 	WMI_PRIO_TX_SECTORS_SET_DEFAULT_CFG_CMDID	= 0x9A7,
++	WMI_SET_VR_PROFILE_CMDID			= 0xA09,
+ 	WMI_SET_MAC_ADDRESS_CMDID			= 0xF003,
+ 	WMI_ABORT_SCAN_CMDID				= 0xF007,
+ 	WMI_SET_PROMISCUOUS_MODE_CMDID			= 0xF041,
+@@ -1134,6 +1136,7 @@ enum wmi_event_id {
+ 	WMI_PRIO_TX_SECTORS_ORDER_EVENTID		= 0x19A5,
+ 	WMI_PRIO_TX_SECTORS_NUMBER_EVENTID		= 0x19A6,
+ 	WMI_PRIO_TX_SECTORS_SET_DEFAULT_CFG_EVENTID	= 0x19A7,
++	WMI_SET_VR_PROFILE_EVENTID			= 0x1A09,
+ 	WMI_SET_CHANNEL_EVENTID				= 0x9000,
+ 	WMI_ASSOC_REQ_EVENTID				= 0x9001,
+ 	WMI_EAPOL_RX_EVENTID				= 0x9002,
+@@ -2618,4 +2621,30 @@ struct wmi_prio_tx_sectors_set_default_cfg_event {
+ 	u8 reserved[3];
+ } __packed;
+ 
++enum wmi_vr_profile {
++	WMI_VR_PROFILE_DISABLED		= 0,
++	WMI_VR_PROFILE_COMMON_AP	= 1,
++	WMI_VR_PROFILE_COMMON_STA	= 2,
++	WMI_VR_PROFILE_RESERVED0	= 250,
++	WMI_VR_PROFILE_RESERVED1	= 251,
++	WMI_VR_PROFILE_RESERVED2	= 252,
++	WMI_VR_PROFILE_RESERVED3	= 253,
++	WMI_VR_PROFILE_RESERVED4	= 254,
++	WMI_VR_PROFILE_RESERVED5	= 255,
++};
++
++/* WMI_SET_VR_PROFILE_CMDID */
++struct wmi_set_vr_profile_cmd {
++	/* enum wmi_vr_profile */
++	u8 profile;
++	u8 reserved[3];
++} __packed;
++
++/* WMI_SET_VR_PROFILE_EVENTID */
++struct wmi_set_vr_profile_event {
++	/* enum wmi_fw_status */
++	u8 status;
++	u8 reserved[3];
++} __packed;
++
+ #endif /* __WILOCITY_WMI_H__ */
+-- 
+1.9.1
+
