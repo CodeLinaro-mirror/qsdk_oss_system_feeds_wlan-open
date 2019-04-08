@@ -17,6 +17,14 @@ MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh
 MP_CONFIG_BOOL="mesh_auto_open_plinks mesh_fwding"
 MP_CONFIG_STRING="mesh_power_mode"
 
+set_wifi_up() {
+	local vif="$1"
+	local ifname="$2"
+
+	uci_set_state wireless $vif up 1
+	uci_set_state wireless $vif ifname "$ifname"
+}
+
 find_net_config() {(
         local vif="$1"
         local cfg
@@ -489,10 +497,32 @@ mac80211_generate_mac() {
 
 find_phy() {
 	[ -n "$phy" -a -d /sys/class/ieee80211/$phy ] && return 0
+
+	# Incase multiple radio's are in the same soc, device path
+	# for these radio's will be the same. In such case we can
+	# get the phy based on the phy index of the soc
+	local radio_idx=${1:5:1}
+	local first_phy_idx=0
+	local delta=0
+	config_load wireless
+	while :; do
+	config_get devicepath "radio$first_phy_idx" path
+	[ -n "$devicepath" -a -n "$path" ] || break
+	[ "$path" == "$devicepath" ] && break
+	first_phy_idx=$(($first_phy_idx + 1))
+	done
+
+	delta=$(($radio_idx - $first_phy_idx))
+
 	[ -n "$path" ] && {
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
-				*$path) return 0;;
+				*$path)
+					if [ $delta -gt 0 ]; then
+						delta=$(($delta - 1))
+						continue;
+					fi
+					return 0;;
 			esac
 		done
 	}
@@ -532,6 +562,12 @@ mac80211_iw_interface_add() {
 		ip link show dev "$ifname" >/dev/null 2>/dev/null && rc=0
 	}
 
+	[ "$rc" = 234 ] && [ "$hwmode" = "11ad" ] && {
+		# In case of 11ad, interface cannot be removed, so at list one interface will always exist,
+		# in such case do not fail.
+		return 0;
+	}
+
 	[ "$rc" != 0 ] && wireless_setup_failed INTERFACE_CREATION_FAILED
 	return $rc
 }
@@ -542,7 +578,15 @@ mac80211_prepare_vif() {
 
 	json_get_vars ifname mode ssid wds extsta powersave macaddr
 
-	[ -z "$ifname" ] && ifname="$(ls /sys/class/ieee80211/$phy/device/net/ | head -1)${if_idx:+-$if_idx}"
+	for wdev in $(list_phy_interfaces "$phy"); do
+		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+		if [ "$phy_name" == "$phy" ]; then
+			if_name = $wdev
+			break;
+		fi
+	done
+
+	[ -n "$if_name" ] && ifname="${if_name}${if_idx:+-$if_idx}"
 
 	[ -n "$ifname" ] || ifname="wlan${phy#phy}${if_idx:+-$if_idx}"
 	if_idx=$((${if_idx:-0} + 1))
@@ -584,6 +628,9 @@ mac80211_prepare_vif() {
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
 			}
 			ap_ifname=$ifname
+			if [ $hwmode = "11ad" ]; then
+				set_wifi_up $vif $ifname
+			fi
 		;;
 		mesh)
 			mac80211_iw_interface_add "$phy" "$ifname" mp || return
@@ -813,6 +860,11 @@ mac80211_interface_cleanup() {
 	local phy="$1"
 
 	for wdev in $(list_phy_interfaces "$phy"); do
+		#Ensure the interface belongs to the phy being passed
+		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+		if [ "$phy_name" != "$phy" ]; then
+			continue
+		fi
 		# 11ad uses single hostapd and single wpa_supplicant instance
 		[ -f "/var/run/hostapd-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
 			hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
@@ -835,6 +887,11 @@ drv_mac80211_cleanup() {
 		# 11ad uses single hostapd and single wpa_supplicant instance
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			for wdev in $(list_phy_interfaces "$phy"); do
+				#Ensure the interface belongs to the correct phy
+				phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+				if ["$phy_name" != $phy]; then
+					continue
+				fi
 				if [ -f "/var/run/hostapd-${wdev}.lock" ]; then
 					hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
 					rm /var/run/hostapd-${wdev}.lock
@@ -895,7 +952,7 @@ drv_mac80211_setup() {
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
-	find_phy || {
+	find_phy $1 || {
 		echo "Could not find PHY for device '$1'"
 		wireless_set_retry 0
 		return 1

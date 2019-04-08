@@ -6,12 +6,33 @@ lookup_phy() {
 		[ -d /sys/class/ieee80211/$phy ] && return
 	}
 
+	# Incase of multiple radios belonging to the same soc, the device path
+	# of these radio's would be same. To find the correct phy, we can
+	# get the phy index of the device in soc and use it during searching
+	# the global phy list
+	local radio_idx=${device:5:1}
+	local first_phy_idx=0
+	local delta=0
 	local devpath
 	config_get devpath "$device" path
+	while :; do
+	config_get devicepath "radio$first_phy_idx" path
+	[ -n "$devicepath" -a -n "$devpath" ] || break
+	[ "$devpath" == "$devicepath" ] && break
+	first_phy_idx=$(($first_phy_idx + 1))
+	done
+
+	delta=$(($radio_idx - $first_phy_idx))
+
 	[ -n "$devpath" ] && {
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
-			*$devpath) return;;
+			*$devpath)
+				if [ $delta -gt 0 ]; then
+					delta=$(($delta - 1))
+					continue;
+				fi
+				return;;
 			esac
 		done
 	}
@@ -82,7 +103,7 @@ detect_mac80211() {
 		ht_capab=""
 
 		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
-		(iw phy "$dev" info | grep -q '5745 MHz' && !(iw phy "$dev" info | grep -q '5180 MHz')) && { mode_band="a"; channel="149"; }
+		(iw phy "$dev" info | grep -q '5745 MHz' && (iw phy "$dev" info | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
 		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
 
 		iw phy "$dev" info | grep -q 'Capabilities:' && htmode=HT20
@@ -172,6 +193,7 @@ post_mac80211() {
 		[ -f "/lib/update_smp_affinity.sh" ] && {
 			. /lib/update_smp_affinity.sh
 			enable_smp_affinity_wifi
+			enable_smp_affinity_wigig
 		}
 	fi
 	case "${action}" in

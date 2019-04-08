@@ -3,15 +3,15 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=mac80211
 
-PKG_BACKPORTS_VERSION:=416b29ba
+PKG_BACKPORTS_VERSION:=2fee410fa
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=b8f962f1
+PKG_KERNEL_VERSION:=9bcbbf4cedb7
 PKG_KERNEL_SOURCE_URL:=git://codeaurora.org/quic/qsdk/kvalo/ath.git
-PKG_KERNEL_BRANCH:=ath-qca
+PKG_KERNEL_BRANCH:=ath11k-bringup
 
-PKG_VERSION:=20181013
+PKG_VERSION:=20190412
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -19,7 +19,7 @@ PKG_RELEASE:=1
 PKG_BUILD_DIR:=$(KERNEL_BUILD_DIR)/$(PKG_SUBDIR)
 PKG_BUILD_PARALLEL:=1
 
-PKG_DRIVERS = ath9k-common ath9k ath9k-htc ath10k ath
+PKG_DRIVERS = ath9k-common ath9k ath9k-htc ath10k ath11k ath
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_kmod-mac80211 \
@@ -228,18 +228,17 @@ define DownloadBackports
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit 9d580466 06ae8dc0 fe0984d3 db3bdcb9)
+	git revert --no-edit db3bdcb9)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
-	git revert --no-edit 0795d050 98272f47 b35b2767 fbafdbe9 && \
+	git revert --no-edit 0795d050 98272f47 b35b2767 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
 	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
 	mv $(TMP_DIR)/dl/$(FILE) $(DL_DIR)
 	rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(PKG_NAME)-source
-
 endef
 
 define Download/backports
@@ -338,6 +337,22 @@ QCA IEEE 802.11ac family of chipsets. For now only
 PCI is supported.
 endef
 
+define KernelPackage/ath11k
+  $(call KernelPackage/mac80211/Default)
+  TITLE:=QCA 802.11ax wireless cards support
+  URL:=http://wireless.kernel.org/en/users/Drivers/ath11k
+  DEPENDS+= +kmod-ath
+  FILES:= \
+	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko
+  AUTOLOAD:=$(call AutoProbe,ath11k)
+endef
+
+define KernelPackage/ath11k/description
+This module adds support for wireless adapters based on
+QCA IEEE 802.11ax family of chipsets. For now only
+AHB is supported.
+endef
+
 define KernelPackage/wil6210/config
   if PACKAGE_kmod-wil6210
 	if PACKAGE_kmod-qca-nss-drv
@@ -388,6 +403,7 @@ ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
 	ATH9K_DEBUGFS \
 	ATH9K_HTC_DEBUGFS \
 	ATH10K_DEBUGFS \
+	ATH11K_DEBUGFS \
 	ATH10K_PKTLOG
 endif
 
@@ -402,7 +418,7 @@ config-$(CONFIG_PACKAGE_MAC80211_IBSS_DEBUG) += MAC80211_IBSS_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_PS_DEBUG) += MAC80211_PS_DEBUG
 
 config-$(call config_package,ath) += ATH_CARDS ATH_COMMON
-config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG HWMON
+config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG HWMON
 
 config-$(call config_package,ath9k) += ATH9K
 config-$(call config_package,ath9k-common) += ATH9K_COMMON
@@ -414,6 +430,7 @@ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
+config-$(call config_package,ath11k) += ATH11K
 config-$(call config_package,wil6210) += ATH_CARDS WIL6210
 
 config-$(CONFIG_PACKAGE_WIL6210_NSS_SUPPORT) += WIL6210_NSS_SUPPORT
@@ -526,6 +543,9 @@ define KernelPackage/ath10k/install
 		$(1)/lib/firmware/ath10k/QCA9377/hw1.0
 endef
 
+define KernelPackage/ath11k/install
+endef
+
 $(eval $(call KernelPackage,cfg80211))
 $(eval $(call KernelPackage,mac80211))
 $(eval $(call BuildPackage,mac80211-scripts))
@@ -533,5 +553,6 @@ $(eval $(call KernelPackage,ath9k-common))
 $(eval $(call KernelPackage,ath9k))
 $(eval $(call KernelPackage,ath9k-htc))
 $(eval $(call KernelPackage,ath10k))
+$(eval $(call KernelPackage,ath11k))
 $(eval $(call KernelPackage,ath))
 $(eval $(call KernelPackage,wil6210))
