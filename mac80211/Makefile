@@ -341,7 +341,8 @@ define KernelPackage/ath11k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QCA 802.11ax wireless cards support
   URL:=http://wireless.kernel.org/en/users/Drivers/ath11k
-  DEPENDS+= +kmod-ath
+  DEPENDS+= +kmod-ath +TARGET_ipq_ipq807x:kmod-qrtr_mproc +TARGET_ipq_ipq807x_64:kmod-qrtr_mproc \
+	+TARGET_ipq_ipq60xx:kmod-msm-mproc +TARGET_ipq_ipq60xx_64:kmod-msm-mproc
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko
   AUTOLOAD:=$(call AutoProbe,ath11k)
