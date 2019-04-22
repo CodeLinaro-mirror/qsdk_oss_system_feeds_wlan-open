@@ -34,21 +34,11 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/core.
  
  	status = ath10k_core_probe_fw(ar);
  	if (status) {
-@@ -3312,9 +3316,7 @@ struct ath10k *ath10k_core_create(size_t
- 
- 	mutex_init(&ar->conf_mutex);
- 	spin_lock_init(&ar->data_lock);
--	spin_lock_init(&ar->txqs_lock);
- 
--	INIT_LIST_HEAD(&ar->txqs);
- 	INIT_LIST_HEAD(&ar->peers);
- 	init_waitqueue_head(&ar->peer_mapping_wq);
- 	init_waitqueue_head(&ar->htt.empty_tx_wq);
 Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/core.h
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath10k/core.h
 +++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/core.h
-@@ -104,6 +104,9 @@
+@@ -96,6 +96,9 @@
  
  #define QCA_CFR_VENDORID 0x8CFDF0
  
@@ -58,35 +48,18 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/core.
  struct ath10k;
  
  enum ath10k_cfr_metaversion {
-@@ -173,6 +176,7 @@ struct ath10k_skb_cb {
+@@ -163,9 +166,9 @@ struct ath10k_skb_cb {
+ 	u8 flags;
+ 	u8 eid;
  	u16 msdu_id;
+-	u16 airtime_est;
  	struct ieee80211_vif *vif;
  	struct ieee80211_txq *txq;
 +	u32 airtime_est;
  } __packed;
  
  struct ath10k_skb_rxcb {
-@@ -542,7 +546,7 @@ struct ath10k_sta {
- 	u16 peer_id;
- 	struct rate_info txrate;
- 	struct ieee80211_tx_info tx_info;
--
-+	u32 last_tx_bitrate;
- 	struct work_struct update_wk;
- 	u64 rx_duration;
- 	struct ath10k_htt_tx_stats *tx_stats;
-@@ -1165,10 +1169,7 @@ struct ath10k {
- 
- 	/* protects shared structure data */
- 	spinlock_t data_lock;
--	/* protects: ar->txqs, artxq->list */
--	spinlock_t txqs_lock;
- 
--	struct list_head txqs;
- 	struct list_head arvifs;
- 	struct list_head peers;
- 	struct ath10k_peer *peer_map[ATH10K_MAX_NUM_PEER_IDS];
-@@ -1294,6 +1295,7 @@ struct ath10k {
+@@ -1294,6 +1297,7 @@ struct ath10k {
  	struct ath10k_smart_ant_info smart_ant_info;
  
  	bool ethernet_mode;
@@ -98,28 +71,15 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/htt_r
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -2408,6 +2408,7 @@ static void ath10k_htt_rx_tx_fetch_ind(s
+@@ -2408,6 +2408,8 @@ static void ath10k_htt_rx_tx_fetch_ind(s
  	u8 tid;
  	int ret;
  	int i;
 +	bool may_tx;
++	struct ieee80211_hw *hw = ar->hw;
  
  	ath10k_dbg(ar, ATH10K_DBG_HTT, "htt rx tx fetch ind\n");
  
-@@ -2480,8 +2481,13 @@ static void ath10k_htt_rx_tx_fetch_ind(s
- 		num_msdus = 0;
- 		num_bytes = 0;
- 
-+		ieee80211_txq_schedule_start(hw, txq->ac);
-+		may_tx = ieee80211_txq_may_transmit(hw, txq);
- 		while (num_msdus < max_num_msdus &&
- 		       num_bytes < max_num_bytes) {
-+			if (!may_tx)
-+				break;
-+
- 			ret = ath10k_mac_tx_push_txq(hw, txq);
- 			if (ret < 0)
- 				break;
 @@ -2489,6 +2495,8 @@ static void ath10k_htt_rx_tx_fetch_ind(s
  			num_msdus++;
  			num_bytes += ret;
@@ -141,16 +101,7 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/mac.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath10k/mac.c
 +++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/mac.c
-@@ -3636,7 +3636,7 @@ static void ath10k_mac_tx_h_fill_cb(stru
- 				    struct ieee80211_vif *vif,
- 				    struct ieee80211_txq *txq,
- 				    struct ieee80211_sta *sta,
--				    struct sk_buff *skb)
-+				    struct sk_buff *skb, u32 airtime)
- {
- 	struct ieee80211_hdr *hdr = (void *)skb->data;
- 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-@@ -3651,6 +3651,7 @@ static void ath10k_mac_tx_h_fill_cb(stru
+@@ -3642,6 +3642,7 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
  	cb->flags = 0;
  	cb->vif = vif;
  	cb->txq = txq;
@@ -158,242 +109,110 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/mac.c
  
  	if (info->control.no_80211_encap) {
  		cb->flags |= ATH10K_SKB_F_NO_80211_ENCAP;
-@@ -4030,7 +4031,6 @@ static void ath10k_mac_txq_init(struct i
- 
- static void ath10k_mac_txq_unref(struct ath10k *ar, struct ieee80211_txq *txq)
- {
--	struct ath10k_txq *artxq;
- 	struct ath10k_skb_cb *cb;
- 	struct sk_buff *msdu;
- 	int msdu_id;
-@@ -4038,12 +4038,6 @@ static void ath10k_mac_txq_unref(struct
- 	if (!txq)
- 		return;
- 
--	artxq = (void *)txq->drv_priv;
--	spin_lock_bh(&ar->txqs_lock);
--	if (!list_empty(&artxq->list))
--		list_del_init(&artxq->list);
--	spin_unlock_bh(&ar->txqs_lock);
--
- 	spin_lock_bh(&ar->htt.tx_lock);
- 	idr_for_each_entry(&ar->htt.pending_tx, msdu, msdu_id) {
- 		cb = ATH10K_SKB_CB(msdu);
-@@ -4083,7 +4077,6 @@ static bool ath10k_mac_tx_can_push(struc
- 	struct ath10k_txq *artxq = (void *)txq->drv_priv;
- 
- 	/* No need to get locks */
--
- 	if (ar->htt.tx_q_state.mode == HTT_TX_MODE_SWITCH_PUSH)
- 		return true;
- 
-@@ -4096,6 +4089,51 @@ static bool ath10k_mac_tx_can_push(struc
- 	return false;
- }
- 
-+/* Return estimated airtime in microsecond, which is calculated using last
-+ * reported TX rate. This is just a rough estimation because host driver has no
-+ * knowledge of the actual transmit rate, retries or aggregation. If actual
-+ * airtime can be reported by firmware, then delta between estimated and actual
-+ * airtime can be adjusted from deficit.
-+ */
-+#define IEEE80211_ATF_OVERHEAD		100	/* IFS + some slot time */
-+#define IEEE80211_ATF_OVERHEAD_IFS	16	/* IFS only */
+@@ -4088,41 +4089,40 @@ static bool ath10k_mac_tx_can_push(struct ieee80211_hw *hw,
+  */
+ #define IEEE80211_ATF_OVERHEAD		100	/* IFS + some slot time */
+ #define IEEE80211_ATF_OVERHEAD_IFS	16	/* IFS only */
+-static u16 ath10k_mac_update_airtime(struct ath10k *ar,
 +static u32 ath10k_mac_update_airtime(struct ath10k *ar,
-+				     struct ieee80211_txq *txq,
-+				     struct sk_buff *skb)
-+{
-+	struct ath10k_sta *arsta;
+ 				     struct ieee80211_txq *txq,
+ 				     struct sk_buff *skb)
+ {
+ 	struct ath10k_sta *arsta;
+-	u32 pktlen;
+-	u16 airtime = 0;
 +	u32 pktlen, overhead;
 +	u32 airtime = 0;
-+
-+	if (!txq || !txq->sta)
-+		return airtime;
-+
-+	spin_lock_bh(&ar->data_lock);
-+	arsta = (struct ath10k_sta *)txq->sta->drv_priv;
-+
+ 
+ 	if (!txq || !txq->sta)
+ 		return airtime;
+ 
+-	if (test_bit(WMI_SERVICE_REPORT_AIRTIME, ar->wmi.svc_map))
+-		return airtime;
+-
+ 	spin_lock_bh(&ar->data_lock);
+ 	arsta = (struct ath10k_sta *)txq->sta->drv_priv;
+ 
 +	/* overhead for media access time and IFS */
 +	overhead = IEEE80211_ATF_OVERHEAD_IFS;
-+	pktlen = skb->len + 38; /* Assume MAC header 30, SNAP 8 for most case */
-+	if (arsta->last_tx_bitrate) {
-+		/* airtime in us, last_tx_bitrate in 100kbps */
-+		airtime = (pktlen * 8 * (1000 / 100))
-+				/ arsta->last_tx_bitrate;
-+	} else {
+ 	pktlen = skb->len + 38; /* Assume MAC header 30, SNAP 8 for most case */
+ 	if (arsta->last_tx_bitrate) {
+ 		/* airtime in us, last_tx_bitrate in 100kbps */
+ 		airtime = (pktlen * 8 * (1000 / 100))
+ 				/ arsta->last_tx_bitrate;
+-		/* overhead for media access time and IFS */
+-		airtime += IEEE80211_ATF_OVERHEAD_IFS;
+ 	} else {
 +		overhead = IEEE80211_ATF_OVERHEAD;
-+		/* This is mostly for throttle excessive BC/MC frames, and the
-+		 * airtime/rate doesn't need be exact. Airtime of BC/MC frames
-+		 * in 2G get some discount, which helps prevent very low rate
-+		 * frames from being blocked for too long.
-+		 */
-+		airtime = (pktlen * 8 * (1000 / 100)) / 60; /* 6M */
-+	}
-+	spin_unlock_bh(&ar->data_lock);
-+
+ 		/* This is mostly for throttle excessive BC/MC frames, and the
+ 		 * airtime/rate doesn't need be exact. Airtime of BC/MC frames
+ 		 * in 2G get some discount, which helps prevent very low rate
+ 		 * frames from being blocked for too long.
+ 		 */
+ 		airtime = (pktlen * 8 * (1000 / 100)) / 60; /* 6M */
+-		airtime += IEEE80211_ATF_OVERHEAD;
+ 	}
+ 	spin_unlock_bh(&ar->data_lock);
+ 
 +	airtime += overhead;
 +
-+	return airtime;
-+}
-+
- int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
- 			   struct ieee80211_txq *txq)
- {
-@@ -4111,6 +4149,7 @@ int ath10k_mac_tx_push_txq(struct ieee80
+ 	return airtime;
+ }
+ 
+@@ -4141,7 +4141,7 @@ int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
  	size_t skb_len;
  	bool is_mgmt, is_presp;
  	int ret;
+-	u16 airtime;
 +	u32 airtime;
  
  	spin_lock_bh(&ar->htt.tx_lock);
  	ret = ath10k_htt_tx_inc_pending(htt);
-@@ -4128,7 +4167,8 @@ int ath10k_mac_tx_push_txq(struct ieee80
- 		return -ENOENT;
- 	}
- 
--	ath10k_mac_tx_h_fill_cb(ar, vif, txq, sta, skb);
-+	airtime = ath10k_mac_update_airtime(ar, txq, skb);
-+	ath10k_mac_tx_h_fill_cb(ar, vif, txq, sta, skb, airtime);
- 
- 	skb_len = skb->len;
- 	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
-@@ -4170,48 +4210,46 @@ int ath10k_mac_tx_push_txq(struct ieee80
- 	return skb_len;
- }
- 
--void ath10k_mac_tx_push_pending(struct ath10k *ar)
-+static int ath10k_mac_schedule_txq(struct ieee80211_hw *hw, u32 ac)
- {
--	struct ieee80211_hw *hw = ar->hw;
- 	struct ieee80211_txq *txq;
--	struct ath10k_txq *artxq;
--	struct ath10k_txq *last;
--	int ret;
--	int max;
--
--	if (ar->htt.num_pending_tx >= (ar->htt.max_num_pending_tx / 2))
--		return;
--
--	spin_lock_bh(&ar->txqs_lock);
--	rcu_read_lock();
-+	int ret = 0;
- 
--	last = list_last_entry(&ar->txqs, struct ath10k_txq, list);
--	while (!list_empty(&ar->txqs)) {
--		artxq = list_first_entry(&ar->txqs, struct ath10k_txq, list);
--		txq = container_of((void *)artxq, struct ieee80211_txq,
--				   drv_priv);
- 
--		/* Prevent aggressive sta/tid taking over tx queue */
--		max = HTC_HOST_MAX_MSG_PER_TX_BUNDLE;
--		ret = 0;
--		while (ath10k_mac_tx_can_push(hw, txq) && max--) {
-+	ieee80211_txq_schedule_start(hw, ac);
-+	while ((txq = ieee80211_next_txq(hw, ac))) {
-+		while (ath10k_mac_tx_can_push(hw, txq)) {
- 			ret = ath10k_mac_tx_push_txq(hw, txq);
- 			if (ret < 0)
- 				break;
- 		}
-+		ieee80211_return_txq(hw, txq);
-+		ath10k_htt_tx_txq_update(hw, txq);
-+		if (ret == -EBUSY)
-+			break;
-+	}
-+	ieee80211_txq_schedule_end(hw, ac);
- 
--		list_del_init(&artxq->list);
--		if (ret != -ENOENT)
--			list_add_tail(&artxq->list, &ar->txqs);
-+	return ret;
-+}
- 
--		ath10k_htt_tx_txq_update(hw, txq);
-+void ath10k_mac_tx_push_pending(struct ath10k *ar)
-+{
-+	struct ieee80211_hw *hw = ar->hw;
-+	u32 ac;
-+
-+	if (ar->htt.tx_q_state.mode != HTT_TX_MODE_SWITCH_PUSH)
-+		return;
- 
--		if (artxq == last || (ret < 0 && ret != -ENOENT))
-+	if (ar->htt.num_pending_tx >= (ar->htt.max_num_pending_tx / 2))
-+		return;
-+
-+	rcu_read_lock();
-+	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
-+		if (ath10k_mac_schedule_txq(hw, ac) == -EBUSY)
+@@ -4210,17 +4210,17 @@ static int ath10k_mac_schedule_txq(struct ieee80211_hw *hw, u32 ac)
+ 	ieee80211_txq_schedule_start(hw, ac);
+ 	while ((txq = ieee80211_next_txq(hw, ac))) {
+ 		while (ath10k_mac_tx_can_push(hw, txq)) {
+-			ret = ath10k_mac_tx_push_txq(hw, txq);
+-			if (ret < 0)
+-				break;
+-		}
++ 			ret = ath10k_mac_tx_push_txq(hw, txq);
++ 			if (ret < 0)
++ 				break;
++ 		}
+ 		ieee80211_return_txq(hw, txq);
+ 		ath10k_htt_tx_txq_update(hw, txq);
+ 		if (ret == -EBUSY)
  			break;
  	}
+ 	ieee80211_txq_schedule_end(hw, ac);
 -
- 	rcu_read_unlock();
--	spin_unlock_bh(&ar->txqs_lock);
++
+ 	return ret;
+ }
+ 
+@@ -4231,16 +4231,16 @@ void ath10k_mac_tx_push_pending(struct ath10k *ar)
+ 
+ 	if (ar->htt.tx_q_state.mode != HTT_TX_MODE_SWITCH_PUSH)
+ 		return;
+-
++
+ 	if (ar->htt.num_pending_tx >= (ar->htt.max_num_pending_tx / 2))
+ 		return;
+ 
+ 	rcu_read_lock();
+ 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
+ 		if (ath10k_mac_schedule_txq(hw, ac) == -EBUSY)
+-			break;
+-	}
+-	rcu_read_unlock();
++ 			break;
++ 	}
++ 	rcu_read_unlock();
  }
  EXPORT_SYMBOL(ath10k_mac_tx_push_pending);
  
-@@ -4398,8 +4436,10 @@ static void ath10k_mac_op_tx(struct ieee
- 	bool is_mgmt;
- 	bool is_presp;
- 	int ret;
-+	u32 airtime;
- 
--	ath10k_mac_tx_h_fill_cb(ar, vif, txq, sta, skb);
-+	airtime = ath10k_mac_update_airtime(ar, txq, skb);
-+	ath10k_mac_tx_h_fill_cb(ar, vif, txq, sta, skb, airtime);
- 
- 	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
- 	txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
-@@ -4455,31 +4495,29 @@ static void ath10k_mac_op_wake_tx_queue(
- 					struct ieee80211_txq *txq)
- {
- 	struct ath10k *ar = hw->priv;
--	struct ath10k_txq *artxq = (void *)txq->drv_priv;
--	struct ieee80211_txq *f_txq;
--	struct ath10k_txq *f_artxq;
--	int ret = 0;
--	int max = HTC_HOST_MAX_MSG_PER_TX_BUNDLE;
-+	int ret;
-+	u8 ac;
-+
-+	ath10k_htt_tx_txq_update(hw, txq);
-+	if (ar->htt.tx_q_state.mode != HTT_TX_MODE_SWITCH_PUSH)
-+		return;
- 
--	spin_lock_bh(&ar->txqs_lock);
--	if (list_empty(&artxq->list))
--		list_add_tail(&artxq->list, &ar->txqs);
--
--	f_artxq = list_first_entry(&ar->txqs, struct ath10k_txq, list);
--	f_txq = container_of((void *)f_artxq, struct ieee80211_txq, drv_priv);
--	list_del_init(&f_artxq->list);
-+	ac = txq->ac;
-+	ieee80211_txq_schedule_start(hw, ac);
-+	txq = ieee80211_next_txq(hw, ac);
-+	if (!txq)
-+		goto out;
- 
--	while (ath10k_mac_tx_can_push(hw, f_txq) && max--) {
--		ret = ath10k_mac_tx_push_txq(hw, f_txq);
-+
-+	while (ath10k_mac_tx_can_push(hw, txq)) {
-+		ret = ath10k_mac_tx_push_txq(hw, txq);
- 		if (ret < 0)
- 			break;
- 	}
--	if (ret != -ENOENT)
--		list_add_tail(&f_artxq->list, &ar->txqs);
--	spin_unlock_bh(&ar->txqs_lock);
--
--	ath10k_htt_tx_txq_update(hw, f_txq);
-+	ieee80211_return_txq(hw, txq);
- 	ath10k_htt_tx_txq_update(hw, txq);
-+out:
-+	ieee80211_txq_schedule_end(hw, ac);
- }
- 
- /* Must not be called with conf_mutex held as workers can use that also. */
-@@ -9054,6 +9092,9 @@ int ath10k_mac_register(struct ath10k *a
+@@ -9152,6 +9152,9 @@ int ath10k_mac_register(struct ath10k *ar)
  		ar->ops->set_tid_conf = NULL;
  	}
  
@@ -403,7 +222,7 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/mac.c
  	/*
  	 * on LL hardware queues are managed entirely by the FW
  	 * so we only advertise to mac we can do the queues thing
-@@ -9188,6 +9229,8 @@ int ath10k_mac_register(struct ath10k *a
+@@ -9288,6 +9291,8 @@ int ath10k_mac_register(struct ath10k *ar)
  		goto err_dfs_detector_exit;
  	}
  
@@ -412,850 +231,41 @@ Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/mac.c
  	ret = ieee80211_register_hw(ar->hw);
  	if (ret) {
  		ath10k_err(ar, "failed to register ieee80211: %d\n", ret);
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/txrx.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath10k/txrx.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath10k/txrx.c
-@@ -103,6 +103,9 @@ int ath10k_txrx_tx_unref(struct ath10k_h
- 		wake_up(&htt->empty_tx_wq);
- 	spin_unlock_bh(&htt->tx_lock);
- 
-+	if (sta)
-+		ieee80211_sta_register_airtime(sta, txq->tid, skb_cb->airtime_est, 0);
-+
- 	if (ar->dev_type != ATH10K_DEV_TYPE_HL)
- 		dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
- 
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/ath9k.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/ath9k.h
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/ath9k.h
-@@ -112,8 +112,6 @@ int ath_descdma_setup(struct ath_softc *
- #define ATH_TXFIFO_DEPTH           8
- #define ATH_TX_ERROR               0x01
- 
--#define ATH_AIRTIME_QUANTUM        300 /* usec */
--
- /* Stop tx traffic 1ms before the GO goes away */
- #define ATH_P2P_PS_STOP_TIME       1000
- 
-@@ -246,10 +244,8 @@ struct ath_atx_tid {
- 	s8 bar_index;
- 	bool active;
- 	bool clear_ps_filter;
--	bool has_queued;
- };
- 
--void __ath_tx_queue_tid(struct ath_softc *sc, struct ath_atx_tid *tid);
- void ath_tx_queue_tid(struct ath_softc *sc, struct ath_atx_tid *tid);
- 
- struct ath_node {
-@@ -263,12 +259,9 @@ struct ath_node {
- 
- 	bool sleeping;
- 	bool no_ps_filter;
--	s64 airtime_deficit[IEEE80211_NUM_ACS];
--	u32 airtime_rx_start;
- 
- #ifdef CPTCFG_ATH9K_STATION_STATISTICS
- 	struct ath_rx_rate_stats rx_rate_stats;
--	struct ath_airtime_stats airtime_stats;
- #endif
- 	u8 key_idx[4];
- 
-@@ -989,11 +982,6 @@ void ath_ant_comb_scan(struct ath_softc
- 
- #define ATH9K_NUM_CHANCTX  2 /* supports 2 operating channels */
- 
--#define AIRTIME_USE_TX		BIT(0)
--#define AIRTIME_USE_RX		BIT(1)
--#define AIRTIME_USE_NEW_QUEUES	BIT(2)
--#define AIRTIME_ACTIVE(flags) (!!(flags & (AIRTIME_USE_TX|AIRTIME_USE_RX)))
--
- struct ath_led {
- 	struct list_head list;
- 	struct ath_softc *sc;
-@@ -1044,8 +1032,6 @@ struct ath_softc {
- 	short nbcnvifs;
- 	unsigned long ps_usecount;
- 
--	u16 airtime_flags; /* AIRTIME_* */
--
- 	struct ath_rx rx;
- 	struct ath_tx tx;
- 	struct ath_beacon beacon;
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/debug.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug.c
-@@ -1502,9 +1502,6 @@ int ath9k_init_debug(struct ath_hw *ah)
- #endif
- 	debugfs_create_file("tpc", 0600, sc->debug.debugfs_phy, sc, &fops_tpc);
- 
--	debugfs_create_u16("airtime_flags", 0600,
--			   sc->debug.debugfs_phy, &sc->airtime_flags);
--
- 	debugfs_create_file("nf_override", 0600,
- 			    sc->debug.debugfs_phy, sc, &fops_nf_override);
- 
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/debug.h
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug.h
-@@ -319,20 +319,12 @@ ath9k_debug_sync_cause(struct ath_softc
- void ath_debug_rate_stats(struct ath_softc *sc,
- 			  struct ath_rx_status *rs,
- 			  struct sk_buff *skb);
--void ath_debug_airtime(struct ath_softc *sc,
--		       struct ath_node *an,
--		       u32 rx, u32 tx);
- #else
- static inline void ath_debug_rate_stats(struct ath_softc *sc,
- 					struct ath_rx_status *rs,
- 					struct sk_buff *skb)
- {
- }
--static inline void ath_debug_airtime(struct ath_softc *sc,
--			      struct ath_node *an,
--			      u32 rx, u32 tx)
--{
--}
- #endif /* CPTCFG_ATH9K_STATION_STATISTICS */
- 
- #endif /* DEBUG_H */
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug_sta.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/debug_sta.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/debug_sta.c
-@@ -242,50 +242,6 @@ static const struct file_operations fops
- 	.llseek = default_llseek,
- };
- 
--void ath_debug_airtime(struct ath_softc *sc,
--		struct ath_node *an,
--		u32 rx,
--		u32 tx)
--{
--	struct ath_airtime_stats *astats = &an->airtime_stats;
--
--	astats->rx_airtime += rx;
--	astats->tx_airtime += tx;
--}
--
--static ssize_t read_airtime(struct file *file, char __user *user_buf,
--			size_t count, loff_t *ppos)
--{
--	struct ath_node *an = file->private_data;
--	struct ath_airtime_stats *astats;
--	static const char *qname[4] = {
--		"VO", "VI", "BE", "BK"
--	};
--	u32 len = 0, size = 256;
--	char *buf;
--	size_t retval;
--	int i;
--
--	buf = kzalloc(size, GFP_KERNEL);
--	if (buf == NULL)
--		return -ENOMEM;
--
--	astats = &an->airtime_stats;
--
--	len += scnprintf(buf + len, size - len, "RX: %u us\n", astats->rx_airtime);
--	len += scnprintf(buf + len, size - len, "TX: %u us\n", astats->tx_airtime);
--	len += scnprintf(buf + len, size - len, "Deficit: ");
--	for (i = 0; i < 4; i++)
--		len += scnprintf(buf+len, size - len, "%s: %lld us ", qname[i], an->airtime_deficit[i]);
--	if (len < size)
--		buf[len++] = '\n';
--
--	retval = simple_read_from_buffer(user_buf, count, ppos, buf, len);
--	kfree(buf);
--
--	return retval;
--}
--
- static ssize_t
- write_airtime_reset_stub(struct file *file, const char __user *ubuf,
- 		   size_t count, loff_t *ppos)
-@@ -302,15 +258,6 @@ write_airtime_reset_stub(struct file *fi
- 	return count;
- }
- 
--static const struct file_operations fops_airtime = {
--	.read = read_airtime,
--	.write = write_airtime_reset_stub,
--	.open = simple_open,
--	.owner = THIS_MODULE,
--	.llseek = default_llseek,
--};
--
--
- void ath9k_sta_add_debugfs(struct ieee80211_hw *hw,
- 			   struct ieee80211_vif *vif,
- 			   struct ieee80211_sta *sta,
-@@ -320,5 +267,4 @@ void ath9k_sta_add_debugfs(struct ieee80
- 
- 	debugfs_create_file("node_aggr", 0444, dir, an, &fops_node_aggr);
- 	debugfs_create_file("node_recv", 0444, dir, an, &fops_node_recv);
--	debugfs_create_file("airtime", 0644, dir, an, &fops_airtime);
- }
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/init.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/init.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/init.c
-@@ -709,8 +709,6 @@ static int ath9k_init_softc(u16 devid, s
- 
- 	/* Will be cleared in ath9k_start() */
- 	set_bit(ATH_OP_INVALID, &common->op_flags);
--	sc->airtime_flags = (AIRTIME_USE_TX | AIRTIME_USE_RX |
--			     AIRTIME_USE_NEW_QUEUES);
- 
- 	sc->sc_ah = ah;
- 	sc->dfs_detector = dfs_pattern_detector_init(common, NL80211_DFS_UNSET);
-@@ -1071,6 +1069,7 @@ static void ath9k_set_hw_capab(struct at
- 	SET_IEEE80211_PERM_ADDR(hw, common->macaddr);
- 
- 	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
-+	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_AIRTIME_FAIRNESS);
- }
- 
- int ath9k_init_device(u16 devid, struct ath_softc *sc,
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/recv.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/recv.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/recv.c
-@@ -1054,14 +1054,7 @@ static void ath_rx_count_airtime(struct
- 						len, rxs->rate_idx, is_sp);
- 	}
- 
-- 	if (!!(sc->airtime_flags & AIRTIME_USE_RX)) {
--		spin_lock_bh(&acq->lock);
--		an->airtime_deficit[acno] -= airtime;
--		if (an->airtime_deficit[acno] <= 0)
--			__ath_tx_queue_tid(sc, ATH_AN_2_TID(an, tidno));
--		spin_unlock_bh(&acq->lock);
--	}
--	ath_debug_airtime(sc, an, airtime, 0);
-+	ieee80211_sta_register_airtime(sta, tidno, 0, airtime);
- exit:
- 	rcu_read_unlock();
- }
-Index: backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/xmit.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/drivers/net/wireless/ath/ath9k/xmit.c
-+++ backports-20181013-3.14.77-b8f962f1/drivers/net/wireless/ath/ath9k/xmit.c
-@@ -113,44 +113,14 @@ void ath_txq_unlock_complete(struct ath_
- 		ath_tx_status(hw, skb);
- }
- 
--void __ath_tx_queue_tid(struct ath_softc *sc, struct ath_atx_tid *tid)
--{
--	struct ath_vif *avp = (struct ath_vif *) tid->an->vif->drv_priv;
--	struct ath_chanctx *ctx = avp->chanctx;
--	struct ath_acq *acq;
--	struct list_head *tid_list;
--	u8 acno = TID_TO_WME_AC(tid->tidno);
--
--	if (!ctx || !list_empty(&tid->list))
--		return;
--
--
--	acq = &ctx->acq[acno];
--	if ((sc->airtime_flags & AIRTIME_USE_NEW_QUEUES) &&
--	    tid->an->airtime_deficit[acno] > 0)
--		tid_list = &acq->acq_new;
--	else
--		tid_list = &acq->acq_old;
--
--	list_add_tail(&tid->list, tid_list);
--}
--
- void ath_tx_queue_tid(struct ath_softc *sc, struct ath_atx_tid *tid)
- {
--	struct ath_vif *avp = (struct ath_vif *) tid->an->vif->drv_priv;
--	struct ath_chanctx *ctx = avp->chanctx;
--	struct ath_acq *acq;
-+	struct ieee80211_txq *queue = container_of(
-+		(void *)tid, struct ieee80211_txq, drv_priv);
- 
--	if (!ctx || !list_empty(&tid->list))
--		return;
--
--	acq = &ctx->acq[TID_TO_WME_AC(tid->tidno)];
--	spin_lock_bh(&acq->lock);
--	__ath_tx_queue_tid(sc, tid);
--	spin_unlock_bh(&acq->lock);
-+	ieee80211_return_txq(sc->hw, queue);
- }
- 
--
- void ath9k_wake_tx_queue(struct ieee80211_hw *hw, struct ieee80211_txq *queue)
- {
- 	struct ath_softc *sc = hw->priv;
-@@ -167,11 +137,7 @@ void ath9k_wake_tx_queue(struct ieee8021
- 		tid->tidno);
- 
- 	ath_txq_lock(sc, txq);
--
--	tid->has_queued = true;
--	ath_tx_queue_tid(sc, tid);
- 	ath_txq_schedule(sc, txq);
--
- 	ath_txq_unlock(sc, txq);
- }
- 
-@@ -221,8 +187,8 @@ ath_get_skb_tid(struct ath_softc *sc, st
- 	return ATH_AN_2_TID(an, tidno);
- }
- 
--static struct sk_buff *
--ath_tid_pull(struct ath_atx_tid *tid)
-+static int
-+ath_tid_pull(struct ath_atx_tid *tid, struct sk_buff **skbuf)
- {
- 	struct ieee80211_txq *txq = container_of((void*)tid, struct ieee80211_txq, drv_priv);
- 	struct ath_softc *sc = tid->an->sc;
-@@ -233,20 +199,15 @@ ath_tid_pull(struct ath_atx_tid *tid)
- 	};
- 	struct sk_buff *skb;
- 	struct ath_frame_info *fi;
--	int q;
--
--	if (!tid->has_queued)
--		return NULL;
-+	int q, ret;
- 
- 	skb = ieee80211_tx_dequeue(hw, txq);
--	if (!skb) {
--		tid->has_queued = false;
--		return NULL;
--	}
-+	if (!skb)
-+		return -ENOENT;
- 
--	if (ath_tx_prepare(hw, skb, &txctl)) {
-+	if ((ret = ath_tx_prepare(hw, skb, &txctl))) {
- 		ieee80211_free_txskb(hw, skb);
--		return NULL;
-+		return ret;
- 	}
- 
- 	q = skb_get_queue_mapping(skb);
-@@ -256,24 +217,19 @@ ath_tid_pull(struct ath_atx_tid *tid)
- 		++tid->txq->pending_frames;
- 	}
- 
--	return skb;
--}
--
--
--static bool ath_tid_has_buffered(struct ath_atx_tid *tid)
--{
--	return !skb_queue_empty(&tid->retry_q) || tid->has_queued;
--}
-+	*skbuf = skb;
-+	return 0;
-+ }
- 
--static struct sk_buff *ath_tid_dequeue(struct ath_atx_tid *tid)
-+static int ath_tid_dequeue(struct ath_atx_tid *tid,
-+			   struct sk_buff **skb)
- {
--	struct sk_buff *skb;
-+	int ret = 0;
-+	*skb = __skb_dequeue(&tid->retry_q);
-+	if (!*skb)
-+		ret = ath_tid_pull(tid, skb);
- 
--	skb = __skb_dequeue(&tid->retry_q);
--	if (!skb)
--		skb = ath_tid_pull(tid);
--
--	return skb;
-+	return ret;
- }
- 
- static void ath_tx_flush_tid(struct ath_softc *sc, struct ath_atx_tid *tid)
-@@ -369,11 +325,12 @@ static void ath_tid_drain(struct ath_sof
- 	struct list_head bf_head;
- 	struct ath_tx_status ts;
- 	struct ath_frame_info *fi;
-+	int ret;
- 
- 	memset(&ts, 0, sizeof(ts));
- 	INIT_LIST_HEAD(&bf_head);
- 
--	while ((skb = ath_tid_dequeue(tid))) {
-+	while ((ret = ath_tid_dequeue(tid, &skb)) == 0) {
- 		fi = get_frame_info(skb);
- 		bf = fi->bf;
- 
-@@ -685,7 +642,6 @@ static void ath_tx_complete_aggr(struct
- 		skb_queue_splice_tail(&bf_pending, &tid->retry_q);
- 		if (!an->sleeping) {
- 			ath_tx_queue_tid(sc, tid);
--
- 			if (ts->ts_status & (ATH9K_TXERR_FILT | ATH9K_TXERR_XRETRY))
- 				tid->clear_ps_filter = true;
- 		}
-@@ -712,11 +668,9 @@ static bool bf_is_ampdu_not_probing(stru
-     return bf_isampdu(bf) && !(info->flags & IEEE80211_TX_CTL_RATE_CTRL_PROBE);
- }
- 
--static void ath_tx_count_airtime(struct ath_softc *sc, struct ath_node *an,
--				 struct ath_atx_tid *tid, struct ath_buf *bf,
--				 struct ath_tx_status *ts)
-+static void ath_tx_count_airtime(struct ath_softc *sc, struct ieee80211_sta *sta,
-+				 struct ath_buf *bf, struct ath_tx_status *ts)
- {
--	struct ath_txq *txq = tid->txq;
- 	u32 airtime = 0;
- 	int i;
- 
-@@ -726,17 +680,7 @@ static void ath_tx_count_airtime(struct
- 		airtime += rate_dur * bf->rates[i].count;
- 	}
- 
--	if (sc->airtime_flags & AIRTIME_USE_TX) {
--		int q = txq->mac80211_qnum;
--		struct ath_acq *acq = &sc->cur_chan->acq[q];
--
--		spin_lock_bh(&acq->lock);
--		an->airtime_deficit[q] -= airtime;
--		if (an->airtime_deficit[q] <= 0)
--			__ath_tx_queue_tid(sc, tid);
--		spin_unlock_bh(&acq->lock);
--	}
--	ath_debug_airtime(sc, an, 0, airtime);
-+	ieee80211_sta_register_airtime(sta, ts->tid, airtime, 0);
- }
- 
- static void ath_tx_process_buffer(struct ath_softc *sc, struct ath_txq *txq,
-@@ -766,7 +710,7 @@ static void ath_tx_process_buffer(struct
- 	if (sta) {
- 		struct ath_node *an = (struct ath_node *)sta->drv_priv;
- 		tid = ath_get_skb_tid(sc, an, bf->bf_mpdu);
--		ath_tx_count_airtime(sc, an, tid, bf, ts);
-+		ath_tx_count_airtime(sc, sta, bf, ts);
- 		if (ts->ts_status & (ATH9K_TXERR_FILT | ATH9K_TXERR_XRETRY))
- 			tid->clear_ps_filter = true;
- 	}
-@@ -950,20 +894,21 @@ static int ath_compute_num_delims(struct
- 	return ndelim;
- }
- 
--static struct ath_buf *
-+static int
- ath_tx_get_tid_subframe(struct ath_softc *sc, struct ath_txq *txq,
--			struct ath_atx_tid *tid)
-+			struct ath_atx_tid *tid, struct ath_buf **buf)
- {
- 	struct ieee80211_tx_info *tx_info;
- 	struct ath_frame_info *fi;
--	struct sk_buff *skb, *first_skb = NULL;
- 	struct ath_buf *bf;
-+	struct sk_buff *skb, *first_skb = NULL;
- 	u16 seqno;
-+	int ret;
- 
- 	while (1) {
--		skb = ath_tid_dequeue(tid);
--		if (!skb)
--			break;
-+		ret = ath_tid_dequeue(tid, &skb);
-+		if (ret < 0)
-+			return ret;
- 
- 		fi = get_frame_info(skb);
- 		bf = fi->bf;
-@@ -995,7 +940,7 @@ ath_tx_get_tid_subframe(struct ath_softc
- 
- 		if (!(tx_info->flags & IEEE80211_TX_CTL_AMPDU)) {
- 			bf->bf_state.bf_type = 0;
--			return bf;
-+			break;
- 		}
- 
- 		bf->bf_state.bf_type = BUF_AMPDU | BUF_AGGR;
-@@ -1014,7 +959,7 @@ ath_tx_get_tid_subframe(struct ath_softc
- 					first_skb = skb;
- 				continue;
- 			}
--			break;
-+			return -EINPROGRESS;
- 		}
- 
- 		if (tid->bar_index > ATH_BA_INDEX(tid->seq_start, seqno)) {
-@@ -1031,10 +976,11 @@ ath_tx_get_tid_subframe(struct ath_softc
- 		if (bf_isampdu(bf))
- 			ath_tx_addto_baw(sc, tid, bf);
- 
--		return bf;
-+		break;
- 	}
- 
--	return NULL;
-+	*buf = bf;
-+	return 0;
- }
- 
- static int
-@@ -1044,7 +990,7 @@ ath_tx_form_aggr(struct ath_softc *sc, s
- {
- #define PADBYTES(_len) ((4 - ((_len) % 4)) % 4)
- 	struct ath_buf *bf = bf_first, *bf_prev = NULL;
--	int nframes = 0, ndelim;
-+	int nframes = 0, ndelim, ret;
- 	u16 aggr_limit = 0, al = 0, bpad = 0,
- 	    al_delta, h_baw = tid->baw_size / 2;
- 	struct ieee80211_tx_info *tx_info;
-@@ -1096,7 +1042,9 @@ ath_tx_form_aggr(struct ath_softc *sc, s
- 
- 		bf_prev = bf;
- 
--		bf = ath_tx_get_tid_subframe(sc, txq, tid);
-+		ret = ath_tx_get_tid_subframe(sc, txq, tid, &bf);
-+		if (ret < 0)
-+			break;
- 	}
- 	goto finish;
- stop:
-@@ -1493,7 +1441,7 @@ ath_tx_form_burst(struct ath_softc *sc,
- 		  struct ath_buf *bf_first)
- {
- 	struct ath_buf *bf = bf_first, *bf_prev = NULL;
--	int nframes = 0;
-+	int nframes = 0, ret;
- 
- 	do {
- 		struct ieee80211_tx_info *tx_info;
-@@ -1507,8 +1455,8 @@ ath_tx_form_burst(struct ath_softc *sc,
- 		if (nframes >= 2)
- 			break;
- 
--		bf = ath_tx_get_tid_subframe(sc, txq, tid);
--		if (!bf)
-+		ret = ath_tx_get_tid_subframe(sc, txq, tid, &bf);
-+		if (ret < 0)
- 			break;
- 
- 		tx_info = IEEE80211_SKB_CB(bf->bf_mpdu);
-@@ -1521,30 +1469,27 @@ ath_tx_form_burst(struct ath_softc *sc,
- 	} while (1);
- }
- 
--static bool ath_tx_sched_aggr(struct ath_softc *sc, struct ath_txq *txq,
--			      struct ath_atx_tid *tid)
-+static int ath_tx_sched_aggr(struct ath_softc *sc, struct ath_txq *txq,
-+			     struct ath_atx_tid *tid)
- {
--	struct ath_buf *bf;
-+	struct ath_buf *bf = NULL;
- 	struct ieee80211_tx_info *tx_info;
- 	struct list_head bf_q;
--	int aggr_len = 0;
-+	int aggr_len = 0, ret;
- 	bool aggr;
- 
--	if (!ath_tid_has_buffered(tid))
--		return false;
--
- 	INIT_LIST_HEAD(&bf_q);
- 
--	bf = ath_tx_get_tid_subframe(sc, txq, tid);
--	if (!bf)
--		return false;
-+	ret = ath_tx_get_tid_subframe(sc, txq, tid, &bf);
-+	if (ret < 0)
-+		return ret;
- 
- 	tx_info = IEEE80211_SKB_CB(bf->bf_mpdu);
- 	aggr = !!(tx_info->flags & IEEE80211_TX_CTL_AMPDU);
- 	if ((aggr && txq->axq_ampdu_depth >= ATH_AGGR_MIN_QDEPTH) ||
- 	    (!aggr && txq->axq_depth >= ATH_NON_AGGR_MIN_QDEPTH)) {
- 		__skb_queue_tail(&tid->retry_q, bf->bf_mpdu);
--		return false;
-+		return -EBUSY;
- 	}
- 
- 	ath_set_rates(tid->an->vif, tid->an->sta, bf);
-@@ -1554,7 +1499,7 @@ static bool ath_tx_sched_aggr(struct ath
- 		ath_tx_form_burst(sc, txq, tid, &bf_q, bf);
- 
- 	if (list_empty(&bf_q))
--		return false;
-+		return -EAGAIN;
- 
- 	if (tid->clear_ps_filter || tid->an->no_ps_filter) {
- 		tid->clear_ps_filter = false;
-@@ -1563,7 +1508,7 @@ static bool ath_tx_sched_aggr(struct ath
- 
- 	ath_tx_fill_desc(sc, bf, txq, aggr_len);
- 	ath_tx_txqaddbuf(sc, txq, &bf_q, false);
--	return true;
-+	return 0;
- }
- 
- int ath_tx_aggr_start(struct ath_softc *sc, struct ieee80211_sta *sta,
-@@ -1626,28 +1571,16 @@ void ath_tx_aggr_sleep(struct ieee80211_
- {
- 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
- 	struct ath_atx_tid *tid;
--	struct ath_txq *txq;
- 	int tidno;
- 
- 	ath_dbg(common, XMIT, "%s called\n", __func__);
- 
- 	for (tidno = 0; tidno < IEEE80211_NUM_TIDS; tidno++) {
- 		tid = ath_node_to_tid(an, tidno);
--		txq = tid->txq;
--
--		ath_txq_lock(sc, txq);
--
--		if (list_empty(&tid->list)) {
--			ath_txq_unlock(sc, txq);
--			continue;
--		}
- 
- 		if (!skb_queue_empty(&tid->retry_q))
- 			ieee80211_sta_set_buffered(sta, tid->tidno, true);
- 
--		list_del_init(&tid->list);
--
--		ath_txq_unlock(sc, txq);
- 	}
- }
- 
-@@ -1666,11 +1599,12 @@ void ath_tx_aggr_wakeup(struct ath_softc
- 
- 		ath_txq_lock(sc, txq);
- 		tid->clear_ps_filter = true;
--		if (ath_tid_has_buffered(tid)) {
-+		if (!skb_queue_empty(&tid->retry_q)) {
- 			ath_tx_queue_tid(sc, tid);
- 			ath_txq_schedule(sc, txq);
- 		}
- 		ath_txq_unlock_complete(sc, txq);
-+
- 	}
- }
- 
-@@ -1701,9 +1635,9 @@ void ath9k_release_buffered_frames(struc
- 	struct ath_txq *txq = sc->tx.uapsdq;
- 	struct ieee80211_tx_info *info;
- 	struct list_head bf_q;
--	struct ath_buf *bf_tail = NULL, *bf;
-+	struct ath_buf *bf_tail = NULL, *bf = NULL;
- 	int sent = 0;
--	int i;
-+	int i, ret;
- 
- 	INIT_LIST_HEAD(&bf_q);
- 	for (i = 0; tids && nframes; i++, tids >>= 1) {
-@@ -1716,8 +1650,8 @@ void ath9k_release_buffered_frames(struc
- 
- 		ath_txq_lock(sc, tid->txq);
- 		while (nframes > 0) {
--			bf = ath_tx_get_tid_subframe(sc, sc->tx.uapsdq, tid);
--			if (!bf)
-+			ret = ath_tx_get_tid_subframe(sc, sc->tx.uapsdq, tid, &bf);
-+			if (ret < 0)
- 				break;
- 
- 			ath9k_set_moredata(sc, bf, true);
-@@ -1983,11 +1917,11 @@ void ath_tx_cleanupq(struct ath_softc *s
-  */
- void ath_txq_schedule(struct ath_softc *sc, struct ath_txq *txq)
- {
-+	struct ieee80211_hw *hw = sc->hw;
- 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
-+	struct ieee80211_txq *queue;
- 	struct ath_atx_tid *tid;
--	struct list_head *tid_list;
--	struct ath_acq *acq;
--	bool active = AIRTIME_ACTIVE(sc->airtime_flags);
-+	int ret;
- 
- 	if (txq->mac80211_qnum < 0)
- 		return;
-@@ -1995,58 +1929,26 @@ void ath_txq_schedule(struct ath_softc *
- 	if (test_bit(ATH_OP_HW_RESET, &common->op_flags))
- 		return;
- 
-+	ieee80211_txq_schedule_start(hw, txq->mac80211_qnum);
- 	spin_lock_bh(&sc->chan_lock);
- 	rcu_read_lock();
--	acq = &sc->cur_chan->acq[txq->mac80211_qnum];
- 
- 	if (sc->cur_chan->stopped)
- 		goto out;
- 
--begin:
--	tid_list = &acq->acq_new;
--	if (list_empty(tid_list)) {
--		tid_list = &acq->acq_old;
--		if (list_empty(tid_list))
--			goto out;
--	}
--	tid = list_first_entry(tid_list, struct ath_atx_tid, list);
--
--	if (active && tid->an->airtime_deficit[txq->mac80211_qnum] <= 0) {
--		spin_lock_bh(&acq->lock);
--		tid->an->airtime_deficit[txq->mac80211_qnum] += ATH_AIRTIME_QUANTUM;
--		list_move_tail(&tid->list, &acq->acq_old);
--		spin_unlock_bh(&acq->lock);
--		goto begin;
--	}
--
--	if (!ath_tid_has_buffered(tid)) {
--		spin_lock_bh(&acq->lock);
--		if ((tid_list == &acq->acq_new) && !list_empty(&acq->acq_old))
--			list_move_tail(&tid->list, &acq->acq_old);
--		else {
--			list_del_init(&tid->list);
--		}
--		spin_unlock_bh(&acq->lock);
--		goto begin;
--	}
-+	while ((queue = ieee80211_next_txq(hw, txq->mac80211_qnum))) {
-+		tid = (struct ath_atx_tid *) queue->drv_priv;
- 
-+		ret = ath_tx_sched_aggr(sc, txq, tid);
-+		ath_dbg(common, QUEUE, "ath_tx_sched_aggr returned %d\n", ret);
- 
--	/*
--	 * If we succeed in scheduling something, immediately restart to make
--	 * sure we keep the HW busy.
--	 */
--	if(ath_tx_sched_aggr(sc, txq, tid)) {
--		if (!active) {
--			spin_lock_bh(&acq->lock);
--			list_move_tail(&tid->list, &acq->acq_old);
--			spin_unlock_bh(&acq->lock);
--		}
--		goto begin;
-+		ieee80211_return_txq(hw, queue);
- 	}
- 
- out:
- 	rcu_read_unlock();
- 	spin_unlock_bh(&sc->chan_lock);
-+	ieee80211_txq_schedule_end(hw, txq->mac80211_qnum);
- }
- 
- void ath_txq_schedule_all(struct ath_softc *sc)
-@@ -2890,9 +2792,6 @@ void ath_tx_node_init(struct ath_softc *
- 	struct ath_atx_tid *tid;
- 	int tidno, acno;
- 
--	for (acno = 0; acno < IEEE80211_NUM_ACS; acno++)
--		an->airtime_deficit[acno] = ATH_AIRTIME_QUANTUM;
--
- 	for (tidno = 0; tidno < IEEE80211_NUM_TIDS; tidno++) {
- 		tid = ath_node_to_tid(an, tidno);
- 		tid->an        = an;
-@@ -2902,7 +2801,6 @@ void ath_tx_node_init(struct ath_softc *
- 		tid->baw_head  = tid->baw_tail = 0;
- 		tid->active	   = false;
- 		tid->clear_ps_filter = true;
--		tid->has_queued  = false;
- 		__skb_queue_head_init(&tid->retry_q);
- 		INIT_LIST_HEAD(&tid->list);
- 		acno = TID_TO_WME_AC(tidno);
-Index: backports-20181013-3.14.77-b8f962f1/include/net/cfg80211.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/include/net/cfg80211.h
-+++ backports-20181013-3.14.77-b8f962f1/include/net/cfg80211.h
-@@ -991,6 +991,7 @@ enum station_parameters_apply_mask {
-  * @support_p2p_ps: information if station supports P2P PS mechanism
-  * @he_capa: HE capabilities of station
-  * @he_capa_len: the length of the HE capabilities
-+ * @airtime_weight: airtime scheduler weight for this station
-  */
- struct station_parameters {
- 	const u8 *supported_rates;
-@@ -1020,6 +1021,7 @@ struct station_parameters {
- 	int support_p2p_ps;
- 	const struct ieee80211_he_cap_elem *he_capa;
- 	u8 he_capa_len;
-+	u16 airtime_weight;
- };
- 
- /**
-@@ -1287,6 +1289,8 @@ struct cfg80211_tid_stats {
-  * @rx_beacon_signal_avg: signal strength average (in dBm) for beacons received
-  *	from this peer
-  * @rx_duration: aggregate PPDU duration(usecs) for all the frames from a peer
-+ * @tx_duration: aggregate PPDU duration(usecs) for all the frames to a peer
-+ * @airtime_weight: current airtime scheduling weight
-  * @pertid: per-TID statistics, see &struct cfg80211_tid_stats, using the last
-  *	(IEEE80211_NUM_TIDS) index for MSDUs not encapsulated in QoS-MPDUs.
-  *	Note that this doesn't use the @filled bit, but is used if non-NULL.
-@@ -1334,9 +1338,11 @@ struct station_info {
- 	u32 expected_throughput;
- 
- 	u64 rx_beacon;
-+	u64 tx_duration;
- 	u64 rx_duration;
- 	u8 rx_beacon_signal_avg;
- 	struct cfg80211_tid_stats *pertid;
-+	u16 airtime_weight;
- 	s8 ack_signal;
- 	s8 avg_ack_signal;
- };
-@@ -2364,6 +2370,8 @@ enum wiphy_params_flags {
- 	WIPHY_PARAM_TXQ_QUANTUM		= 1 << 8,
- };
- 
-+#define IEEE80211_DEFAULT_AIRTIME_WEIGHT	256
-+
- /**
-  * struct cfg80211_pmksa - PMK Security Association
-  *
 Index: backports-20181013-3.14.77-b8f962f1/include/net/mac80211.h
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/include/net/mac80211.h
 +++ backports-20181013-3.14.77-b8f962f1/include/net/mac80211.h
-@@ -108,9 +108,16 @@
-  * The driver is expected to initialize its private per-queue data for stations
-  * and interfaces in the .add_interface and .sta_add ops.
-  *
-- * The driver can't access the queue directly. To dequeue a frame, it calls
-- * ieee80211_tx_dequeue(). Whenever mac80211 adds a new frame to a queue, it
-- * calls the .wake_tx_queue driver op.
-+ * The driver can't access the queue directly. To dequeue a frame from a
-+ * txq, it calls ieee80211_tx_dequeue(). Whenever mac80211 adds a new frame to a
-+ * queue, it calls the .wake_tx_queue driver op.
-+ *
-+ * Drivers can optionally delegate responsibility for scheduling queues to
-+ * mac80211, to take advantage of airtime fairness accounting. In this case, to
-+ * obtain the next queue to pull frames from, the driver calls
+@@ -115,8 +115,9 @@
+  * Drivers can optionally delegate responsibility for scheduling queues to
+  * mac80211, to take advantage of airtime fairness accounting. In this case, to
+  * obtain the next queue to pull frames from, the driver calls
+- * ieee80211_next_txq(). The driver is then expected to return the txq using
+- * ieee80211_return_txq().
 + * ieee80211_next_txq(). The driver is then expected to re-schedule the txq
 + * using ieee80211_schedule_txq() if it is still active after the driver has
 + * finished pulling packets from it.
   *
   * For AP powersave TIM handling, the driver only needs to indicate if it has
   * buffered packets in the driver specific data structures by calling
-@@ -2389,6 +2396,8 @@ enum ieee80211_hw_flags {
-  * 	this field is applicable for devices advertising SW_CRYPTO_CONTROL
-  * 	hwflag. Drivers may also set the interface types on which mac80211
-  * 	can fallback to software encryption if set_key returns -EOPNOTSUPP.
+@@ -2482,6 +2483,8 @@ enum ieee80211_hw_flags {
+  *	this field is applicable for devices advertising SW_CRYPTO_CONTROL
+  *	hwflag. Drivers may also set the interface types on which mac80211
+  *	can fallback to software encryption if set_key returns -EOPNOTSUPP.
 + *
 + * @airtime_weight: Default airtime weight preferred by driver.
   */
  struct ieee80211_hw {
  	struct ieee80211_conf conf;
-@@ -2426,6 +2435,7 @@ struct ieee80211_hw {
- 	u8 max_nan_de_entries;
+@@ -2520,6 +2523,7 @@ struct ieee80211_hw {
  	u8 tx_sk_pacing_shift;
+ 	u8 weight_multiplier;
  	u16 supp_sw_crypto_iftypes;
 +	u32 airtime_weight;
  };
  
  static inline bool _ieee80211_hw_check(struct ieee80211_hw *hw,
-@@ -5447,6 +5457,34 @@ void ieee80211_sta_eosp(struct ieee80211
- void ieee80211_send_eosp_nullfunc(struct ieee80211_sta *pubsta, int tid);
+@@ -5611,6 +5615,34 @@ void ieee80211_sta_register_airtime(struct ieee80211_sta *pubsta, u8 tid,
+ 				    u32 tx_airtime, u32 rx_airtime);
  
  /**
 + * ieee80211_sta_register_airtime - register airtime usage for a sta/tid
@@ -1299,8 +309,8 @@ Index: backports-20181013-3.14.77-b8f962f1/include/net/mac80211.h
   *
   * Returns the skb if successful, %NULL if no frame was available.
   */
-@@ -6175,6 +6214,76 @@ struct sk_buff *ieee80211_tx_dequeue(str
- 				     struct ieee80211_txq *txq);
+@@ -6436,6 +6469,76 @@ bool ieee80211_txq_may_transmit(struct ieee80211_hw *hw,
+ 				struct ieee80211_txq *txq);
  
  /**
 + * ieee80211_next_txq - get next tx queue to pull packets from
@@ -1376,80 +386,6 @@ Index: backports-20181013-3.14.77-b8f962f1/include/net/mac80211.h
   * ieee80211_txq_get_depth - get pending frame/byte count of given txq
   *
   * The values are not guaranteed to be coherent with regard to each other, i.e.
-Index: backports-20181013-3.14.77-b8f962f1/include/uapi/linux/nl80211.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/include/uapi/linux/nl80211.h
-+++ backports-20181013-3.14.77-b8f962f1/include/uapi/linux/nl80211.h
-@@ -2266,6 +2266,9 @@ enum nl80211_commands {
-  * @NL80211_ATTR_MAX_RETRY_COUNT: The upper limit for the retry count
-  *	configuration that the driver can accept.
-  *
-+ * @NL80211_ATTR_AIRTIME_WEIGHT: Station's weight when scheduled by the airtime
-+ *      scheduler.
-+ *
-  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
-  * @NL80211_ATTR_MAX: highest attribute number currently defined
-  * @__NL80211_ATTR_AFTER_LAST: internal use
-@@ -2711,6 +2714,8 @@ enum nl80211_attrs {
- 	NL80211_ATTR_TID_CONFIG,
- 	NL80211_ATTR_MAX_RETRY_COUNT,
- 
-+	NL80211_ATTR_AIRTIME_WEIGHT,
-+
- 	/* add attributes here, update the policy in nl80211.c */
- 
- 	__NL80211_ATTR_AFTER_LAST,
-@@ -3082,6 +3087,9 @@ enum nl80211_sta_bss_param {
-  * @NL80211_STA_INFO_ACK_SIGNAL_AVG: avg signal strength of ACK frames (s8, dBm)
-  * @__NL80211_STA_INFO_AFTER_LAST: internal
-  * @NL80211_STA_INFO_MAX: highest possible station info attribute
-+ * @NL80211_STA_INFO_TX_DURATION: aggregate PPDU duration for all frames
-+ *	sent to the station (u64, usec)
-+ * @NL80211_STA_INFO_AIRTIME_WEIGHT: current airtime weight for station (u16)
-  */
- enum nl80211_sta_info {
- 	__NL80211_STA_INFO_INVALID,
-@@ -3120,6 +3128,8 @@ enum nl80211_sta_info {
- 	NL80211_STA_INFO_PAD,
- 	NL80211_STA_INFO_ACK_SIGNAL,
- 	NL80211_STA_INFO_ACK_SIGNAL_AVG,
-+	NL80211_STA_INFO_TX_DURATION,
-+	NL80211_STA_INFO_AIRTIME_WEIGHT,
- 
- 	/* keep last */
- 	__NL80211_STA_INFO_AFTER_LAST,
-@@ -5361,6 +5371,10 @@ enum nl80211_feature_flags {
-  * @NL80211_EXT_FEATURE_PER_STA_AMPDU_AGGR_CTRL: Driver supports per STA
-  *	specific TID aggregation control(enable/disable).
-  *
-+ * @NL80211_EXT_FEATURE_AIRTIME_FAIRNESS: Driver supports getting airtime
-+ *      fairness for transmitted packets and has enabled airtime fairness
-+ *      scheduling.
-+ *
-  * @NUM_NL80211_EXT_FEATURES: number of extended features.
-  * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
-  */
-@@ -5404,6 +5418,7 @@ enum nl80211_ext_feature_index {
- 	NL80211_EXT_FEATURE_PER_STA_RETRY_CONFIG,
- 	NL80211_EXT_FEATURE_PER_TID_AMPDU_AGGR_CTRL,
- 	NL80211_EXT_FEATURE_PER_STA_AMPDU_AGGR_CTRL,
-+	NL80211_EXT_FEATURE_AIRTIME_FAIRNESS,
- 
- 	/* add new features before the definition below */
- 	NUM_NL80211_EXT_FEATURES,
-Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/agg-tx.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/agg-tx.c
-+++ backports-20181013-3.14.77-b8f962f1/net/mac80211/agg-tx.c
-@@ -229,7 +229,7 @@ ieee80211_agg_start_txq(struct sta_info
- 	clear_bit(IEEE80211_TXQ_STOP, &txqi->flags);
- 	local_bh_disable();
- 	rcu_read_lock();
--	drv_wake_tx_queue(sta->sdata->local, txqi);
-+	schedule_and_wake_txq(sta->sdata->local, txqi);
- 	rcu_read_unlock();
- 	local_bh_enable();
- }
 Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/cfg.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/cfg.c
@@ -1482,63 +418,6 @@ Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/debugfs_sta.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/debugfs_sta.c
 +++ backports-20181013-3.14.77-b8f962f1/net/mac80211/debugfs_sta.c
-@@ -181,9 +181,9 @@ static ssize_t sta_aqm_read(struct file
- 			       txqi->tin.tx_bytes,
- 			       txqi->tin.tx_packets,
- 			       txqi->flags,
--			       txqi->flags & (1<<IEEE80211_TXQ_STOP) ? "STOP" : "RUN",
--			       txqi->flags & (1<<IEEE80211_TXQ_AMPDU) ? " AMPDU" : "",
--			       txqi->flags & (1<<IEEE80211_TXQ_NO_AMSDU) ? " NO-AMSDU" : "");
-+			       test_bit(IEEE80211_TXQ_STOP, &txqi->flags) ? "STOP" : "RUN",
-+			       test_bit(IEEE80211_TXQ_AMPDU, &txqi->flags) ? " AMPDU" : "",
-+			       test_bit(IEEE80211_TXQ_NO_AMSDU, &txqi->flags) ? " NO-AMSDU" : "");
- 	}
- 
- 	rcu_read_unlock();
-@@ -195,6 +195,46 @@ static ssize_t sta_aqm_read(struct file
- }
- STA_OPS(aqm);
- 
-+static ssize_t sta_airtime_read(struct file *file, char __user *userbuf,
-+				size_t count, loff_t *ppos)
-+{
-+	struct sta_info *sta = file->private_data;
-+	struct ieee80211_local *local = sta->sdata->local;
-+	size_t bufsz = 200;
-+	char *buf = kzalloc(bufsz, GFP_KERNEL), *p = buf;
-+	u64 rx_airtime = 0, tx_airtime = 0;
-+	s64 deficit[IEEE80211_NUM_ACS];
-+	ssize_t rv;
-+	int ac;
-+
-+	if (!buf)
-+		return -ENOMEM;
-+
-+	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
-+		spin_lock_bh(&local->active_txq_lock[ac]);
-+		rx_airtime += sta->airtime[ac].rx_airtime;
-+		tx_airtime += sta->airtime[ac].tx_airtime;
-+		deficit[ac] = sta->airtime[ac].deficit;
-+		spin_unlock_bh(&local->active_txq_lock[ac]);
-+	}
-+
-+	p += scnprintf(p, bufsz + buf - p,
-+		"RX: %llu us\nTX: %llu us\nWeight: %u\n"
-+		"Deficit: VO: %lld us VI: %lld us BE: %lld us BK: %lld us\n",
-+		rx_airtime,
-+		tx_airtime,
-+		sta->airtime_weight,
-+		deficit[0],
-+		deficit[1],
-+		deficit[2],
-+		deficit[3]);
-+
-+	rv = simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
-+	kfree(buf);
-+	return rv;
-+}
-+STA_OPS(airtime);
-+
  static ssize_t sta_agg_status_read(struct file *file, char __user *userbuf,
  					size_t count, loff_t *ppos)
  {
@@ -1553,62 +432,6 @@ Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/debugfs_sta.c
  	if (sizeof(sta->driver_buffered_tids) == sizeof(u32))
  		debugfs_create_x32("driver_buffered_tids", 0400,
  				   sta->debugfs_dir,
-Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/driver-ops.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/driver-ops.h
-+++ backports-20181013-3.14.77-b8f962f1/net/mac80211/driver-ops.h
-@@ -1183,6 +1183,15 @@ static inline int drv_can_aggregate_in_a
- 	return local->ops->can_aggregate_in_amsdu(&local->hw, head, skb);
- }
- 
-+static inline void schedule_and_wake_txq(struct ieee80211_local *local,
-+					 struct txq_info *txqi)
-+{
-+	spin_lock_bh(&local->active_txq_lock[txqi->txq.ac]);
-+	ieee80211_return_txq(&local->hw, &txqi->txq);
-+	spin_unlock_bh(&local->active_txq_lock[txqi->txq.ac]);
-+	drv_wake_tx_queue(local, txqi);
-+}
-+
- static inline int drv_start_nan(struct ieee80211_local *local,
- 				struct ieee80211_sub_if_data *sdata,
- 				struct cfg80211_nan_conf *conf)
-Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/ieee80211_i.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/ieee80211_i.h
-+++ backports-20181013-3.14.77-b8f962f1/net/mac80211/ieee80211_i.h
-@@ -836,6 +836,8 @@ enum txq_info_flags {
-  *	a fq_flow which is already owned by a different tin
-  * @def_cvars: codel vars for @def_flow
-  * @frags: used to keep fragments created after dequeue
-+ * @schedule_order: used with ieee80211_local->active_txqs
-+ * @schedule_round: counter to prevent infinite loops on TXQ scheduling
-  */
- struct txq_info {
- 	struct fq_tin tin;
-@@ -843,6 +845,8 @@ struct txq_info {
- 	struct codel_vars def_cvars;
- 	struct codel_stats cstats;
- 	struct sk_buff_head frags;
-+	struct list_head schedule_order;
-+	u16 schedule_round;
- 	unsigned long flags;
- 
- 	/* keep last! */
-@@ -1143,6 +1147,13 @@ struct ieee80211_local {
- 	struct codel_vars *cvars;
- 	struct codel_params cparams;
- 
-+	/* protects active_txqs and txqi->schedule_order */
-+	spinlock_t active_txq_lock[IEEE80211_NUM_ACS];
-+	struct list_head active_txqs[IEEE80211_NUM_ACS];
-+	u16 schedule_round[IEEE80211_NUM_ACS];
-+
-+	u16 airtime_flags;
-+
- 	const struct ieee80211_ops *ops;
- 
- 	/*
 Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/main.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/main.c
@@ -1640,76 +463,17 @@ Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/sta_info.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/sta_info.c
 +++ backports-20181013-3.14.77-b8f962f1/net/mac80211/sta_info.c
-@@ -90,7 +90,6 @@ static void __cleanup_single_sta(struct
- 	struct tid_ampdu_tx *tid_tx;
- 	struct ieee80211_sub_if_data *sdata = sta->sdata;
- 	struct ieee80211_local *local = sdata->local;
--	struct fq *fq = &local->fq;
- 	struct ps_data *ps;
- 
- 	if (test_sta_flag(sta, WLAN_STA_PS_STA) ||
-@@ -120,9 +119,7 @@ static void __cleanup_single_sta(struct
- 
- 			txqi = to_txq_info(sta->sta.txq[i]);
- 
--			spin_lock_bh(&fq->lock);
- 			ieee80211_txq_purge(local, txqi);
--			spin_unlock_bh(&fq->lock);
- 		}
- 	}
- 
-@@ -387,9 +384,12 @@ struct sta_info *sta_info_alloc(struct i
+@@ -384,7 +384,7 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
  	if (sta_prepare_rate_control(local, sta, gfp))
  		goto free_txq;
  
+-	sta->airtime_weight = IEEE80211_DEFAULT_AIRTIME_WEIGHT;
 +	sta->airtime_weight = hw->airtime_weight;
-+
+ 
  	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
  		skb_queue_head_init(&sta->ps_tx_buf[i]);
- 		skb_queue_head_init(&sta->tx_filtered[i]);
-+		sta->airtime[i].deficit = sta->airtime_weight;
- 	}
- 
- 	for (i = 0; i < IEEE80211_NUM_TIDS; i++)
-@@ -1251,7 +1251,7 @@ void ieee80211_sta_ps_deliver_wakeup(str
- 		if (!sta->sta.txq[i] || !txq_has_queue(sta->sta.txq[i]))
- 			continue;
- 
--		drv_wake_tx_queue(local, to_txq_info(sta->sta.txq[i]));
-+		schedule_and_wake_txq(local, to_txq_info(sta->sta.txq[i]));
- 	}
- 
- 	skb_queue_head_init(&pending);
-@@ -1828,6 +1828,27 @@ void ieee80211_sta_set_buffered(struct i
- }
- EXPORT_SYMBOL(ieee80211_sta_set_buffered);
- 
-+void ieee80211_sta_register_airtime(struct ieee80211_sta *pubsta, u8 tid,
-+				    u32 tx_airtime, u32 rx_airtime)
-+{
-+	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
-+	struct ieee80211_local *local = sta->sdata->local;
-+	u8 ac = ieee80211_ac_from_tid(tid);
-+	u32 airtime = 0;
-+
-+	if (sta->local->airtime_flags & AIRTIME_USE_TX)
-+		airtime += tx_airtime;
-+	if (sta->local->airtime_flags & AIRTIME_USE_RX)
-+		airtime += rx_airtime;
-+
-+	spin_lock_bh(&local->active_txq_lock[ac]);
-+	sta->airtime[ac].tx_airtime += tx_airtime;
-+	sta->airtime[ac].rx_airtime += rx_airtime;
-+	sta->airtime[ac].deficit -= airtime;
-+	spin_unlock_bh(&local->active_txq_lock[ac]);
-+}
-+EXPORT_SYMBOL(ieee80211_sta_register_airtime);
-+
- int sta_info_move_state(struct sta_info *sta,
- 			enum ieee80211_sta_state new_state)
- {
-@@ -2190,6 +2211,23 @@ void sta_set_sinfo(struct sta_info *sta,
- 		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_FAILED);
+@@ -2228,6 +2249,23 @@ void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo,
+ 		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_AIRTIME_WEIGHT);
  	}
  
 +	if (!(sinfo->filled & (1ULL << NL80211_STA_INFO_RX_DURATION))) {
@@ -1732,37 +496,6 @@ Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/sta_info.c
  	sinfo->rx_dropped_misc = sta->rx_stats.dropped;
  	if (sta->pcpu_rx_stats) {
  		for_each_possible_cpu(cpu) {
-Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/sta_info.h
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/sta_info.h
-+++ backports-20181013-3.14.77-b8f962f1/net/mac80211/sta_info.h
-@@ -127,6 +127,16 @@ enum ieee80211_agg_stop_reason {
- 	AGG_STOP_DESTROY_STA,
- };
- 
-+/* Debugfs flags to enable/disable use of RX/TX airtime in scheduler */
-+#define AIRTIME_USE_TX		BIT(0)
-+#define AIRTIME_USE_RX		BIT(1)
-+
-+struct airtime_info {
-+	u64 rx_airtime;
-+	u64 tx_airtime;
-+	s64 deficit;
-+};
-+
- struct sta_info;
- 
- /**
-@@ -570,6 +580,9 @@ struct sta_info {
- 	} tx_stats;
- 	u16 tid_seq[IEEE80211_QOS_CTL_TID_MASK + 1];
- 
-+	struct airtime_info airtime[IEEE80211_NUM_ACS];
-+	u16 airtime_weight;
-+
- 	/*
- 	 * Aggregation information, locked with lock.
- 	 */
 Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/status.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/status.c
@@ -1780,177 +513,6 @@ Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/status.c
  		if (ieee80211_hw_check(&local->hw, REPORTS_TX_ACK_STATUS)) {
  			if (info->flags & IEEE80211_TX_STAT_ACK) {
  				if (sta->status_stats.lost_packets)
-Index: backports-20181013-3.14.77-b8f962f1/net/mac80211/tx.c
-===================================================================
---- backports-20181013-3.14.77-b8f962f1.orig/net/mac80211/tx.c
-+++ backports-20181013-3.14.77-b8f962f1/net/mac80211/tx.c
-@@ -1463,6 +1463,7 @@ void ieee80211_txq_init(struct ieee80211
- 	codel_vars_init(&txqi->def_cvars);
- 	codel_stats_init(&txqi->cstats);
- 	__skb_queue_head_init(&txqi->frags);
-+	INIT_LIST_HEAD(&txqi->schedule_order);
- 
- 	txqi->txq.vif = &sdata->vif;
- 
-@@ -1501,8 +1502,13 @@ void ieee80211_txq_purge(struct ieee8021
- 	struct fq *fq = &local->fq;
- 	struct fq_tin *tin = &txqi->tin;
- 
-+	spin_lock_bh(&fq->lock);
- 	fq_tin_reset(fq, tin, fq_skb_free_func);
- 	ieee80211_purge_tx_queue(&local->hw, &txqi->frags);
-+	spin_unlock_bh(&fq->lock);
-+	spin_lock_bh(&local->active_txq_lock[txqi->txq.ac]);
-+	list_del_init(&txqi->schedule_order);
-+	spin_unlock_bh(&local->active_txq_lock[txqi->txq.ac]);
- }
- 
- void ieee80211_txq_set_params(struct ieee80211_local *local)
-@@ -1619,7 +1625,7 @@ static bool ieee80211_queue_skb(struct i
- 	ieee80211_txq_enqueue(local, txqi, skb);
- 	spin_unlock_bh(&fq->lock);
- 
--	drv_wake_tx_queue(local, txqi);
-+	schedule_and_wake_txq(local, txqi);
- 
- 	return true;
- }
-@@ -3655,6 +3661,135 @@ out:
- }
- EXPORT_SYMBOL(ieee80211_tx_dequeue);
- 
-+struct ieee80211_txq *ieee80211_next_txq(struct ieee80211_hw *hw, u8 ac)
-+{
-+	struct ieee80211_local *local = hw_to_local(hw);
-+	struct txq_info *txqi = NULL;
-+
-+	lockdep_assert_held(&local->active_txq_lock[ac]);
-+
-+ begin:
-+	txqi = list_first_entry_or_null(&local->active_txqs[ac],
-+					struct txq_info,
-+					schedule_order);
-+	if (!txqi)
-+		return NULL;
-+
-+	if (txqi->txq.sta) {
-+		struct sta_info *sta = container_of(txqi->txq.sta,
-+						struct sta_info, sta);
-+
-+		if (sta->airtime[txqi->txq.ac].deficit < 0) {
-+			sta->airtime[txqi->txq.ac].deficit += sta->airtime_weight;
-+			list_move_tail(&txqi->schedule_order,
-+				       &local->active_txqs[txqi->txq.ac]);
-+			goto begin;
-+		}
-+	}
-+
-+
-+	if (txqi->schedule_round == local->schedule_round[ac])
-+		return NULL;
-+
-+	list_del_init(&txqi->schedule_order);
-+	txqi->schedule_round = local->schedule_round[ac];
-+	return &txqi->txq;
-+}
-+EXPORT_SYMBOL(ieee80211_next_txq);
-+
-+void ieee80211_return_txq(struct ieee80211_hw *hw,
-+			    struct ieee80211_txq *txq)
-+{
-+	struct ieee80211_local *local = hw_to_local(hw);
-+	struct txq_info *txqi = to_txq_info(txq);
-+
-+	lockdep_assert_held(&local->active_txq_lock[txq->ac]);
-+
-+	if (list_empty(&txqi->schedule_order) &&
-+	    (!skb_queue_empty(&txqi->frags) || txqi->tin.backlog_packets)) {
-+		/* If airtime accounting is active, always enqueue STAs at the
-+		 * head of the list to ensure that they only get moved to the
-+		 * back by the airtime DRR scheduler once they have a negative
-+		 * deficit. A station that already has a negative deficit will
-+		 * get immediately moved to the back of the list on the next
-+		 * call to ieee80211_next_txq().
-+		 */
-+		if (wiphy_ext_feature_isset(local->hw.wiphy,
-+					    NL80211_EXT_FEATURE_AIRTIME_FAIRNESS)
-+		    && txqi->txq.sta)
-+			list_add(&txqi->schedule_order,
-+				 &local->active_txqs[txq->ac]);
-+		else
-+			list_add_tail(&txqi->schedule_order,
-+				      &local->active_txqs[txq->ac]);
-+	}
-+
-+}
-+EXPORT_SYMBOL(ieee80211_return_txq);
-+
-+bool ieee80211_txq_may_transmit(struct ieee80211_hw *hw,
-+				struct ieee80211_txq *txq)
-+{
-+	struct ieee80211_local *local = hw_to_local(hw);
-+	struct txq_info *iter, *tmp, *txqi = to_txq_info(txq);
-+	struct sta_info *sta;
-+	u8 ac = txq->ac;
-+
-+	lockdep_assert_held(&local->active_txq_lock[ac]);
-+
-+	if (!txqi->txq.sta)
-+		goto out;
-+
-+	if (list_empty(&txqi->schedule_order))
-+		goto out;
-+
-+	list_for_each_entry_safe(iter, tmp, &local->active_txqs[ac], schedule_order) {
-+		if (iter == txqi)
-+			break;
-+
-+		if (!iter->txq.sta) {
-+			list_move_tail(&iter->schedule_order, &local->active_txqs[ac]);
-+			continue;
-+		}
-+		sta = container_of(iter->txq.sta, struct sta_info, sta);
-+		if (sta->airtime[ac].deficit < 0)
-+			sta->airtime[ac].deficit += sta->airtime_weight;
-+		list_move_tail(&iter->schedule_order, &local->active_txqs[ac]);
-+	}
-+
-+	sta = container_of(txqi->txq.sta, struct sta_info, sta);
-+	if (sta->airtime[ac].deficit >= 0)
-+		goto out;
-+
-+	sta->airtime[ac].deficit += sta->airtime_weight;
-+	list_move_tail(&txqi->schedule_order, &local->active_txqs[ac]);
-+
-+	return false;
-+out:
-+	if (!list_empty(&txqi->schedule_order))
-+		list_del_init(&txqi->schedule_order);
-+
-+	return true;
-+}
-+EXPORT_SYMBOL(ieee80211_txq_may_transmit);
-+
-+void ieee80211_txq_schedule_start(struct ieee80211_hw *hw, u8 ac)
-+{
-+	struct ieee80211_local *local = hw_to_local(hw);
-+
-+	spin_lock_bh(&local->active_txq_lock[ac]);
-+	local->schedule_round[ac]++;
-+}
-+EXPORT_SYMBOL(ieee80211_txq_schedule_start);
-+
-+void ieee80211_txq_schedule_end(struct ieee80211_hw *hw, u8 ac)
-+{
-+	struct ieee80211_local *local = hw_to_local(hw);
-+
-+	spin_unlock_bh(&local->active_txq_lock[ac]);
-+}
-+EXPORT_SYMBOL(ieee80211_txq_schedule_end);
-+
- void __ieee80211_subif_start_xmit(struct sk_buff *skb,
- 				  struct net_device *dev,
- 				  u32 info_flags)
 Index: backports-20181013-3.14.77-b8f962f1/net/wireless/nl80211.c
 ===================================================================
 --- backports-20181013-3.14.77-b8f962f1.orig/net/wireless/nl80211.c
@@ -1963,18 +525,6 @@ Index: backports-20181013-3.14.77-b8f962f1/net/wireless/nl80211.c
  };
  
  /* policy for the key attributes */
-@@ -4685,6 +4686,11 @@ static int nl80211_send_station(struct s
- 	PUT_SINFO(PLID, plid, u16);
- 	PUT_SINFO(PLINK_STATE, plink_state, u8);
- 	PUT_SINFO_U64(RX_DURATION, rx_duration);
-+	PUT_SINFO_U64(TX_DURATION, tx_duration);
-+
-+	if (wiphy_ext_feature_isset(&rdev->wiphy,
-+				    NL80211_EXT_FEATURE_AIRTIME_FAIRNESS))
-+		PUT_SINFO(AIRTIME_WEIGHT, airtime_weight, u16);
- 
- 	switch (rdev->wiphy.signal_type) {
- 	case CFG80211_SIGNAL_TYPE_MBM:
 @@ -5322,6 +5328,17 @@ static int nl80211_set_station(struct sk
  			nla_get_u8(info->attrs[NL80211_ATTR_OPMODE_NOTIF]);
  	}

@@ -41,11 +41,11 @@
  		ath10k_err(ar, "could not probe fw (%d)\n", status);
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -121,6 +121,7 @@ enum ath10k_skb_flags {
- 	ATH10K_SKB_F_DELIVER_CAB = BIT(2),
+@@ -114,6 +114,7 @@ enum ath10k_skb_flags {
  	ATH10K_SKB_F_MGMT = BIT(3),
  	ATH10K_SKB_F_QOS = BIT(4),
-+	ATH10K_SKB_F_NO_80211_ENCAP = BIT(5),
+ 	ATH10K_SKB_F_RAW_TX = BIT(5),
++	ATH10K_SKB_F_NO_80211_ENCAP = BIT(6),
  };
  
  struct ath10k_skb_cb {
@@ -100,10 +100,10 @@
  	skb_cb->paddr = dma_map_single(dev, msdu->data, msdu->len,
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -3397,11 +3397,15 @@ ath10k_mac_tx_h_get_txmode(struct ath10k *ar,
- 			   struct sk_buff *skb)
+@@ -3388,11 +3388,15 @@ ath10k_mac_tx_h_get_txmode(struct ath10k *ar,
  {
  	const struct ieee80211_hdr *hdr = (void *)skb->data;
+ 	const struct ath10k_skb_cb *skb_cb = ATH10K_SKB_CB(skb);
 +	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	__le16 fc = hdr->frame_control;
  
@@ -116,12 +116,8 @@
  	if (ieee80211_is_mgmt(fc))
  		return ATH10K_HW_TXRX_MGMT;
  
-@@ -3547,9 +3551,18 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
- 				    struct sk_buff *skb)
- {
- 	struct ieee80211_hdr *hdr = (void *)skb->data;
-+	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
- 	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(skb);
+@@ -3539,6 +3543,14 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+ 			ieee80211_is_data_qos(hdr->frame_control);
  
  	cb->flags = 0;
 +	cb->vif = vif;
@@ -135,18 +131,17 @@
  	if (!ath10k_tx_h_use_hwcrypto(vif, skb))
  		cb->flags |= ATH10K_SKB_F_NO_HWCRYPT;
  
-@@ -3558,9 +3571,6 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+@@ -3564,8 +3577,6 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+ 		cb->flags |= ATH10K_SKB_F_RAW_TX;
+ 	}
  
- 	if (ieee80211_is_data_qos(hdr->frame_control))
- 		cb->flags |= ATH10K_SKB_F_QOS;
--
 -	cb->vif = vif;
 -	cb->txq = txq;
+ 	cb->airtime_est = airtime;
  }
  
- bool ath10k_mac_tx_frm_has_freq(struct ath10k *ar)
-@@ -3669,6 +3679,9 @@ static int ath10k_mac_tx(struct ath10k *ar,
- 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+@@ -3676,6 +3687,9 @@ static int ath10k_mac_tx(struct ath10k *ar,
+ 	const struct ath10k_skb_cb *skb_cb = ATH10K_SKB_CB(skb);
  	int ret;
  
 +	if (info->control.no_80211_encap)
@@ -155,7 +150,7 @@
  	/* We should disable CCK RATE due to P2P */
  	if (info->flags & IEEE80211_TX_CTL_NO_CCK_RATE)
  		ath10k_dbg(ar, ATH10K_DBG_MAC, "IEEE80211_TX_CTL_NO_CCK_RATE\n");
-@@ -3691,6 +3704,7 @@ static int ath10k_mac_tx(struct ath10k *ar,
+@@ -3699,6 +3713,7 @@ static int ath10k_mac_tx(struct ath10k *ar,
  		}
  	}
  
@@ -163,7 +158,7 @@
  	if (info->flags & IEEE80211_TX_CTL_TX_OFFCHAN) {
  		if (!ath10k_mac_tx_frm_has_freq(ar)) {
  			ath10k_dbg(ar, ATH10K_DBG_MAC, "queued offchannel skb %pK\n",
-@@ -3740,6 +3754,7 @@ void ath10k_offchan_tx_work(struct work_struct *work)
+@@ -3748,6 +3763,7 @@ void ath10k_offchan_tx_work(struct work_struct *work)
  	int ret;
  	unsigned long time_left;
  	bool tmp_peer_created = false;
@@ -171,7 +166,7 @@
  
  	/* FW requirement: We must create a peer before FW will send out
  	 * an offchannel frame. Otherwise the frame will be stuck and
-@@ -3759,8 +3774,14 @@ void ath10k_offchan_tx_work(struct work_struct *work)
+@@ -3767,8 +3783,14 @@ void ath10k_offchan_tx_work(struct work_struct *work)
  		ath10k_dbg(ar, ATH10K_DBG_MAC, "mac offchannel skb %pK\n",
  			   skb);
  
@@ -188,7 +183,7 @@
  
  		spin_lock_bh(&ar->data_lock);
  		vdev_id = ar->scan.vdev_id;
-@@ -4251,7 +4272,7 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -4296,7 +4318,7 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
  	struct ieee80211_vif *vif = info->control.vif;
  	struct ieee80211_sta *sta = control->sta;
  	struct ieee80211_txq *txq = NULL;
@@ -197,7 +192,7 @@
  	enum ath10k_hw_txrx_mode txmode;
  	enum ath10k_mac_tx_path txpath;
  	bool is_htt;
-@@ -4263,13 +4284,13 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -4310,13 +4332,13 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
  
  	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
  	txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
@@ -212,7 +207,7 @@
  
  		ret = ath10k_htt_tx_inc_pending(htt);
  		if (ret) {
-@@ -4280,14 +4301,19 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -4327,14 +4349,19 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
  			return;
  		}
  
@@ -240,7 +235,7 @@
  		}
  		spin_unlock_bh(&ar->htt.tx_lock);
  	}
-@@ -8565,7 +8591,6 @@ int ath10k_mac_register(struct ath10k *ar)
+@@ -8671,7 +8698,6 @@ int ath10k_mac_register(struct ath10k *ar)
  	ieee80211_hw_set(ar->hw, HAS_RATE_CONTROL);
  	ieee80211_hw_set(ar->hw, AP_LINK_PS);
  	ieee80211_hw_set(ar->hw, SPECTRUM_MGMT);
@@ -248,7 +243,7 @@
  	ieee80211_hw_set(ar->hw, CONNECTION_MONITOR);
  	ieee80211_hw_set(ar->hw, SUPPORTS_PER_STA_GTK);
  	ieee80211_hw_set(ar->hw, WANT_MONITOR_VIF);
-@@ -8574,6 +8599,11 @@ int ath10k_mac_register(struct ath10k *ar)
+@@ -8680,6 +8706,11 @@ int ath10k_mac_register(struct ath10k *ar)
  	ieee80211_hw_set(ar->hw, SUPPORTS_TX_FRAG);
  	ieee80211_hw_set(ar->hw, REPORTS_LOW_ACK);
  
@@ -302,5 +297,5 @@
  	struct fq_tin *tin = &txqi->tin;
 -	struct ieee80211_tx_info *info;
  
+ 	spin_lock_bh(&fq->lock);
  	fq_tin_reset(fq, tin, fq_skb_free_func);
- 	ieee80211_purge_tx_queue(&local->hw, &txqi->frags);
