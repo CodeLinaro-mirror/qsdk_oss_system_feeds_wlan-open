@@ -1,0 +1,101 @@
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 5829bd1..cf0581c 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -456,6 +456,7 @@ struct ath11k {
+ 	u32 txpower_scale;
+ 	u32 power_scale;
+ 	u32 chan_tx_pwr;
++	u32 num_stations;
+ 	u32 max_num_stations;
+ 	bool monitor_present;
+ 	struct mutex conf_mutex;
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 233137a..a43170a 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -744,6 +744,7 @@ void ath11k_mac_peer_cleanup_all(struct ath11k *ar)
+ 	spin_unlock_bh(&ab->data_lock);
+ 
+ 	ar->num_peers = 0;
++	ar->num_stations = 0;
+ }
+ 
+ static void ath11k_peer_cleanup(struct ath11k *ar, u32 vdev_id)
+@@ -2590,6 +2591,37 @@ static void ath11k_sta_rc_update_wk(struct work_struct *wk)
+ 	mutex_unlock(&ar->conf_mutex);
+ }
+ 
++static int ath11k_mac_inc_num_stations(struct ath11k_vif *arvif,
++				       struct ieee80211_sta *sta)
++{
++	struct ath11k *ar = arvif->ar;
++
++	lockdep_assert_held(&ar->conf_mutex);
++
++	if (arvif->vdev_type == WMI_VDEV_TYPE_STA && !sta->tdls)
++		return 0;
++
++	if (ar->num_stations >= ar->max_num_stations)
++		return -ENOBUFS;
++
++	ar->num_stations++;
++
++	return 0;
++}
++
++static void ath11k_mac_dec_num_stations(struct ath11k_vif *arvif,
++					struct ieee80211_sta *sta)
++{
++	struct ath11k *ar = arvif->ar;
++
++	lockdep_assert_held(&ar->conf_mutex);
++
++	if (arvif->vdev_type == WMI_VDEV_TYPE_STA && !sta->tdls)
++		return;
++
++	ar->num_stations--;
++}
++
+ static int ath11k_sta_state(struct ieee80211_hw *hw,
+ 			    struct ieee80211_vif *vif,
+ 			    struct ieee80211_sta *sta,
+@@ -2615,6 +2647,13 @@ static int ath11k_sta_state(struct ieee80211_hw *hw,
+ 		arsta->arvif = arvif;
+ 		INIT_WORK(&arsta->update_wk, ath11k_sta_rc_update_wk);
+ 
++		ret = ath11k_mac_inc_num_stations(arvif, sta);
++		if (ret) {
++			ath11k_warn(ar->ab, "refusing to associate station: too many connected already (%d)\n",
++				    ar->max_num_stations);
++			goto exit;
++		}
++
+ 		if (ath11k_debug_is_extd_rx_stats_enabled(ar)) {
+ 			arsta->rx_stats = kzalloc(sizeof(*arsta->rx_stats),
+ 						  GFP_KERNEL);
+@@ -2631,6 +2670,7 @@ static int ath11k_sta_state(struct ieee80211_hw *hw,
+ 		if (ret) {
+ 			ath11k_warn(ar->ab, "Failed to add peer: %pM for VDEV: %d\n",
+ 				    sta->addr, arvif->vdev_id);
++			ath11k_mac_dec_num_stations(arvif, sta);
+ 			goto exit;
+ 		}
+ 
+@@ -2660,6 +2700,7 @@ static int ath11k_sta_state(struct ieee80211_hw *hw,
+ 			ath11k_warn(ar->ab, "failed to setup dp for peer %pM on vdev %i (%d)\n",
+ 				    sta->addr, arvif->vdev_id, ret);
+ 			ath11k_peer_delete(ar, arvif->vdev_id, sta->addr);
++			ath11k_mac_dec_num_stations(arvif, sta);
+ 		}
+ 	} else if ((old_state == IEEE80211_STA_NONE &&
+ 		    new_state == IEEE80211_STA_NOTEXIST)) {
+@@ -2674,6 +2715,8 @@ static int ath11k_sta_state(struct ieee80211_hw *hw,
+ 				    "Removed peer: %pM for VDEV: %d\n",
+ 				    sta->addr, arvif->vdev_id);
+ 
++		ath11k_mac_dec_num_stations(arvif, sta);
++
+ 		if (ath11k_debug_is_extd_tx_stats_enabled(ar))
+ 			kfree(arsta->tx_stats);
+ 
