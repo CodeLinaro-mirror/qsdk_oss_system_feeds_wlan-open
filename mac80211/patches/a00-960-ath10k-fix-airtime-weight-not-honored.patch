@@ -1,0 +1,285 @@
+diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
+index 36016c4..6a41a24 100644
+--- a/drivers/net/wireless/ath/ath10k/core.h
++++ b/drivers/net/wireless/ath/ath10k/core.h
+@@ -97,7 +97,14 @@
+ #define QCA_CFR_VENDORID 0x8CFDF0
+ 
+ /* Default Airtime deficit (Tuned for multiclient performance) */
+-#define ATH10K_DEFAULT_AIRTIME_WEIGHT  4096
++#define ATH10K_DEFAULT_AIRTIME_WEIGHT  256
++
++#define ATH10K_CONG_CTL_CHECK_INTV_IN_MS  1000
++
++/* One successfully Tx won't last for too long and it will resume the tx in Tx completion.
++ * Otherwise, we need to resume tx if a txq has been stopped too long if it is busy.
++ */
++#define ATH10K_TXQ_MAX_STOP_TIME_IN_MS 10
+ 
+ struct ath10k;
+ 
+@@ -456,6 +463,8 @@ struct ath10k_txq {
+ 	struct list_head list;
+ 	unsigned long num_fw_queued;
+ 	unsigned long num_push_allowed;
++	u32 		timestamp;
++	bool		txq_stop;
+ };
+ 
+ enum ath10k_pkt_rx_err {
+@@ -1298,6 +1307,7 @@ struct ath10k {
+ 
+ 	bool ethernet_mode;
+ 	bool enable_atf_sch;
++	struct timer_list cong_ctl_check_timer;
+ 
+ 	enum ath10k_dt_btcoex_support_flag btcoex_support;
+ 	int btcoex_gpio_pin;
+diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
+index edc5010..d2e295f 100644
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -1865,6 +1865,7 @@ struct htt_tx_done {
+ 	u16 msdu_id;
+ 	u16 status;
+ 	u8 ack_rssi;
++	bool fw_drop;
+ };
+ 
+ enum htt_tx_compl_state {
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 5d097ae..c131e6d 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2255,6 +2255,7 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
+ 	struct ath10k_peer *peer;
+ 	u16 ppdu_info_offset = 0, peer_id;
+ 	u32 tx_duration;
++	tx_done.fw_drop = false;
+ 
+ 	switch (status) {
+ 	case HTT_DATA_TX_STATUS_NO_ACK:
+@@ -2264,6 +2265,7 @@ static void ath10k_htt_rx_tx_compl_ind(struct ath10k *ar,
+ 		tx_done.status = HTT_TX_COMPL_STATE_ACK;
+ 		break;
+ 	case HTT_DATA_TX_STATUS_DISCARD:
++		tx_done.fw_drop = true;
+ 	case HTT_DATA_TX_STATUS_POSTPONE:
+ 	case HTT_DATA_TX_STATUS_DOWNLOAD_FAIL:
+ 		tx_done.status = HTT_TX_COMPL_STATE_DISCARD;
+diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
+index a3ed3d5..b75c103 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -4017,7 +4017,9 @@ static void ath10k_mac_txq_init(struct ieee80211_txq *txq)
+ 		return;
+ 
+ 	artxq = (void *)txq->drv_priv;
+-	INIT_LIST_HEAD(&artxq->list);
++
++	artxq->txq_stop = false;
++	artxq->timestamp = 0;
+ }
+ 
+ static void ath10k_mac_txq_unref(struct ath10k *ar, struct ieee80211_txq *txq)
+@@ -4069,7 +4071,7 @@ static bool ath10k_mac_tx_can_push(struct ieee80211_hw *hw,
+ 
+ 	/* No need to get locks */
+ 	if (ar->htt.tx_q_state.mode == HTT_TX_MODE_SWITCH_PUSH)
+-		return true;
++		return ath10k_txrx_cong_ctl_can_push(txq, &ar->htt);
+ 
+ 	if (ar->htt.num_pending_tx < ar->htt.tx_q_state.num_push_allowed)
+ 		return true;
+@@ -4207,6 +4209,7 @@ int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
+ static int ath10k_mac_schedule_txq(struct ieee80211_hw *hw, u32 ac)
+ {
+ 	struct ieee80211_txq *txq;
++	struct ath10k *ar = hw->priv;
+ 	int ret = 0;
+ 
+ 	ieee80211_txq_schedule_start(hw, ac);
+@@ -4221,6 +4224,7 @@ static int ath10k_mac_schedule_txq(struct ieee80211_hw *hw, u32 ac)
+ 		if (ret == -EBUSY)
+ 			break;
+ 	}
++
+ 	ieee80211_txq_schedule_end(hw, ac);
+ 
+ 	return ret;
+@@ -4484,18 +4488,15 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+ 	}
+ }
+ 
+-static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
+-					struct ieee80211_txq *txq)
++void ath10k_mac_wake_tx_queue(struct ieee80211_hw *hw, u32 ac)
+ {
++	struct ieee80211_txq * txq;
+ 	struct ath10k *ar = hw->priv;
+ 	int ret;
+-	u8 ac;
+ 
+-	ath10k_htt_tx_txq_update(hw, txq);
+ 	if (ar->htt.tx_q_state.mode != HTT_TX_MODE_SWITCH_PUSH)
+ 		return;
+ 
+-	ac = txq->ac;
+ 	ieee80211_txq_schedule_start(hw, ac);
+ 	txq = ieee80211_next_txq(hw, ac);
+ 	if (!txq)
+@@ -4508,10 +4509,24 @@ static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
+ 	}
+ 	ieee80211_return_txq(hw, txq);
+ 	ath10k_htt_tx_txq_update(hw, txq);
++
+ out:
+ 	ieee80211_txq_schedule_end(hw, ac);
+ }
+ 
++static void ath10k_mac_op_wake_tx_queue(struct ieee80211_hw *hw,
++					struct ieee80211_txq *txq)
++{
++	struct ath10k *ar = hw->priv;
++	u8 ac;
++
++	ath10k_htt_tx_txq_update(hw, txq);
++
++	ac = txq->ac;
++
++	ath10k_mac_wake_tx_queue(hw, ac);
++}
++
+ /* Must not be called with conf_mutex held as workers can use that also. */
+ void ath10k_drain_tx(struct ath10k *ar)
+ {
+@@ -9175,6 +9190,8 @@ int ath10k_mac_register(struct ath10k *ar)
+ 	if (ar->enable_atf_sch && ath10k_peer_stats_enabled(ar))
+ 		wiphy_ext_feature_set(ar->hw->wiphy,
+ 				      NL80211_EXT_FEATURE_AIRTIME_FAIRNESS);
++
++	ath10k_txrx_cong_ctl_init(ar);
+ 	/*
+ 	 * on LL hardware queues are managed entirely by the FW
+ 	 * so we only advertise to mac we can do the queues thing
+@@ -9357,6 +9374,8 @@ void ath10k_mac_unregister(struct ath10k *ar)
+ 
+ 	ath10k_vendor_unregister(ar);
+ 
++	ath10k_txrx_cong_ctl_deinit(ar);
++
+ 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED) && ar->dfs_detector)
+ 		ar->dfs_detector->exit(ar->dfs_detector);
+ 
+diff --git a/drivers/net/wireless/ath/ath10k/mac.h b/drivers/net/wireless/ath/ath10k/mac.h
+index 82caaf8..bd7274d 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.h
++++ b/drivers/net/wireless/ath/ath10k/mac.h
+@@ -65,6 +65,7 @@ void ath10k_mac_vif_tx_lock(struct ath10k_vif *arvif, int reason);
+ void ath10k_mac_vif_tx_unlock(struct ath10k_vif *arvif, int reason);
+ bool ath10k_mac_tx_frm_has_freq(struct ath10k *ar);
+ void ath10k_mac_tx_push_pending(struct ath10k *ar);
++void ath10k_mac_wake_tx_queue(struct ieee80211_hw *hw, u32 ac);
+ int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
+ 			   struct ieee80211_txq *txq);
+ struct ieee80211_txq *ath10k_mac_txq_lookup(struct ath10k *ar,
+diff --git a/drivers/net/wireless/ath/ath10k/txrx.c b/drivers/net/wireless/ath/ath10k/txrx.c
+index c5fe621..418eece 100644
+--- a/drivers/net/wireless/ath/ath10k/txrx.c
++++ b/drivers/net/wireless/ath/ath10k/txrx.c
+@@ -40,6 +40,67 @@ out:
+ 	spin_unlock_bh(&ar->data_lock);
+ }
+ 
++void ath10k_txrx_cong_ctl_check(struct timer_list * t)
++{
++	struct ath10k * ar = from_timer(ar, t, cong_ctl_check_timer);
++	u32 ac;
++
++	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++)
++		ath10k_mac_wake_tx_queue(ar->hw, ac);
++
++	mod_timer(&ar->cong_ctl_check_timer, jiffies + msecs_to_jiffies(ATH10K_CONG_CTL_CHECK_INTV_IN_MS));
++
++	return;
++}
++
++void ath10k_txrx_cong_ctl_init(struct ath10k * ar)
++{
++	timer_setup(&ar->cong_ctl_check_timer, ath10k_txrx_cong_ctl_check, 0);
++	mod_timer(&ar->cong_ctl_check_timer, jiffies + msecs_to_jiffies(ATH10K_CONG_CTL_CHECK_INTV_IN_MS));
++
++	return;
++}
++
++void ath10k_txrx_cong_ctl_deinit(struct ath10k * ar)
++{
++	return del_timer_sync(&ar->cong_ctl_check_timer);
++}
++
++bool ath10k_txrx_cong_ctl_can_push(struct ieee80211_txq * txq, struct ath10k_htt * htt)
++{
++
++	bool can_push = true;
++	struct ath10k_txq *artxq = (void *)txq->drv_priv;
++
++	spin_lock_bh(&htt->tx_lock);
++
++	/*In case this txq is stop for a long time */
++	if ((jiffies - artxq->timestamp) < msecs_to_jiffies(ATH10K_TXQ_MAX_STOP_TIME_IN_MS))
++		can_push = !(artxq->txq_stop);
++	else
++		artxq->timestamp = 0;
++
++	spin_unlock_bh(&htt->tx_lock);
++
++	return can_push;
++}
++
++void ath10k_txrx_cong_ctl_update(struct ieee80211_txq * txq, bool fw_drop, struct ath10k_htt * htt)
++{
++
++	struct ath10k_txq *artxq = (void *)txq->drv_priv;
++
++	lockdep_assert_held(&htt->tx_lock);
++
++	if (!artxq)
++		return;
++
++	artxq->txq_stop = fw_drop;
++	artxq->timestamp = fw_drop ? jiffies : 0;
++
++	return;
++}
++
+ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
+ 			 const struct htt_tx_done *tx_done)
+ {
+@@ -80,6 +141,8 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
+ 		artxq = (void *)txq->drv_priv;
+ 		artxq->num_fw_queued--;
+ 		sta = txq->sta;
++
++		ath10k_txrx_cong_ctl_update(txq, tx_done->fw_drop, htt);
+ 	}
+ 
+ 	flags = skb_cb->flags;
+diff --git a/drivers/net/wireless/ath/ath10k/txrx.h b/drivers/net/wireless/ath/ath10k/txrx.h
+index ecac441..7632269 100644
+--- a/drivers/net/wireless/ath/ath10k/txrx.h
++++ b/drivers/net/wireless/ath/ath10k/txrx.h
+@@ -11,6 +11,14 @@
+ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
+ 			 const struct htt_tx_done *tx_done);
+ 
++void ath10k_txrx_cong_ctl_init(struct ath10k * ar);
++
++void ath10k_txrx_cong_ctl_deinit(struct ath10k * ar);
++
++void ath10k_txrx_cong_ctl_update(struct ieee80211_txq * txq, bool fw_drop, struct ath10k_htt * htt);
++
++bool ath10k_txrx_cong_ctl_can_push(struct ieee80211_txq * txq, struct ath10k_htt * htt);
++
+ struct ath10k_peer *ath10k_peer_find(struct ath10k *ar, int vdev_id,
+ 				     const u8 *addr);
+ struct ath10k_peer *ath10k_peer_find_by_id(struct ath10k *ar, int peer_id);
