@@ -1,0 +1,61 @@
+diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
+index bc05423..349ba4e 100755
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -1854,7 +1854,8 @@ void ieee80211_sta_register_airtime(struct ieee80211_sta *pubsta, u8 tid,
+ 
+ 	weight_sum = local->airtime_weight_sum[ac] ?: sta->airtime_weight;
+ 
+-	local->airtime_v_t[ac] += airtime / weight_sum;
++	/* Round the calculation of global vt */
++	local->airtime_v_t[ac] += (airtime + (weight_sum >> 1)) / weight_sum;
+ 	sta->airtime[ac].v_t += airtime / sta->airtime_weight;
+ 	ieee80211_resort_txq(&local->hw, txq);
+ 
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index 006b043..a394e24 100755
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -130,7 +130,7 @@ enum ieee80211_agg_stop_reason {
+ /* Debugfs flags to enable/disable use of RX/TX airtime in scheduler */
+ #define AIRTIME_USE_TX		BIT(0)
+ #define AIRTIME_USE_RX		BIT(1)
+-#define AIRTIME_GRACE 		500 /* usec of grace period before reset */
++#define AIRTIME_GRACE 		2000 /* usec of grace period before reset */
+ 
+ struct airtime_info {
+ 	u64 rx_airtime;
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index d85ff71..cce2606 100755
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -3910,15 +3910,28 @@ bool ieee80211_txq_may_transmit(struct ieee80211_hw *hw,
+ 				struct ieee80211_txq *txq)
+ {
+ 	struct ieee80211_local *local = hw_to_local(hw);
+-	struct txq_info *txqi = to_txq_info(txq);
++	struct txq_info * first_txqi, *txqi = to_txq_info(txq);
++	struct rb_node *node = NULL;
+ 	struct sta_info *sta;
+ 	u8 ac = txq->ac;
++	first_txqi = NULL;
++	bool ret = false;
+ 
+ 	lockdep_assert_held(&local->active_txq_lock[ac]);
+ 
+ 	if (!txqi->txq.sta)
+ 		return true;
+ 
++	node = rb_first_cached(&local->active_txqs[ac]);
++	if (node) {
++		first_txqi = container_of(node, struct txq_info, schedule_order);
++		if (first_txqi->txq.sta) {
++			sta = container_of(first_txqi->txq.sta, struct sta_info, sta);
++			if (local->airtime_v_t[ac] < sta->airtime[ac].v_t)
++				local->airtime_v_t[ac] = sta->airtime[ac].v_t;
++		}
++	}
++
+ 	sta = container_of(txqi->txq.sta, struct sta_info, sta);
+ 	return (sta->airtime[ac].v_t <= local->airtime_v_t[ac]);
+ }
