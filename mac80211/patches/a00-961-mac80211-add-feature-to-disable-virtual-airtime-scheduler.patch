@@ -1,0 +1,90 @@
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index 57bd78e..4e07026 100644
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -2850,9 +2850,6 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
+ 			(ar->enable_atf_sch))
+ 			val |= WMI_10_4_REPORT_AIRTIME;
+ 
+-		if (test_bit(WMI_SERVICE_REPORT_AIRTIME, ar->wmi.svc_map))
+-			val |= WMI_10_4_REPORT_AIRTIME;
+-
+ 		status = ath10k_mac_ext_resource_config(ar, val);
+ 		if (status) {
+ 			ath10k_err(ar,
+diff --git a/drivers/net/wireless/ath/ath10k/mac.c b/drivers/net/wireless/ath/ath10k/mac.c
+index b75c103..bfbb965 100644
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -9161,11 +9161,6 @@ int ath10k_mac_register(struct ath10k *ar)
+ 		wiphy_ext_feature_set(ar->hw->wiphy,
+ 				      NL80211_EXT_FEATURE_ACK_SIGNAL_SUPPORT);
+ 
+-	if (ath10k_peer_stats_enabled(ar) ||
+-	    test_bit(WMI_SERVICE_REPORT_AIRTIME, ar->wmi.svc_map))
+-		wiphy_ext_feature_set(ar->hw->wiphy,
+-				      NL80211_EXT_FEATURE_AIRTIME_FAIRNESS);
+-
+ 	if (test_bit(WMI_SERVICE_RTT_RESPONDER_ROLE, ar->wmi.svc_map))
+ 		wiphy_ext_feature_set(ar->hw->wiphy,
+ 				      NL80211_EXT_FEATURE_ENABLE_FTM_RESPONDER);
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index cce2606..b69857a 100755
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -3710,7 +3710,7 @@ struct ieee80211_txq *ieee80211_next_txq(struct ieee80211_hw *hw, u8 ac)
+ }
+ EXPORT_SYMBOL(ieee80211_next_txq);
+ 
+-static void __ieee80211_insert_txq(struct rb_root_cached *root,
++static void __ieee80211_insert_txq(struct rb_root_cached *root, struct ieee80211_hw *hw,
+                                    struct txq_info *txqi, u8 ac)
+ {
+ 	struct rb_node **new = &root->rb_root.rb_node;
+@@ -3723,8 +3723,15 @@ static void __ieee80211_insert_txq(struct rb_root_cached *root,
+ 		__txqi = rb_entry(parent, struct txq_info, schedule_order);
+ 
+ 		if (!txqi->txq.sta) {
+-			/* new txqi has no sta - insert to the left */
+-			new = &parent->rb_left;
++			if (wiphy_ext_feature_isset(hw->wiphy,
++				    NL80211_EXT_FEATURE_AIRTIME_FAIRNESS))
++				/* new txqi has no sta - insert to the left */
++				new = &parent->rb_left;
++			else {
++				new = &parent->rb_right;
++				leftmost = false;
++			}
++
+ 		} else if (!__txqi->txq.sta) {
+ 			/* existing txqi has no sta - insert to the right */
+ 			new = &parent->rb_right;
+@@ -3737,7 +3744,9 @@ static void __ieee80211_insert_txq(struct rb_root_cached *root,
+ 												struct sta_info,
+ 												sta);
+ 
+-			if (new_sta->airtime[ac].v_t <= old_sta->airtime[ac].v_t)
++			if (wiphy_ext_feature_isset(hw->wiphy,
++						NL80211_EXT_FEATURE_AIRTIME_FAIRNESS) &&
++				new_sta->airtime[ac].v_t <= old_sta->airtime[ac].v_t)
+ 				new = &parent->rb_left;
+ 			else {
+ 				new = &parent->rb_right;
+@@ -3779,7 +3788,7 @@ void ieee80211_schedule_txq(struct ieee80211_hw *hw,
+ 
+ 	}
+ 
+-	__ieee80211_insert_txq(&local->active_txqs[ac], txqi, ac);
++	__ieee80211_insert_txq(&local->active_txqs[ac], hw, txqi, ac);
+ 
+ out:
+ 	spin_unlock_bh(&local->active_txq_lock[ac]);
+@@ -3797,7 +3806,7 @@ void ieee80211_resort_txq(struct ieee80211_hw *hw,
+ 		rb_erase_cached(&txqi->schedule_order,
+ 	                       &local->active_txqs[ac]);
+ 		RB_CLEAR_NODE(&txqi->schedule_order);
+-		__ieee80211_insert_txq(&local->active_txqs[ac], txqi, ac);
++		__ieee80211_insert_txq(&local->active_txqs[ac], hw, txqi, ac);
+ 	}
+ }
+ 
