@@ -1,0 +1,239 @@
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/core.h	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/core.h	2019-06-24 10:36:04.980381694 +0530
+@@ -367,6 +367,7 @@
+ 	struct rate_info txrate;
+ 	struct rate_info last_txrate;
+ 	u64 rx_duration;
++	u8 rssi_comb;
+ 	struct ath11k_htt_tx_stats *tx_stats;
+ 	struct ath11k_rx_peer_stats *rx_stats;
+ };
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/debug.c
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/debug.c	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/debug.c	2019-06-24 10:35:36.436034064 +0530
+@@ -829,6 +829,8 @@
+ 		tlv_filter.pkt_filter_flags2 = HTT_RX_FP_CTRL_FILTER_FLASG2;
+ 		tlv_filter.pkt_filter_flags3 = HTT_RX_FP_CTRL_FILTER_FLASG3 |
+ 			HTT_RX_FP_DATA_FILTER_FLASG3;
++	} else {
++		tlv_filter = mac_mon_status_filter_default;
+ 	}
+ 
+ 	ring_id = ar->dp.rx_mon_status_refill_ring.refill_buf_ring.ring_id;
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_rx.c
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-06-24 10:36:04.980381694 +0530
+@@ -1777,11 +1777,6 @@
+ 
+ 	rx_status->flag |= RX_FLAG_NO_SIGNAL_VAL;
+ 
+-	/* TODO: Use real NF instead of default one */
+-	rx_status->signal = ath11k_dp_rx_h_msdu_start_rssi(rx_desc) +
+-			    ATH11K_DEFAULT_NOISE_FLOOR;
+-	rx_status->flag &= ~RX_FLAG_NO_SIGNAL_VAL;
+-
+ 	channel_num = ath11k_dp_rx_h_msdu_start_freq(rx_desc);
+ 
+ 	if (channel_num >= 1 && channel_num <= 14) {
+@@ -2182,6 +2177,8 @@
+ 
+ 	rx_stats->num_mpdu_fcs_ok += ppdu_info->num_mpdu_fcs_ok;
+ 	rx_stats->num_mpdu_fcs_err += ppdu_info->num_mpdu_fcs_err;
++
++	arsta->rssi_comb = ppdu_info->rssi_comb;
+ }
+ 
+ static struct sk_buff *ath11k_dp_rx_alloc_mon_status_buf(struct ath11k_base *ab,
+@@ -2508,9 +2505,7 @@
+ 	rx_status->encoding = RX_ENC_LEGACY;
+ 	rx_status->bw = RATE_INFO_BW_20;
+ 
+-	/* TODO: Use real NF instead of default one */
+-	rx_status->signal = ath11k_dp_rx_h_msdu_start_rssi(rx_desc) +
+-			    ATH11K_DEFAULT_NOISE_FLOOR;
++	rx_status->flag |= RX_FLAG_NO_SIGNAL_VAL;
+ 
+ 	rx_channel = ath11k_dp_rx_h_msdu_start_freq(rx_desc);
+ 
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_tx.c
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/dp_tx.c	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_tx.c	2019-06-24 10:35:36.440034113 +0530
+@@ -941,6 +941,8 @@
+ 	if (!reset)
+ 		tlv_filter.rx_filter =
+ 				HTT_RX_MON_FILTER_TLV_FLAGS_MON_STATUS_RING;
++	else
++		tlv_filter = mac_mon_status_filter_default;
+ 
+ 	ret = ath11k_dp_htt_rx_filter_setup(ar->ab, ring_id, dp->mac_id,
+ 					    HAL_RXDMA_MONITOR_STATUS,
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/hal_rx.c
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/hal_rx.c	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/hal_rx.c	2019-06-24 10:35:36.440034113 +0530
+@@ -1129,6 +1129,10 @@
+ 		struct hal_rx_phyrx_rssi_legacy_info *rssi =
+ 			(struct hal_rx_phyrx_rssi_legacy_info *)tlv_data;
+ 
++		/* TODO: Please note that the combined rssi will not be accurate
++		 * in MU case. Rssi in MU needs to be retrieved from
++		 * PHYRX_OTHER_RECEIVE_INFO TLV.
++		 */
+ 		ppdu_info->rssi_comb =
+ 			FIELD_GET(HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB,
+ 				  __le32_to_cpu(rssi->info0));
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/mac.c
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/mac.c	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/mac.c	2019-06-24 10:36:04.980381694 +0530
+@@ -151,6 +151,15 @@
+ 	},
+ };
+ 
++const struct htt_rx_ring_tlv_filter mac_mon_status_filter_default = {
++	.rx_filter = HTT_RX_FILTER_TLV_FLAGS_MPDU_START |
++		     HTT_RX_FILTER_TLV_FLAGS_PPDU_END |
++		     HTT_RX_FILTER_TLV_FLAGS_PPDU_END_STATUS_DONE,
++	.pkt_filter_flags0 = HTT_RX_FP_MGMT_FILTER_FLAGS0,
++	.pkt_filter_flags1 = HTT_RX_FP_MGMT_FILTER_FLAGS1,
++	.pkt_filter_flags3 = HTT_RX_FP_DATA_FILTER_FLASG3
++};
++
+ #define ATH11K_MAC_FIRST_OFDM_RATE_IDX 4
+ #define ath11k_g_rates ath11k_legacy_rates
+ #define ath11k_g_rates_size (ARRAY_SIZE(ath11k_legacy_rates))
+@@ -2712,13 +2721,10 @@
+ 			goto exit;
+ 		}
+ 
+-		if (ath11k_debug_is_extd_rx_stats_enabled(ar)) {
+-			arsta->rx_stats = kzalloc(sizeof(*arsta->rx_stats),
+-						  GFP_KERNEL);
+-			if (!arsta->rx_stats) {
+-				ret = -ENOMEM;
+-				goto exit;
+-			}
++		arsta->rx_stats = kzalloc(sizeof(*arsta->rx_stats), GFP_KERNEL);
++		if (!arsta->rx_stats) {
++			ret = -ENOMEM;
++			goto exit;
+ 		}
+ 
+ 		peer_param.vdev_id = arvif->vdev_id;
+@@ -2778,10 +2784,8 @@
+ 		if (ath11k_debug_is_extd_tx_stats_enabled(ar))
+ 			kfree(arsta->tx_stats);
+ 
+-		if (ath11k_debug_is_extd_rx_stats_enabled(ar)) {
+-			kfree(arsta->rx_stats);
+-			arsta->rx_stats = NULL;
+-		}
++		kfree(arsta->rx_stats);
++		arsta->rx_stats = NULL;
+ 	} else if (old_state == IEEE80211_STA_AUTH &&
+ 		   new_state == IEEE80211_STA_ASSOC &&
+ 		   (vif->type == NL80211_IFTYPE_AP ||
+@@ -3610,6 +3614,21 @@
+ 	ath11k_mgmt_over_wmi_tx_purge(ar);
+ }
+ 
++static int ath11k_mac_config_mon_status_default(struct ath11k *ar, bool enable)
++{
++	struct htt_rx_ring_tlv_filter tlv_filter = {0};
++	u32 ring_id;
++
++	if (enable)
++		tlv_filter = mac_mon_status_filter_default;
++
++	ring_id = ar->dp.rx_mon_status_refill_ring.refill_buf_ring.ring_id;
++
++	return ath11k_dp_htt_rx_filter_setup(ar->ab, ring_id, ar->dp.mac_id,
++					     HAL_RXDMA_MONITOR_STATUS,
++					     DP_RX_BUFFER_SIZE, &tlv_filter);
++}
++
+ static int ath11k_start(struct ieee80211_hw *hw)
+ {
+ 	struct ath11k *ar = hw->priv;
+@@ -3689,6 +3708,16 @@
+ 	ar->num_created_vdevs = 0;
+ 	ar->num_peers = 0;
+ 
++	/* Configure monitor status ring with default rx_filter to get rx status
++	 * such as rssi, rx_duration.
++	 */
++	ret = ath11k_mac_config_mon_status_default(ar, true);
++	if (ret) {
++		ath11k_err(ab, "failed to configure monitor status ring with default rx_filter: (%d)\n",
++			   ret);
++		goto err;
++	}
++
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	rcu_assign_pointer(ab->pdevs_active[ar->pdev_idx],
+@@ -3707,10 +3736,16 @@
+ {
+ 	struct ath11k *ar = hw->priv;
+ 	struct htt_ppdu_stats_info *ppdu_stats, *tmp;
++	int ret;
+ 
+ 	ath11k_drain_tx(ar);
+ 
+ 	mutex_lock(&ar->conf_mutex);
++	ret = ath11k_mac_config_mon_status_default(ar, false);
++	if (ret)
++		ath11k_err(ar->ab, "failed to clear rx_filter for monitor status ring: (%d)\n",
++			   ret);
++
+ 	clear_bit(ATH11K_CAC_RUNNING, &ar->dev_flags);
+ 	ar->state = ATH11K_STATE_OFF;
+ 	mutex_unlock(&ar->conf_mutex);
+@@ -5221,6 +5256,9 @@
+ 	}
+ 	sinfo->txrate.flags = arsta->txrate.flags;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
++
++	/* TODO: Use real NF instead of default one. */
++	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
+ }
+ 
+ static const struct ieee80211_ops ath11k_ops = {
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/mac.h
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/mac.h	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/mac.h	2019-06-24 10:35:36.440034113 +0530
+@@ -164,6 +164,8 @@
+ 
+ #define ATH11K_CHAN_WIDTH_NUM			8
+ 
++extern const struct htt_rx_ring_tlv_filter mac_mon_status_filter_default;
++
+ int ath11k_mac_create(struct ath11k_base *ab);
+ void ath11k_mac_destroy(struct ath11k_base *ab);
+ void ath11k_mac_unregister(struct ath11k_base *ab);
+Index: backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_rx.h
+===================================================================
+--- backports-20190610-4.4.60-371886ba35ca.orig/drivers/net/wireless/ath/ath11k/dp_rx.h	2019-06-24 10:35:36.444034163 +0530
++++ backports-20190610-4.4.60-371886ba35ca/drivers/net/wireless/ath/ath11k/dp_rx.h	2019-06-24 10:35:36.440034113 +0530
+@@ -220,15 +220,6 @@
+ 	return __le32_to_cpu(rxd->msdu_start.flow_id_toeplitz);
+ }
+ 
+-static inline u8
+-ath11k_dp_rx_h_msdu_start_rssi(u8 *desc)
+-{
+-	struct hal_rx_desc *rxd = (struct hal_rx_desc *)desc;
+-
+-	return FIELD_GET(RX_MSDU_START_INFO3_USER_RSSI,
+-			 __le32_to_cpu(rxd->msdu_start.info3));
+-}
+-
+ static inline u32
+ ath11k_dp_rx_h_msdu_start_freq(u8 *desc)
+ {
