@@ -1,9 +1,9 @@
 --- a/drivers/net/wireless/ath/ath11k/Makefile
 +++ b/drivers/net/wireless/ath/ath11k/Makefile
-@@ -14,7 +14,8 @@ ath11k-y += core.o \
- 	    dp_rx.o \
+@@ -15,7 +15,8 @@ ath11k-y += core.o \
  	    debug.o \
  	    ce.o \
+ 	    peer.o \
 -	    db_ring.o
 +	    db_ring.o \
 +	    vendor.o
@@ -12,7 +12,7 @@
  	ath11k-y += qmi.o
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -457,6 +457,16 @@ struct ath11k_vdev_stop_status {
+@@ -431,6 +431,16 @@ struct ath11k_vdev_stop_status {
  	u32  vdev_id;
  };
  
@@ -29,7 +29,7 @@
  struct ath11k {
  	struct ath11k_base *ab;
  	struct ath11k_pdev *pdev;
-@@ -561,6 +571,8 @@ struct ath11k {
+@@ -544,6 +554,8 @@ struct ath11k {
  	struct ath11k_per_peer_tx_stats cached_stats;
  	u32 last_ppdu_id;
  	u32 cached_ppdu_id;
@@ -48,15 +48,15 @@
  #include "mac.h"
  #include "core.h"
  #include "debug.h"
-@@ -13,6 +14,7 @@
- #include "dp_tx.h"
+@@ -14,6 +15,7 @@
  #include "dp_rx.h"
  #include "testmode.h"
+ #include "peer.h"
 +#include "vendor.h"
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -5303,6 +5305,91 @@ static void ath11k_sta_statistics(struct
+@@ -5159,6 +5161,91 @@ static void ath11k_mac_op_sta_statistics
  	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
  }
  
@@ -147,8 +147,8 @@
 +
  static const struct ieee80211_ops ath11k_ops = {
  	.tx				= ath11k_mac_op_tx,
- 	.start                          = ath11k_start,
-@@ -5588,6 +5675,7 @@ static int ath11k_mac_register(struct at
+ 	.start                          = ath11k_mac_op_start,
+@@ -5444,6 +5531,7 @@ static int ath11k_mac_register(struct at
  		ARRAY_SIZE(ath11k_iftypes_ext_capa);
  
  	ath11k_reg_init(ar);
@@ -156,7 +156,7 @@
  
  	if (!test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags)) {
  		ar->hw->netdev_features = NETIF_F_HW_CSUM;
-@@ -5668,6 +5756,56 @@ void ath11k_mac_unregister(struct ath11k
+@@ -5522,6 +5610,56 @@ void ath11k_mac_unregister(struct ath11k
  	ab->mac_registered = false;
  }
  
@@ -213,7 +213,7 @@
  int ath11k_mac_create(struct ath11k_base *ab)
  {
  	struct ieee80211_hw *hw;
-@@ -5701,6 +5839,7 @@ int ath11k_mac_create(struct ath11k_base
+@@ -5555,6 +5693,7 @@ int ath11k_mac_create(struct ath11k_base
  		 */
  		ath11k_wmi_pdev_attach(ab, i);
  
@@ -223,15 +223,18 @@
  		ar->num_tx_chains = get_num_chains(pdev->cap.tx_chain_mask);
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -184,6 +184,8 @@ void ath11k_scan_finish(struct ath11k *a
- struct ath11k_vif *ath11k_get_arvif(struct ath11k *ar, u32 vdev_id);
- struct ath11k_vif *ath11k_get_arvif_by_vdev_id(struct ath11k_base *ab,
- 					       u32 vdev_id);
+@@ -180,8 +180,9 @@ void __ath11k_mac_scan_finish(struct ath
+ void ath11k_mac_scan_finish(struct ath11k *ar);
+ 
+ struct ath11k_vif *ath11k_mac_get_arvif(struct ath11k *ar, u32 vdev_id);
+-struct ath11k_vif *ath11k_mac_get_arvif_by_vdev_id(struct ath11k_base *ab,
+-						   u32 vdev_id);
++struct ath11k_vif *ath11k_mac_get_arvif_by_vdev_id(struct ath11k_base *ab, u32 vdev_id);
 +int ath11k_mac_coex_config(struct ath11k *ar, struct ath11k_vif *arvif,
 +			   int coex, u32 wlan_prio_mask, u8 wlan_weight);
- struct ath11k *ath11k_get_ar_by_vdev_id(struct ath11k_base *ab, u32 vdev_id);
- struct ath11k *ath11k_get_ar_by_pdev_id(struct ath11k_base *ab, u32 pdev_id);
- struct ath11k *ath11k_get_ar_vdev_stop_status(struct ath11k_base *ab,
+ struct ath11k *ath11k_mac_get_ar_by_vdev_id(struct ath11k_base *ab, u32 vdev_id);
+ struct ath11k *ath11k_mac_get_ar_by_pdev_id(struct ath11k_base *ab, u32 pdev_id);
+ struct ath11k *ath11k_mac_get_ar_vdev_stop_status(struct ath11k_base *ab,
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/vendor.c
 @@ -0,0 +1,120 @@
@@ -443,7 +446,7 @@
 +#endif /* QCA_VENDOR_H */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1417,6 +1417,71 @@ int ath11k_wmi_vdev_set_param_cmd(struct
+@@ -1429,6 +1429,71 @@ int ath11k_wmi_vdev_set_param_cmd(struct
  	return ret;
  }
  
@@ -517,7 +520,7 @@
  {
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -5148,6 +5148,79 @@ struct wmi_wmm_params_arg {
+@@ -4582,6 +4582,79 @@ struct wmi_wmm_params_arg {
  	u8 no_ack;
  };
  
@@ -597,7 +600,7 @@
  struct wmi_vdev_set_wmm_params_cmd {
  	u32 tlv_header;
  	u32 vdev_id;
-@@ -5464,4 +5537,6 @@ int ath11k_wmi_vdev_spectral_enable(stru
+@@ -4897,4 +4970,6 @@ int ath11k_wmi_vdev_spectral_enable(stru
  				    u32 trigger, u32 enable);
  int ath11k_wmi_vdev_spectral_conf(struct ath11k *ar,
  				  struct ath11k_wmi_vdev_spectral_conf_param *param);

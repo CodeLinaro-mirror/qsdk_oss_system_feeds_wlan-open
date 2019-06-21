@@ -28,7 +28,7 @@ v2:
 
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -727,7 +727,7 @@ static void ath11k_core_restart(struct w
+@@ -623,7 +623,7 @@ static void ath11k_core_restart(struct w
  		complete(&ar->install_key_done);
  		complete(&ar->vdev_setup_done);
  		complete(&ar->bss_survey_done);
@@ -39,7 +39,7 @@ v2:
  			     ath11k_mac_tx_mgmt_pending_free, ar);
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -5610,6 +5610,8 @@ int ath11k_mac_create(struct ath11k_base
+@@ -5518,6 +5518,8 @@ int ath11k_mac_create(struct ath11k_base
  		init_completion(&ar->bss_survey_done);
  		init_completion(&ar->scan.started);
  		init_completion(&ar->scan.completed);
@@ -201,7 +201,7 @@ v2:
  #endif /* _ATH11K_THERMAL_ */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1433,6 +1433,34 @@ int ath11k_wmi_send_stats_request_cmd(st
+@@ -1445,6 +1445,34 @@ int ath11k_wmi_send_stats_request_cmd(st
  	return ret;
  }
  
@@ -236,7 +236,7 @@ v2:
  int ath11k_wmi_send_bcn_offload_control_cmd(struct ath11k *ar,
  					    u32 vdev_id, u32 bcn_ctrl_op)
  {
-@@ -4134,6 +4162,34 @@ int ath11k_wmi_pull_fw_stats(struct ath1
+@@ -4133,6 +4161,34 @@ int ath11k_wmi_pull_fw_stats(struct ath1
  	return 0;
  }
  
@@ -271,19 +271,18 @@ v2:
  size_t ath11k_wmi_fw_stats_num_peers(struct list_head *head)
  {
  	struct ath11k_fw_stats_peer *i;
-@@ -5590,6 +5646,31 @@ exit:
+@@ -5574,6 +5630,30 @@ exit:
  	kfree(tb);
  }
  
 +static void
-+ath11k_wmi_pdev_temperature_event(struct ath11k_base *ab,
-+				  u8 *evt_buf, u32 len)
++ath11k_wmi_pdev_temperature_event(struct ath11k_base *ab, struct sk_buff *skb)
 +{
 +	struct ath11k *ar;
 +	s32 temp;
 +	u32 pdev_id;
 +
-+	if (ath11k_pull_pdev_temp_ev(ab, evt_buf, len, &temp, &pdev_id) != 0) {
++	if (ath11k_pull_pdev_temp_ev(ab, skb->data, skb->len, &temp, &pdev_id) != 0) {
 +		ath11k_warn(ab, "failed to extract pdev temperature event");
 +		return;
 +	}
@@ -291,7 +290,7 @@ v2:
 +	ath11k_dbg(ab, ATH11K_DBG_WMI,
 +		   "pdev temperature ev temp %d pdev_id %d\n", temp, pdev_id);
 +
-+	ar = ath11k_get_ar_by_pdev_id(ab, pdev_id);
++	ar = ath11k_mac_get_ar_by_pdev_id(ab, pdev_id);
 +	if (!ar) {
 +		ath11k_warn(ab, "invalid pdev id in pdev temperature ev %d", pdev_id);
 +		return;
@@ -303,19 +302,19 @@ v2:
  static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -5672,6 +5753,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -5651,6 +5731,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_CSA_SWITCH_COUNT_STATUS_EVENTID:
- 		ath11k_wmi_pdev_csa_switch_count_status_event(ab, data, len);
+ 		ath11k_wmi_pdev_csa_switch_count_status_event(ab, skb);
  		break;
 +	case WMI_PDEV_TEMPERATURE_EVENTID:
-+		ath11k_wmi_pdev_temperature_event(ab, data, len);
++		ath11k_wmi_pdev_temperature_event(ab, skb);
 +		break;
  	/* add Unsupported events here */
  	case WMI_TBTTOFFSET_EXT_UPDATE_EVENTID:
  	case WMI_VDEV_DELETE_RESP_EVENTID:
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -3834,6 +3834,12 @@ struct wmi_request_stats_cmd {
+@@ -3271,6 +3271,12 @@ struct wmi_request_stats_cmd {
  	u32 pdev_id;
  } __packed;
  
@@ -328,7 +327,7 @@ v2:
  #define WMI_BEACON_TX_BUFFER_SIZE	512
  
  struct wmi_bcn_tmpl_cmd {
-@@ -4683,6 +4689,12 @@ struct wmi_pdev_radar_ev {
+@@ -4118,6 +4124,12 @@ struct wmi_pdev_radar_ev {
  	s32 sidx;
  } __packed;
  
@@ -341,7 +340,7 @@ v2:
  enum wlan_phymode {
  	WLAN_PHYMODE_AUTO             = 0,
  	WLAN_PHYMODE_11A              = 1,
-@@ -5284,6 +5296,7 @@ int ath11k_wmi_pdev_bss_chan_info_reques
+@@ -4717,6 +4729,7 @@ int ath11k_wmi_pdev_bss_chan_info_reques
  					  enum wmi_bss_chan_info_req_type type);
  int ath11k_wmi_send_stats_request_cmd(struct ath11k *ar,
  				      struct stats_request_params *param);
