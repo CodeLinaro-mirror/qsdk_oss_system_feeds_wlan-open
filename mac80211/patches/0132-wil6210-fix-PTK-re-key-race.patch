@@ -1,0 +1,473 @@
+diff --git a/drivers/net/wireless/ath/wil6210/cfg80211.c b/drivers/net/wireless/ath/wil6210/cfg80211.c
+index 1ee151d..d04a50a 100644
+--- a/drivers/net/wireless/ath/wil6210/cfg80211.c
++++ b/drivers/net/wireless/ath/wil6210/cfg80211.c
+@@ -468,6 +468,8 @@ static const char * const key_usage_str[] = {
+ 	[WMI_KEY_USE_PAIRWISE]	= "PTK",
+ 	[WMI_KEY_USE_RX_GROUP]	= "RX_GTK",
+ 	[WMI_KEY_USE_TX_GROUP]	= "TX_GTK",
++	[WMI_KEY_USE_STORE_PTK]	= "STORE_PTK",
++	[WMI_KEY_USE_APPLY_PTK]	= "APPLY_PTK",
+ };
+ 
+ int wil_iftype_nl2wmi(enum nl80211_iftype type)
+@@ -584,7 +586,7 @@ static int wil_cfg80211_get_station(struct wiphy *wiphy,
+ /*
+  * Find @idx-th active STA for station dump.
+  */
+-static int wil_find_cid_by_idx(struct wil6210_priv *wil, int idx)
++int wil_find_cid_by_idx(struct wil6210_priv *wil, int idx)
+ {
+ 	int i;
+ 
+@@ -1233,6 +1235,7 @@ static void wil_set_crypto_rx(u8 key_index, enum wmi_key_usage key_usage,
+ 		return;
+ 
+ 	switch (key_usage) {
++	case WMI_KEY_USE_STORE_PTK:
+ 	case WMI_KEY_USE_PAIRWISE:
+ 		for (tid = 0; tid < WIL_STA_TID_NUM; tid++) {
+ 			cc = &cs->tid_crypto_rx[tid].key_id[key_index];
+@@ -1290,6 +1293,7 @@ static int wil_cfg80211_add_key(struct wiphy *wiphy,
+ {
+ 	int rc;
+ 	struct wil6210_priv *wil = wiphy_to_wil(wiphy);
++	struct wireless_dev *wdev = wil_to_wdev(wil);
+ 	enum wmi_key_usage key_usage = wil_detect_key_usage(wil, pairwise);
+ 	struct wil_sta_info *cs = wil_find_sta_by_key_usage(wil, key_usage,
+ 							    mac_addr);
+@@ -1321,6 +1325,16 @@ static int wil_cfg80211_add_key(struct wiphy *wiphy,
+ 		return -EINVAL;
+ 	}
+ 
++	spin_lock_bh(&wil->eap_lock);
++	if (pairwise && wdev->iftype == NL80211_IFTYPE_STATION &&
++	    (wil->ptk_rekey_state == WIL_REKEY_M3_RECEIVED ||
++	     wil->ptk_rekey_state == WIL_REKEY_WAIT_M4_SENT)) {
++		key_usage = WMI_KEY_USE_STORE_PTK;
++		wil->ptk_rekey_state = WIL_REKEY_WAIT_M4_SENT;
++		wil_dbg_misc(wil, "Store EAPOL key\n");
++	}
++	spin_unlock_bh(&wil->eap_lock);
++
+ 	rc = wmi_add_cipher_key(wil, key_index, mac_addr, params->key_len,
+ 				params->key, key_usage);
+ 	if (!rc) {
+diff --git a/drivers/net/wireless/ath/wil6210/main.c b/drivers/net/wireless/ath/wil6210/main.c
+index e627fc7..2cf0670 100644
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -293,6 +293,7 @@ static void _wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ 			wil->bss = NULL;
+ 		}
+ 		clear_bit(wil_status_fwconnecting, wil->status);
++		wil->ptk_rekey_state = WIL_REKEY_IDLE;
+ 		break;
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_P2P_GO:
+@@ -566,11 +567,13 @@ int wil_priv_init(struct wil6210_priv *wil)
+ 	INIT_WORK(&wil->fw_error_worker, wil_fw_error_worker);
+ 	INIT_WORK(&wil->probe_client_worker, wil_probe_client_worker);
+ 	INIT_WORK(&wil->p2p.delayed_listen_work, wil_p2p_delayed_listen_work);
++	INIT_WORK(&wil->enable_tx_key_worker, wil_enable_tx_key_worker);
+ 
+ 	INIT_LIST_HEAD(&wil->pending_wmi_ev);
+ 	INIT_LIST_HEAD(&wil->probe_client_pending);
+ 	spin_lock_init(&wil->wmi_ev_lock);
+ 	spin_lock_init(&wil->net_queue_lock);
++	spin_lock_init(&wil->eap_lock);
+ 	wil->net_queue_stopped = 1;
+ 	init_waitqueue_head(&wil->wq);
+ 
+@@ -640,6 +643,7 @@ void wil_priv_deinit(struct wil6210_priv *wil)
+ 	cancel_work_sync(&wil->fw_error_worker);
+ 	cancel_work_sync(&wil->p2p.discovery_expired_work);
+ 	cancel_work_sync(&wil->p2p.delayed_listen_work);
++	cancel_work_sync(&wil->enable_tx_key_worker);
+ 	mutex_lock(&wil->mutex);
+ 	wil6210_disconnect(wil, NULL, WLAN_REASON_DEAUTH_LEAVING, false);
+ 	mutex_unlock(&wil->mutex);
+@@ -1074,7 +1078,7 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 	cancel_work_sync(&wil->disconnect_worker);
+ 	wil6210_disconnect(wil, NULL, WLAN_REASON_DEAUTH_LEAVING, false);
+ 	wil_bcast_fini(wil);
+-
++	wil->ptk_rekey_state = WIL_REKEY_IDLE;
+ 	/* Disable device led before reset*/
+ 	wmi_led_cfg(wil, false);
+ 
+diff --git a/drivers/net/wireless/ath/wil6210/txrx.c b/drivers/net/wireless/ath/wil6210/txrx.c
+index 49da3d2..280b53b 100644
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -49,6 +49,11 @@ module_param(drop_if_ring_full, bool, 0444);
+ MODULE_PARM_DESC(drop_if_ring_full,
+ 		 " drop Tx packets in case tx ring is full");
+ 
++static inline int skb_mac_offset(const struct sk_buff *skb)
++{
++	return skb_mac_header(skb) - skb->data;
++}
++
+ static inline uint wil_rx_snaplen(void)
+ {
+ 	return rx_align_2 ? 6 : 0;
+@@ -658,6 +663,177 @@ static int wil_rx_crypto_check(struct wil6210_priv *wil, struct sk_buff *skb)
+ }
+ 
+ /*
++ * Check if skb is ptk eapol key message
++ *
++ * returns a pointer to the start of the eapol key structure, NULL
++ * if frame is not PTK eapol key
++ */
++static struct wil_eapol_key *wil_is_ptk_eapol_key(struct wil6210_priv *wil, struct sk_buff *skb)
++{
++	u8 *buf;
++	const struct wil_1x_hdr *hdr;
++	struct wil_eapol_key *key;
++	u16 key_info;
++	int len = skb->len;
++
++	if (!skb_mac_header_was_set(skb)) {
++		wil_err(wil, "mac header was not set\n");
++		return NULL;
++	}
++
++	len -= skb_mac_offset(skb);
++
++	if (len < sizeof(struct ethhdr) + sizeof(struct wil_1x_hdr) +
++	    sizeof(struct wil_eapol_key))
++		return NULL;
++
++	buf = skb_mac_header(skb) + sizeof(struct ethhdr);
++
++	hdr = (const struct wil_1x_hdr *)buf;
++	if (hdr->type != WIL_1X_TYPE_EAPOL_KEY)
++		return NULL;
++
++	key = (struct wil_eapol_key *)(buf + sizeof(struct wil_1x_hdr));
++	if (key->type != WIL_EAPOL_KEY_TYPE_WPA &&
++	    key->type != WIL_EAPOL_KEY_TYPE_RSN)
++		return NULL;
++
++	key_info = be16_to_cpu(key->key_info);
++	if (!(key_info & WIL_KEY_INFO_KEY_TYPE)) /* check if pairwise */
++		return NULL;
++
++	return key;
++}
++
++static bool wil_skb_is_eap_3(struct wil6210_priv *wil, struct sk_buff *skb)
++{
++	struct wil_eapol_key *key;
++	u16 key_info;
++
++	key = wil_is_ptk_eapol_key(wil, skb);
++	if (!key)
++		return false;
++
++	key_info = be16_to_cpu(key->key_info);
++	if (key_info & (WIL_KEY_INFO_MIC |
++			WIL_KEY_INFO_ENCR_KEY_DATA)) {
++		/* 3/4 of 4-Way Handshake */
++		wil_dbg_misc(wil, "EAPOL key message 3\n");
++		return true;
++	}
++	/* 1/4 of 4-Way Handshake */
++	wil_dbg_misc(wil, "EAPOL key message 1\n");
++
++	return false;
++}
++
++static bool wil_skb_is_eap_4(struct wil6210_priv *wil, struct sk_buff *skb)
++{
++	struct wil_eapol_key *key;
++	u32 *nonce, i;
++
++	key = wil_is_ptk_eapol_key(wil, skb);
++	if (!key)
++		return false;
++
++	nonce = (u32 *)key->key_nonce;
++	for (i = 0; i < WIL_EAP_NONCE_LEN / sizeof(u32); i++, nonce++) {
++		if (*nonce != 0) {
++			/* message 2/4 */
++			wil_dbg_misc(wil, "EAPOL key message 2\n");
++			return false;
++		}
++	}
++	wil_dbg_misc(wil, "EAPOL key message 4\n");
++
++	return true;
++}
++
++void wil_enable_tx_key_worker(struct work_struct *work)
++{
++	struct wil6210_priv *wil = container_of(work, struct wil6210_priv,
++						enable_tx_key_worker);
++	int rc, cid;
++
++	rtnl_lock();
++	if (wil->ptk_rekey_state != WIL_REKEY_WAIT_M4_SENT) {
++		wil_dbg_misc(wil, "Invalid rekey state = %d\n",
++			     wil->ptk_rekey_state);
++		rtnl_unlock();
++		return;
++	}
++	cid = wil_find_cid_by_idx(wil, 0);
++	if (cid < 0) {
++		wil_err(wil, "Invalid cid = %d\n", cid);
++		rtnl_unlock();
++		return;
++	}
++
++	wil_dbg_misc(wil, "Apply PTK key after eapol was sent out\n");
++	rc = wmi_add_cipher_key(wil, 0, wil->sta[cid].addr, 0, NULL,
++				WMI_KEY_USE_APPLY_PTK);
++
++	wil->ptk_rekey_state = WIL_REKEY_IDLE;
++	rtnl_unlock();
++
++	if (rc)
++		wil_err(wil, "Apply PTK key failed %d\n", rc);
++}
++
++void wil_tx_complete_handle_eapol(struct wil6210_priv *wil, struct sk_buff *skb)
++{
++	struct wireless_dev *wdev = wil_to_wdev(wil);
++	bool q = false;
++
++	if (wdev->iftype != NL80211_IFTYPE_STATION ||
++	    !test_bit(WMI_FW_CAPABILITY_SPLIT_REKEY, wil->fw_capabilities))
++		return;
++
++	/* check if skb is an EAP message 4/4 */
++	if (!wil_skb_is_eap_4(wil, skb))
++		return;
++
++	spin_lock_bh(&wil->eap_lock);
++	switch (wil->ptk_rekey_state) {
++	case WIL_REKEY_IDLE:
++		/* ignore idle state, can happen due to M4 retransmission */
++		break;
++	case WIL_REKEY_M3_RECEIVED:
++		wil->ptk_rekey_state = WIL_REKEY_IDLE;
++		break;
++	case WIL_REKEY_WAIT_M4_SENT:
++		q = true;
++		break;
++	default:
++		wil_err(wil, "Unknown rekey state = %d",
++			wil->ptk_rekey_state);
++	}
++	spin_unlock_bh(&wil->eap_lock);
++
++	if (q) {
++		q = queue_work(wil->wmi_wq, &wil->enable_tx_key_worker);
++		wil_dbg_misc(wil, "queue_work of enable_tx_key_worker -> %d\n",
++			     q);
++	}
++}
++
++static void wil_rx_handle_eapol(struct wil6210_priv *wil, struct sk_buff *skb)
++{
++	struct wireless_dev *wdev = wil_to_wdev(wil);
++
++	if (wdev->iftype != NL80211_IFTYPE_STATION ||
++	    !test_bit(WMI_FW_CAPABILITY_SPLIT_REKEY, wil->fw_capabilities))
++		return;
++
++	/* check if skb is a EAP message 3/4 */
++	if (!wil_skb_is_eap_3(wil, skb))
++		return;
++
++	if (wil->ptk_rekey_state == WIL_REKEY_IDLE)
++		wil->ptk_rekey_state = WIL_REKEY_M3_RECEIVED;
++}
++
++/*
+  * Pass Rx packet to the netif. Update statistics.
+  * Called in softirq context (NAPI poll).
+  */
+@@ -748,6 +924,9 @@ void wil_netif_rx_any(struct sk_buff *skb, struct net_device *ndev)
+ 
+ 	if (skb) { /* deliver to local stack */
+ 		skb->protocol = eth_type_trans(skb, ndev);
++		if (skb->protocol == cpu_to_be16(ETH_P_PAE))
++			wil_rx_handle_eapol(wil, skb);
++
+ #if defined(CPTCFG_WIL6210_NSS_SUPPORT)
+ 		if (rx_align_2) {
+ 			int rc1 = nss_tx_virt_if_rxbuf(wil->nss_ctx,
+@@ -2162,6 +2341,9 @@ int wil_tx_complete(struct wil6210_priv *wil, int ringid)
+ 					if (stats)
+ 						stats->tx_errors++;
+ 				}
++				if (skb->protocol == cpu_to_be16(ETH_P_PAE))
++					wil_tx_complete_handle_eapol(wil, skb);
++
+ 				wil_consume_skb(skb, d->dma.error == 0);
+ 			}
+ 			memset(ctx, 0, sizeof(*ctx));
+diff --git a/drivers/net/wireless/ath/wil6210/txrx.h b/drivers/net/wireless/ath/wil6210/txrx.h
+index 059b994..0d72cb6 100644
+--- a/drivers/net/wireless/ath/wil6210/txrx.h
++++ b/drivers/net/wireless/ath/wil6210/txrx.h
+@@ -415,6 +415,46 @@ struct vring_rx_mac {
+ #define RX_DMA_STATUS_PHY_INFO	BIT(6)
+ #define RX_DMA_STATUS_FFM	BIT(7) /* EtherType Flex Filter Match */
+ 
++/* IEEE 802.11, 8.5.2 EAPOL-Key frames */
++#define WIL_KEY_INFO_KEY_TYPE BIT(3) /* val of 1 = Pairwise, 0 = Group key */
++
++#define WIL_KEY_INFO_MIC BIT(8)
++#define WIL_KEY_INFO_ENCR_KEY_DATA BIT(12) /* for rsn only */
++
++#define WIL_EAP_NONCE_LEN 32
++#define WIL_EAP_KEY_RSC_LEN 8
++#define WIL_EAP_REPLAY_COUNTER_LEN 8
++#define WIL_EAP_KEY_IV_LEN 16
++#define WIL_EAP_KEY_ID_LEN 8
++
++enum {
++	WIL_1X_TYPE_EAP_PACKET = 0,
++	WIL_1X_TYPE_EAPOL_START = 1,
++	WIL_1X_TYPE_EAPOL_LOGOFF = 2,
++	WIL_1X_TYPE_EAPOL_KEY = 3,
++};
++
++#define WIL_EAPOL_KEY_TYPE_RSN 2
++#define WIL_EAPOL_KEY_TYPE_WPA 254
++
++struct wil_1x_hdr {
++	u8 version;
++	u8 type;
++	__be16 length;
++	/* followed by data */
++} __packed;
++
++struct wil_eapol_key {
++	u8 type;
++	__be16 key_info;
++	__be16 key_length;
++	u8 replay_counter[WIL_EAP_REPLAY_COUNTER_LEN];
++	u8 key_nonce[WIL_EAP_NONCE_LEN];
++	u8 key_iv[WIL_EAP_KEY_IV_LEN];
++	u8 key_rsc[WIL_EAP_KEY_RSC_LEN];
++	u8 key_id[WIL_EAP_KEY_ID_LEN];
++} __packed;
++
+ struct vring_rx_dma {
+ 	u32 d0;
+ 	struct vring_dma_addr addr;
+diff --git a/drivers/net/wireless/ath/wil6210/wil6210.h b/drivers/net/wireless/ath/wil6210/wil6210.h
+index 75c7c21..3035b77 100644
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -511,6 +511,12 @@ enum wil_sta_status {
+ 	wil_sta_connected = 2,
+ };
+ 
++enum wil_rekey_state {
++	WIL_REKEY_IDLE = 0,
++	WIL_REKEY_M3_RECEIVED = 1,
++	WIL_REKEY_WAIT_M4_SENT = 2,
++};
++
+ #define WIL_STA_TID_NUM (16)
+ #define WIL_MCS_MAX (12) /* Maximum MCS supported */
+ 
+@@ -676,6 +682,11 @@ struct wil6210_priv {
+ 	struct timer_list connect_timer;
+ 	struct timer_list scan_timer; /* detect scan timeout */
+ 	struct list_head pending_wmi_ev;
++
++	/* PTK rekey race prevention, this is relevant to station mode only */
++	enum wil_rekey_state ptk_rekey_state;
++	struct work_struct enable_tx_key_worker;
++
+ 	/*
+ 	 * protect pending_wmi_ev
+ 	 * - fill in IRQ from wil6210_irq_misc,
+@@ -683,6 +694,7 @@ struct wil6210_priv {
+ 	 */
+ 	spinlock_t wmi_ev_lock;
+ 	spinlock_t net_queue_lock; /* guarding stop/wake netif queue */
++	spinlock_t eap_lock; /* guarding access to eap rekey fields */
+ 	int net_queue_stopped; /* netif_tx_stop_all_queues invoked */
+ 	struct napi_struct napi_rx;
+ 	struct napi_struct napi_tx;
+@@ -888,6 +900,7 @@ int wil_down(struct wil6210_priv *wil);
+ int __wil_down(struct wil6210_priv *wil);
+ void wil_mbox_ring_le2cpus(struct wil6210_mbox_ring *r);
+ int wil_find_cid(struct wil6210_priv *wil, const u8 *mac);
++int wil_find_cid_by_idx(struct wil6210_priv *wil, int idx);
+ void wil_set_ethtoolops(struct net_device *ndev);
+ int wil_vr_update_profile(struct wil6210_priv *wil, u8 profile);
+ 
+@@ -995,6 +1008,7 @@ void wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ 			u16 reason_code, bool from_event);
+ void wil_probe_client_flush(struct wil6210_priv *wil);
+ void wil_probe_client_worker(struct work_struct *work);
++void wil_enable_tx_key_worker(struct work_struct *work);
+ 
+ int wil_rx_init(struct wil6210_priv *wil, u16 size);
+ void wil_rx_fini(struct wil6210_priv *wil);
+@@ -1014,6 +1028,8 @@ void wil_update_net_queues_bh(struct wil6210_priv *wil, struct vring *vring,
+ 			      bool check_stop);
+ netdev_tx_t wil_start_xmit(struct sk_buff *skb, struct net_device *ndev);
+ int wil_tx_complete(struct wil6210_priv *wil, int ringid);
++void wil_tx_complete_handle_eapol(struct wil6210_priv *wil,
++				  struct sk_buff *skb);
+ void wil6210_unmask_irq_tx(struct wil6210_priv *wil);
+ 
+ /* RX API */
+diff --git a/drivers/net/wireless/ath/wil6210/wmi.c b/drivers/net/wireless/ath/wil6210/wmi.c
+index 351de03..f1a5a40 100644
+--- a/drivers/net/wireless/ath/wil6210/wmi.c
++++ b/drivers/net/wireless/ath/wil6210/wmi.c
+@@ -1393,10 +1393,17 @@ int wmi_add_cipher_key(struct wil6210_priv *wil, u8 key_index,
+ 		.key_len = key_len,
+ 	};
+ 
+-	if (!key || (key_len > sizeof(cmd.key)))
++	if (key_len > sizeof(cmd.key))
+ 		return -EINVAL;
+ 
+-	memcpy(cmd.key, key, key_len);
++	/* key len = 0 is allowed only for usage of WMI_KEY_USE_APPLY */
++	if ((key_len == 0 || !key) &&
++	    key_usage != WMI_KEY_USE_APPLY_PTK)
++		return -EINVAL;
++
++	if (key)
++		memcpy(cmd.key, key, key_len);
++
+ 	if (mac_addr)
+ 		memcpy(cmd.mac, mac_addr, WMI_MAC_LEN);
+ 
+diff --git a/drivers/net/wireless/ath/wil6210/wmi.h b/drivers/net/wireless/ath/wil6210/wmi.h
+index 10845bb..db8300e 100644
+--- a/drivers/net/wireless/ath/wil6210/wmi.h
++++ b/drivers/net/wireless/ath/wil6210/wmi.h
+@@ -63,6 +63,7 @@ enum wmi_fw_capability {
+ 	WMI_FW_CAPABILITY_WMI_ONLY		= 5,
+ 	WMI_FW_CAPABILITY_THERMAL_THROTTLING	= 7,
+ 	WMI_FW_CAPABILITY_RSSI_REPORTING	= 12,
++	WMI_FW_CAPABILITY_SPLIT_REKEY		= 31,
+ 	WMI_FW_CAPABILITY_MAX,
+ };
+ 
+@@ -313,6 +314,8 @@ enum wmi_key_usage {
+ 	WMI_KEY_USE_PAIRWISE	= 0x00,
+ 	WMI_KEY_USE_RX_GROUP	= 0x01,
+ 	WMI_KEY_USE_TX_GROUP	= 0x02,
++	WMI_KEY_USE_STORE_PTK	= 0x03,
++	WMI_KEY_USE_APPLY_PTK	= 0x04,
+ };
+ 
+ struct wmi_add_cipher_key_cmd {
+-- 
+2.7.4
+
