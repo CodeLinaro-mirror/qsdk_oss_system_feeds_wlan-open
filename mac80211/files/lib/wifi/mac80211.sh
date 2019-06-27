@@ -84,6 +84,16 @@ check_mac80211_device() {
 detect_mac80211() {
 	devidx=0
 	config_load wireless
+
+	if [ ! -f "/etc/config/wireless" ]; then
+		cat <<EOF
+config smp_affinity  mac80211
+	option enable_smp_affinity	1
+	option enable_nss		0
+
+EOF
+	fi
+
 	while :; do
 		config_get type "radio$devidx" type
 		[ -n "$type" ] || break
@@ -196,6 +206,7 @@ post_mac80211() {
 			enable_smp_affinity_wigig
 		}
 	fi
+
 	case "${action}" in
 		enable)
 			[ -f "/usr/sbin/fst.sh" ] && {
