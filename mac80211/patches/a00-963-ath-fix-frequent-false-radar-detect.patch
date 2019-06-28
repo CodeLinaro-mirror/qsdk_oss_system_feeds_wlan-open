@@ -1,0 +1,63 @@
+--- a/drivers/net/wireless/ath/ath.h
++++ b/drivers/net/wireless/ath/ath.h
+@@ -192,6 +192,8 @@ struct ath_common {
+ 
+ 	int last_rssi;
+ 	struct ieee80211_supported_band sbands[NUM_NL80211_BANDS];
++
++	int dfs_pulse_valid_diff_ts;
+ };
+ 
+ static inline const struct ath_ps_ops *ath_ps_ops(struct ath_common *common)
+--- a/drivers/net/wireless/ath/dfs_pattern_detector.c
++++ b/drivers/net/wireless/ath/dfs_pattern_detector.c
+@@ -273,6 +273,7 @@ dpd_add_pulse(struct dfs_pattern_detecto
+ {
+ 	u32 i;
+ 	struct channel_detector *cd;
++	int diff_ts;
+ 
+ 	/*
+ 	 * pulses received for a non-supported or un-initialized
+@@ -285,8 +286,9 @@ dpd_add_pulse(struct dfs_pattern_detecto
+ 	if (cd == NULL)
+ 		return false;
+ 
++	diff_ts = event->ts - dpd->last_pulse_ts;
+ 	/* reset detector on time stamp wraparound, caused by TSF reset */
+-	if (event->ts < dpd->last_pulse_ts)
++	if (diff_ts < dpd->common->dfs_pulse_valid_diff_ts)
+ 		dpd_reset(dpd);
+ 	dpd->last_pulse_ts = event->ts;
+ 
+--- a/drivers/net/wireless/ath/dfs_pattern_detector.h
++++ b/drivers/net/wireless/ath/dfs_pattern_detector.h
+@@ -24,7 +24,7 @@
+ /* tolerated deviation of radar time stamp in usecs on both sides
+  * TODO: this might need to be HW-dependent
+  */
+-#define PRI_TOLERANCE	16
++#define PRI_TOLERANCE	6
+ 
+ /**
+  * struct ath_dfs_pool_stats - DFS Statistics for global pools
+--- a/drivers/net/wireless/ath/ath10k/mac.c
++++ b/drivers/net/wireless/ath/ath10k/mac.c
+@@ -8961,6 +8961,8 @@ static int ath10k_mac_get_wrdd_regulator
+ }
+ #endif /* CONFIG_ACPI */
+ 
++#define ATH10K_DFS_PULSE_VALID_DIFF_TS 100
++
+ static int ath10k_mac_init_rd(struct ath10k *ar)
+ {
+ 	int ret;
+@@ -9296,6 +9298,8 @@ int ath10k_mac_register(struct ath10k *a
+ 	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED)) {
+ 		/* Init ath dfs pattern detector */
+ 		ar->ath_common.debug_mask = ATH_DBG_DFS;
++		ar->ath_common.dfs_pulse_valid_diff_ts =
++					ATH10K_DFS_PULSE_VALID_DIFF_TS;
+ 		ar->dfs_detector = dfs_pattern_detector_init(&ar->ath_common,
+ 							     NL80211_DFS_UNSET);
+ 
