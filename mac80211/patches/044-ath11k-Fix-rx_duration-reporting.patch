@@ -1,0 +1,114 @@
+From 2361dba58859fb880ff38610839878f20b65a568 Mon Sep 17 00:00:00 2001
+From: Ganesh Sesetti <gseset@codeaurora.org>
+Date: Mon, 10 Jun 2019 12:01:39 +0530
+Subject: [PATCH] ath11k: Fix rx_duration reporting
+
+Since rx duration is wrongly reported in iw wlanX station dump,
+fetch correct rx duration reported in PPDU_END tlv.
+Enable PPDU_END, MPDU_START and PPDU_END_STATUS_DONE tlv
+reporting in monitor status by default. Pass the sta's Rx duration
+to mac80211 in sta_statistics() ops.
+
+Signed-off-by: Ganesh Sesetti <gseset@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/core.h        | 1 +
+ drivers/net/wireless/ath/ath11k/debugfs_sta.c | 2 ++
+ drivers/net/wireless/ath/ath11k/dp_rx.c       | 2 ++
+ drivers/net/wireless/ath/ath11k/hal_rx.c      | 8 ++++++++
+ drivers/net/wireless/ath/ath11k/hal_rx.h      | 8 ++++++++
+ drivers/net/wireless/ath/ath11k/mac.c         | 4 +++-
+ 6 files changed, 24 insertions(+), 1 deletion(-)
+
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -261,6 +261,7 @@ struct ath11k_rx_peer_stats {
+ 	u64 tid_count[IEEE80211_NUM_TIDS + 1];
+ 	u64 pream_cnt[HAL_RX_PREAMBLE_MAX];
+ 	u64 reception_type[HAL_RX_RECEPTION_TYPE_MAX];
++	u64 rx_duration;
+ };
+ 
+ struct ath11k_peer {
+--- a/drivers/net/wireless/ath/ath11k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
+@@ -382,6 +382,8 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 	len += scnprintf(buf + len, size - len, "\nNSS(1-8):");
+ 	for (i = 0; i < HAL_RX_MAX_NSS; i++)
+ 		len += scnprintf(buf + len, size - len, "%llu ", rx_stats->nss_count[i]);
++	len += scnprintf(buf + len, size - len, "\nRX Duration:%llu ",
++			 rx_stats->rx_duration);
+ 	len += scnprintf(buf + len, size - len, "\n");
+ 
+ 	spin_unlock_bh(&ar->ab->data_lock);
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -2179,6 +2179,7 @@ static void ath11k_dp_rx_update_peer_sta
+ 	rx_stats->num_mpdu_fcs_err += ppdu_info->num_mpdu_fcs_err;
+ 
+ 	arsta->rssi_comb = ppdu_info->rssi_comb;
++	rx_stats->rx_duration = ppdu_info->rx_duration;
+ }
+ 
+ static struct sk_buff *ath11k_dp_rx_alloc_mon_status_buf(struct ath11k_base *ab,
+@@ -2434,6 +2435,7 @@ int ath11k_dp_rx_process_mon_status(stru
+ 		}
+ 
+ 		arsta = (struct ath11k_sta *)peer->sta->drv_priv;
++		arsta->rx_duration = ppdu_info.rx_duration;
+ 		ath11k_dp_rx_update_peer_stats(arsta, &ppdu_info);
+ 
+ 		if (ath11k_debug_is_pktlog_peer_vaild(ar, peer->addr)) {
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
+@@ -1149,6 +1149,14 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 			ppdu_info->peer_id = peer_id;
+ 		break;
+ 	}
++	case HAL_RXPCU_PPDU_END_INFO: {
++		struct hal_rx_ppdu_end_duration *ppdu_rx_duration =
++			(struct hal_rx_ppdu_end_duration *)tlv_data;
++		ppdu_info->rx_duration =
++			FIELD_GET(HAL_RX_PPDU_END_DURATION,
++				  __le32_to_cpu(ppdu_rx_duration->info0));
++		break;
++	}
+ 	case HAL_DUMMY:
+ 		return HAL_RX_MON_STATUS_BUF_DONE;
+ 	case HAL_RX_PPDU_END_STATUS_DONE:
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.h
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
+@@ -124,6 +124,7 @@ struct hal_rx_mon_ppdu_info {
+ 	u8 rssi_comb;
+ 	u8 tid;
+ 	u8 reception_type;
++	u64 rx_duration;
+ };
+ 
+ #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
+@@ -275,6 +276,13 @@ struct hal_rx_mpdu_info {
+ 	__le32 rsvd1[21];
+ } __packed;
+ 
++#define HAL_RX_PPDU_END_DURATION	GENMASK(23, 0)
++struct hal_rx_ppdu_end_duration {
++	__le32 rsvd0[9];
++	__le32 info0;
++	__le32 rsvd1[4];
++} __packed;
++
+ struct hal_rx_rxpcu_classification_overview {
+ 	u32 rsvd0;
+ } __packed;
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -157,7 +157,9 @@ const struct htt_rx_ring_tlv_filter mac_
+ 		     HTT_RX_FILTER_TLV_FLAGS_PPDU_END_STATUS_DONE,
+ 	.pkt_filter_flags0 = HTT_RX_FP_MGMT_FILTER_FLAGS0,
+ 	.pkt_filter_flags1 = HTT_RX_FP_MGMT_FILTER_FLAGS1,
+-	.pkt_filter_flags3 = HTT_RX_FP_DATA_FILTER_FLASG3
++	.pkt_filter_flags2 = HTT_RX_FP_CTRL_FILTER_FLASG2,
++	.pkt_filter_flags3 = HTT_RX_FP_DATA_FILTER_FLASG3 |
++			     HTT_RX_FP_CTRL_FILTER_FLASG3
+ };
+ 
+ #define ATH11K_MAC_FIRST_OFDM_RATE_IDX 4
