@@ -123,6 +123,20 @@ mac80211_add_capabilities() {
 	export -n -- "$__var=$__out"
 }
 
+mac80211_add_he_capabilities() {
+	local __out= oifs
+
+	oifs="$IFS"
+	IFS=:
+	for capab in "$@"; do
+		set -- $capab
+		[ "$(($4))" -gt 0 ] || continue
+		[ "$(((0x$2) & $3))" -gt 0 ] || continue
+		append base_cfg "$1=1" "$N"
+	done
+	IFS="$oifs"
+}
+
 mac80211_hostapd_setup_base() {
 	local phy="$1"
 
@@ -364,6 +378,69 @@ mac80211_hostapd_setup_base() {
 			vht_capab="$vht_capab[MAX-A-MPDU-LEN-EXP$max_ampdu_length_exp_hw]"
 
 		[ -n "$vht_capab" ] && append base_cfg "vht_capab=$vht_capab" "$N"
+	fi
+
+	# 802.11ax
+	enable_ax=0
+	idx="$channel"
+	case "$htmode" in
+		HE20)	enable_ax=1;;
+		HE40)
+			case "$(( ($channel / 4) % 2 ))" in
+				1) idx=$(($channel + 2));;
+				0) idx=$(($channel - 2));;
+			esac
+			enable_ax=1
+			if [ $channel -ge 36 ]; then
+				append base_cfg "he_oper_chwidth=0" "$N"
+				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
+			;;
+		HE80)
+			case "$(( ($channel / 4) % 4 ))" in
+				1) idx=$(($channel + 6));;
+				2) idx=$(($channel + 2));;
+				3) idx=$(($channel - 2));;
+				0) idx=$(($channel - 6));;
+			esac
+			enable_ax=1
+			append base_cfg "he_oper_chwidth=1" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			;;
+		HE160)
+			case "$channel" in
+				36|40|44|48|52|56|60|64) idx=50;;
+				100|104|108|112|116|120|124|128) idx=114;;
+			esac
+			enable_ax=1
+			append base_cfg "he_oper_chwidth=2" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			;;
+	esac
+
+	if [ "$enable_ax" != "0" ]; then
+		json_get_vars \
+		he_su_beamformer:1 \
+		he_su_beamformee:1 \
+		he_mu_beamformer:1 \
+		he_twt_required:0 \
+		he_spr_sr_control:0 \
+		
+
+		append base_cfg "ieee80211ax=1" "$N"
+		he_phy_cap=$(iw phy "$phy" info | awk -F "[()]" '/HE PHY Capabilities/ { print $2 }' | head -1)
+		he_phy_cap=${he_phy_cap:2}
+		
+		he_mac_cap=$(iw phy "$phy" info | awk -F "[()]" '/HE MAC Capabilities/ { print $2 }' | head -1)
+		he_mac_cap=${he_mac_cap:2}
+		
+		mac80211_add_he_capabilities \
+		he_su_beamformer:${he_phy_cap:6:2}:0x40:$he_su_beamformer \
+		he_su_beamformee:${he_phy_cap:8:2}:0x1:$he_su_beamformee \
+		he_mu_beamformer:${he_phy_cap:8:2}:0x2:$he_mu_beamformer \
+		he_spr_sr_control:${he_phy_cap:14:2}:0x1:$he_spr_sr_control \
+		he_twt_required:${he_mac_cap:0:2}:0x3:$he_twt_required \
+
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
