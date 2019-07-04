@@ -1,8 +1,8 @@
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -95,6 +95,9 @@
- /* The magic used by QCA spec */
- #define ATH10K_SMBIOS_BDF_EXT_MAGIC "BDF_"
+@@ -87,6 +87,9 @@
+ /* Default Airtime weight multipler (Tuned for multiclient performance) */
+ #define ATH10K_AIRTIME_WEIGHT_MULTIPLIER  4
  
 +/* Number of TID target accepts from host */
 +#define ATH10K_MAX_TIDS	0x8
@@ -10,7 +10,7 @@
  struct ath10k;
  
  static inline const char *ath10k_bus_str(enum ath10k_bus bus)
-@@ -123,6 +126,7 @@ enum ath10k_skb_flags {
+@@ -115,6 +118,7 @@ enum ath10k_skb_flags {
  	ATH10K_SKB_F_QOS = BIT(4),
  	ATH10K_SKB_F_RAW_TX = BIT(5),
  	ATH10K_SKB_F_NO_80211_ENCAP = BIT(6),
@@ -18,9 +18,9 @@
  };
  
  struct ath10k_skb_cb {
-@@ -526,6 +530,9 @@ struct ath10k_sta {
+@@ -520,6 +524,9 @@ struct ath10k_sta {
+ 	struct ath10k_smart_ant_sta *smart_ant_sta;
  	u8 tpc;
- 	enum nl80211_cqm_txrate_threshold_event last_event;
  	struct ath10k_cfr_capture cfr_capture;
 +
 +	/* TID bitmap for station's NoAck policy, protected by conf_mutex */
@@ -28,7 +28,7 @@
  };
  
  #define ATH10K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
-@@ -594,6 +601,9 @@ struct ath10k_vif {
+@@ -587,6 +594,9 @@ struct ath10k_vif {
  	struct work_struct ap_csa_work;
  	struct delayed_work connection_loss_work;
  	struct cfg80211_bitrate_mask bitrate_mask;
@@ -40,7 +40,7 @@
  struct ath10k_vif_iter {
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -2931,6 +2931,39 @@ static void ath10k_bss_disassoc(struct ieee80211_hw *hw,
+@@ -2931,6 +2931,39 @@ static void ath10k_bss_disassoc(struct i
  	cancel_delayed_work_sync(&arvif->connection_loss_work);
  }
  
@@ -80,7 +80,7 @@
  static int ath10k_station_assoc(struct ath10k *ar,
  				struct ieee80211_vif *vif,
  				struct ieee80211_sta *sta,
-@@ -2938,6 +2971,7 @@ static int ath10k_station_assoc(struct ath10k *ar,
+@@ -2938,6 +2971,7 @@ static int ath10k_station_assoc(struct a
  {
  	struct ath10k_vif *arvif = (void *)vif->drv_priv;
  	struct wmi_peer_assoc_complete_arg peer_arg;
@@ -88,7 +88,7 @@
  	int ret = 0;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -2996,6 +3030,23 @@ static int ath10k_station_assoc(struct ath10k *ar,
+@@ -2996,6 +3030,23 @@ static int ath10k_station_assoc(struct a
  		}
  	}
  
@@ -112,7 +112,7 @@
  	return ret;
  }
  
-@@ -3540,6 +3591,7 @@ static void ath10k_tx_h_add_p2p_noa_ie(struct ath10k *ar,
+@@ -3540,6 +3591,7 @@ static void ath10k_tx_h_add_p2p_noa_ie(s
  static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
  				    struct ieee80211_vif *vif,
  				    struct ieee80211_txq *txq,
@@ -120,7 +120,7 @@
  				    struct sk_buff *skb, u16 airtime)
  {
  	struct ieee80211_hdr *hdr = (void *)skb->data;
-@@ -3548,6 +3600,10 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+@@ -3547,6 +3599,10 @@ static void ath10k_mac_tx_h_fill_cb(stru
  	const struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	bool is_data = ieee80211_is_data(hdr->frame_control) ||
  			ieee80211_is_data_qos(hdr->frame_control);
@@ -131,7 +131,7 @@
  
  	cb->flags = 0;
  	cb->vif = vif;
-@@ -3564,8 +3620,20 @@ static void ath10k_mac_tx_h_fill_cb(struct ath10k *ar,
+@@ -3563,8 +3619,20 @@ static void ath10k_mac_tx_h_fill_cb(stru
  	if (ieee80211_is_mgmt(hdr->frame_control))
  		cb->flags |= ATH10K_SKB_F_MGMT;
  
@@ -153,7 +153,7 @@
  
  	/* Data frames encrypted in software will be posted to firmware
  	 * with tx encap mode set to RAW. Ex: Multicast traffic generated
-@@ -4058,7 +4126,7 @@ int ath10k_mac_tx_push_txq(struct ieee80211_hw *hw,
+@@ -4057,7 +4125,7 @@ int ath10k_mac_tx_push_txq(struct ieee80
  	}
  
  	airtime = ath10k_mac_update_airtime(ar, txq, skb);
@@ -162,7 +162,7 @@
  
  	skb_len = skb->len;
  	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
-@@ -4328,7 +4396,7 @@ static void ath10k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -4327,7 +4395,7 @@ static void ath10k_mac_op_tx(struct ieee
  	u16 airtime;
  
  	airtime = ath10k_mac_update_airtime(ar, txq, skb);
@@ -171,7 +171,7 @@
  
  	txmode = ath10k_mac_tx_h_get_txmode(ar, vif, sta, skb);
  	txpath = ath10k_mac_tx_h_get_txpath(ar, skb, txmode);
-@@ -8091,6 +8159,82 @@ static void ath10k_sta_statistics(struct ieee80211_hw *hw,
+@@ -8064,6 +8132,82 @@ static void ath10k_sta_statistics(struct
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
  }
  
@@ -254,7 +254,7 @@
  static const struct ieee80211_ops ath10k_ops = {
  	.tx				= ath10k_mac_op_tx,
  	.wake_tx_queue			= ath10k_mac_op_wake_tx_queue,
-@@ -8133,6 +8277,7 @@ static const struct ieee80211_ops ath10k_ops = {
+@@ -8106,6 +8250,7 @@ static const struct ieee80211_ops ath10k
  	.switch_vif_chanctx		= ath10k_mac_op_switch_vif_chanctx,
  	.sta_pre_rcu_remove		= ath10k_mac_op_sta_pre_rcu_remove,
  	.sta_statistics			= ath10k_sta_statistics,
@@ -262,7 +262,7 @@
  
  	CFG80211_TESTMODE_CMD(ath10k_tm_cmd)
  
-@@ -8869,6 +9014,12 @@ int ath10k_mac_register(struct ath10k *ar)
+@@ -8842,6 +8987,12 @@ int ath10k_mac_register(struct ath10k *a
  		wiphy_ext_feature_set(ar->hw->wiphy,
  				      NL80211_EXT_FEATURE_ENABLE_FTM_RESPONDER);
  
@@ -277,7 +277,7 @@
  	 * so we only advertise to mac we can do the queues thing
 --- a/drivers/net/wireless/ath/ath10k/txrx.c
 +++ b/drivers/net/wireless/ath/ath10k/txrx.c
-@@ -112,18 +112,21 @@ int ath10k_txrx_tx_unref(struct ath10k_htt *htt,
+@@ -104,18 +104,21 @@ int ath10k_txrx_tx_unref(struct ath10k_h
  	memset(&info->status, 0, sizeof(info->status));
  	trace_ath10k_txrx_tx_unref(ar, tx_done->msdu_id);
  

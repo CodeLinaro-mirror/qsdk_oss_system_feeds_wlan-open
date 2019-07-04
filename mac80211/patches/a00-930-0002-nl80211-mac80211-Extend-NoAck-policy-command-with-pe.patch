@@ -1,6 +1,6 @@
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -3038,7 +3038,15 @@ struct cfg80211_external_auth_params {
+@@ -3338,7 +3338,15 @@ struct cfg80211_pmsr_request {
   * @probe_client: probe an associated client, must return a cookie that it
   *	later passes to cfg80211_probe_status().
   *
@@ -17,7 +17,7 @@
   *
   * @get_channel: Get the current operating channel for the virtual interface.
   *	For monitor interfaces, it should return %NULL unless there's a single
-@@ -3357,7 +3365,7 @@ struct cfg80211_ops {
+@@ -3657,7 +3665,7 @@ struct cfg80211_ops {
  
  	int	(*set_noack_map)(struct wiphy *wiphy,
  				  struct net_device *dev,
@@ -28,9 +28,9 @@
  			       struct wireless_dev *wdev,
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -3914,7 +3914,7 @@ struct ieee80211_ops {
- 				       struct sk_buff *head,
- 				       struct sk_buff *skb);
+@@ -4026,7 +4026,7 @@ struct ieee80211_ops {
+ 	void (*abort_pmsr)(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			   struct cfg80211_pmsr_request *request);
  	int (*set_noack_tid_bitmap)(struct ieee80211_hw *hw,
 -				    struct ieee80211_vif *vif, u16 noack_map);
 +				    struct ieee80211_vif *vif, int noack_map);
@@ -59,16 +59,16 @@
   *
   * @NL80211_CMD_CH_SWITCH_NOTIFY: An AP or GO may decide to switch channels
   *	independently of the userspace SME, send this event indicating
-@@ -5260,6 +5271,8 @@ enum nl80211_feature_flags {
+@@ -5339,6 +5350,8 @@ enum nl80211_feature_flags {
   *      able to rekey an in-use key correctly. Userspace must not rekey PTK keys
   *      if this flag is not set. Ignoring this can leak clear text packets and/or
   *      freeze the connection.
 + * @NL80211_EXT_FEATURE_PER_STA_NOACK_MAP: Driver supports STA specific NoAck
 + *	policy functionality.
   *
-  * @NUM_NL80211_EXT_FEATURES: number of extended features.
-  * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
-@@ -5414,6 +5427,7 @@ enum nl80211_ext_feature_index {
+  * @NL80211_EXT_FEATURE_AIRTIME_FAIRNESS: Driver supports getting airtime
+  *	fairness for transmitted packets and has enabled airtime fairness
+@@ -5388,6 +5401,7 @@ enum nl80211_ext_feature_index {
  	NL80211_EXT_FEATURE_ENABLE_FTM_RESPONDER,
  	NL80211_EXT_FEATURE_AIRTIME_FAIRNESS,
  	NL80211_EXT_FEATURE_AP_PMKSA_CACHING,
@@ -78,7 +78,7 @@
  	NUM_NL80211_EXT_FEATURES,
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -344,7 +344,8 @@ static void ieee80211_del_nan_func(struct wiphy *wiphy,
+@@ -344,7 +344,8 @@ static void ieee80211_del_nan_func(struc
  
  static int ieee80211_set_noack_map(struct wiphy *wiphy,
  				  struct net_device *dev,
@@ -90,7 +90,7 @@
  
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -1264,7 +1264,7 @@ static inline void drv_del_nan_func(struct ieee80211_local *local,
+@@ -1350,7 +1350,7 @@ static inline void drv_del_nan_func(stru
  
  static inline int drv_set_noack_tid_bitmap(struct ieee80211_local *local,
  					   struct ieee80211_sub_if_data *sdata,
@@ -101,7 +101,7 @@
  
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -897,7 +897,7 @@ struct ieee80211_sub_if_data {
+@@ -909,7 +909,7 @@ struct ieee80211_sub_if_data {
  	unsigned int fragment_next;
  
  	/* TID bitmap for NoAck policy */
@@ -112,7 +112,7 @@
  	u8 wmm_acm;
 --- a/net/mac80211/trace.h
 +++ b/net/mac80211/trace.h
-@@ -1887,13 +1887,13 @@ TRACE_EVENT(drv_del_nan_func,
+@@ -1897,13 +1897,13 @@ DEFINE_EVENT(local_sdata_evt, drv_abort_
  TRACE_EVENT(drv_set_noack_tid_bitmap,
  	TP_PROTO(struct ieee80211_local *local,
  		 struct ieee80211_sub_if_data *sdata,
@@ -128,7 +128,7 @@
  	),
  
  	TP_fast_assign(
-@@ -1904,7 +1904,7 @@ TRACE_EVENT(drv_set_noack_tid_bitmap,
+@@ -1914,7 +1914,7 @@ TRACE_EVENT(drv_set_noack_tid_bitmap,
  
  	TP_printk(
  		LOCAL_PR_FMT  VIF_PR_FMT
@@ -139,7 +139,7 @@
  );
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -3321,17 +3321,29 @@ static int nl80211_set_noack_map(struct sk_buff *skb, struct genl_info *info)
+@@ -3498,17 +3498,29 @@ static int nl80211_set_noack_map(struct
  {
  	struct cfg80211_registered_device *rdev = info->user_ptr[0];
  	struct net_device *dev = info->user_ptr[1];
@@ -176,7 +176,7 @@
  struct get_key_cookie {
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -923,11 +923,12 @@ static inline int rdev_probe_client(struct cfg80211_registered_device *rdev,
+@@ -908,11 +908,12 @@ static inline int rdev_probe_client(stru
  }
  
  static inline int rdev_set_noack_map(struct cfg80211_registered_device *rdev,
@@ -194,7 +194,7 @@
  }
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -1932,21 +1932,24 @@ TRACE_EVENT(rdev_tx_control_port,
+@@ -1927,21 +1927,24 @@ TRACE_EVENT(rdev_tx_control_port,
  );
  
  TRACE_EVENT(rdev_set_noack_map,

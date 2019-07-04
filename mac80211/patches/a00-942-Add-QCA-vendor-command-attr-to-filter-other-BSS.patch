@@ -12,7 +12,7 @@
  ath10k_core-$(CPTCFG_ATH10K_DEBUGFS) += debug_smart_ant.o debug_htt_stats.o
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -41,6 +41,7 @@
+@@ -30,6 +30,7 @@
  #include "pktlog.h"
  #include "smart_ant.h"
  #include "debug_htt_stats.h"
@@ -20,7 +20,7 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -1273,6 +1274,8 @@ struct ath10k {
+@@ -1269,6 +1270,8 @@ struct ath10k {
  	u32	cfr_enable;
  	struct rchan *rfs_cfr_capture;
  
@@ -31,7 +31,7 @@
  };
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -25,6 +25,7 @@
+@@ -14,6 +14,7 @@
  #include "mac.h"
  #include "smart_ant.h"
  #include "debug_htt_stats.h"
@@ -39,7 +39,7 @@
  
  #include "spectral.h"
  #include <linux/log2.h>
-@@ -1805,6 +1806,10 @@ static bool ath10k_htt_rx_amsdu_allowed(struct ath10k *ar,
+@@ -1995,6 +1996,10 @@ static bool ath10k_htt_rx_amsdu_allowed(
  		return false;
  	}
  
@@ -52,7 +52,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/mac.c
 +++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -5498,6 +5498,8 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
+@@ -5593,6 +5593,8 @@ static void ath10k_remove_interface(stru
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -61,9 +61,9 @@
  	spin_lock_bh(&ar->data_lock);
  	ath10k_mac_vif_beacon_cleanup(arvif);
  	spin_unlock_bh(&ar->data_lock);
-@@ -9227,10 +9229,16 @@ int ath10k_mac_register(struct ath10k *ar)
+@@ -9298,10 +9300,16 @@ int ath10k_mac_register(struct ath10k *a
  
- 	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
+ 	ar->hw->weight_multiplier = ATH10K_AIRTIME_WEIGHT_MULTIPLIER;
  
 +	ret = ath10k_vendor_register(ar);
 +	if (ret) {
@@ -78,8 +78,8 @@
 +		goto err_vendor_unregister;
  	}
  
- 	if (!ath_is_world_regd(&ar->ath_common.regulatory)) {
-@@ -9245,6 +9253,9 @@ int ath10k_mac_register(struct ath10k *ar)
+ 	if (test_bit(WMI_SERVICE_PER_PACKET_SW_ENCRYPT, ar->wmi.svc_map)) {
+@@ -9321,6 +9329,9 @@ int ath10k_mac_register(struct ath10k *a
  err_unregister:
  	ieee80211_unregister_hw(ar->hw);
  
@@ -89,7 +89,7 @@
  err_dfs_detector_exit:
  	if (IS_ENABLED(CPTCFG_ATH10K_DFS_CERTIFIED) && ar->dfs_detector)
  		ar->dfs_detector->exit(ar->dfs_detector);
-@@ -9261,6 +9272,8 @@ void ath10k_mac_unregister(struct ath10k *ar)
+@@ -9337,6 +9348,8 @@ void ath10k_mac_unregister(struct ath10k
  {
  	ieee80211_unregister_hw(ar->hw);
  
@@ -1165,7 +1165,7 @@
 +#endif /* _VENDOR_H_ */
 --- a/drivers/net/wireless/ath/ath10k/wmi-ops.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi-ops.h
-@@ -245,6 +245,12 @@ struct wmi_ops {
+@@ -242,6 +242,12 @@ struct wmi_ops {
  						     const struct wmi_peer_cfr_capture_conf_arg *arg);
  	struct sk_buff *(*gen_per_peer_per_tid_cfg)(struct ath10k *ar,
  						    const struct wmi_per_peer_per_tid_cfg_arg *arg);
@@ -1178,7 +1178,7 @@
  };
  
  int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id);
-@@ -1772,4 +1778,26 @@ ath10k_wmi_set_per_peer_per_tid_cfg(struct ath10k *ar,
+@@ -1813,4 +1819,26 @@ ath10k_wmi_set_per_peer_per_tid_cfg(stru
  	return ath10k_wmi_cmd_send(ar, skb,
  				   ar->wmi.cmd->per_peer_per_tid_config_cmdid);
  }
@@ -1207,7 +1207,7 @@
  #endif
 --- a/drivers/net/wireless/ath/ath10k/wmi.c
 +++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -9156,6 +9156,37 @@ ath10k_wmi_10_4_op_gen_set_coex_param(struct ath10k *ar,
+@@ -9315,6 +9315,37 @@ ath10k_wmi_10_4_op_gen_set_coex_param(st
  	return skb;
  }
  
@@ -1245,7 +1245,7 @@
  static const struct wmi_ops wmi_ops = {
  	.rx = ath10k_wmi_op_rx,
  	.map_svc = wmi_main_svc_map,
-@@ -9539,6 +9570,8 @@ static const struct wmi_ops wmi_10_4_ops = {
+@@ -9701,6 +9732,8 @@ static const struct wmi_ops wmi_10_4_ops
  	.gen_echo = ath10k_wmi_op_gen_echo,
  	.gen_pdev_get_tpc_config = ath10k_wmi_10_2_4_op_gen_pdev_get_tpc_config,
  	.gen_set_coex_param = ath10k_wmi_10_4_op_gen_set_coex_param,
@@ -1257,22 +1257,22 @@
 --- a/drivers/net/wireless/ath/ath10k/wmi.h
 +++ b/drivers/net/wireless/ath/ath10k/wmi.h
 @@ -205,6 +205,7 @@ enum wmi_service {
- 	WMI_SERVICE_PER_PACKET_SW_ENCRYPT,
+ 	WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LEGACY,
  	WMI_SERVICE_VDEV_BCN_RATE_CONTROL,
  	WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT,
 +	WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS,
  
  	/* Remember to add the new value to wmi_service_name()! */
  
-@@ -502,6 +503,7 @@ static inline char *wmi_service_name(enum wmi_service service_id)
- 	SVCSTR(WMI_SERVICE_PER_PACKET_SW_ENCRYPT);
+@@ -500,6 +501,7 @@ static inline char *wmi_service_name(enu
+ 	SVCSTR(WMI_SERVICE_CFR_CAPTURE_IND_MSG_TYPE_LEGACY);
  	SVCSTR(WMI_SERVICE_VDEV_BCN_RATE_CONTROL);
  	SVCSTR(WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT);
 +	SVCSTR(WMI_SERVICE_VDEV_FILTER_NEIGHBOR_RX_PACKETS);
  
  	case WMI_SERVICE_MAX:
  		return NULL;
-@@ -839,6 +841,8 @@ static inline void wmi_10_4_svc_map(const __le32 *in, unsigned long *out,
+@@ -837,6 +839,8 @@ static inline void wmi_10_4_svc_map(cons
  	       WMI_SERVICE_PEER_TID_CONFIGS_SUPPORT, len);
  	SVCMAP(WMI_10_4_SERVICE_VDEV_BCN_RATE_CONTROL,
  	       WMI_SERVICE_VDEV_BCN_RATE_CONTROL, len);
@@ -1281,7 +1281,7 @@
  }
  
  #undef SVCMAP
-@@ -7424,6 +7428,45 @@ struct wmi_peer_sant_set_train_arg {
+@@ -7477,6 +7481,45 @@ struct wmi_peer_sant_set_train_arg {
  	u32 num_pkts;
  };
  
