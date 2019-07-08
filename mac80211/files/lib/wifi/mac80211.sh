@@ -85,7 +85,7 @@ detect_mac80211() {
 	devidx=0
 	config_load wireless
 
-	if [ ! -f "/etc/config/wireless" ]; then
+	if [ ! -f "/etc/config/wireless" ] || ! grep -q "enable_smp_affinity" "/etc/config/wireless"; then
 		cat <<EOF
 config smp_affinity  mac80211
 	option enable_smp_affinity	1
