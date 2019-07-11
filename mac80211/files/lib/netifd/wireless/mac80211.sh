@@ -1058,6 +1058,10 @@ drv_mac80211_setup() {
 			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
 		}
 	fi
+
+	[ -f "/lib/performance.sh" ] && {
+		. /lib/performance.sh
+	}
 }
 
 list_phy_interfaces() {
