@@ -84,6 +84,8 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
+	config_add_string airtime_mode
+	config_add_int airtime_update_interval
 
 }
 
