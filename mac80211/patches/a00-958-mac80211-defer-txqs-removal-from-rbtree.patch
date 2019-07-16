@@ -1,6 +1,8 @@
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 7459cc8..2d2fd6d 100755
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -928,6 +928,8 @@ struct ieee80211_tx_rate {
+@@ -941,6 +941,8 @@ struct ieee80211_tx_rate {
  
  #define IEEE80211_MAX_TX_RETRY		31
  
@@ -9,7 +11,7 @@
  static inline void ieee80211_rate_set_vht(struct ieee80211_tx_rate *rate,
  					  u8 mcs, u8 nss)
  {
-@@ -6456,7 +6458,8 @@ struct ieee80211_txq *ieee80211_next_txq
+@@ -6489,7 +6491,8 @@ struct ieee80211_txq *ieee80211_next_txq(struct ieee80211_hw *hw, u8 ac);
   * @txq: pointer obtained from station or virtual interface
   *
   * Should only be called between calls to ieee80211_txq_schedule_start()
@@ -19,7 +21,7 @@
   */
  void ieee80211_return_txq(struct ieee80211_hw *hw, struct ieee80211_txq *txq);
  
-@@ -6477,7 +6480,8 @@ void ieee80211_txq_schedule_start(struct
+@@ -6510,7 +6513,8 @@ void ieee80211_txq_schedule_start(struct ieee80211_hw *hw, u8 ac);
   * @hw: pointer as obtained from ieee80211_alloc_hw()
   * @ac: AC number to acquire locks for
   *
@@ -29,7 +31,7 @@
   */
  void ieee80211_txq_schedule_end(struct ieee80211_hw *hw, u8 ac);
  
-@@ -6495,6 +6499,14 @@ void ieee80211_schedule_txq(struct ieee8
+@@ -6528,6 +6532,14 @@ void ieee80211_schedule_txq(struct ieee80211_hw *hw, struct ieee80211_txq *txq)
          __acquires(txq_lock) __releases(txq_lock);
  
  /**
@@ -44,6 +46,8 @@
   * ieee80211_txq_may_transmit - check whether TXQ is allowed to transmit
   *
   * This function is used to check whether given txq is allowed to transmit by
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index 4b8e669..fa93cc9 100755
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
 @@ -854,6 +854,7 @@ struct txq_info {
@@ -63,9 +67,11 @@
  	u16 airtime_flags;
  
  	const struct ieee80211_ops *ops;
+diff --git a/net/mac80211/main.c b/net/mac80211/main.c
+index d1e6f6f..ba8ea21 100644
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -677,10 +677,14 @@ struct ieee80211_hw *ieee80211_alloc_hw_
+@@ -677,10 +677,14 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
  
  	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
  		local->active_txqs[i] = RB_ROOT_CACHED;
@@ -80,7 +86,7 @@
  	INIT_LIST_HEAD(&local->chanctx_list);
  	mutex_init(&local->chanctx_mtx);
  
-@@ -1314,6 +1318,7 @@ void ieee80211_unregister_hw(struct ieee
+@@ -1314,6 +1318,7 @@ void ieee80211_unregister_hw(struct ieee80211_hw *hw)
  	tasklet_kill(&local->tx_pending_tasklet);
  	tasklet_kill(&local->tasklet);
  
@@ -88,9 +94,11 @@
  #ifdef __disabled__CONFIG_INET
  	unregister_inetaddr_notifier(&local->ifa_notifier);
  #endif
+diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
+index 534a158..bc05423 100755
 --- a/net/mac80211/sta_info.c
 +++ b/net/mac80211/sta_info.c
-@@ -1848,13 +1848,16 @@ void ieee80211_sta_register_airtime(stru
+@@ -1848,13 +1848,16 @@ void ieee80211_sta_register_airtime(struct ieee80211_sta *pubsta, u8 tid,
  	airtime <<= 8;
  
  	spin_lock_bh(&local->active_txq_lock[ac]);
@@ -109,6 +117,8 @@
  	spin_unlock_bh(&local->active_txq_lock[ac]);
  }
  EXPORT_SYMBOL(ieee80211_sta_register_airtime);
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index ec53276..006b043 100755
 --- a/net/mac80211/sta_info.h
 +++ b/net/mac80211/sta_info.h
 @@ -130,7 +130,7 @@ enum ieee80211_agg_stop_reason {
@@ -120,9 +130,11 @@
  
  struct airtime_info {
  	u64 rx_airtime;
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 13fdc9e..b26a637 100755
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -1468,6 +1468,7 @@ void ieee80211_txq_init(struct ieee80211
+@@ -1468,6 +1468,7 @@ void ieee80211_txq_init(struct ieee80211_sub_if_data *sdata,
  	codel_stats_init(&txqi->cstats);
  	__skb_queue_head_init(&txqi->frags);
  	RB_CLEAR_NODE(&txqi->schedule_order);
@@ -130,7 +142,7 @@
  
  	txqi->txq.vif = &sdata->vif;
  
-@@ -3759,6 +3760,10 @@ void ieee80211_schedule_txq(struct ieee8
+@@ -3759,6 +3760,10 @@ void ieee80211_schedule_txq(struct ieee80211_hw *hw,
  
  	spin_lock_bh(&local->active_txq_lock[ac]);
  
@@ -141,7 +153,7 @@
  	if (!RB_EMPTY_NODE(&txqi->schedule_order))
  	       goto out;
  
-@@ -3767,9 +3772,11 @@ void ieee80211_schedule_txq(struct ieee8
+@@ -3767,9 +3772,11 @@ void ieee80211_schedule_txq(struct ieee80211_hw *hw,
                                         struct sta_info, sta);
  
  		local->airtime_weight_sum[ac] += sta->airtime_weight;
@@ -155,7 +167,7 @@
  	}
  
  	__ieee80211_insert_txq(&local->active_txqs[ac], txqi, ac);
-@@ -3818,15 +3825,31 @@ static void __ieee80211_unschedule_txq(s
+@@ -3818,15 +3825,29 @@ static void __ieee80211_unschedule_txq(struct ieee80211_hw *hw,
  	RB_CLEAR_NODE(&txqi->schedule_order);
  }
  
@@ -167,9 +179,7 @@
 +
 +	lockdep_assert_held(&local->active_txq_lock[txq->ac]);
 +
-+	if (!RB_EMPTY_NODE(&txqi->schedule_order) &&
-+		!list_empty(&txqi->candidate)) {
-+
++	if (!RB_EMPTY_NODE(&txqi->schedule_order)) {
 +		__ieee80211_unschedule_txq(hw, txq);
 +		list_del_init(&txqi->candidate);
 +	}
@@ -189,7 +199,7 @@
  	spin_unlock_bh(&local->active_txq_lock[txq->ac]);
  }
  
-@@ -3839,11 +3862,50 @@ void ieee80211_return_txq(struct ieee802
+@@ -3839,11 +3860,50 @@ void ieee80211_return_txq(struct ieee80211_hw *hw,
  	lockdep_assert_held(&local->active_txq_lock[txq->ac]);
  
  	if (!RB_EMPTY_NODE(&txqi->schedule_order) &&
@@ -242,7 +252,7 @@
  bool ieee80211_txq_may_transmit(struct ieee80211_hw *hw,
  				struct ieee80211_txq *txq)
  {
-@@ -3877,6 +3939,8 @@ void ieee80211_txq_schedule_end(struct i
+@@ -3877,6 +3937,8 @@ void ieee80211_txq_schedule_end(struct ieee80211_hw *hw, u8 ac)
  	struct ieee80211_local *local = hw_to_local(hw);
  
  	local->schedule_pos[ac] = NULL;
