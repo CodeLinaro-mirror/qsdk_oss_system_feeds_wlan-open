@@ -1,0 +1,207 @@
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 5c0be9a48fb0..faf649c09e44 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -1817,6 +1817,7 @@ struct cfg80211_scan_info {
+  * @channels: channels to scan on.
+  * @n_channels: total number of channels to scan
+  * @scan_width: channel width for scanning
++ * @chandef: defines the channel to do wide band scan
+  * @ie: optional information element(s) to add into Probe Request or %NULL
+  * @ie_len: length of ie in octets
+  * @duration: how long to listen on each channel, in TUs. If
+@@ -1843,6 +1844,7 @@ struct cfg80211_scan_request {
+ 	int n_ssids;
+ 	u32 n_channels;
+ 	enum nl80211_bss_scan_width scan_width;
++	struct cfg80211_chan_def *chandef;
+ 	const u8 *ie;
+ 	size_t ie_len;
+ 	u16 duration;
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 9781c5558971..a9c36eb660c8 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -5356,6 +5356,10 @@ enum nl80211_feature_flags {
+  *
+  * @NL80211_EXT_FEATURE_STA_TX_PWR: This driver supports controlling tx power
+  *	to a station.
++ *
++ * @NL80211_EXT_FEATURE_WIDE_BAND_SCAN: Driver/device supports wide band scan
++ *	on a frequency along with its corresponding phymode (40Mhz, 80Mhz)
++ *
+  * @NUM_NL80211_EXT_FEATURES: number of extended features.
+  * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
+  */
+@@ -5398,6 +5402,7 @@ enum nl80211_ext_feature_index {
+ 	NL80211_EXT_FEATURE_AIRTIME_FAIRNESS,
+ 	NL80211_EXT_FEATURE_AP_PMKSA_CACHING,
+ 	NL80211_EXT_FEATURE_STA_TX_PWR,
++	NL80211_EXT_FEATURE_WIDE_BAND_SCAN,
+ 
+ 	/* add new features before the definition below */
+ 	NUM_NL80211_EXT_FEATURES,
+@@ -5509,6 +5514,8 @@ enum nl80211_timeout_reason {
+  * @NL80211_SCAN_FLAG_MIN_PREQ_CONTENT: minimize probe request content to
+  *	only have supported rates and no additional capabilities (unless
+  *	added by userspace explicitly.)
++ * @NL80211_SCAN_FLAG_WIDE_BAND_SCAN: This flag intends the driver to perform
++ *	wide band scan only if the driver supports it.
+  */
+ enum nl80211_scan_flags {
+ 	NL80211_SCAN_FLAG_LOW_PRIORITY				= 1<<0,
+@@ -5524,6 +5531,7 @@ enum nl80211_scan_flags {
+ 	NL80211_SCAN_FLAG_HIGH_ACCURACY				= 1<<10,
+ 	NL80211_SCAN_FLAG_RANDOM_SN				= 1<<11,
+ 	NL80211_SCAN_FLAG_MIN_PREQ_CONTENT			= 1<<12,
++	NL80211_SCAN_FLAG_WIDE_BAND_SCAN			= 1<<13,
+ };
+ 
+ /**
+diff --git a/net/mac80211/scan.c b/net/mac80211/scan.c
+index 0cf066700623..f576f6b2c45b 100644
+--- a/net/mac80211/scan.c
++++ b/net/mac80211/scan.c
+@@ -665,11 +665,13 @@ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
+ 
+ 		local->hw_scan_req = kmalloc(
+ 				sizeof(*local->hw_scan_req) +
++				sizeof(*req->chandef) +
+ 				req->n_channels * sizeof(req->channels[0]) +
+ 				local->hw_scan_ies_bufsize, GFP_KERNEL);
+ 		if (!local->hw_scan_req)
+ 			return -ENOMEM;
+ 
++		local->hw_scan_req->req.chandef = req->chandef;
+ 		local->hw_scan_req->req.ssids = req->ssids;
+ 		local->hw_scan_req->req.n_ssids = req->n_ssids;
+ 		ies = (u8 *)local->hw_scan_req +
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 6c0e33ae574d..48dd6d1b80ba 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -7216,7 +7216,10 @@ nl80211_check_scan_flags(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 				     NL80211_EXT_FEATURE_SCAN_RANDOM_SN) ||
+ 	    !nl80211_check_scan_feat(wiphy, *flags,
+ 				     NL80211_SCAN_FLAG_MIN_PREQ_CONTENT,
+-				     NL80211_EXT_FEATURE_SCAN_MIN_PREQ_CONTENT))
++				     NL80211_EXT_FEATURE_SCAN_MIN_PREQ_CONTENT) ||
++	    !nl80211_check_scan_feat(wiphy, *flags,
++				     NL80211_SCAN_FLAG_WIDE_BAND_SCAN,
++				     NL80211_EXT_FEATURE_WIDE_BAND_SCAN))
+ 		return -EOPNOTSUPP;
+ 
+ 	if (*flags & NL80211_SCAN_FLAG_RANDOM_ADDR) {
+@@ -7239,10 +7242,12 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 	struct cfg80211_registered_device *rdev = info->user_ptr[0];
+ 	struct wireless_dev *wdev = info->user_ptr[1];
+ 	struct cfg80211_scan_request *request;
++	struct cfg80211_chan_def chandef;
+ 	struct nlattr *attr;
+ 	struct wiphy *wiphy;
+-	int err, tmp, n_ssids = 0, n_channels, i;
++	int err, tmp, n_ssids = 0, n_channels = 0, i;
+ 	size_t ie_len;
++	bool chandef_found = false;
+ 
+ 	wiphy = &rdev->wiphy;
+ 
+@@ -7257,7 +7262,14 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 		goto unlock;
+ 	}
+ 
+-	if (info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]) {
++	if (info->attrs[NL80211_ATTR_WIPHY_FREQ]) {
++		n_channels = 1;
++		if (nl80211_parse_chandef(rdev, info, &chandef)) {
++			err = -EINVAL;
++			goto unlock;
++		}
++		chandef_found = true;
++	} else if (info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]) {
+ 		n_channels = validate_scan_freqs(
+ 				info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]);
+ 		if (!n_channels) {
+@@ -7288,6 +7300,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 	}
+ 
+ 	request = kzalloc(sizeof(*request)
++			+ sizeof(*request->chandef)
+ 			+ sizeof(*request->ssids) * n_ssids
+ 			+ sizeof(*request->channels) * n_channels
+ 			+ ie_len, GFP_KERNEL);
+@@ -7296,6 +7309,12 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 		goto unlock;
+ 	}
+ 
++	if (chandef_found) {
++		request->chandef = &chandef;
++		request->channels[0] = chandef.chan;
++		request->n_channels = n_channels;
++	}
++
+ 	if (n_ssids)
+ 		request->ssids = (void *)&request->channels[n_channels];
+ 	request->n_ssids = n_ssids;
+@@ -7326,7 +7345,7 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 			request->channels[i] = chan;
+ 			i++;
+ 		}
+-	} else {
++	} else if (!chandef_found) {
+ 		enum nl80211_band band;
+ 
+ 		/* all channels */
+@@ -7349,31 +7368,32 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
+ 		}
+ 	}
+ 
+-	if (!i) {
+-		err = -EINVAL;
+-		goto out_free;
+-	}
+-
+-	request->n_channels = i;
+-
+-	wdev_lock(wdev);
+-	if (!cfg80211_off_channel_oper_allowed(wdev)) {
+-		struct ieee80211_channel *chan;
+-
+-		if (request->n_channels != 1) {
+-			wdev_unlock(wdev);
+-			err = -EBUSY;
++	if (!chandef_found) {
++		if (!i) {
++			err = -EINVAL;
+ 			goto out_free;
+ 		}
++		request->n_channels = i;
+ 
+-		chan = request->channels[0];
+-		if (chan->center_freq != wdev->chandef.chan->center_freq) {
+-			wdev_unlock(wdev);
+-			err = -EBUSY;
+-			goto out_free;
++		wdev_lock(wdev);
++		if (!cfg80211_off_channel_oper_allowed(wdev)) {
++			struct ieee80211_channel *chan;
++
++			if (request->n_channels != 1) {
++				wdev_unlock(wdev);
++				err = -EBUSY;
++				goto out_free;
++			}
++
++			chan = request->channels[0];
++			if (chan->center_freq != wdev->chandef.chan->center_freq) {
++				wdev_unlock(wdev);
++				err = -EBUSY;
++				goto out_free;
++			}
+ 		}
++		wdev_unlock(wdev);
+ 	}
+-	wdev_unlock(wdev);
+ 
+ 	i = 0;
+ 	if (n_ssids) {
