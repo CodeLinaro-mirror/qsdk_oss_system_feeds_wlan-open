@@ -7,9 +7,9 @@
 -	vaddr = kzalloc(hw_desc_sz + HAL_LINK_DESC_ALIGN - 1, GFP_KERNEL);
 +	vaddr = kzalloc(hw_desc_sz + HAL_LINK_DESC_ALIGN - 1, GFP_ATOMIC);
  	if (!vaddr) {
- 		spin_unlock_bh(&ab->data_lock);
+ 		spin_unlock_bh(&ab->base_lock);
  		return -ENOMEM;
-@@ -1258,11 +1258,9 @@ struct htt_ppdu_stats_info *ath11k_dp_ht
+@@ -1216,11 +1216,9 @@ struct htt_ppdu_stats_info *ath11k_dp_ht
  {
  	struct htt_ppdu_stats_info *ppdu_info = NULL;
  
@@ -21,7 +21,7 @@
  				return ppdu_info;
  			}
  		}
-@@ -1276,16 +1274,13 @@ struct htt_ppdu_stats_info *ath11k_dp_ht
+@@ -1234,16 +1232,13 @@ struct htt_ppdu_stats_info *ath11k_dp_ht
  			kfree(ppdu_info);
  		}
  	}
@@ -39,7 +39,7 @@
  
  	return ppdu_info;
  }
-@@ -1317,8 +1312,10 @@ static int ath11k_htt_pull_ppdu_stats(st
+@@ -1275,8 +1270,10 @@ static int ath11k_htt_pull_ppdu_stats(st
  		ath11k_htt_ppdu_pktlog_process(ar, (u8 *)skb->data, skb->len);
  	}
  
@@ -50,7 +50,7 @@
  		ret = -EINVAL;
  		goto exit;
  	}
-@@ -1328,10 +1325,12 @@ static int ath11k_htt_pull_ppdu_stats(st
+@@ -1286,10 +1283,12 @@ static int ath11k_htt_pull_ppdu_stats(st
  				     ath11k_htt_tlv_ppdu_stats_parse,
  				     (void *)ppdu_info);
  	if (ret) {
@@ -65,7 +65,7 @@
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2198,22 +2198,31 @@ static int ath11k_clear_peer_keys(struct
+@@ -2306,22 +2306,28 @@ static int ath11k_clear_peer_keys(struct
  	int ret;
  	int i;
  	u32 flags = 0;
@@ -73,22 +73,20 @@
  
  	lockdep_assert_held(&ar->conf_mutex);
  
- 	spin_lock_bh(&ab->data_lock);
+ 	spin_lock_bh(&ab->base_lock);
  	peer = ath11k_peer_find(ab, arvif->vdev_id, addr);
--	spin_unlock_bh(&ab->data_lock);
- 
+-	spin_unlock_bh(&ab->base_lock);
+-
 -	if (!peer)
 +	if (!peer) {
-+		spin_unlock_bh(&ab->data_lock);
++		spin_unlock_bh(&ab->base_lock);
  		return -ENOENT;
 +	}
-+
 +	for (i = 0; i < ARRAY_SIZE(keys); i++) {
 +		keys[i]= peer->keys[i];
 +		peer->keys[i]= NULL;
 +	}
-+
-+	spin_unlock_bh(&ab->data_lock);
++	spin_unlock_bh(&ab->base_lock);
  
 -	for (i = 0; i < ARRAY_SIZE(peer->keys); i++) {
 -		if (!peer->keys[i])
@@ -102,13 +100,14 @@
  					 DISABLE_KEY, addr, flags);
  		if (ret < 0 && first_errno == 0)
  			first_errno = ret;
-@@ -2222,9 +2231,6 @@ static int ath11k_clear_peer_keys(struct
+@@ -2329,10 +2335,6 @@ static int ath11k_clear_peer_keys(struct
+ 		if (ret < 0)
  			ath11k_warn(ab, "failed to remove peer key %d: %d\n",
  				    i, ret);
- 
--		spin_lock_bh(&ab->data_lock);
+-
+-		spin_lock_bh(&ab->base_lock);
 -		peer->keys[i] = NULL;
--		spin_unlock_bh(&ab->data_lock);
+-		spin_unlock_bh(&ab->base_lock);
  	}
  
  	return first_errno;

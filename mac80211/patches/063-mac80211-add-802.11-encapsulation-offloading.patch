@@ -36,18 +36,17 @@ Signed-off-by: John Crispin <john@phrozen.org>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -818,6 +818,8 @@ enum mac80211_tx_control_flags {
- 	IEEE80211_TX_CTRL_RATE_INJECT		= BIT(2),
+@@ -817,6 +817,7 @@ enum mac80211_tx_control_flags {
  	IEEE80211_TX_CTRL_AMSDU			= BIT(3),
  	IEEE80211_TX_CTRL_FAST_XMIT		= BIT(4),
-+	IEEE80211_TX_CTRL_SKIP_MPATH_LOOKUP	= BIT(5),
+ 	IEEE80211_TX_CTRL_SKIP_MPATH_LOOKUP	= BIT(5),
 +	IEEE80211_TX_CTRL_HW_80211_ENCAP	= BIT(6),
  };
  
  /*
-@@ -2264,6 +2266,9 @@ struct ieee80211_txq {
-  * @IEEE80211_HW_SUPPORTS_ONLY_HE_MULTI_BSSID: Hardware supports multi BSSID
-  *	only for HE APs. Applies if @IEEE80211_HW_SUPPORTS_MULTI_BSSID is set.
+@@ -2268,6 +2269,9 @@ struct ieee80211_txq {
+  * @IEEE80211_HW_EXT_KEY_ID_NATIVE: Driver and hardware are supporting Extended
+  *	Key ID and can handle two unicast keys per station for Rx and Tx.
   *
 + * @IEEE80211_HW_SUPPORTS_80211_ENCAP: Hardware/driver supports 802.11
 + *	encap for data frames.
@@ -55,15 +54,15 @@ Signed-off-by: John Crispin <john@phrozen.org>
   * @NUM_IEEE80211_HW_FLAGS: number of hardware flags, used for sizing arrays
   */
  enum ieee80211_hw_flags {
-@@ -2315,6 +2320,7 @@ enum ieee80211_hw_flags {
- 	IEEE80211_HW_TX_STATUS_NO_AMPDU_LEN,
+@@ -2320,6 +2324,7 @@ enum ieee80211_hw_flags {
  	IEEE80211_HW_SUPPORTS_MULTI_BSSID,
  	IEEE80211_HW_SUPPORTS_ONLY_HE_MULTI_BSSID,
+ 	IEEE80211_HW_EXT_KEY_ID_NATIVE,
 +	IEEE80211_HW_SUPPORTS_80211_ENCAP,
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
-@@ -4611,6 +4617,25 @@ void ieee80211_tx_status_irqsafe(struct
+@@ -4616,6 +4621,25 @@ void ieee80211_tx_status_irqsafe(struct
  				 struct sk_buff *skb);
  
  /**
@@ -89,7 +88,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
   * ieee80211_report_low_ack - report non-responding station
   *
   * When operating in AP-mode, call this function to report a non-responding
-@@ -6388,4 +6413,5 @@ void ieee80211_nan_func_match(struct iee
+@@ -6393,4 +6417,5 @@ void ieee80211_nan_func_match(struct iee
  			      struct cfg80211_nan_match_params *match,
  			      gfp_t gfp);
  
@@ -97,7 +96,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  #endif /* MAC80211_H */
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2383,11 +2383,17 @@ static int ieee80211_set_mcast_rate(stru
+@@ -2418,11 +2418,17 @@ static int ieee80211_set_mcast_rate(stru
  static int ieee80211_set_wiphy_params(struct wiphy *wiphy, u32 changed)
  {
  	struct ieee80211_local *local = wiphy_priv(wiphy);
@@ -117,17 +116,17 @@ Signed-off-by: John Crispin <john@phrozen.org>
  		if (err) {
 --- a/net/mac80211/debugfs.c
 +++ b/net/mac80211/debugfs.c
-@@ -221,6 +221,7 @@ static const char *hw_flag_names[] = {
- 	FLAG(TX_STATUS_NO_AMPDU_LEN),
+@@ -272,6 +272,7 @@ static const char *hw_flag_names[] = {
  	FLAG(SUPPORTS_MULTI_BSSID),
  	FLAG(SUPPORTS_ONLY_HE_MULTI_BSSID),
+ 	FLAG(EXT_KEY_ID_NATIVE),
 +	FLAG(SUPPORTS_80211_ENCAP),
  #undef FLAG
  };
  
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -987,6 +987,8 @@ struct ieee80211_sub_if_data {
+@@ -984,6 +984,8 @@ struct ieee80211_sub_if_data {
  	} debugfs;
  #endif
  
@@ -136,7 +135,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	/* must be last, dynamically sized area in this! */
  	struct ieee80211_vif vif;
  };
-@@ -1734,6 +1736,7 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -1731,6 +1733,7 @@ int ieee80211_if_add(struct ieee80211_lo
  		     struct vif_params *params);
  int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
  			     enum nl80211_iftype type);
@@ -144,7 +143,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
  void ieee80211_remove_interfaces(struct ieee80211_local *local);
  u32 ieee80211_idle_off(struct ieee80211_local *local);
-@@ -1761,6 +1764,8 @@ netdev_tx_t ieee80211_monitor_start_xmit
+@@ -1758,6 +1761,8 @@ netdev_tx_t ieee80211_monitor_start_xmit
  					 struct net_device *dev);
  netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
  				       struct net_device *dev);
@@ -152,7 +151,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
 +					    struct net_device *dev);
  void __ieee80211_subif_start_xmit(struct sk_buff *skb,
  				  struct net_device *dev,
- 				  u32 info_flags);
+ 				  u32 info_flags,
 @@ -1940,6 +1945,11 @@ void __ieee80211_tx_skb_tid_band(struct
  				 struct sk_buff *skb, int tid,
  				 enum nl80211_band band, u32 txdata_flags);
@@ -167,7 +166,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  			  struct sk_buff *skb, int tid,
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -1219,6 +1219,109 @@ static const struct net_device_ops ieee8
+@@ -1220,6 +1220,109 @@ static const struct net_device_ops ieee8
  #endif
  };
  
@@ -274,10 +273,10 @@ Signed-off-by: John Crispin <john@phrozen.org>
 +	return offloaded;
 +}
 +
- #if LINUX_VERSION_IS_GEQ(4,19,0)
+ #if LINUX_VERSION_IS_GEQ(5,2,0)
  static u16 ieee80211_monitor_select_queue(struct net_device *dev,
  					  struct sk_buff *skb,
-@@ -1484,6 +1587,7 @@ static void ieee80211_setup_sdata(struct
+@@ -1490,6 +1593,7 @@ static void ieee80211_setup_sdata(struct
  	sdata->vif.bss_conf.idle = true;
  
  	sdata->noack_map = 0;
@@ -287,7 +286,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	if (sdata->dev) {
 --- a/net/mac80211/key.c
 +++ b/net/mac80211/key.c
-@@ -174,6 +174,10 @@ static int ieee80211_key_enable_hw_accel
+@@ -177,6 +177,10 @@ static int ieee80211_key_enable_hw_accel
  		}
  	}
  
@@ -298,7 +297,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	ret = drv_set_key(key->local, SET_KEY, sdata,
  			  sta ? &sta->sta : NULL, &key->conf);
  
-@@ -200,6 +204,9 @@ static int ieee80211_key_enable_hw_accel
+@@ -203,6 +207,9 @@ static int ieee80211_key_enable_hw_accel
  			  key->conf.keyidx,
  			  sta ? sta->sta.addr : bcast_addr, ret);
  
@@ -310,7 +309,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	case WLAN_CIPHER_SUITE_WEP40:
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -998,7 +998,9 @@ int ieee80211_register_hw(struct ieee802
+@@ -995,7 +995,9 @@ int ieee80211_register_hw(struct ieee802
  		hw->wiphy->software_iftypes |= BIT(NL80211_IFTYPE_AP_VLAN);
  	}
  
@@ -323,7 +322,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  
 --- a/net/mac80211/status.c
 +++ b/net/mac80211/status.c
-@@ -1021,6 +1021,85 @@ void ieee80211_tx_rate_update(struct iee
+@@ -1018,6 +1018,85 @@ void ieee80211_tx_rate_update(struct iee
  }
  EXPORT_SYMBOL(ieee80211_tx_rate_update);
  
@@ -411,7 +410,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -1253,7 +1253,8 @@ static struct txq_info *ieee80211_get_tx
+@@ -1249,7 +1249,8 @@ static struct txq_info *ieee80211_get_tx
  	    (info->control.flags & IEEE80211_TX_CTRL_PS_RESPONSE))
  		return NULL;
  
@@ -421,7 +420,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  		if ((!ieee80211_is_mgmt(hdr->frame_control) ||
  		     ieee80211_is_bufferable_mmpdu(hdr->frame_control) ||
  		     vif->type == NL80211_IFTYPE_STATION) &&
-@@ -2357,9 +2358,9 @@ static inline bool ieee80211_is_tdls_set
+@@ -2354,9 +2355,9 @@ static inline bool ieee80211_is_tdls_set
  	       skb->data[14] == WLAN_TDLS_SNAP_RFTYPE;
  }
  
@@ -434,7 +433,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  {
  	struct sta_info *sta;
  
-@@ -2855,7 +2856,8 @@ void ieee80211_check_fast_xmit(struct st
+@@ -2866,7 +2867,8 @@ void ieee80211_check_fast_xmit(struct st
  	struct ieee80211_chanctx_conf *chanctx_conf;
  	__le16 fc;
  
@@ -444,7 +443,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  		return;
  
  	/* Locking here protects both the pointer itself, and against concurrent
-@@ -3581,6 +3583,9 @@ begin:
+@@ -3596,6 +3598,9 @@ begin:
  	else
  		info->flags &= ~IEEE80211_TX_CTL_AMPDU;
  
@@ -454,15 +453,15 @@ Signed-off-by: John Crispin <john@phrozen.org>
  	if (info->control.flags & IEEE80211_TX_CTRL_FAST_XMIT) {
  		struct sta_info *sta = container_of(txq->sta, struct sta_info,
  						    sta);
-@@ -3637,6 +3642,7 @@ begin:
+@@ -3655,6 +3660,7 @@ begin:
  		break;
  	}
  
 +encap_out:
  	IEEE80211_SKB_CB(skb)->control.vif = vif;
+ 	return skb;
  
- out:
-@@ -3996,6 +4002,167 @@ netdev_tx_t ieee80211_subif_start_xmit(s
+@@ -4026,6 +4032,167 @@ netdev_tx_t ieee80211_subif_start_xmit(s
  	return NETDEV_TX_OK;
  }
  
@@ -630,7 +629,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  struct sk_buff *
  ieee80211_build_data_template(struct ieee80211_sub_if_data *sdata,
  			      struct sk_buff *skb, u32 info_flags)
-@@ -4074,6 +4241,16 @@ static bool ieee80211_tx_pending_skb(str
+@@ -4104,6 +4271,16 @@ static bool ieee80211_tx_pending_skb(str
  		}
  		info->band = chanctx_conf->def.chan->band;
  		result = ieee80211_tx(sdata, NULL, skb, true, 0);
