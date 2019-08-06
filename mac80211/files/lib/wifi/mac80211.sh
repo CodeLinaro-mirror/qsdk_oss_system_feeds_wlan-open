@@ -217,6 +217,19 @@ post_mac80211() {
 			fi
 		;;
 	esac
+
+	if [ -e "/sys/module/ath11k/parameters/enable_qdss_trace" ]; then
+		qdss_tracing=`cat /sys/module/ath11k/parameters/enable_qdss_trace`
+		if [ $qdss_tracing = 1 ]; then
+			echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
+			echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
+			echo "0x06021FB0 0xc5acce55" > /sys/bus/coresight/devices/coresight-hwevent/setreg
+			echo "0x06130FB0 0xc5acce55" > /sys/bus/coresight/devices/coresight-hwevent/setreg
+			echo "0x06021000 0x00000320" > /sys/bus/coresight/devices/coresight-hwevent/setreg
+			echo "0x06130000 0x00000340" > /sys/bus/coresight/devices/coresight-hwevent/setreg
+			echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
+		fi
+	fi
 	return 0
 }
 
