@@ -867,8 +867,8 @@ mac80211_setup_vif() {
 				[ -n "$mcast_rate" ] && wpa_supplicant_add_rate mcval "$mcast_rate"
 
 				case "$htmode" in
-					VHT20|HT20) mesh_htmode=HT20;;
-					HT40*|VHT40)
+					VHT20|HT20|HE20) mesh_htmode=HT20;;
+					HT40*|VHT40|HE40)
 						case "$hwmode" in
 							a)
 								case "$(( ($channel / 4) % 2 ))" in
@@ -891,7 +891,7 @@ mac80211_setup_vif() {
 							;;
 						esac
 					;;
-					VHT80)
+					VHT80|HE80)
 						mesh_htmode="80MHz"
 					;;
 					*) mesh_htmode="NOHT" ;;
