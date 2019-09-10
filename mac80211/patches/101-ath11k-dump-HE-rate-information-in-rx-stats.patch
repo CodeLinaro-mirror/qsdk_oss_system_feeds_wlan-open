@@ -1,0 +1,214 @@
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -43,6 +43,7 @@
+ 
+ #define ATH11K_INVALID_HW_MAC_ID	0xFF
+ #define ATH11K_RX_RATE_TABLE_NUM 320
++#define ATH11K_RX_RATE_TABLE_11AX_NUM 576
+ 
+ enum ath11k_supported_bw {
+ 	ATH11K_BW_20	= 0,
+@@ -250,11 +251,12 @@ struct ath11k_vif_iter {
+ struct ath11k_rx_peer_rate_stats {
+ 	u64 ht_mcs_count[HAL_RX_MAX_MCS_HT + 1];
+ 	u64 vht_mcs_count[HAL_RX_MAX_MCS_VHT + 1];
++	u64 he_mcs_count[HAL_RX_MAX_MCS_HE + 1];
+ 	u64 nss_count[HAL_RX_MAX_NSS];
+ 	u64 bw_count[HAL_RX_BW_MAX];
+ 	u64 gi_count[HAL_RX_GI_MAX];
+ 	u64 legacy_count[HAL_RX_MAX_NUM_LEGACY_RATES];
+-	u64 rx_rate[ATH11K_RX_RATE_TABLE_NUM];
++	u64 rx_rate[ATH11K_RX_RATE_TABLE_11AX_NUM];
+ };
+ 
+ struct ath11k_rx_peer_stats {
+--- a/drivers/net/wireless/ath/ath11k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
+@@ -9,6 +9,7 @@
+ #include "peer.h"
+ #include "debug.h"
+ #include "dp_tx.h"
++#include "dp_rx.h"
+ #include "debug_htt_stats.h"
+ 
+ static u8 mac80211_bw_to_ath11k_bw( u8 bw)
+@@ -210,8 +211,13 @@ void ath11k_update_per_peer_stats_from_t
+ 		arsta->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
+ 		if (ts->sgi)
+ 			arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+-	} else {
+-		/*TODO: update HE rates */
++	} else if (ts->pkt_type == HAL_TX_RATE_STATS_PKT_TYPE_11AX) {
++		arsta->txrate.mcs = ts->mcs;
++		arsta->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
++		arsta->txrate.he_gi = ath11k_he_gi_to_nl80211_he_gi(ts->sgi);
++		arsta->txrate.he_ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(
++						ts->num_tones_in_ru);
++
+ 	}
+ 
+ 	arsta->txrate.nss = arsta->last_txrate.nss;
+@@ -335,8 +341,11 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 	struct ath11k *ar = arsta->arvif->ar;
+ 	struct ath11k_rx_peer_stats *rx_stats = arsta->rx_stats;
+ 	int len = 0, i, retval = 0;
+-	const int size = 4096;
++	const int size = 4 * 4096;
+ 	char *buf;
++	int he_rates_avail = (rx_stats->pream_cnt[HAL_RX_PREAMBLE_11AX] > 1) ? 1 : 0;
++	int rate_table_len = he_rates_avail ? ATH11K_RX_RATE_TABLE_11AX_NUM :
++					      ATH11K_RX_RATE_TABLE_NUM;
+ 	char *legacy_rate_str[] = {"1Mbps", "2Mbps", "5.5Mbps", "6Mbps",
+ 				   "9Mbps", "11Mbps", "12Mbps", "18Mbps",
+ 				   "24Mbps", "36 Mbps", "48Mbps", "54Mbps"};
+@@ -388,6 +397,11 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 			 rx_stats->rx_duration);
+ 
+ 	len += scnprintf(buf + len, size - len, "\nRX success packet stats:\n");
++	len += scnprintf(buf + len, size - len, "\nHE packet stats:\n");
++	for (i = 0; i <= HAL_RX_MAX_MCS_HE; i++)
++		len += scnprintf(buf + len, size - len, "MCS %d: %llu%s", i,
++				 rx_stats->pkt_stats.he_mcs_count[i],
++				 (i + 1) % 6 ? "\t" : "\n");
+ 	len += scnprintf(buf + len, size - len, "\nVHT packet stats:\n");
+ 	for (i = 0; i <= HAL_RX_MAX_MCS_VHT; i++)
+ 		len += scnprintf(buf + len, size - len, "MCS %d: %llu%s", i,
+@@ -420,12 +434,18 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 			 rx_stats->pkt_stats.bw_count[2],
+ 			 rx_stats->pkt_stats.bw_count[3]);
+ 	len += scnprintf(buf + len, size - len, "\nRate Table (packets):\n");
+-	for (i = 0; i < ATH11K_RX_RATE_TABLE_NUM; i++)
+-		len += scnprintf(buf + len, size - len, "%llu%s",
++	for (i = 0; i < rate_table_len; i++)
++		len += scnprintf(buf + len, size - len, "%10llu%s",
+ 				rx_stats->pkt_stats.rx_rate[i],
+-				(i + 1) % 8 ? "\t\t" : "\n");
++				(i + 1) % (he_rates_avail ? 12 : 8) ? "\t" : "\n");
+ 
+ 	len += scnprintf(buf + len, size - len, "\nRX success byte stats:\n");
++	len += scnprintf(buf + len, size - len, "\nHE byte stats:\n");
++	for (i = 0; i <= HAL_RX_MAX_MCS_HE; i++)
++		len += scnprintf(buf + len, size - len, "MCS %d: %llu%s", i,
++				 rx_stats->byte_stats.he_mcs_count[i],
++				 (i + 1) % 6 ? "\t" : "\n");
++
+ 	len += scnprintf(buf + len, size - len, "\nVHT byte stats:\n");
+ 	for (i = 0; i <= HAL_RX_MAX_MCS_VHT; i++)
+ 		len += scnprintf(buf + len, size - len, "MCS %d: %llu%s", i,
+@@ -458,10 +478,10 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 			 rx_stats->byte_stats.bw_count[2],
+ 			 rx_stats->byte_stats.bw_count[3]);
+ 	len += scnprintf(buf + len, size - len, "\nRate Table (bytes):\n");
+-	for (i = 0; i < ATH11K_RX_RATE_TABLE_NUM; i++)
+-		len += scnprintf(buf + len, size - len, "%llu%s",
++	for (i = 0; i < rate_table_len; i++)
++		len += scnprintf(buf + len, size - len, "%10llu%s",
+ 				rx_stats->byte_stats.rx_rate[i],
+-				(i + 1) % 8 ? "\t\t" : "\n");
++				(i + 1) % (he_rates_avail ? 12 : 8) ? "\t" : "\n");
+ 	len += scnprintf(buf + len, size - len,
+ 			 "\nDCM: %llu\nRU: 26 %llu 52: %llu 106: %llu 242: %llu 484: %llu 996: %llu\n",
+ 			 rx_stats->dcm_count, rx_stats->ru_alloc_cnt[0],
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1039,25 +1039,6 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
+ 	return 0;
+ }
+ 
+-static inline u32 ath11k_he_gi_to_nl80211_he_gi(u8 sgi)
+-{
+-	u32 ret = 0;
+-
+-	switch (sgi) {
+-	case RX_MSDU_START_SGI_0_8_US:
+-		ret = NL80211_RATE_INFO_HE_GI_0_8;
+-		break;
+-	case RX_MSDU_START_SGI_1_6_US:
+-		ret = NL80211_RATE_INFO_HE_GI_1_6;
+-		break;
+-	case RX_MSDU_START_SGI_3_2_US:
+-		ret = NL80211_RATE_INFO_HE_GI_3_2;
+-		break;
+-	}
+-
+-	return ret;
+-}
+-
+ static void
+ ath11k_update_per_peer_tx_stats(struct ath11k *ar,
+ 				struct htt_ppdu_stats *ppdu_stats, u8 user)
+@@ -2479,12 +2460,17 @@ ath11k_dp_rx_update_peer_rate_table_stat
+ 	u32 bw_idx = ppdu_info->bw;
+ 	u32 gi_idx = ppdu_info->gi;
+ 
+-	if (ppdu_info->preamble_type != HAL_RX_PREAMBLE_11N &&
+-	    ppdu_info->preamble_type != HAL_RX_PREAMBLE_11AC)
++	if (ppdu_info->preamble_type == HAL_RX_PREAMBLE_11N ||
++	    ppdu_info->preamble_type == HAL_RX_PREAMBLE_11AC) {
++		rate_idx = mcs_idx * 8 + 8 * 10 * nss_idx;
++		rate_idx += bw_idx * 2 + gi_idx;
++	} else if (ppdu_info->preamble_type == HAL_RX_PREAMBLE_11AX) {
++		gi_idx = ath11k_he_gi_to_nl80211_he_gi(ppdu_info->gi);
++		rate_idx = mcs_idx * 12 + 12 * 12 * nss_idx;
++		rate_idx += bw_idx * 3 + gi_idx;
++	} else {
+ 		return;
+-
+-	rate_idx = mcs_idx * 8 + 8 * 10 * nss_idx;
+-	rate_idx += bw_idx * 2 + gi_idx;
++	}
+ 
+ 	rx_stats->pkt_stats.rx_rate[rate_idx] += num_msdu;
+ 	rx_stats->byte_stats.rx_rate[rate_idx] += ppdu_info->mpdu_len;
+@@ -2571,6 +2557,13 @@ static void ath11k_dp_rx_update_peer_sta
+ 		rx_stats->byte_stats.vht_mcs_count[ppdu_info->mcs] += ppdu_info->mpdu_len;
+ 	}
+ 
++	if (ppdu_info->preamble_type == HAL_RX_PREAMBLE_11AX &&
++	    ppdu_info->mcs <= HAL_RX_MAX_MCS_HE) {
++		rx_stats->pkt_stats.he_mcs_count[ppdu_info->mcs] += num_msdu;
++		rx_stats->byte_stats.he_mcs_count[ppdu_info->mcs] += ppdu_info->mpdu_len;
++	}
++
++
+ 	if ((ppdu_info->preamble_type == HAL_RX_PREAMBLE_11A ||
+ 	     ppdu_info->preamble_type == HAL_RX_PREAMBLE_11B) &&
+ 	     ppdu_info->rate < HAL_RX_LEGACY_RATE_INVALID) {
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.h
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
+@@ -39,6 +39,25 @@ struct ath11k_dp_rfc1042_hdr {
+ 	__be16 snap_type;
+ } __packed;
+ 
++static inline u32 ath11k_he_gi_to_nl80211_he_gi(u8 sgi)
++{
++        u32 ret = 0;
++
++        switch (sgi) {
++        case RX_MSDU_START_SGI_0_8_US:
++                ret = NL80211_RATE_INFO_HE_GI_0_8;
++                break;
++        case RX_MSDU_START_SGI_1_6_US:
++                ret = NL80211_RATE_INFO_HE_GI_1_6;
++                break;
++        case RX_MSDU_START_SGI_3_2_US:
++                ret = NL80211_RATE_INFO_HE_GI_3_2;
++                break;
++        }
++
++        return ret;
++}
++
+ int ath11k_dp_rx_ampdu_start(struct ath11k *ar,
+ 			     struct ieee80211_ampdu_params *params);
+ int ath11k_dp_rx_ampdu_stop(struct ath11k *ar,
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.h
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
+@@ -45,6 +45,7 @@ struct hal_rx_wbm_rel_info {
+ #define HAL_RX_MAX_MCS 12
+ #define HAL_RX_MAX_MCS_HT 31
+ #define HAL_RX_MAX_MCS_VHT 9
++#define HAL_RX_MAX_MCS_HE 11
+ #define HAL_RX_MAX_NSS 8
+ #define HAL_RX_MAX_NUM_LEGACY_RATES 12
+ 
