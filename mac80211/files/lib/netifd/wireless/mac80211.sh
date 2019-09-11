@@ -285,6 +285,12 @@ mac80211_hostapd_setup_base() {
 		vht_link_adapt:3 \
 		vht160:2
 
+		if [ 1 -eq "$txantenna" ] || [ 2 -eq "$txantenna" ] || [ 4 -eq "$txantenna" ]  || [ 8 -eq "$txantenna"  ]; then
+			tx_stbc_2by1=0
+			su_beamformer=0
+			mu_beamformer=0
+		fi
+
 		append base_cfg "ieee80211ac=1" "$N"
 		vht_cap=0
 		for cap in $(iw phy "$phy" info | awk -F "[()]" '/VHT Capabilities/ { print $2 }'); do
