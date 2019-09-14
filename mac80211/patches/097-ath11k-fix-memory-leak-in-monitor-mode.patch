@@ -1,0 +1,41 @@
+From 91d02db9be435f7ce78f6cfd398ca0218e80b006 Mon Sep 17 00:00:00 2001
+From: Miles Hu <milehu@codeaurora.org>
+Date: Mon, 26 Aug 2019 13:23:50 -0700
+Subject: [PATCH] ath11k: fix memory leak in monitor mode
+
+remove tail check to avoid last amsdu leak.
+recycle skb in ppdu id wrap around case
+
+Signed-off-by: Miles Hu <milehu@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -3991,8 +3991,15 @@ ath11k_dp_rx_mon_mpdu_pop(struct ath11k
+ 
+ 				if (ath11k_dp_rx_mon_comp_ppduid(msdu_ppdu_id,
+ 								 ppdu_id,
+-								 &rx_bufs_used))
++								 &rx_bufs_used)) {
++					if(rx_bufs_used) {
++						drop_mpdu = true;
++						dev_kfree_skb_any(msdu);
++						msdu = NULL;
++						goto next_msdu;
++					}
+ 					return rx_bufs_used;
++				}
+ 				pmon->mon_last_linkdesc_paddr = paddr;
+ 				is_first_msdu = false;
+ 			}
+@@ -4194,7 +4201,7 @@ static int ath11k_dp_rx_mon_deliver(stru
+ 
+ 		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb);
+ 		mon_skb = skb_next;
+-	} while (mon_skb && (mon_skb != tail_msdu));
++	} while (mon_skb);
+ 	rxs->flag = 0;
+ 
+ 	return 0;
