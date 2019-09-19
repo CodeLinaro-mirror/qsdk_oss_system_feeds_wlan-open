@@ -233,7 +233,7 @@ define DownloadBackports
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
-	git revert --no-edit 0795d050 98272f47 b35b2767 && \
+	git revert --no-edit b35b2767 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
 	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
