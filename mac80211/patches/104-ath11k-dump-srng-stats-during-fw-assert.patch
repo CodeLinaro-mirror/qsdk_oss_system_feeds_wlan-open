@@ -1,0 +1,115 @@
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/core.c
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.c
+@@ -575,6 +575,7 @@ int ath11k_core_ssr_notifier_cb(struct n
+ 	 * only if the notification is received for the expected rproc */
+ 
+ 	ath11k_core_dump_bp_stats(qmi->ab);
++	ath11k_hal_dump_srng_stats(qmi->ab);
+ 	/* TODO Add more driver stats */
+ 
+ 	/* Crash the system once all the stats are dumped */
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/hal.c
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/hal.c
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/hal.c
+@@ -895,6 +895,8 @@ void ath11k_hal_srng_access_end(struct a
+ 					   srng->u.dst_ring.tp);
+ 		}
+ 	}
++
++	srng->timestamp = jiffies;
+ }
+ 
+ void ath11k_hal_setup_link_idle_list(struct ath11k_base *ab,
+@@ -1018,6 +1020,7 @@ int ath11k_hal_srng_setup(struct ath11k_
+ 				params->intr_batch_cntr_thres_entries;
+ 	srng->intr_timer_thres_us = params->intr_timer_thres_us;
+ 	srng->flags = params->flags;
++	srng->initialized = 1;
+ 	spin_lock_init(&srng->lock);
+ 
+ 	for (i = 0; i < HAL_SRNG_NUM_REG_GRP; i++) {
+@@ -1123,3 +1126,35 @@ void ath11k_hal_srng_deinit(struct ath11
+ 	ath11k_hal_free_cont_rdp(sc);
+ 	ath11k_hal_free_cont_wrp(sc);
+ }
++
++void ath11k_hal_dump_srng_stats(struct ath11k_base *ab)
++{
++	struct hal_srng *srng;
++	struct ath11k_ext_irq_grp *irq_grp;
++	int i;
++
++	ath11k_err(ab, "Last interrupt received for each group:\n");
++	for (i = 0; i < ATH11K_EXT_IRQ_GRP_NUM_MAX; i++) {
++		irq_grp = &ab->ext_irq_grp[i];
++		ath11k_err(ab, "group_id %d %ums before\n",
++			   irq_grp->grp_id, jiffies_to_msecs(jiffies - irq_grp->timestamp));
++	}
++
++	for (i = 0; i < HAL_SRNG_RING_ID_MAX; i++) {
++		srng = &ab->hal.srng_list[i];
++
++		if (!srng->initialized)
++			continue;
++
++		if (srng->ring_dir == HAL_SRNG_DIR_SRC)
++			ath11k_err(ab, "src srng id %u hp %u, reap_hp %u, tp %u, cached tp %u napi processed before %ums\n",
++				   srng->ring_id, srng->u.src_ring.hp, srng->u.src_ring.reap_hp,
++				   *srng->u.src_ring.tp_addr, srng->u.src_ring.cached_tp,
++				   jiffies_to_msecs(jiffies - srng->timestamp));
++		else if (srng->ring_dir == HAL_SRNG_DIR_DST)
++			ath11k_err(ab, "dst srng id %u tp %u, hp %u, cached hp %u napi processed before %ums\n",
++				   srng->ring_id, srng->u.dst_ring.tp, *srng->u.dst_ring.hp_addr,
++				   srng->u.dst_ring.cached_hp,
++				   jiffies_to_msecs(jiffies - srng->timestamp));
++	}
++}
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/hal.h
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/hal.h
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/hal.h
+@@ -529,6 +529,8 @@ struct hal_srng {
+ 	 */
+ 	u32 hwreg_base[HAL_SRNG_NUM_REG_GRP];
+ 
++	u64 timestamp;
++
+ 	/* Source or Destination ring */
+ 	enum hal_srng_dir ring_dir;
+ 
+@@ -893,5 +895,6 @@ int ath11k_hal_srng_setup(struct ath11k_
+ 			  struct hal_srng_params *params);
+ int ath11k_hal_srng_init(struct ath11k_base *ath11k);
+ void ath11k_hal_srng_deinit(struct ath11k_base *ath11k);
++void ath11k_hal_dump_srng_stats(struct ath11k_base *ab);
+ 
+ #endif
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/ahb.c
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/ahb.c
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -788,6 +788,9 @@ static irqreturn_t ath11k_ahb_ext_interr
+ {
+ 	struct ath11k_ext_irq_grp *irq_grp = arg;
+ 
++	/* last interrupt received for this group */
++	irq_grp->timestamp = jiffies;
++
+ 	ath11k_ahb_ext_grp_disable(irq_grp);
+ 
+ 	napi_schedule(&irq_grp->napi);
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/core.h
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.h
+@@ -132,6 +132,7 @@ struct ath11k_ext_irq_grp {
+ 	u32 irqs[ATH11K_EXT_IRQ_NUM_MAX];
+ 	u32 num_irq;
+ 	u32 grp_id;
++	u64 timestamp;
+ 	struct napi_struct napi;
+ 	struct net_device napi_ndev;
+ 	/* Queue of pending packets, not expected to be accessed concurrently
