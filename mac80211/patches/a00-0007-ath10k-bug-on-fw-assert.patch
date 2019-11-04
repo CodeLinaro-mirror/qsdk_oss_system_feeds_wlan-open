@@ -29,28 +29,55 @@
  	{
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2674,3 +2674,29 @@ void ath10k_dbg_dump(struct ath10k *ar,
+@@ -10,7 +10,7 @@
+ #include <linux/vmalloc.h>
+ #include <linux/crc32.h>
+ #include <linux/firmware.h>
+-
++#include <linux/of.h>
+ #include "core.h"
+ #include "debug.h"
+ #include "hif.h"
+@@ -2674,3 +2674,47 @@ void ath10k_dbg_dump(struct ath10k *ar,
  EXPORT_SYMBOL(ath10k_dbg_dump);
  
  #endif /* CPTCFG_ATH10K_DEBUG */
 +
 +void ath10k_dbg_bug_on_fw_assert(struct ath10k *ar, u8 *buf)
 +{
-+	u8 *addr;
-+	int len = ar->hw_values->fw_crash_dump_sz;
++	struct device_node *node;
++	u32 crash_dump_addr, crash_dump_len;
++	u8 *addr, ret;
 +
-+	if (!bug_on_fw_assert || ar->stats.fw_crash_counter == 0 ||
-+	    !ar->coredump.fw_crash_data->ramdump_buf)
++	node = ar->dev->of_node;
++	if(!node) {
++		ath10k_err(ar, "Wifi node is not found\n");
 +		return;
++	}
 +
-+	addr = (u8 *)ioremap(ar->hw_values->fw_crash_dump_addr, len);
++	ret = of_property_read_u32(node, "qcom,wifi-dump", &crash_dump_addr);
++	if(ret){
++		ath10k_err(ar, "crash dump address is not assigned\n");
++		return;
++	}
++	ret = of_property_read_u32(node, "qcom,dump-len", &crash_dump_len);
++	if(ret){
++                ath10k_err(ar, "crash dump length is not assigned\n");
++                return;
++        }
++	if (!bug_on_fw_assert || ar->stats.fw_crash_counter == 0 ||
++            !ar->coredump.fw_crash_data->ramdump_buf)
++                return;
++	ath10k_info(ar, "Wifi-dump : addr %x and len %d\n",crash_dump_addr, crash_dump_len);
++
++	addr = (u8 *)ioremap(crash_dump_addr, crash_dump_len);
 +	if (!addr) {
 +		ath10k_err(ar, "Cannot access memory to dump WLAN Firmware data\n");
 +		return;
 +	}
 +
 +	/* copy the dump collected */
-+	memcpy(addr, buf, len);
++	memcpy(addr, buf, crash_dump_len);
 +
 +	ath10k_err(ar, "Firmware DRAM dump collected successfully\n");
 +	iounmap(addr);
@@ -61,7 +88,7 @@
 +EXPORT_SYMBOL(ath10k_dbg_bug_on_fw_assert);
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -72,11 +72,22 @@ struct ath10k_pktlog_hdr {
+@@ -72,11 +72,16 @@ struct ath10k_pktlog_hdr {
  #define ATH10K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  extern unsigned int ath10k_debug_mask;
@@ -74,17 +101,11 @@
 +#define        ATTR_SRAM_MEM   BIT(0)
 +#define        ATTR_REG_SPACE  BIT(1)
 +
-+#define ATH10K_FW_IO_MEM_ADDR          0x41400000
-+#define ATH10K_FW_IO_MEM_SIZE          ((1 * 1024 * 1024) - 128)
-+
-+#define ATH10K_FW_IO_MEM_REGION_2_ADDR 0x44000000
-+#define IPQ40XX_FW_IO_MEM_ADDR         0x87500000
-+#define ATH10K_FW_IO_MEM_REGION_2_SIZE 0x00600000 /* 6 mb */
 +
  void ath10k_debug_print_hwfw_info(struct ath10k *ar);
  void ath10k_debug_print_board_info(struct ath10k *ar);
  void ath10k_debug_print_boot_info(struct ath10k *ar);
-@@ -238,6 +249,7 @@ void ath10k_sta_update_rx_tid_stats_ampd
+@@ -238,6 +243,7 @@ void ath10k_sta_update_rx_tid_stats_ampd
  {
  }
  #endif /* CPTCFG_MAC80211_DEBUGFS */
@@ -92,55 +113,6 @@
  
  #ifdef CPTCFG_ATH10K_DEBUG
  __printf(3, 4) void ath10k_dbg(struct ath10k *ar,
---- a/drivers/net/wireless/ath/ath10k/hw.c
-+++ b/drivers/net/wireless/ath/ath10k/hw.c
-@@ -146,6 +146,8 @@ const struct ath10k_hw_values qca988x_va
- 	.num_target_ce_config_wlan	= 7,
- 	.ce_desc_meta_data_mask		= 0xFFFC,
- 	.ce_desc_meta_data_lsb		= 2,
-+	.fw_crash_dump_addr		= ATH10K_FW_IO_MEM_ADDR,
-+	.fw_crash_dump_sz		= ATH10K_FW_IO_MEM_SIZE,
- };
- 
- const struct ath10k_hw_values qca6174_values = {
-@@ -164,6 +166,8 @@ const struct ath10k_hw_values qca99x0_va
- 	.num_target_ce_config_wlan	= 10,
- 	.ce_desc_meta_data_mask		= 0xFFF0,
- 	.ce_desc_meta_data_lsb		= 4,
-+	.fw_crash_dump_addr		= ATH10K_FW_IO_MEM_REGION_2_ADDR,
-+	.fw_crash_dump_sz		= ATH10K_FW_IO_MEM_REGION_2_SIZE,
- };
- 
- const struct ath10k_hw_values qca9888_values = {
-@@ -173,6 +177,8 @@ const struct ath10k_hw_values qca9888_va
- 	.num_target_ce_config_wlan	= 10,
- 	.ce_desc_meta_data_mask		= 0xFFF0,
- 	.ce_desc_meta_data_lsb		= 4,
-+	.fw_crash_dump_addr		= ATH10K_FW_IO_MEM_REGION_2_ADDR,
-+	.fw_crash_dump_sz		= ATH10K_FW_IO_MEM_REGION_2_SIZE,
- };
- 
- const struct ath10k_hw_values qca4019_values = {
-@@ -180,6 +186,8 @@ const struct ath10k_hw_values qca4019_va
- 	.num_target_ce_config_wlan      = 10,
- 	.ce_desc_meta_data_mask         = 0xFFF0,
- 	.ce_desc_meta_data_lsb          = 4,
-+	.fw_crash_dump_addr		= IPQ40XX_FW_IO_MEM_ADDR,
-+	.fw_crash_dump_sz		= ATH10K_FW_IO_MEM_REGION_2_SIZE,
- };
- 
- const struct ath10k_hw_regs wcn3990_regs = {
---- a/drivers/net/wireless/ath/ath10k/hw.h
-+++ b/drivers/net/wireless/ath/ath10k/hw.h
-@@ -376,6 +376,8 @@ struct ath10k_hw_values {
- 	u8 num_target_ce_config_wlan;
- 	u16 ce_desc_meta_data_mask;
- 	u8 ce_desc_meta_data_lsb;
-+	u32 fw_crash_dump_addr;
-+	u32 fw_crash_dump_sz;
- };
- 
- extern const struct ath10k_hw_values qca988x_values;
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
 @@ -21,7 +21,7 @@ ath10k_core-$(CPTCFG_ATH10K_TRACING) +=
@@ -168,17 +140,23 @@
  		/* protected by conf_mutex */
 --- a/drivers/net/wireless/ath/ath10k/coredump.c
 +++ b/drivers/net/wireless/ath/ath10k/coredump.c
-@@ -6,7 +6,9 @@
+@@ -5,12 +5,13 @@
+  */
  
  #include "coredump.h"
- 
+-
 +#ifdef CPTCFG_DEV_COREDUMP
  #include <linux/devcoredump.h>
 +#endif
  #include <linux/kernel.h>
  #include <linux/types.h>
  #include <linux/utsname.h>
-@@ -702,16 +704,6 @@ static const struct ath10k_mem_region qc
+-
++#include <linux/of.h>
+ #include "debug.h"
+ #include "hw.h"
+ 
+@@ -702,16 +703,6 @@ static const struct ath10k_mem_region qc
  		},
  	},
  	{
@@ -195,7 +173,7 @@
  		.type = ATH10K_MEM_REGION_TYPE_IOSRAM,
  		.start = 0xC0000,
  		.len = 0x40000,
-@@ -722,10 +714,10 @@ static const struct ath10k_mem_region qc
+@@ -722,10 +713,10 @@ static const struct ath10k_mem_region qc
  		},
  	},
  	{
@@ -210,7 +188,7 @@
  		.section_table = {
  			.sections = NULL,
  			.size = 0,
-@@ -733,9 +725,9 @@ static const struct ath10k_mem_region qc
+@@ -733,9 +724,9 @@ static const struct ath10k_mem_region qc
  	},
  	{
  		.type = ATH10K_MEM_REGION_TYPE_IOREG,
@@ -223,7 +201,7 @@
  		.section_table = {
  			.sections = NULL,
  			.size = 0,
-@@ -771,6 +763,16 @@ static const struct ath10k_mem_region qc
+@@ -771,6 +762,16 @@ static const struct ath10k_mem_region qc
  			.size = 0,
  		},
  	},
@@ -240,7 +218,76 @@
  };
  
  static const struct ath10k_mem_region qca9984_hw10_mem_regions[] = {
-@@ -785,16 +787,6 @@ static const struct ath10k_mem_region qc
+@@ -785,15 +786,15 @@ static const struct ath10k_mem_region qc
+ 		},
+ 	},
+ 	{
+-		.type = ATH10K_MEM_REGION_TYPE_REG,
+-		.start = 0x98000,
+-		.len = 0x50000,
+-		.name = "IRAM",
+-		.section_table = {
+-			.sections = NULL,
+-			.size = 0,
+-		},
+-	},
++                .type = ATH10K_MEM_REGION_TYPE_REG,
++                .start = 0x980000,
++                .len = 0x50000,
++                .name = "IRAM",
++                .section_table = {
++                        .sections = NULL,
++                        .size = 0,
++                },
++        },
+ 	{
+ 		.type = ATH10K_MEM_REGION_TYPE_IOSRAM,
+ 		.start = 0xC0000,
+@@ -814,16 +815,16 @@ static const struct ath10k_mem_region qc
+ 			.size = 0,
+ 		},
+ 	},
+-	{
+-		.type = ATH10K_MEM_REGION_TYPE_IOREG,
+-		.start = 0x3f000,
+-		.len = 0x3000,
+-		.name = "APB REG 2",
+-		.section_table = {
+-			.sections = NULL,
+-			.size = 0,
+-		},
+-	},
++	 {
++                .type = ATH10K_MEM_REGION_TYPE_IOREG,
++                .start = 0x3f000,
++                .len = 0x3000,
++                .name = "APB REG 2",
++                .section_table = {
++                        .sections = NULL,
++                        .size = 0,
++                },
++        },
+ 	{
+ 		.type = ATH10K_MEM_REGION_TYPE_IOREG,
+ 		.start = 0x43000,
+@@ -879,6 +880,16 @@ static const struct ath10k_mem_region qc
+ 			.size = 0,
+ 		},
+ 	},
++	 {
++                .type = ATH10K_MEM_REGION_TYPE_REG,
++                .start = 0x980000,
++                .len = 0x50000,
++                .name = "IRAM",
++                .section_table = {
++                        .sections = NULL,
++                        .size = 0,
++                },
++        },
+ 	{
+ 		.type = ATH10K_MEM_REGION_TYPE_REG,
+ 		.start = 0xC0000,
+@@ -890,16 +901,6 @@ static const struct ath10k_mem_region qc
  		},
  	},
  	{
@@ -254,67 +301,14 @@
 -		},
 -	},
 -	{
- 		.type = ATH10K_MEM_REGION_TYPE_IOSRAM,
- 		.start = 0xC0000,
- 		.len = 0x40000,
-@@ -805,10 +797,10 @@ static const struct ath10k_mem_region qc
+ 		.type = ATH10K_MEM_REGION_TYPE_IOREG,
+ 		.start = 0x30000,
+ 		.len = 0x7000,
+@@ -910,15 +911,15 @@ static const struct ath10k_mem_region qc
  		},
  	},
  	{
 -		.type = ATH10K_MEM_REGION_TYPE_IOREG,
--		.start = 0x30000,
--		.len = 0x7000,
--		.name = "APB REG 1",
-+		.type = ATH10K_MEM_REGION_TYPE_REG,
-+		.start = 0x980000,
-+		.len = 0x50000,
-+		.name = "IRAM",
- 		.section_table = {
- 			.sections = NULL,
- 			.size = 0,
-@@ -816,9 +808,9 @@ static const struct ath10k_mem_region qc
- 	},
- 	{
- 		.type = ATH10K_MEM_REGION_TYPE_IOREG,
--		.start = 0x3f000,
--		.len = 0x3000,
--		.name = "APB REG 2",
-+		.start = 0x30000,
-+		.len = 0x7000,
-+		.name = "APB REG 1",
- 		.section_table = {
- 			.sections = NULL,
- 			.size = 0,
-@@ -854,6 +846,16 @@ static const struct ath10k_mem_region qc
- 			.size = 0,
- 		},
- 	},
-+	{
-+		.type = ATH10K_MEM_REGION_TYPE_IOREG,
-+		.start = 0x3f000,
-+		.len = 0x3000,
-+		.name = "APB REG 2",
-+		.section_table = {
-+			.sections = NULL,
-+			.size = 0,
-+		},
-+	},
- };
- 
- static const struct ath10k_mem_section ipq4019_soc_reg_range[] = {
-@@ -891,7 +893,7 @@ static const struct ath10k_mem_region qc
- 	},
- 	{
- 		.type = ATH10K_MEM_REGION_TYPE_REG,
--		.start = 0x98000,
-+		.start = 0x980000,
- 		.len = 0x50000,
- 		.name = "IRAM",
- 		.section_table = {
-@@ -911,16 +913,6 @@ static const struct ath10k_mem_region qc
- 	},
- 	{
- 		.type = ATH10K_MEM_REGION_TYPE_IOREG,
 -		.start = 0x3f000,
 -		.len = 0x3000,
 -		.name = "APB REG 2",
@@ -323,29 +317,19 @@
 -			.size = 0,
 -		},
 -	},
--	{
--		.type = ATH10K_MEM_REGION_TYPE_IOREG,
++                .type = ATH10K_MEM_REGION_TYPE_IOREG,
++                .start = 0x3f000,
++                .len = 0x3000,
++                .name = "APB REG 2",
++                .section_table = {
++                        .sections = NULL,
++                        .size = 0,
++                },
++        },
+ 	{
+ 		.type = ATH10K_MEM_REGION_TYPE_IOREG,
  		.start = 0x43000,
- 		.len = 0x3000,
- 		.name = "WIFI REG",
-@@ -949,6 +941,16 @@ static const struct ath10k_mem_region qc
- 			.size = ARRAY_SIZE(ipq4019_soc_reg_range),
- 		},
- 	},
-+	{
-+		.type = ATH10K_MEM_REGION_TYPE_IOREG,
-+		.start = 0x3f000,
-+		.len = 0x3000,
-+		.name = "APB REG 2",
-+		.section_table = {
-+			.sections = NULL,
-+			.size = 0,
-+		},
-+	},
- };
- 
- static const struct ath10k_hw_mem_layout hw_mem_layouts[] = {
-@@ -1109,7 +1111,9 @@ struct ath10k_fw_crash_data *ath10k_core
+@@ -1109,7 +1110,9 @@ struct ath10k_fw_crash_data *ath10k_core
  		return NULL;
  
  	guid_gen(&crash_data->guid);
@@ -355,15 +339,54 @@
  
  	return crash_data;
  }
-@@ -1137,6 +1141,7 @@ static struct ath10k_dump_file_data *ath
+@@ -1121,12 +1124,28 @@ static struct ath10k_dump_file_data *ath
+ 	struct ath10k_ce_crash_hdr *ce_hdr;
+ 	struct ath10k_dump_file_data *dump_data;
+ 	struct ath10k_tlv_dump_data *dump_tlv;
++	struct device_node *node;
+ 	size_t hdr_len = sizeof(*dump_data);
+ 	size_t len, sofar = 0;
++	u32 crash_dump_len;
++	u8 ret;
+ 	unsigned char *buf;
+ 
++	node = ar->dev->of_node;
++	if(!node){
++		ath10k_err(ar, "Wifi node not detected\n");
++		return NULL;
++	}
++
+ 	len = hdr_len;
+ 
++	ret = of_property_read_u32(node, "qcom,dump-len", &crash_dump_len);
++	if(ret){
++		ath10k_err(ar, "crash dump length not valid\n");
++		return  NULL;
++	}
++	ath10k_info(ar, "crash-dump-len %d\n",crash_dump_len);
++
+ 	if (test_bit(ATH10K_FW_CRASH_DUMP_REGISTERS, &ath10k_coredump_mask))
+ 		len += sizeof(*dump_tlv) + sizeof(crash_data->registers);
+ 
+@@ -1137,8 +1156,8 @@ static struct ath10k_dump_file_data *ath
  	if (test_bit(ATH10K_FW_CRASH_DUMP_RAM_DATA, &ath10k_coredump_mask))
  		len += sizeof(*dump_tlv) + crash_data->ramdump_buf_len;
  
-+	len = ar->hw_values->fw_crash_dump_sz;
++	len = crash_dump_len;
  	sofar += hdr_len;
- 
+-
  	/* This is going to get big when we start dumping FW RAM and such,
-@@ -1232,7 +1237,10 @@ int ath10k_coredump_submit(struct ath10k
+ 	 * so go ahead and use vmalloc.
+ 	 */
+@@ -1147,7 +1166,6 @@ static struct ath10k_dump_file_data *ath
+ 		return NULL;
+ 
+ 	spin_lock_bh(&ar->data_lock);
+-
+ 	dump_data = (struct ath10k_dump_file_data *)(buf);
+ 	strlcpy(dump_data->df_magic, "ATH10K-FW-DUMP",
+ 		sizeof(dump_data->df_magic));
+@@ -1232,7 +1250,10 @@ int ath10k_coredump_submit(struct ath10k
  		return -ENODATA;
  	}
  
@@ -374,7 +397,7 @@
  
  	return 0;
  }
-@@ -1257,9 +1265,11 @@ int ath10k_coredump_register(struct ath1
+@@ -1257,9 +1278,11 @@ int ath10k_coredump_register(struct ath1
  	if (test_bit(ATH10K_FW_CRASH_DUMP_RAM_DATA, &ath10k_coredump_mask)) {
  		crash_data->ramdump_buf_len = ath10k_coredump_get_ramdump_size(ar);
  
