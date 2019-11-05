@@ -8,7 +8,7 @@
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -448,6 +449,11 @@ struct ath11k_coex_info {
+@@ -449,6 +450,11 @@ struct ath11k_coex_info {
  	u32 pta_priority;
  };
  
@@ -20,7 +20,7 @@
  struct ath11k {
  	struct ath11k_base *ab;
  	struct ath11k_pdev *pdev;
-@@ -569,6 +575,8 @@ struct ath11k {
+@@ -572,6 +578,8 @@ struct ath11k {
  	bool dfs_block_radar_events;
  	struct ath11k_thermal thermal;
  	struct completion fw_mode_reset;
@@ -31,7 +31,7 @@
  struct ath11k_band_cap {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2589,6 +2589,33 @@ static void ath11k_mac_dec_num_stations(
+@@ -2731,6 +2731,33 @@ static void ath11k_mac_dec_num_stations(
  	ar->num_stations--;
  }
  
@@ -62,23 +62,23 @@
 +	return ret;
 +}
 +
- static int ath11k_mac_op_sta_state(struct ieee80211_hw *hw,
- 				   struct ieee80211_vif *vif,
- 				   struct ieee80211_sta *sta,
-@@ -2641,6 +2668,12 @@ static int ath11k_mac_op_sta_state(struc
- 		ath11k_info(ar->ab, "Added peer: %pM for VDEV: %d\n",
- 			    sta->addr, arvif->vdev_id);
+ static int ath11k_mac_station_add(struct ath11k *ar,
+ 				  struct ieee80211_vif *vif,
+ 				  struct ieee80211_sta *sta)
+@@ -2770,6 +2797,12 @@ static int ath11k_mac_station_add(struct
+ 	ath11k_dbg(ab, ATH11K_DBG_MAC, "Added peer: %pM for VDEV: %d\n",
+ 		   sta->addr, arvif->vdev_id);
  
-+		ret = ath11k_mac_ap_ps_recalc(ar);
-+		if (ret) {
-+			ath11k_warn(ar->ab, "failed to send ap ps ret %d\n", ret);
-+			goto exit;
-+		}
++	ret = ath11k_mac_ap_ps_recalc(ar);
++	if (ret) {
++		ath11k_warn(ar->ab, "failed to send ap ps ret %d\n", ret);
++		goto exit;
++	}
 +
- 		if (ath11k_debug_is_extd_tx_stats_enabled(ar)) {
- 			arsta->tx_stats = kzalloc(sizeof(*arsta->tx_stats),
- 						  GFP_KERNEL);
-@@ -2685,6 +2718,9 @@ static int ath11k_mac_op_sta_state(struc
+ 	if (ath11k_debug_is_extd_tx_stats_enabled(ar)) {
+ 		arsta->tx_stats = kzalloc(sizeof(*arsta->tx_stats), GFP_KERNEL);
+ 		if (!arsta->tx_stats) {
+@@ -2856,6 +2889,9 @@ static int ath11k_mac_op_sta_state(struc
  
  		kfree(arsta->tx_stats);
  		arsta->tx_stats = NULL;
@@ -88,7 +88,7 @@
  
  		kfree(arsta->rx_stats);
  		arsta->rx_stats = NULL;
-@@ -3538,6 +3574,7 @@ static void ath11k_mac_op_stop(struct ie
+@@ -3845,6 +3881,7 @@ static void ath11k_mac_op_stop(struct ie
  
  	clear_bit(ATH11K_CAC_RUNNING, &ar->dev_flags);
  	ar->state = ATH11K_STATE_OFF;
@@ -96,7 +96,7 @@
  	mutex_unlock(&ar->conf_mutex);
  
  	cancel_delayed_work_sync(&ar->scan.timeout);
-@@ -3733,7 +3770,6 @@ static int ath11k_mac_op_add_interface(s
+@@ -4040,7 +4077,6 @@ static int ath11k_mac_op_add_interface(s
  			    arvif->vdev_id, ret);
  		goto err;
  	}
@@ -104,7 +104,7 @@
  	ar->num_created_vdevs++;
  
  	ab->free_vdev_map &= ~(1LL << arvif->vdev_id);
-@@ -3840,6 +3876,10 @@ static int ath11k_mac_op_add_interface(s
+@@ -4147,6 +4183,10 @@ static int ath11k_mac_op_add_interface(s
  
  	ath11k_dp_vdev_tx_attach(ar, arvif);
  
@@ -115,7 +115,7 @@
  	mutex_unlock(&ar->conf_mutex);
  
  	return 0;
-@@ -3922,6 +3962,7 @@ static void ath11k_mac_op_remove_interfa
+@@ -4229,6 +4269,7 @@ static void ath11k_mac_op_remove_interfa
  
  	/* Recalc txpower for remaining vdev */
  	ath11k_mac_txpower_recalc(ar);
@@ -125,7 +125,7 @@
  	/* TODO: recal traffic pause state based on the available vdevs */
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -167,6 +167,7 @@ struct ath11k_generic_iter {
+@@ -119,6 +119,7 @@ struct ath11k_generic_iter {
  extern const struct htt_rx_ring_tlv_filter ath11k_mac_mon_status_filter_default;
  
  int ath11k_mac_create(struct ath11k_base *ab);
@@ -207,10 +207,10 @@
  static struct wiphy_vendor_command ath11k_vendor_commands[] = {
  	{
  		.info.vendor_id = QCA_NL80211_VENDOR_ID,
-@@ -108,7 +157,15 @@ static struct wiphy_vendor_command ath11
- 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+@@ -109,7 +158,15 @@ static struct wiphy_vendor_command ath11
  			WIPHY_VENDOR_CMD_NEED_RUNNING,
  		.doit = ath11k_vendor_btcoex_configure,
+ 		.policy = ath11k_vendor_btcoex_config_policy
 -	}
 +	},
 +	{
@@ -219,8 +219,8 @@
 +		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 +			WIPHY_VENDOR_CMD_NEED_RUNNING,
 +		.doit = ath11k_vendor_set_wifi_config,
++		.policy = ath11k_vendor_set_wifi_config_policy
 +	},
-+
  };
  
  int ath11k_vendor_register(struct ath11k *ar)
@@ -256,7 +256,7 @@
   * enum qca_wlan_vendor_attr_btcoex_config - Used by the vendor command
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1172,6 +1172,38 @@ ath11k_wmi_rx_reord_queue_remove(struct
+@@ -1174,6 +1174,38 @@ ath11k_wmi_rx_reord_queue_remove(struct
  	return ret;
  }
  
@@ -297,7 +297,7 @@
  {
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -2807,6 +2807,12 @@ struct set_fwtest_params {
+@@ -2842,6 +2842,12 @@ struct set_fwtest_params {
  	u32 value;
  };
  
@@ -310,9 +310,9 @@
  struct wmi_fwtest_set_param_cmd_param {
  	u32 tlv_header;
  	u32 param_id;
-@@ -4936,4 +4942,5 @@ int ath11k_wmi_vdev_spectral_conf(struct
- 				  struct ath11k_wmi_vdev_spectral_conf_param *param);
+@@ -5030,4 +5036,5 @@ int ath11k_wmi_vdev_spectral_conf(struct
+ 		struct ath11k_wmi_vdev_spectral_conf_param *param);
  int ath11k_send_coex_config_cmd(struct ath11k *ar,
- 				struct coex_config_arg *coex_config);
+ 		struct coex_config_arg *coex_config);
 +int ath11k_wmi_pdev_ap_ps_cmd_send(struct ath11k *ar, u8 pdev_id, u32 value);
  #endif

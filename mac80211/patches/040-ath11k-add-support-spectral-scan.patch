@@ -16,7 +16,7 @@
  	u32 aid;
  	u8 bssid[ETH_ALEN];
  	struct cfg80211_bitrate_mask bitrate_mask;
-@@ -548,6 +550,7 @@ struct ath11k {
+@@ -550,6 +552,7 @@ struct ath11k {
  	u32 cached_ppdu_id;
  #ifdef CPTCFG_ATH11K_DEBUGFS
  	struct ath11k_debug debug;
@@ -38,7 +38,7 @@
  		ath11k_warn(ab, "Recv dma buffer release ev on unsupp module %d\n",
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1919,6 +1919,9 @@ static int ath11k_start_scan(struct ath1
+@@ -2061,6 +2061,9 @@ static int ath11k_start_scan(struct ath1
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -1174,7 +1174,7 @@
  static const struct wmi_tlv_policy wmi_tlv_policies[] = {
  	[WMI_TAG_ARRAY_BYTE]
  		= { .min_len = 0 },
-@@ -2869,6 +2879,80 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
+@@ -2995,6 +3005,80 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
  	return ath11k_init_cmd_send(&wmi_sc->wmi[0], &init_param);
  }
  
@@ -1255,7 +1255,7 @@
  int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
  				 struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param)
  {
-@@ -2915,6 +2999,117 @@ err:
+@@ -3041,6 +3125,117 @@ err:
  	return ret;
  }
  
@@ -1373,7 +1373,7 @@
  static int ath11k_wmi_tlv_hw_mode_caps_parse(struct ath11k_base *soc,
  					     u16 tag, u16 len,
  					     const void *ptr, void *data)
-@@ -5792,9 +5987,13 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -5926,12 +6121,16 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_UTF_EVENTID:
  		ath11k_tm_event_wmi(ab, id, skb);
  		break;
@@ -1383,14 +1383,17 @@
  	/* add Unsupported events here */
  	case WMI_TBTTOFFSET_EXT_UPDATE_EVENTID:
  	case WMI_VDEV_DELETE_RESP_EVENTID:
+ 	case WMI_PEER_OPER_MODE_CHANGE_EVENTID:
+ 	case WMI_TWT_ENABLE_EVENTID:
+ 	case WMI_TWT_DISABLE_EVENTID:
 +	case WMI_PDEV_DMA_RING_CFG_RSP_EVENTID:
  		ath11k_dbg(ab, ATH11K_DBG_WMI,
  			   "ignoring unsupported event 0x%x\n", id);
  		break;
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -4557,6 +4557,64 @@ struct wmi_wmm_params_all_arg {
- 	struct wmi_wmm_params_arg ac_vo;
+@@ -4645,6 +4645,64 @@ struct wmi_obss_spatial_reuse_params_cmd
+ 	u32 vdev_id;
  };
  
 +#define ATH11K_WMI_SPECTRAL_COUNT_DEFAULT                 0
@@ -1454,7 +1457,7 @@
  struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd {
  	u32 tlv_header;
  	u32 pdev_id;
-@@ -4605,6 +4663,9 @@ struct wmi_dma_buf_release_meta_data {
+@@ -4693,6 +4751,9 @@ struct wmi_dma_buf_release_meta_data {
  	u32 tlv_header;
  	s32 noise_floor[WMI_MAX_CHAINS];
  	u32 reset_delay;
@@ -1464,14 +1467,14 @@
  } __packed;
  
  struct target_resource_config {
-@@ -4796,4 +4857,8 @@ void ath11k_wmi_fw_stats_fill(struct ath
- int ath11k_wmi_simulate_radar(struct ath11k *ar);
+@@ -4890,4 +4951,8 @@ int ath11k_wmi_send_obss_spr_cmd(struct
+ 				 struct ieee80211_he_obss_pd *he_obss_pd);
  int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
- 				 struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param);
+ 		struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param);
 +int ath11k_wmi_vdev_spectral_enable(struct ath11k *ar, u32 vdev_id,
-+				    u32 trigger, u32 enable);
++		u32 trigger, u32 enable);
 +int ath11k_wmi_vdev_spectral_conf(struct ath11k *ar,
-+				  struct ath11k_wmi_vdev_spectral_conf_param *param);
++		struct ath11k_wmi_vdev_spectral_conf_param *param);
  #endif
 --- a/drivers/net/wireless/ath/spectral_common.h
 +++ b/drivers/net/wireless/ath/spectral_common.h
@@ -1514,7 +1517,7 @@
  #endif /* SPECTRAL_COMMON_H */
 --- a/drivers/net/wireless/ath/ath11k/Kconfig
 +++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -41,3 +41,14 @@ config ATH11K_PKTLOG
+@@ -42,3 +42,14 @@ config ATH11K_PKTLOG
  	and reception, rate information and ani state. The packet
  	log uses ring buffer to dump the data. The buffer size,
  	frame filters can be alterted by debugfs entries.
@@ -1541,43 +1544,43 @@
  CFLAGS_trace.o := -I$(src)
 --- a/local-symbols
 +++ b/local-symbols
-@@ -133,3 +133,4 @@ ATH11K_DEBUG=
+@@ -135,3 +135,4 @@ ATH11K_DEBUG=
  ATH11K_DEBUGFS=
  ATH11K_TRACING=
  ATH11K_PKTLOG=
 +ATH11K_SPECTRAL=
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -400,8 +400,16 @@ static int ath11k_core_pdev_create(struc
+@@ -404,8 +404,16 @@ static int ath11k_core_pdev_create(struc
  		goto err_dp_pdev_free;
  	}
  
-+	ret = ath11k_spectral_init(sc);
++	ret = ath11k_spectral_init(ab);
 +	if (ret) {
-+		ath11k_err(sc, "failed to init spectral %d\n", ret);
++		ath11k_err(ab, "failed to init spectral %d\n", ret);
 +		goto err_thermal_unregister;
 +	}
 +
  	return 0;
  
 +err_thermal_unregister:
-+	ath11k_thermal_unregister(sc);
++	ath11k_thermal_unregister(ab);
  err_dp_pdev_free:
- 	ath11k_dp_pdev_free(sc);
+ 	ath11k_dp_pdev_free(ab);
  err_mac_destroy:
-@@ -413,6 +421,7 @@ err_mac_destroy:
- static void ath11k_core_pdev_destroy(struct ath11k_base *sc)
+@@ -420,6 +428,7 @@ err_pdev_debug:
+ static void ath11k_core_pdev_destroy(struct ath11k_base *ab)
  {
- 	ath11k_thermal_unregister(sc);
-+	ath11k_spectral_deinit(sc);
- 	ath11k_mac_unregister(sc);
- 	ath11k_ahb_ext_irq_disable(sc);
- 	ath11k_dp_pdev_free(sc);
-@@ -575,6 +584,7 @@ static int ath11k_core_reconfigure_on_cr
- 	ath11k_thermal_unregister(sc);
- 	ath11k_ahb_ext_irq_disable(sc);
- 	ath11k_dp_pdev_free(sc);
-+	ath11k_spectral_deinit(sc);
- 	ath11k_ahb_stop(sc);
- 	ath11k_wmi_detach(sc);
- 	mutex_unlock(&sc->core_lock);
+ 	ath11k_thermal_unregister(ab);
++	ath11k_spectral_deinit(ab);
+ 	ath11k_mac_unregister(ab);
+ 	ath11k_ahb_ext_irq_disable(ab);
+ 	ath11k_dp_pdev_free(ab);
+@@ -583,6 +592,7 @@ static int ath11k_core_reconfigure_on_cr
+ 	ath11k_thermal_unregister(ab);
+ 	ath11k_ahb_ext_irq_disable(ab);
+ 	ath11k_dp_pdev_free(ab);
++	ath11k_spectral_deinit(ab);
+ 	ath11k_ahb_stop(ab);
+ 	ath11k_wmi_detach(ab);
+ 	mutex_unlock(&ab->core_lock);

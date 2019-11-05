@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -690,6 +690,23 @@ void ath11k_ahb_power_down(struct ath11k
+@@ -648,6 +648,23 @@ void ath11k_ahb_power_down(struct ath11k
  #endif
  }
  
@@ -21,14 +21,14 @@
 +	return 0;
 +}
 +
- static void ath11k_ahb_init_qmi_ce_config(struct ath11k_base *sc)
+ static void ath11k_ahb_init_qmi_ce_config(struct ath11k_base *ab)
  {
- 	struct ath11k_qmi_ce_cfg *cfg = &sc->qmi.ce_cfg;
-@@ -1061,6 +1078,8 @@ static int ath11k_ahb_probe(struct platf
+ 	struct ath11k_qmi_ce_cfg *cfg = &ab->qmi.ce_cfg;
+@@ -1019,6 +1036,8 @@ static int ath11k_ahb_probe(struct platf
  		goto err_ce_free;
  	}
  
-+	ath11k_ahb_fwreset_from_cold_boot(sc);
++	ath11k_ahb_fwreset_from_cold_boot(ab);
 +
  	return 0;
  
@@ -62,12 +62,12 @@
 @@ -1677,6 +1682,7 @@ out:
  static int ath11k_qmi_alloc_target_mem_chunk(struct ath11k_base *ab)
  {
- 	u32 bdf_location[2] = {0, 0};
+ 	int i, idx;
 +	u32 caldb_location[2] = {0, 0};
- 	struct device *dev = ab->dev;
- 	int i, idx, mode = ab->qmi.target_mem_mode;
  
-@@ -1701,9 +1707,20 @@ static int ath11k_qmi_alloc_target_mem_c
+ 	for (i = 0, idx = 0; i < ab->qmi.mem_seg_count; i++) {
+ 		switch (ab->qmi.target_mem[i].type) {
+@@ -1692,9 +1698,20 @@ static int ath11k_qmi_alloc_target_mem_c
  				ath11k_warn(ab, "qmi mem size is low to load caldata\n");
  				return -EINVAL;
  			}
@@ -75,15 +75,15 @@
 -			ab->qmi.target_mem[idx].paddr = 0;
 -			ab->qmi.target_mem[idx].vaddr = 0;
 +
-+			if (of_property_read_u32_array(dev->of_node, "qcom,caldb-addr",
++			if (of_property_read_u32_array(ab->dev->of_node, "qcom,caldb-addr",
 +						       &caldb_location[0],
 +						       ARRAY_SIZE(caldb_location))) {
 +				ath11k_warn(ab, "qmi no bdf_addr in device_tree\n");
 +			}
 +
 +			if (enable_cold_boot_cal) {
-+				ab->qmi.target_mem[idx].paddr = caldb_location[mode];
-+				ab->qmi.target_mem[idx].vaddr = caldb_location[mode];
++				ab->qmi.target_mem[idx].paddr = caldb_location[ab->qmi.target_mem_mode];
++				ab->qmi.target_mem[idx].vaddr = caldb_location[ab->qmi.target_mem_mode];
 +			} else {
 +				ab->qmi.target_mem[idx].paddr = 0;
 +				ab->qmi.target_mem[idx].vaddr = 0;
@@ -91,7 +91,7 @@
  			ab->qmi.target_mem[idx].size = ab->qmi.target_mem[i].size;
  			ab->qmi.target_mem[idx].type = ab->qmi.target_mem[i].type;
  			idx++;
-@@ -2138,6 +2155,32 @@ int ath11k_qmi_firmware_start(struct ath
+@@ -2119,6 +2136,32 @@ int ath11k_qmi_firmware_start(struct ath
  	return 0;
  }
  
@@ -124,7 +124,7 @@
  static int
  ath11k_qmi_driver_event_post(struct ath11k_qmi *qmi,
  			     enum ath11k_qmi_event_type type,
-@@ -2274,11 +2317,16 @@ static void ath11k_qmi_msg_fw_ready_cb(s
+@@ -2255,11 +2298,16 @@ static void ath11k_qmi_msg_fw_ready_cb(s
  	ath11k_qmi_driver_event_post(qmi, ATH11K_QMI_EVENT_FW_READY, NULL);
  }
  
@@ -142,7 +142,7 @@
  }
  
  static const struct qmi_msg_handler ath11k_qmi_msg_handlers[] = {
-@@ -2389,11 +2437,14 @@ static void ath11k_qmi_driver_event_work
+@@ -2370,11 +2418,14 @@ static void ath11k_qmi_driver_event_work
  				queue_work(ab->workqueue, &ab->restart_work);
  				break;
  			}
@@ -164,9 +164,9 @@
  			break;
 --- a/drivers/net/wireless/ath/ath11k/qmi.h
 +++ b/drivers/net/wireless/ath/ath11k/qmi.h
-@@ -37,6 +37,11 @@
- #define QMI_WLANFW_MAX_DATA_SIZE_V01		6144
+@@ -39,6 +39,11 @@
  #define ATH11K_FIRMWARE_MODE_OFF		4
+ #define ATH11K_QMI_TARGET_MEM_MODE_DEFAULT	0
  
 +#define ATH11K_FW_READY_DELAY			100 /* 100 msec */
 +#define ATH11K_COLD_BOOT_MAX_WAIT_LIMIT		400

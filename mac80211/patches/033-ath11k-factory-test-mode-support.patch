@@ -1,16 +1,16 @@
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -1028,6 +1028,7 @@ static int ath11k_ahb_probe(struct platf
+@@ -986,6 +986,7 @@ static int ath11k_ahb_probe(struct platf
  
- 	sc->pdev = pdev;
- 	sc->hw_rev = (enum ath11k_hw_rev)of_id->data;
-+	sc->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
- 	sc->mem = mem;
- 	sc->mem_len = resource_size(mem_res);
- 	platform_set_drvdata(pdev, sc);
+ 	ab->pdev = pdev;
+ 	ab->hw_rev = (enum ath11k_hw_rev)of_id->data;
++	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
+ 	ab->mem = mem;
+ 	ab->mem_len = resource_size(mem_res);
+ 	platform_set_drvdata(pdev, ab);
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -544,7 +544,7 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -552,7 +552,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		set_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags);
  
  	mutex_lock(&ab->core_lock);
@@ -19,9 +19,9 @@
  	if (ret) {
  		ath11k_err(ab, "failed to start core: %d\n", ret);
  		goto err_dp_free;
-@@ -636,7 +636,8 @@ static void ath11k_core_restart(struct w
- 	for (i = 0; i < sc->num_radios; i++) {
- 		pdev = &sc->pdevs[i];
+@@ -644,7 +644,8 @@ static void ath11k_core_restart(struct w
+ 	for (i = 0; i < ab->num_radios; i++) {
+ 		pdev = &ab->pdevs[i];
  		ar = pdev->ar;
 -		if (!ar || ar->state == ATH11K_STATE_OFF)
 +		if (!ar || ar->state == ATH11K_STATE_OFF ||
@@ -29,12 +29,12 @@
  			continue;
  
  		ieee80211_stop_queues(ar->hw);
-@@ -691,6 +692,12 @@ static void ath11k_core_restart(struct w
- 			ath11k_warn(sc,
+@@ -699,6 +700,12 @@ static void ath11k_core_restart(struct w
+ 			ath11k_warn(ab,
  				    "device is wedged, will not restart radio %d\n", i);
  			break;
 +		case ATH11K_STATE_TM:
-+			ath11k_warn(sc, "fw mode reset done radio %d\n", i);
++			ath11k_warn(ab, "fw mode reset done radio %d\n", i);
 +			if (test_bit(ATH11K_FLAG_FW_RESTART_FOR_HOST, &ar->ab->dev_flags)) {
 +				complete(&ar->fw_mode_reset);
 +			}
@@ -72,7 +72,7 @@
  struct ath11k_fw_stats {
  	struct dentry *debugfs_fwstats;
  	u32 pdev_id;
-@@ -539,6 +547,7 @@ struct ath11k {
+@@ -541,6 +549,7 @@ struct ath11k {
  #endif
  	bool dfs_block_radar_events;
  	struct ath11k_thermal thermal;
@@ -80,7 +80,7 @@
  };
  
  struct ath11k_band_cap {
-@@ -600,6 +609,7 @@ struct ath11k_subsys_info {
+@@ -602,6 +611,7 @@ struct ath11k_subsys_info {
  /* Master structure to hold the hw data which may be used in core module */
  struct ath11k_base {
  	enum ath11k_hw_rev hw_rev;
@@ -88,7 +88,7 @@
  	struct platform_device *pdev;
  	struct device *dev;
  	struct ath11k_qmi qmi;
-@@ -678,6 +688,7 @@ struct ath11k_base {
+@@ -680,6 +690,7 @@ struct ath11k_base {
  		/* protected by data_lock */
  		u32 fw_crash_counter;
  	} stats;
@@ -98,7 +98,7 @@
  struct ath11k_fw_stats_pdev {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -3398,6 +3398,7 @@ static int ath11k_mac_op_start(struct ie
+@@ -3705,6 +3705,7 @@ static int ath11k_mac_op_start(struct ie
  	case ATH11K_STATE_RESTARTED:
  	case ATH11K_STATE_WEDGED:
  	case ATH11K_STATE_ON:
@@ -546,7 +546,7 @@
  
  struct wmi_tlv_policy {
  	size_t min_len;
-@@ -5568,6 +5569,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -5702,6 +5703,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_TEMPERATURE_EVENTID:
  		ath11k_wmi_pdev_temperature_event(ab, skb);
  		break;
