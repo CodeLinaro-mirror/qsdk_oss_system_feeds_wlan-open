@@ -1,0 +1,138 @@
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/core.h	2019-11-06 12:15:30.454452214 +0530
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/core.h	2019-11-06 12:15:30.554452214 +0530
+@@ -764,6 +764,7 @@
+ 	struct ath11k_ftm_event_obj ftm_event_obj;
+ 	struct ath11k_db_ring_cap *db_caps;
+ 	u32 num_db_cap;
++	u32 pktlog_defs_checksum;
+ };
+ 
+ struct ath11k_fw_stats_pdev {
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/dp_rx.c
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-11-06 12:15:30.474452214 +0530
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-11-06 12:15:30.554452214 +0530
+@@ -1481,7 +1481,8 @@
+ 		return;
+ 	}
+ 
+-	trace_ath11k_htt_pktlog(ar, data->payload, len);
++	trace_ath11k_htt_pktlog(ar, data->payload, len,
++				ar->ab->pktlog_defs_checksum);
+ 	ath11k_htt_pktlog_process(ar, (u8 *)data->payload);
+ }
+ 
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/trace.h
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/trace.h	2019-09-20 11:23:18.000000000 +0530
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/trace.h	2019-11-06 12:15:30.558452214 +0530
+@@ -18,14 +18,16 @@
+ #endif /* !CPTCFG_ATH11K_TRACING || __CHECKER__ */
+ 
+ TRACE_EVENT(ath11k_htt_pktlog,
+-	    TP_PROTO(struct ath11k *ar, const void *buf, u16 buf_len),
++	    TP_PROTO(struct ath11k *ar, const void *buf, u16 buf_len,
++		     u32 pktlog_checksum),
+ 
+-	TP_ARGS(ar, buf, buf_len),
++	TP_ARGS(ar, buf, buf_len, pktlog_checksum),
+ 
+ 	TP_STRUCT__entry(
+ 		__string(device, dev_name(ar->ab->dev))
+ 		__string(driver, dev_driver_string(ar->ab->dev))
+ 		__field(u16, buf_len)
++		__field(u32, pktlog_checksum)
+ 		__dynamic_array(u8, pktlog, buf_len)
+ 	),
+ 
+@@ -33,14 +35,16 @@
+ 		__assign_str(device, dev_name(ar->ab->dev));
+ 		__assign_str(driver, dev_driver_string(ar->ab->dev));
+ 		__entry->buf_len = buf_len;
++		__entry->pktlog_checksum = pktlog_checksum;
+ 		memcpy(__get_dynamic_array(pktlog), buf, buf_len);
+ 	),
+ 
+ 	TP_printk(
+-		"%s %s size %hu",
++		"%s %s size %hu pktlog_checksum %d",
+ 		__get_str(driver),
+ 		__get_str(device),
+-		__entry->buf_len
++		__entry->buf_len,
++		__entry->pktlog_checksum
+ 	 )
+ );
+ 
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/wmi.c
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/wmi.c	2019-11-06 12:15:30.466452214 +0530
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/wmi.c	2019-11-06 12:15:30.558452214 +0530
+@@ -114,7 +114,7 @@
+ 	[WMI_TAG_VDEV_INSTALL_KEY_COMPLETE_EVENT]
+ 		= { .min_len = sizeof(struct wmi_vdev_install_key_compl_event) },
+ 	[WMI_TAG_READY_EVENT]
+-		= {.min_len = sizeof(struct wmi_ready_event) },
++		= {.min_len = sizeof(struct wmi_ready_event_min) },
+ 	[WMI_TAG_SERVICE_AVAILABLE_EVENT]
+ 		= {.min_len = sizeof(struct wmi_service_available_event) },
+ 	[WMI_TAG_PEER_ASSOC_CONF_EVENT]
+@@ -5657,7 +5657,7 @@
+ 				    const void *ptr, void *data)
+ {
+ 	struct wmi_tlv_rdy_parse *rdy_parse = data;
+-	struct wmi_ready_event *fixed_param;
++	struct wmi_ready_event fixed_param;
+ 	struct wmi_mac_addr *addr_list;
+ 	struct ath11k_pdev *pdev;
+ 	u32 num_mac_addr;
+@@ -5665,11 +5665,16 @@
+ 
+ 	switch (tag) {
+ 	case WMI_TAG_READY_EVENT:
+-		fixed_param = (struct wmi_ready_event *)ptr;
+-		ab->wlan_init_status = fixed_param->status;
+-		rdy_parse->num_extra_mac_addr = fixed_param->num_extra_mac_addr;
+-
+-		ether_addr_copy(ab->mac_addr, fixed_param->mac_addr.addr);
++		memset(&fixed_param, 0, sizeof(fixed_param));
++		memcpy(&fixed_param, (struct wmi_ready_event *)ptr,
++		       min_t(u16, sizeof(fixed_param), len));
++		ab->wlan_init_status = fixed_param.ready_event_min.status;
++		rdy_parse->num_extra_mac_addr =
++			fixed_param.ready_event_min.num_extra_mac_addr;
++
++		ether_addr_copy(ab->mac_addr,
++				fixed_param.ready_event_min.mac_addr.addr);
++		ab->pktlog_defs_checksum = fixed_param.pktlog_defs_checksum;
+ 		ab->wmi_ready = true;
+ 		break;
+ 	case WMI_TAG_ARRAY_FIXED_STRUCT:
+Index: backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/wmi.h
+===================================================================
+--- backports-20190802-4.4.60-50ca7786c26.orig/drivers/net/wireless/ath/ath11k/wmi.h	2019-11-06 12:15:30.466452214 +0530
++++ backports-20190802-4.4.60-50ca7786c26/drivers/net/wireless/ath/ath11k/wmi.h	2019-11-06 12:15:30.562452214 +0530
+@@ -2399,7 +2399,7 @@
+ 	u32 min_buf_align;
+ } __packed;
+ 
+-struct wmi_ready_event {
++struct wmi_ready_event_min {
+ 	struct wmi_abi_version fw_abi_vers;
+ 	struct wmi_mac_addr mac_addr;
+ 	u32 status;
+@@ -2409,6 +2409,12 @@
+ 	u32 num_extra_peers;
+ } __packed;
+ 
++struct wmi_ready_event {
++	struct wmi_ready_event_min ready_event_min;
++	u32 max_ast_index;
++	u32 pktlog_defs_checksum;
++} __packed;
++
+ struct wmi_service_available_event {
+ 	u32 wmi_service_segment_offset;
+ 	u32 wmi_service_segment_bitmap[WMI_SERVICE_SEGMENT_BM_SIZE32];
