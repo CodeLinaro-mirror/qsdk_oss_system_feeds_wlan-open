@@ -1,0 +1,231 @@
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/ahb.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/ahb.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/ahb.c	2019-11-12 16:53:45.165889970 +0530
+@@ -792,26 +792,26 @@
+ 			if (ath11k_reo_status_ring_mask[i] & BIT(j))
+ 				irq_grp->irqs[num_irq++] = reo2host_status;
+ 
+-			if (j < MAX_RADIOS) {
++			if (j < ab->hw_params.max_radios) {
+ 				if (ath11k_rxdma2host_ring_mask[i] & BIT(j)) {
+ 					irq_grp->irqs[num_irq++] =
+ 						rxdma2host_destination_ring_mac1
+-						- ath11k_core_get_hw_mac_id(ab, j);
++						- ab->hw_params.hw_ops->get_hw_mac_from_pdev_id(ab, j);
+ 				}
+ 
+ 				if (ath11k_host2rxdma_ring_mask[i] & BIT(j)) {
+ 					irq_grp->irqs[num_irq++] =
+ 						host2rxdma_host_buf_ring_mac1
+-						- ath11k_core_get_hw_mac_id(ab, j);
++						- ab->hw_params.hw_ops->get_hw_mac_from_pdev_id(ab, j);
+ 				}
+ 
+ 				if (rx_mon_status_ring_mask[i] & BIT(j)) {
+ 					irq_grp->irqs[num_irq++] =
+ 						ppdu_end_interrupts_mac1 -
+-						ath11k_core_get_hw_mac_id(ab, j);
++						ab->hw_params.hw_ops->get_hw_mac_from_pdev_id(ab, j);
+ 					irq_grp->irqs[num_irq++] =
+ 						rxdma2host_monitor_status_ring_mac1 -
+-						ath11k_core_get_hw_mac_id(ab, j);
++						ab->hw_params.hw_ops->get_hw_mac_from_pdev_id(ab, j);
+ 				}
+ 			}
+ 		}
+@@ -1021,12 +1021,6 @@
+ 
+ 	ath11k_ahb_init_qmi_ce_config(ab);
+ 
+-	ret = ath11k_ahb_config_irq(ab);
+-	if (ret) {
+-		ath11k_err(ab, "failed to configure irq: %d\n", ret);
+-		goto err_ce_free;
+-	}
+-
+ #ifndef CONFIG_QCOM_QMI_HELPERS
+ 	ath11k_register_subsys(ab);
+ #endif
+@@ -1037,6 +1031,13 @@
+ 		goto err_ce_free;
+ 	}
+ 
++	ret = ath11k_ahb_config_irq(ab);
++	if (ret) {
++		ath11k_err(ab, "failed to configure irq: %d\n", ret);
++		goto err_ce_free;
++	}
++
++
+ 	ath11k_ahb_fwreset_from_cold_boot(ab);
+ 
+ 	return 0;
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/core.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/core.c	2019-11-12 16:54:59.249986713 +0530
+@@ -33,6 +33,8 @@
+ 			.cal_size =  IPQ8074_MAX_CAL_DATA_SZ,
+ 		},
+ 		.spectral_fft_sz = 2,
++		.max_radios = 3,
++		.hw_ops = &qca8074_ops,
+ 	},
+ 	{
+ 		.dev_id = ATH11K_HW_IPQ6018,
+@@ -43,11 +45,14 @@
+ 			.cal_size =  IPQ6018_MAX_CAL_DATA_SZ,
+ 		},
+ 		.spectral_fft_sz = 4,
++		.max_radios = 2,
++		.hw_ops = &qca6018_ops,
+ 	},
+ };
+ 
+ /* Map from pdev index to hw mac index */
+-u8 ath11k_core_get_hw_mac_id(struct ath11k_base *ab, int pdev_idx)
++static u8 ath11k_qca8074_hw_mac_from_pdev_id(struct ath11k_base *ab,
++					     int pdev_idx)
+ {
+ 	switch (pdev_idx) {
+ 	case 0:
+@@ -62,6 +67,20 @@
+ 	}
+ }
+ 
++static u8 ath11k_qca6018_hw_mac_from_pdev_id(struct ath11k_base *ab,
++						    int pdev_idx)
++{
++	return pdev_idx;
++}
++
++const struct ath11k_hw_ops qca8074_ops = {
++	.get_hw_mac_from_pdev_id = ath11k_qca8074_hw_mac_from_pdev_id,
++};
++
++const struct ath11k_hw_ops qca6018_ops = {
++	.get_hw_mac_from_pdev_id = ath11k_qca6018_hw_mac_from_pdev_id,
++};
++
+ static int ath11k_core_create_board_name(struct ath11k_base *ab, char *name,
+ 					 size_t name_len)
+ {
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/core.h	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/core.h	2019-11-12 16:53:45.165889970 +0530
+@@ -908,7 +908,6 @@
+ void ath11k_core_free_bdf(struct ath11k_base *ab, struct ath11k_board_data *bd);
+ 
+ void ath11k_core_halt(struct ath11k *ar);
+-u8 ath11k_core_get_hw_mac_id(struct ath11k_base *ab, int pdev_idx);
+ 
+ static inline const char *ath11k_scan_state_str(enum ath11k_scan_state state)
+ {
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/dp_rx.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/dp_rx.c	2019-11-12 16:53:45.165889970 +0530
+@@ -3938,7 +3938,7 @@
+ 	int total_num_buffs_reaped = 0;
+ 	int ret, i;
+ 
+-	for (i = 0; i < MAX_RADIOS; i++)
++	for (i = 0; i < ab->num_radios; i++)
+ 		__skb_queue_head_init(&msdu_list[i]);
+ 
+ 	srng = &ab->hal.srng_list[dp->rx_rel_ring.ring_id];
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/htc.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/htc.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/htc.c	2019-11-12 16:53:45.165889970 +0530
+@@ -748,7 +748,7 @@
+ 		htc->wmi_ep_count = 3;
+ 		break;
+ 	default:
+-		htc->wmi_ep_count = 3;
++		htc->wmi_ep_count = ab->hw_params.max_radios;
+ 		break;
+ 	}
+ 
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/hw.h
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/hw.h	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/hw.h	2019-11-12 16:53:45.165889970 +0530
+@@ -104,17 +104,27 @@
+ 	ATH11K_HW_RATE_OFDM_9M,
+ };
+ 
++struct ath11k_hw_ops {
++	u8 (*get_hw_mac_from_pdev_id)(struct ath11k_base *ab, int pdev_id);
++};
++
+ struct ath11k_hw_params {
+ 	const char *name;
+ 	u16 dev_id;
++	u8 max_radios;
+ 	struct {
+ 		const char *dir;
+ 		size_t board_size;
+ 		size_t cal_size;
+ 	} fw;
+ 	u8 spectral_fft_sz;
++
++	const struct ath11k_hw_ops *hw_ops;
+ };
+ 
++extern const struct ath11k_hw_ops qca8074_ops;
++extern const struct ath11k_hw_ops qca6018_ops;
++
+ struct ath11k_fw_ie {
+ 	__le32 id;
+ 	__le32 len;
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/mac.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/mac.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/mac.c	2019-11-12 16:53:45.169889976 +0530
+@@ -6390,7 +6390,7 @@
+ 		ar->ab = ab;
+ 		ar->pdev = pdev;
+ 		ar->pdev_idx = i;
+-		ar->lmac_id = ath11k_core_get_hw_mac_id(ab, i);
++		ar->lmac_id = ab->hw_params.hw_ops->get_hw_mac_from_pdev_id(ab, i);
+ 
+ 		ar->wmi = &ab->wmi_sc.wmi[i];
+ 		/* FIXME wmi[0] is already initialized during attach,
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/reg.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/reg.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/reg.c	2019-11-12 16:53:45.169889976 +0530
+@@ -695,7 +695,7 @@
+ {
+ 	int i;
+ 
+-	for (i = 0; i < MAX_RADIOS; i++) {
++	for (i = 0; i < ab->hw_params.max_radios; i++) {
+ 		kfree(ab->default_regd[i]);
+ 		kfree(ab->new_regd[i]);
+ 	}
+Index: backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/wmi.c
+===================================================================
+--- backports-20191108-4.4.60-cdd7d0b55972.orig/drivers/net/wireless/ath/ath11k/wmi.c	2019-11-12 16:53:45.173889980 +0530
++++ backports-20191108-4.4.60-cdd7d0b55972/drivers/net/wireless/ath/ath11k/wmi.c	2019-11-12 16:53:45.169889976 +0530
+@@ -6936,7 +6936,7 @@
+ 	u8 wmi_ep_count;
+ 
+ 	wmi_ep_count = ab->htc.wmi_ep_count;
+-	if (wmi_ep_count > MAX_RADIOS)
++	if (wmi_ep_count > ab->hw_params.max_radios)
+ 		return -1;
+ 
+ 	for (i = 0; i < wmi_ep_count; i++)
+@@ -6958,7 +6958,7 @@
+ {
+ 	struct ath11k_pdev_wmi *wmi_handle;
+ 
+-	if (pdev_id >= MAX_RADIOS)
++	if (pdev_id >= ab->hw_params.max_radios)
+ 		return -EINVAL;
+ 
+ 	wmi_handle = &ab->wmi_sc.wmi[pdev_id];
