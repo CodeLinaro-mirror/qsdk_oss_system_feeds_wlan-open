@@ -128,9 +128,7 @@ API and the driver dependency is set appropriately.
 +}
 +
 +static bool ath11k_dp_rx_h_mpdu_start_seq_ctrl_valid(struct hal_rx_desc *desc)
- {
--	return FIELD_GET(RX_MPDU_START_INFO5_DECAP_TYPE,
--			 __le32_to_cpu(desc->mpdu_start.info5));
++{
 +	return !!FIELD_GET(RX_MPDU_START_INFO1_MPDU_SEQ_CTRL_VALID,
 +			   __le32_to_cpu(desc->mpdu_start.info1));
 +}
@@ -158,13 +156,33 @@ API and the driver dependency is set appropriately.
 +}
 +
 +static u16 ath11k_dp_rx_h_mpdu_start_seq_no(struct hal_rx_desc *desc)
-+{
+ {
+-	return FIELD_GET(RX_MPDU_START_INFO5_DECAP_TYPE,
+-			 __le32_to_cpu(desc->mpdu_start.info5));
 +	return FIELD_GET(RX_MPDU_START_INFO1_MPDU_SEQ_NUM,
 +			 __le32_to_cpu(desc->mpdu_start.info1));
  }
  
  static bool ath11k_dp_rx_h_attn_msdu_done(struct hal_rx_desc *desc)
-@@ -613,6 +650,58 @@ free_desc:
+@@ -137,6 +174,17 @@ static u8 ath11k_dp_rx_h_msdu_start_nss(
+ 	return hweight8(mimo_ss_bitmap);
+ }
+ 
++static u8 ath11k_dp_rx_h_mpdu_start_tid(struct hal_rx_desc *desc)
++{
++	return FIELD_GET(RX_MPDU_START_INFO2_TID,
++			 __le32_to_cpu(desc->mpdu_start.info2));
++}
++
++static u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct hal_rx_desc *desc)
++{
++	return __le16_to_cpu(desc->mpdu_start.sw_peer_id);
++}
++
+ static u8 ath11k_dp_rx_h_msdu_end_l3pad(struct hal_rx_desc *desc)
+ {
+ 	return FIELD_GET(RX_MSDU_END_INFO2_L3_HDR_PADDING,
+@@ -602,6 +650,58 @@ free_desc:
  	kfree(rx_tid->vaddr);
  }
  
@@ -223,7 +241,7 @@ API and the driver dependency is set appropriately.
  static void ath11k_peer_rx_tid_delete(struct ath11k *ar,
  				      struct ath11k_peer *peer, u8 tid)
  {
-@@ -643,10 +732,21 @@ static void ath11k_peer_rx_tid_delete(st
+@@ -632,10 +732,21 @@ static void ath11k_peer_rx_tid_delete(st
  
  void ath11k_peer_rx_tid_cleanup(struct ath11k *ar, struct ath11k_peer *peer)
  {
@@ -246,7 +264,7 @@ API and the driver dependency is set appropriately.
  }
  
  static int ath11k_peer_rx_tid_reo_update(struct ath11k *ar,
-@@ -1606,7 +1706,9 @@ static int ath11k_dp_rx_retrieve_amsdu(s
+@@ -1595,7 +1706,9 @@ static int ath11k_dp_rx_retrieve_amsdu(s
  		msdu_len = ath11k_dp_rx_h_msdu_start_msdu_len(rx_desc);
  		l3_pad_bytes = ath11k_dp_rx_h_msdu_end_l3pad(lrx_desc);
  
@@ -257,7 +275,7 @@ API and the driver dependency is set appropriately.
  			if ((msdu_len + l3_pad_bytes + HAL_RX_DESC_SIZE) > DP_RX_BUFFER_SIZE) {
  				 ath11k_warn(ar->ab, "invalid msdu len %u\n", msdu_len);
  				 ath11k_dbg_dump(ar->ab, ATH11K_DBG_DATA, NULL, "",
-@@ -1919,7 +2021,7 @@ static void ath11k_dp_rx_h_undecap(struc
+@@ -1908,7 +2021,7 @@ static void ath11k_dp_rx_h_undecap(struc
  	u8 decap;
  
  	first_hdr = ath11k_dp_rx_h_80211_hdr(rx_desc);
@@ -266,7 +284,7 @@ API and the driver dependency is set appropriately.
  
  	switch (decap) {
  	case DP_RX_DECAP_TYPE_NATIVE_WIFI:
-@@ -2818,99 +2920,565 @@ exit:
+@@ -2807,99 +2920,565 @@ exit:
  	return num_buffs_reaped;
  }
  
@@ -354,7 +372,7 @@ API and the driver dependency is set appropriately.
 +	ret = crypto_shash_setkey(tfm, key, 8);
 +	if (ret)
 +		goto out;
- 
++
 +	ret = crypto_shash_init(desc);
 +	if (ret)
 +		goto out;
@@ -365,7 +383,7 @@ API and the driver dependency is set appropriately.
 +	if (ieee80211_is_data_qos(hdr->frame_control))
 +		tid = ieee80211_get_tid(hdr);
 +	mic_hdr[12] = tid;
-+
+ 
 +	ret = crypto_shash_update(desc, mic_hdr, 16);
 +	if (ret)
 +		goto out;
@@ -384,7 +402,8 @@ API and the driver dependency is set appropriately.
 -				     struct ieee80211_rx_status *rx_status)
 +static int ath11k_dp_rx_h_verify_tkip_mic(struct ath11k *ar, struct ath11k_peer *peer,
 +					  struct sk_buff *msdu)
-+{
+ {
+-	u8 rx_channel;
 +	struct hal_rx_desc *rx_desc = (struct hal_rx_desc *)msdu->data;
 +	struct ieee80211_rx_status *rxs = IEEE80211_SKB_RXCB(msdu);
 +	struct ieee80211_key_conf *key_conf;
@@ -470,8 +489,7 @@ API and the driver dependency is set appropriately.
 +				 struct ath11k_peer *peer,
 +				 struct dp_rx_tid *rx_tid,
 +				 struct sk_buff **defrag_skb)
- {
--	u8 rx_channel;
++{
 +	struct hal_rx_desc *rx_desc;
 +	struct sk_buff *skb, *first_frag, *last_frag;
 +	struct ieee80211_hdr *hdr;
@@ -835,14 +853,14 @@ API and the driver dependency is set appropriately.
 +	} else {
 +		ath11k_dp_rx_link_desc_return(ab, ring_desc,
 +					      HAL_WBM_REL_BM_ACT_PUT_IN_IDLE);
-+	}
+ 	}
 +
 +	if (!rx_tid->last_frag_no ||
 +	    rx_tid->rx_frag_bitmap != GENMASK(rx_tid->last_frag_no, 0)) {
 +		mod_timer(&rx_tid->frag_timer, jiffies +
 +					       ATH11K_DP_RX_FRAGMENT_TIMEOUT_MS);
 +		goto out_unlock;
- 	}
++	}
 +
 +	spin_unlock_bh(&ab->base_lock);
 +	del_timer_sync(&rx_tid->frag_timer);
@@ -889,7 +907,7 @@ API and the driver dependency is set appropriately.
  	struct hal_rx_desc *rx_desc;
  	u16 msdu_len;
  
-@@ -2931,10 +3499,7 @@ ath11k_dp_process_rx_err_buf(struct ath1
+@@ -2920,10 +3499,7 @@ ath11k_dp_process_rx_err_buf(struct ath1
  			 msdu->len + skb_tailroom(msdu),
  			 DMA_FROM_DEVICE);
  
@@ -901,7 +919,7 @@ API and the driver dependency is set appropriately.
  		dev_kfree_skb_any(msdu);
  		return 0;
  	}
-@@ -2962,16 +3527,12 @@ ath11k_dp_process_rx_err_buf(struct ath1
+@@ -2951,16 +3527,12 @@ ath11k_dp_process_rx_err_buf(struct ath1
  	}
  
  	skb_put(msdu, HAL_RX_DESC_SIZE + msdu_len);
@@ -923,7 +941,7 @@ API and the driver dependency is set appropriately.
  exit:
  	rcu_read_unlock();
  	return 0;
-@@ -2996,6 +3557,7 @@ int ath11k_dp_process_rx_err(struct ath1
+@@ -2985,6 +3557,7 @@ int ath11k_dp_process_rx_err(struct ath1
  	dma_addr_t paddr;
  	u32 *desc;
  	bool is_frag;
@@ -931,7 +949,7 @@ API and the driver dependency is set appropriately.
  
  	tot_n_bufs_reaped = 0;
  	quota = budget;
-@@ -3037,9 +3599,15 @@ int ath11k_dp_process_rx_err(struct ath1
+@@ -3026,9 +3599,15 @@ int ath11k_dp_process_rx_err(struct ath1
  
  		is_frag = !!(reo_desc->rx_mpdu_info.info0 & RX_MPDU_DESC_INFO0_FRAG_FLAG);
  
@@ -950,7 +968,7 @@ API and the driver dependency is set appropriately.
  
  		for (i = 0; i < num_msdus; i++) {
  			buf_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_BUF_ID,
-@@ -3050,8 +3618,7 @@ int ath11k_dp_process_rx_err(struct ath1
+@@ -3039,8 +3618,7 @@ int ath11k_dp_process_rx_err(struct ath1
  
  			ar = ab->pdevs[mac_id].ar;
  
@@ -960,7 +978,7 @@ API and the driver dependency is set appropriately.
  				n_bufs_reaped[mac_id]++;
  				tot_n_bufs_reaped++;
  			}
-@@ -3126,7 +3693,7 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -3109,7 +3687,7 @@ static int ath11k_dp_rx_h_null_q_desc(st
  
  	msdu_len = ath11k_dp_rx_h_msdu_start_msdu_len(desc);
  
@@ -969,7 +987,7 @@ API and the driver dependency is set appropriately.
  		/* First buffer will be freed by the caller, so deduct it's length */
  		msdu_len = msdu_len - (DP_RX_BUFFER_SIZE - HAL_RX_DESC_SIZE);
  		ath11k_dp_rx_null_q_desc_sg_drop(ar, msdu_len, msdu_list);
-@@ -3154,14 +3721,17 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -3137,14 +3715,17 @@ static int ath11k_dp_rx_h_null_q_desc(st
  	rxcb->is_first_msdu = ath11k_dp_rx_h_msdu_end_first_msdu(desc);
  	rxcb->is_last_msdu = ath11k_dp_rx_h_msdu_end_last_msdu(desc);
  
