@@ -1,0 +1,64 @@
+From 0fd7007b4aae180a9a12e868d0afeaa7eac93fcf Mon Sep 17 00:00:00 2001
+From: Pradeep Kumar Chitrapu <pradeepc@codeaurora.org>
+Date: Wed, 20 Nov 2019 10:14:34 -0800
+Subject: [PATCH] ath11k: fix sending BA mode inorder to receive bit map of 256
+ bits in BA frame
+
+---
+ drivers/net/wireless/ath/ath11k/mac.c | 14 ++++++++++++++
+ drivers/net/wireless/ath/ath11k/wmi.h |  2 ++
+ 2 files changed, 16 insertions(+)
+
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -1967,6 +1967,20 @@ static void ath11k_mac_op_bss_info_chang
+ 		if (ret)
+ 			ath11k_warn(ar->ab, "failed to update bcn template: %d\n",
+ 				    ret);
++
++		if(vif->bss_conf.he_support) {
++			ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
++							    WMI_VDEV_PARAM_BA_MODE,
++							    WMI_BA_MODE_BUFFER_SIZE_256);
++			if (ret)
++				ath11k_warn(ar->ab,
++					    "failed to set BA BUFFER SIZE 256 for vdev: %d\n",
++					    arvif->vdev_id);
++			else
++				ath11k_dbg(ar->ab, ATH11K_DBG_MAC,
++					   "Set BA BUFFER SIZE 256 for VDEV: %d\n",
++					   arvif->vdev_id);
++		}
+ 	}
+ 
+ 	if (changed & (BSS_CHANGED_BEACON_INFO | BSS_CHANGED_BEACON)) {
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -56,6 +56,7 @@ struct wmi_tlv {
+ #define WLAN_SCAN_PARAMS_MAX_BSSID   4
+ #define WLAN_SCAN_PARAMS_MAX_IE_LEN  256
+ 
++#define WMI_BA_MODE_BUFFER_SIZE_256 3
+ /*
+  * HW mode config type replicated from FW header
+  * @WMI_HOST_HW_MODE_SINGLE: Only one PHY is active.
+@@ -1015,6 +1016,7 @@ enum wmi_tlv_vdev_param {
+ 	WMI_VDEV_PARAM_ENABLE_BCAST_PROBE_RESPONSE,
+ 	WMI_VDEV_PARAM_FILS_MAX_CHANNEL_GUARD_TIME,
+ 	WMI_VDEV_PARAM_HE_LTF = 0x74,
++	WMI_VDEV_PARAM_BA_MODE = 0x7e,
+ 	WMI_VDEV_PARAM_SET_HE_SOUNDING_MODE = 0x87,
+ 	WMI_VDEV_PARAM_PROTOTYPE = 0x8000,
+ 	WMI_VDEV_PARAM_BSS_COLOR,
+--- a/net/mac80211/mesh.c
++++ b/net/mac80211/mesh.c
+@@ -554,6 +554,9 @@ int mesh_add_he_cap_ie(struct ieee80211_
+ 	if (skb_tailroom(skb) < ie_len)
+ 		return -ENOMEM;
+ 
++	if (!sdata->vif.bss_conf.he_support)
++		sdata->vif.bss_conf.he_support = 1;
++
+ 	pos = skb_put(skb, ie_len);
+ 	ieee80211_ie_build_he_cap(pos, he_cap, pos + ie_len);
+ 
