@@ -1,14 +1,15 @@
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -22,6 +22,7 @@
+@@ -21,6 +21,8 @@
+ #include "hw.h"
  #include "hal_rx.h"
  #include "reg.h"
- #include "db_ring.h"
++#include "db_ring.h"
 +#include "spectral.h"
  #ifndef CONFIG_QCOM_QMI_HELPERS
  #include <soc/qcom/subsystem_restart.h>
  #endif
-@@ -227,6 +228,7 @@ struct ath11k_vif {
+@@ -226,6 +228,7 @@ struct ath11k_vif {
  
  	bool is_started;
  	bool is_up;
@@ -16,7 +17,7 @@
  	u32 aid;
  	u8 bssid[ETH_ALEN];
  	struct cfg80211_bitrate_mask bitrate_mask;
-@@ -550,6 +552,7 @@ struct ath11k {
+@@ -549,6 +552,7 @@ struct ath11k {
  	u32 cached_ppdu_id;
  #ifdef CPTCFG_ATH11K_DEBUGFS
  	struct ath11k_debug debug;
@@ -24,34 +25,458 @@
  #endif
  	bool dfs_block_radar_events;
  	struct ath11k_thermal thermal;
---- a/drivers/net/wireless/ath/ath11k/db_ring.c
-+++ b/drivers/net/wireless/ath/ath11k/db_ring.c
-@@ -266,6 +266,9 @@ int ath11k_db_ring_buffer_release_event(
- 	}
+@@ -694,6 +698,8 @@ struct ath11k_base {
+ 		u32 fw_crash_counter;
+ 	} stats;
+ 	struct ath11k_ftm_event_obj ftm_event_obj;
++	struct ath11k_db_ring_cap *db_caps;
++	u32 num_db_cap;
+ };
  
- 	switch (ev->fixed.module_id) {
+ struct ath11k_fw_stats_pdev {
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath11k/db_ring.c
+@@ -0,0 +1,354 @@
++// SPDX-License-Identifier: BSD-3-Clause-Clear
++/*
++ * Copyright (c) 2019 The Linux Foundation. All rights reserved.
++ */
++
++#include "core.h"
++#include "debug.h"
++
++static int ath11k_db_ring_bufs_replenish(struct ath11k *ar,
++					 struct ath11k_db_ring *ring,
++					 struct ath11k_db_ring_element *buff,
++					 gfp_t gfp)
++{
++	struct ath11k_base *ab = ar->ab;
++	struct hal_srng *srng;
++	dma_addr_t paddr;
++	void *ptr_aligned, *ptr_unaligned, *desc;
++	int ret;
++	int buf_id;
++	u32 cookie;
++
++	srng = &ab->hal.srng_list[ring->refill_srng.ring_id];
++
++	lockdep_assert_held(&srng->lock);
++
++	ath11k_hal_srng_access_begin(ab, srng);
++
++	ptr_unaligned = buff->payload;
++	ptr_aligned = PTR_ALIGN(ptr_unaligned, ring->buf_align);
++	paddr = dma_map_single(ab->dev, ptr_aligned, ring->buf_sz,
++			       DMA_FROM_DEVICE);
++	if (dma_mapping_error(ab->dev, paddr)) {
++		ret = -ENOBUFS;
++		goto err;
++	}
++
++	spin_lock_bh(&ring->idr_lock);
++	buf_id = idr_alloc(&ring->bufs_idr, buff, 0, ring->bufs_max, gfp);
++	spin_unlock_bh(&ring->idr_lock);
++	if (buf_id < 0) {
++		ret = -ENOBUFS;
++		goto fail_dma_unmap;
++	}
++
++	desc = ath11k_hal_srng_src_get_next_entry(ab, srng);
++	if (!desc) {
++		ret = -ENOENT;
++		goto fail_idr_remove;
++	}
++
++	buff->paddr = paddr;
++
++	cookie = FIELD_PREP(DP_RXDMA_BUF_COOKIE_PDEV_ID, ar->pdev_idx) |
++		 FIELD_PREP(DP_RXDMA_BUF_COOKIE_BUF_ID, buf_id);
++
++	ath11k_hal_rx_buf_addr_info_set(desc, paddr, cookie, 0);
++
++	ath11k_hal_srng_access_end(ab, srng);
++
++	return 0;
++
++fail_idr_remove:
++	spin_lock_bh(&ring->idr_lock);
++	idr_remove(&ring->bufs_idr, buf_id);
++	spin_unlock_bh(&ring->idr_lock);
++fail_dma_unmap:
++	dma_unmap_single(ab->dev, paddr, ring->buf_sz,
++			 DMA_FROM_DEVICE);
++err:
++	ath11k_hal_srng_access_end(ab, srng);
++	return ret;
++}
++
++static int ath11k_db_ring_fill_bufs(struct ath11k *ar,
++				    struct ath11k_db_ring *ring,
++				    gfp_t gfp)
++{
++	struct ath11k_db_ring_element *buff;
++	struct hal_srng *srng;
++	int num_remain, req_entries, num_free;
++	u32 align;
++	int size, ret;
++
++	srng = &ar->ab->hal.srng_list[ring->refill_srng.ring_id];
++
++	spin_lock_bh(&srng->lock);
++
++	num_free = ath11k_hal_srng_src_num_free(ar->ab, srng, true);
++	req_entries = min(num_free, ring->bufs_max);
++	num_remain = req_entries;
++	align = ring->buf_align;
++	size = sizeof(*buff) + ring->buf_sz + align - 1;
++
++	while (num_remain > 0) {
++		buff = kzalloc(size, gfp);
++		if (!buff)
++			break;
++
++		ret = ath11k_db_ring_bufs_replenish(ar, ring, buff, gfp);
++		if (ret) {
++			ath11k_warn(ar->ab, "failed to replenish db ring num_remain %d req_ent %d\n",
++				    num_remain, req_entries);
++			kfree(buff);
++			break;
++		}
++		num_remain--;
++	}
++
++	spin_unlock_bh(&srng->lock);
++
++	return num_remain;
++}
++
++int ath11k_db_ring_wmi_cfg_setup(struct ath11k *ar,
++				 struct ath11k_db_ring *ring,
++				 enum wmi_direct_buffer_module id)
++{
++	struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd param = {0};
++	int ret;
++
++	if (id >= WMI_DIRECT_BUF_MAX)
++		return -EINVAL;
++
++	param.pdev_id		= DP_SW2HW_MACID(ring->pdev_id);
++	param.module_id		= id;
++	param.base_paddr_lo	= lower_32_bits(ring->refill_srng.paddr);
++	param.base_paddr_hi	= upper_32_bits(ring->refill_srng.paddr);
++	param.head_idx_paddr_lo	= lower_32_bits(ring->hp_addr);
++	param.head_idx_paddr_hi = upper_32_bits(ring->hp_addr);
++	param.tail_idx_paddr_lo = lower_32_bits(ring->tp_addr);
++	param.tail_idx_paddr_hi = upper_32_bits(ring->tp_addr);
++	param.num_elems		= ring->bufs_max;
++	param.buf_size		= ring->buf_sz;
++	param.num_resp_per_event = ring->num_resp_per_event;
++	param.event_timeout_ms	= ring->event_timeout_ms;
++
++	ret = ath11k_wmi_pdev_dma_ring_cfg(ar, &param);
++	if (ret) {
++		ath11k_warn(ar->ab, "failed to setup db ring cfg\n");
++		return ret;
++	}
++
++	return 0;
++}
++
++int ath11k_db_ring_set_cfg(struct ath11k *ar, struct ath11k_db_ring *ring,
++			   u32 num_resp_per_event, u32 event_timeout_ms,
++			   int (*handler)(struct ath11k *,
++					  struct ath11k_db_ring_data *))
++{
++	if (ring) {
++		ring->num_resp_per_event = num_resp_per_event;
++		ring->event_timeout_ms = event_timeout_ms;
++		ring->handler = handler;
++	}
++	return 0;
++}
++
++int ath11k_db_ring_buf_setup(struct ath11k *ar,
++			     struct ath11k_db_ring *ring,
++			     struct ath11k_db_ring_cap *db_cap)
++{
++	struct ath11k_base *ab = ar->ab;
++	struct hal_srng *srng;
++	int ret;
++
++	srng = &ab->hal.srng_list[ring->refill_srng.ring_id];
++	ring->bufs_max = ring->refill_srng.size /
++			 ath11k_hal_srng_get_entrysize(HAL_RXDMA_DIR_BUF);
++
++	ring->buf_sz = db_cap->min_buf_sz;
++	ring->buf_align = db_cap->min_buf_align;
++	ring->pdev_id = db_cap->pdev_id;
++	ring->hp_addr = ath11k_hal_srng_get_hp_addr(ar->ab, srng);
++	ring->tp_addr = ath11k_hal_srng_get_tp_addr(ar->ab, srng);
++
++	ret = ath11k_db_ring_fill_bufs(ar, ring, GFP_KERNEL);
++
++	return ret;
++}
++
++int ath11k_db_srng_setup(struct ath11k *ar, struct ath11k_db_ring *ring,
++			 int ring_num, int num_entries)
++{
++	int ret;
++
++	ret = ath11k_dp_srng_setup(ar->ab, &ring->refill_srng, HAL_RXDMA_DIR_BUF,
++				   ring_num, ar->pdev_idx, num_entries);
++	if (ret < 0) {
++		ath11k_warn(ar->ab, "failed to setup srng: %d ring_id %d\n",
++			    ret, ring_num);
++		goto err;
++	}
++
++	return 0;
++err:
++	ath11k_dp_srng_cleanup(ar->ab, &ring->refill_srng);
++	return ret;
++}
++
++int ath11k_db_ring_get_cap(struct ath11k_base *ab,
++			   u8 pdev_idx,
++			   enum wmi_direct_buffer_module id,
++			   struct ath11k_db_ring_cap *db_cap)
++{
++	int i;
++
++	if (!ab->num_db_cap || !ab->db_caps)
++		return -ENOENT;
++
++	if (id >= WMI_DIRECT_BUF_MAX)
++		return -EINVAL;
++
++	for (i = 0; i < ab->num_db_cap; i++) {
++		if ((pdev_idx == ab->db_caps[i].pdev_id) &&
++		    (id == ab->db_caps[i].id)) {
++			*db_cap = ab->db_caps[i];
++
++			return 0;
++		}
++	}
++
++	return -ENOENT;
++}
++
++int ath11k_db_ring_buffer_release_event(struct ath11k_base *ab,
++					struct ath11k_db_ring_buf_release_event *ev)
++{
++	struct ath11k_db_ring *ring;
++	struct hal_srng *srng;
++	struct ath11k *ar;
++	struct ath11k_db_ring_element *buff;
++	struct ath11k_db_ring_data handler_data;
++	struct ath11k_buffer_addr desc;
++	u8 *vaddr_unalign;
++	u32 num_entry, num_buff_reaped;
++	u8 pdev_idx, rbm;
++	u32 cookie;
++	int buf_id;
++	int size;
++	dma_addr_t paddr;
++	int ret = 0;
++
++	pdev_idx = ev->fixed.pdev_id;
++
++	if (pdev_idx >= ab->num_radios) {
++		ath11k_warn(ab, "Invalid pdev id %d\n", pdev_idx);
++		return -EINVAL;
++	}
++
++	if (ev->fixed.num_buf_release_entry !=
++	    ev->fixed.num_meta_data_entry) {
++		ath11k_warn(ab, "Buffer entry %d mismatch meta entry %d\n",
++			    ev->fixed.num_buf_release_entry,
++			    ev->fixed.num_meta_data_entry);
++		return -EINVAL;
++	}
++
++	ar = ab->pdevs[pdev_idx].ar;
++
++	rcu_read_lock();
++	if (!rcu_dereference(ab->pdevs_active[pdev_idx])) {
++		ret = -EINVAL;
++		goto rcu_unlock;
++	}
++
++	switch (ev->fixed.module_id) {
 +	case WMI_DIRECT_BUF_SPECTRAL:
 +		ring = ath11k_spectral_get_db_ring(ar);
 +		break;
- 	default:
- 		ring = NULL;
- 		ath11k_warn(ab, "Recv dma buffer release ev on unsupp module %d\n",
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2061,6 +2061,9 @@ static int ath11k_start_scan(struct ath1
- 
- 	lockdep_assert_held(&ar->conf_mutex);
- 
-+	if (ath11k_spectral_get_mode(ar) == ATH11K_SPECTRAL_BACKGROUND)
-+		ath11k_spectral_reset_buffer(ar);
++	default:
++		ring = NULL;
++		ath11k_warn(ab, "Recv dma buffer release ev on unsupp module %d\n",
++			    ev->fixed.module_id);
++		break;
++	}
 +
- 	ret = ath11k_wmi_send_scan_start_cmd(ar, arg);
- 	if (ret)
- 		return ret;
++	if (!ring) {
++		ret = -EINVAL;
++		goto rcu_unlock;
++	}
++
++	srng = &ab->hal.srng_list[ring->refill_srng.ring_id];
++	num_entry = ev->fixed.num_buf_release_entry;
++	size = sizeof(*buff) + ring->buf_sz + ring->buf_align - 1;
++	num_buff_reaped = 0;
++
++	spin_lock_bh(&srng->lock);
++
++	while (num_buff_reaped < num_entry) {
++		desc.info0 = ev->buf_entry[num_buff_reaped].paddr_lo;
++		desc.info1 = ev->buf_entry[num_buff_reaped].paddr_hi;
++		handler_data.meta = ev->meta_data[num_buff_reaped];
++
++		num_buff_reaped++;
++
++		ath11k_hal_rx_buf_addr_info_get(&desc, &paddr, &cookie, &rbm);
++
++		buf_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_BUF_ID, cookie);
++
++		spin_lock_bh(&ring->idr_lock);
++		buff = idr_find(&ring->bufs_idr, buf_id);
++		if (!buff) {
++			spin_unlock_bh(&ring->idr_lock);
++			continue;
++		}
++		idr_remove(&ring->bufs_idr, buf_id);
++		spin_unlock_bh(&ring->idr_lock);
++
++		dma_unmap_single(ab->dev, buff->paddr, ring->buf_sz,
++				 DMA_FROM_DEVICE);
++
++		if (ring->handler) {
++			vaddr_unalign = buff->payload;
++			handler_data.data = PTR_ALIGN(vaddr_unalign,
++						      ring->buf_align);
++			handler_data.data_sz = ring->buf_sz;
++
++			ring->handler(ar, &handler_data);
++		}
++
++		memset(buff, 0, size);
++		ath11k_db_ring_bufs_replenish(ar, ring, buff, GFP_ATOMIC);
++	}
++
++	spin_unlock_bh(&srng->lock);
++
++rcu_unlock:
++	rcu_read_unlock();
++
++	return ret;
++}
++
++void ath11k_db_srng_cleanup(struct ath11k *ar, struct ath11k_db_ring *ring)
++{
++	ath11k_dp_srng_cleanup(ar->ab, &ring->refill_srng);
++}
++
++void ath11k_db_ring_buf_cleanup(struct ath11k *ar, struct ath11k_db_ring *ring)
++{
++	struct ath11k_db_ring_element *buff;
++	int buf_id;
++
++	spin_lock_bh(&ring->idr_lock);
++	idr_for_each_entry(&ring->bufs_idr, buff, buf_id) {
++		idr_remove(&ring->bufs_idr, buf_id);
++		dma_unmap_single(ar->ab->dev, buff->paddr,
++				 ring->buf_sz, DMA_FROM_DEVICE);
++		kfree(buff);
++	}
++
++	idr_destroy(&ring->bufs_idr);
++	spin_unlock_bh(&ring->idr_lock);
++}
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath11k/db_ring.h
+@@ -0,0 +1,79 @@
++/* SPDX-License-Identifier: BSD-3-Clause-Clear */
++/*
++ * Copyright (c) 2019 The Linux Foundation. All rights reserved.
++ */
++
++#ifndef ATH11K_DB_RING_H
++#define ATH11K_DB_RING_H
++
++#include <linux/types.h>
++#include <linux/idr.h>
++#include <linux/spinlock.h>
++#include "dp.h"
++
++struct ath11k_db_ring_element {
++	dma_addr_t paddr;
++	u8 payload[0];
++};
++
++struct ath11k_db_ring_data {
++	void *data;
++	u32 data_sz;
++	struct wmi_dma_buf_release_meta_data meta;
++};
++
++struct ath11k_db_ring_buf_release_event {
++	struct ath11k_wmi_dma_buf_release_fixed_param fixed;
++	struct wmi_dma_buf_release_entry *buf_entry;
++	struct wmi_dma_buf_release_meta_data *meta_data;
++	u32 num_buf_entry;
++	u32 num_meta;
++};
++
++struct ath11k_db_ring_cap {
++	u32 pdev_id;
++	enum wmi_direct_buffer_module id;
++	u32 min_elem;
++	u32 min_buf_sz;
++	u32 min_buf_align;
++};
++
++struct ath11k_db_ring {
++	struct dp_srng refill_srng;
++	struct idr bufs_idr;
++	/* Protects bufs_idr */
++	spinlock_t idr_lock;
++	dma_addr_t tp_addr;
++	dma_addr_t hp_addr;
++	int bufs_max;
++	u32 pdev_id;
++	u32 buf_sz;
++	u32 buf_align;
++	u32 num_resp_per_event;
++	u32 event_timeout_ms;
++	int (*handler)(struct ath11k *, struct ath11k_db_ring_data *);
++};
++
++int ath11k_db_ring_set_cfg(struct ath11k *ar,
++			   struct ath11k_db_ring *ring,
++			   u32 num_resp_per_event,
++			   u32 event_timeout_ms,
++			   int (*handler)(struct ath11k *,
++					  struct ath11k_db_ring_data *));
++int ath11k_db_ring_wmi_cfg_setup(struct ath11k *ar,
++				 struct ath11k_db_ring *ring,
++				 enum wmi_direct_buffer_module id);
++int ath11k_db_ring_buf_setup(struct ath11k *ar,
++			     struct ath11k_db_ring *ring,
++			     struct ath11k_db_ring_cap *db_cap);
++int ath11k_db_srng_setup(struct ath11k *ar, struct ath11k_db_ring *ring,
++			 int ring_num, int num_entries);
++int ath11k_db_ring_buffer_release_event(struct ath11k_base *ab,
++					struct ath11k_db_ring_buf_release_event *ev);
++int ath11k_db_ring_get_cap(struct ath11k_base *ab,
++			   u8 pdev_idx,
++			   enum wmi_direct_buffer_module id,
++			   struct ath11k_db_ring_cap *db_cap);
++void ath11k_db_srng_cleanup(struct ath11k *ar, struct ath11k_db_ring *ring);
++void ath11k_db_ring_buf_cleanup(struct ath11k *ar, struct ath11k_db_ring *ring);
++#endif /* ATH11K_DB_RING_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/spectral.c
-@@ -0,0 +1,1017 @@
-+// SPDX-License-Identifier: ISC
+@@ -0,0 +1,1010 @@
++// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2019 The Linux Foundation. All rights reserved.
 + */
@@ -253,8 +678,8 @@
 +	return 0;
 +}
 +
-+int ath11k_spectral_scan_config(struct ath11k *ar,
-+				enum ath11k_spectral_mode mode)
++static int ath11k_spectral_scan_config(struct ath11k *ar,
++				       enum ath11k_spectral_mode mode)
 +{
 +	struct ath11k_wmi_vdev_spectral_conf_param param = { 0 };
 +	struct ath11k_vif *arvif;
@@ -571,7 +996,7 @@
 +	report->base_pwr_db = FIELD_GET(SPECTRAL_FFT_REPORT_INFO1_BASE_PWR_DB,
 +					__le32_to_cpu(search->info1));
 +	report->total_gain_db = FIELD_GET(SPECTRAL_FFT_REPORT_INFO1_TOTAL_GAIN_DB,
-+					__le32_to_cpu(search->info1));
++					  __le32_to_cpu(search->info1));
 +	report->strong_bin_count = FIELD_GET(SPECTRAL_FFT_REPORT_INFO2_NUM_STRONG_BINS,
 +					     __le32_to_cpu(search->info2));
 +	report->peak_mag = FIELD_GET(SPECTRAL_FFT_REPORT_INFO2_PEAK_MAGNITUDE,
@@ -778,9 +1203,8 @@
 +			tlv_len = sizeof(*summary) - sizeof(*tlv);
 +
 +			if (tlv_len < (sizeof(*summary) - sizeof(*tlv))) {
-+				ath11k_warn(ab, "failed to parse spectral summary at bytes %d tlv_len:%d exp_len:%d\n",
-+					    i, tlv_len,
-+					    (sizeof(*summary) - sizeof(*tlv)));
++				ath11k_warn(ab, "failed to parse spectral summary at bytes %d tlv_len:%d\n",
++					    i, tlv_len);
 +				ret = -EINVAL;
 +				goto err;
 +			}
@@ -874,20 +1298,14 @@
 +
 +static inline void ath11k_spectral_debug_unregister(struct ath11k *ar)
 +{
-+	if (ar->spectral.scan_bins) {
-+		debugfs_remove(ar->spectral.scan_bins);
-+		ar->spectral.scan_bins = NULL;
-+	}
++	debugfs_remove(ar->spectral.scan_bins);
++	ar->spectral.scan_bins = NULL;
 +
-+	if (ar->spectral.scan_count) {
-+		debugfs_remove(ar->spectral.scan_count);
-+		ar->spectral.scan_count = NULL;
-+	}
++	debugfs_remove(ar->spectral.scan_count);
++	ar->spectral.scan_count = NULL;
 +
-+	if (ar->spectral.scan_ctl) {
-+		debugfs_remove(ar->spectral.scan_ctl);
-+		ar->spectral.scan_ctl = NULL;
-+	}
++	debugfs_remove(ar->spectral.scan_ctl);
++	ar->spectral.scan_ctl = NULL;
 +
 +	if (ar->spectral.rfs_scan) {
 +		relay_close(ar->spectral.rfs_scan);
@@ -975,9 +1393,9 @@
 +	}
 +
 +	ar->spectral.scan_bins = debugfs_create_file("spectral_bins",
-+						      0600,
-+						      ar->debug.debugfs_pdev, ar,
-+						      &fops_scan_bins);
++						     0600,
++						     ar->debug.debugfs_pdev, ar,
++						     &fops_scan_bins);
 +	if (!ar->spectral.scan_bins) {
 +		ath11k_warn(ar->ab, "failed to open debugfs in pdev %d\n",
 +			    ar->pdev_idx);
@@ -1070,8 +1488,8 @@
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/spectral.h
-@@ -0,0 +1,84 @@
-+/* SPDX-License-Identifier: ISC */
+@@ -0,0 +1,82 @@
++/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2019 The Linux Foundation. All rights reserved.
 + */
@@ -1128,7 +1546,6 @@
 +
 +static inline void ath11k_spectral_deinit(struct ath11k_base *ab)
 +{
-+
 +}
 +
 +static inline int ath11k_spectral_vif_stop(struct ath11k_vif *arvif)
@@ -1138,7 +1555,6 @@
 +
 +static inline void ath11k_spectral_reset_buffer(struct ath11k *ar)
 +{
-+	return;
 +}
 +
 +static inline
@@ -1157,7 +1573,38 @@
 +#endif /* ATH11K_SPECTRAL_H */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -64,6 +64,16 @@ struct wmi_tlv_rdy_parse {
+@@ -28,6 +28,11 @@ struct wmi_tlv_svc_ready_parse {
+ 	bool wmi_svc_bitmap_done;
+ };
+ 
++struct wmi_tlv_dma_ring_caps_parse {
++	struct wmi_dma_ring_capabilities *dma_ring_caps;
++	u32 n_dma_ring_caps;
++};
++
+ struct wmi_tlv_svc_rdy_ext_parse {
+ 	struct ath11k_service_ext_param param;
+ 	struct wmi_soc_mac_phy_hw_mode_caps *hw_caps;
+@@ -40,15 +45,35 @@ struct wmi_tlv_svc_rdy_ext_parse {
+ 	struct wmi_soc_hal_reg_capabilities *soc_hal_reg_caps;
+ 	struct wmi_hal_reg_capabilities_ext *ext_hal_reg_caps;
+ 	u32 n_ext_hal_reg_caps;
++	struct wmi_tlv_dma_ring_caps_parse dma_caps_parse;
+ 	bool hw_mode_done;
+ 	bool mac_phy_done;
+ 	bool ext_hal_reg_done;
++	bool mac_phy_chainmask_combo_done;
++	bool mac_phy_chainmask_cap_done;
++	bool oem_dma_ring_cap_done;
++	bool dma_ring_cap_done;
++};
++
++struct wmi_tlv_svc_rdy_ext2_parse {
++	struct wmi_tlv_dma_ring_caps_parse dma_caps_parse;
++	bool dma_ring_cap_done;
+ };
+ 
+ struct wmi_tlv_rdy_parse {
  	u32 num_extra_mac_addr;
  };
  
@@ -1174,7 +1621,7 @@
  static const struct wmi_tlv_policy wmi_tlv_policies[] = {
  	[WMI_TAG_ARRAY_BYTE]
  		= { .min_len = 0 },
-@@ -2995,6 +3005,80 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
+@@ -2980,6 +3005,236 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
  	return ath11k_init_cmd_send(&wmi_sc->wmi[0], &init_param);
  }
  
@@ -1252,13 +1699,52 @@
 +	return ret;
 +}
 +
- int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
- 				 struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param)
- {
-@@ -3041,6 +3125,117 @@ err:
- 	return ret;
- }
- 
++int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
++				 struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param)
++{
++	struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *cmd;
++	struct sk_buff *skb;
++	int ret;
++
++	skb = ath11k_wmi_alloc_skb(ar->wmi->wmi_sc, sizeof(*cmd));
++	if (!skb)
++		return -ENOMEM;
++
++	cmd = (struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *)skb->data;
++	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_DMA_RING_CFG_REQ) |
++			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
++
++	cmd->pdev_id		= param->pdev_id;
++	cmd->module_id		= param->module_id;
++	cmd->base_paddr_lo	= param->base_paddr_lo;
++	cmd->base_paddr_hi	= param->base_paddr_hi;
++	cmd->head_idx_paddr_lo	= param->head_idx_paddr_lo;
++	cmd->head_idx_paddr_hi	= param->head_idx_paddr_hi;
++	cmd->tail_idx_paddr_lo	= param->tail_idx_paddr_lo;
++	cmd->tail_idx_paddr_hi	= param->tail_idx_paddr_hi;
++	cmd->num_elems		= param->num_elems;
++	cmd->buf_size		= param->buf_size;
++	cmd->num_resp_per_event	= param->num_resp_per_event;
++	cmd->event_timeout_ms	= param->event_timeout_ms;
++
++	ret = ath11k_wmi_cmd_send(ar->wmi, skb,
++				  WMI_PDEV_DMA_RING_CFG_REQ_CMDID);
++	if (ret) {
++		ath11k_warn(ar->ab,
++			    "failed to send dma ring cfg req wmi cmd\n");
++		goto err;
++	}
++
++	ath11k_dbg(ar->ab, ATH11K_DBG_WMI,
++		   "WMI DMA ring cfg req cmd pdev_id 0x%x\n",
++		   param->pdev_id);
++
++	return 0;
++err:
++	dev_kfree_skb(skb);
++	return ret;
++}
++
 +static int ath11k_wmi_tlv_dma_buf_entry_parse(struct ath11k_base *soc,
 +					      u16 tag, u16 len,
 +					      const void *ptr, void *data)
@@ -1334,7 +1820,6 @@
 +		}
 +		break;
 +	default:
-+		printk("%s>def tag:%d len:%d\n", __func__, tag, len);
 +		break;
 +	}
 +	return 0;
@@ -1373,7 +1858,202 @@
  static int ath11k_wmi_tlv_hw_mode_caps_parse(struct ath11k_base *soc,
  					     u16 tag, u16 len,
  					     const void *ptr, void *data)
-@@ -5926,12 +6121,16 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -3160,6 +3415,95 @@ static int ath11k_wmi_tlv_ext_soc_hal_re
+ 	return 0;
+ }
+ 
++static int ath11k_wmi_tlv_dma_ring_caps_parse(struct ath11k_base *soc,
++					      u16 tag, u16 len,
++					      const void *ptr, void *data)
++{
++	struct wmi_tlv_dma_ring_caps_parse *parse = data;
++
++	if (tag != WMI_TAG_DMA_RING_CAPABILITIES)
++		return -EPROTO;
++
++	parse->n_dma_ring_caps++;
++	return 0;
++}
++
++static int ath11k_wmi_alloc_db_ring_caps(struct ath11k_base *ab,
++					 u32 num_cap)
++{
++	size_t sz;
++	void *ptr;
++
++	sz = num_cap * sizeof(struct ath11k_db_ring_cap);
++	ptr = kzalloc(sz, GFP_ATOMIC);
++	if (!ptr)
++		return -ENOMEM;
++
++	ab->db_caps = ptr;
++	ab->num_db_cap = num_cap;
++
++	return 0;
++}
++
++static void ath11k_wmi_free_db_ring_caps(struct ath11k_base *ab)
++{
++	kfree(ab->db_caps);
++	ab->db_caps = NULL;
++}
++
++static int ath11k_wmi_tlv_dma_ring_caps(struct ath11k_base *ab,
++					u16 len, const void *ptr, void *data)
++{
++	struct wmi_tlv_dma_ring_caps_parse *dma_caps_parse = data;
++	struct wmi_dma_ring_capabilities *dma_caps;
++	struct ath11k_db_ring_cap *dir_buff_caps;
++	int ret;
++	u32 i;
++
++	dma_caps_parse->n_dma_ring_caps = 0;
++	dma_caps = (struct wmi_dma_ring_capabilities *)ptr;
++	ret = ath11k_wmi_tlv_iter(ab, ptr, len,
++				  ath11k_wmi_tlv_dma_ring_caps_parse,
++				  dma_caps_parse);
++	if (ret) {
++		ath11k_warn(ab, "failed to parse dma ring caps tlv %d\n", ret);
++		return ret;
++	}
++
++	if (!dma_caps_parse->n_dma_ring_caps)
++		return 0;
++
++	if (ab->num_db_cap) {
++		ath11k_warn(ab, "Already processed, so ignoring dma ring caps\n");
++		return 0;
++	}
++
++	ret = ath11k_wmi_alloc_db_ring_caps(ab, dma_caps_parse->n_dma_ring_caps);
++	if (ret)
++		return ret;
++
++	dir_buff_caps = ab->db_caps;
++	for (i = 0; i < dma_caps_parse->n_dma_ring_caps; i++) {
++		if (dma_caps[i].module_id >= WMI_DIRECT_BUF_MAX) {
++			ath11k_warn(ab, "Invalid module id %d\n", dma_caps[i].module_id);
++			ret = -EINVAL;
++			goto free_dir_buff;
++		}
++
++		dir_buff_caps[i].id = dma_caps[i].module_id;
++		dir_buff_caps[i].pdev_id = DP_HW2SW_MACID(dma_caps[i].pdev_id);
++		dir_buff_caps[i].min_elem = dma_caps[i].min_elem;
++		dir_buff_caps[i].min_buf_sz = dma_caps[i].min_buf_sz;
++		dir_buff_caps[i].min_buf_align = dma_caps[i].min_buf_align;
++	}
++
++	return 0;
++
++free_dir_buff:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
++}
++
+ static int ath11k_wmi_tlv_svc_rdy_ext_parse(struct ath11k_base *ab,
+ 					    u16 tag, u16 len,
+ 					    const void *ptr, void *data)
+@@ -3216,7 +3560,19 @@ static int ath11k_wmi_tlv_svc_rdy_ext_pa
+ 				return ret;
+ 
+ 			svc_rdy_ext->ext_hal_reg_done = true;
+-			complete(&ab->wmi_sc.service_ready);
++		} else if (!svc_rdy_ext->mac_phy_chainmask_combo_done) {
++			svc_rdy_ext->mac_phy_chainmask_combo_done = true;
++		} else if (!svc_rdy_ext->mac_phy_chainmask_cap_done) {
++			svc_rdy_ext->mac_phy_chainmask_cap_done = true;
++		} else if (!svc_rdy_ext->oem_dma_ring_cap_done) {
++			svc_rdy_ext->oem_dma_ring_cap_done = true;
++		} else if (!svc_rdy_ext->dma_ring_cap_done) {
++			ret = ath11k_wmi_tlv_dma_ring_caps(ab, len, ptr,
++							   &svc_rdy_ext->dma_caps_parse);
++			if (ret)
++				return ret;
++
++			svc_rdy_ext->dma_ring_cap_done = true;
+ 		}
+ 		break;
+ 
+@@ -3237,11 +3593,66 @@ static int ath11k_service_ready_ext_even
+ 				  &svc_rdy_ext);
+ 	if (ret) {
+ 		ath11k_warn(ab, "failed to parse tlv %d\n", ret);
+-		return ret;
++		goto err;
+ 	}
+ 
++	if (!test_bit(WMI_TLV_SERVICE_EXT2_MSG, ab->wmi_sc.svc_map))
++		complete(&ab->wmi_sc.service_ready);
++
+ 	kfree(svc_rdy_ext.mac_phy_caps);
+ 	return 0;
++
++err:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
++}
++
++static int ath11k_wmi_tlv_svc_rdy_ext2_parse(struct ath11k_base *ab,
++					     u16 tag, u16 len,
++					     const void *ptr, void *data)
++{
++	struct wmi_tlv_svc_rdy_ext2_parse *parse = data;
++	int ret;
++
++	switch (tag) {
++	case WMI_TAG_ARRAY_STRUCT:
++		if (!parse->dma_ring_cap_done) {
++			ret = ath11k_wmi_tlv_dma_ring_caps(ab, len, ptr,
++							   &parse->dma_caps_parse);
++			if (ret)
++				return ret;
++
++			parse->dma_ring_cap_done = true;
++		}
++		break;
++	default:
++		break;
++	}
++
++	return 0;
++}
++
++static int ath11k_service_ready_ext2_event(struct ath11k_base *ab,
++					   struct sk_buff *skb)
++{
++	struct wmi_tlv_svc_rdy_ext2_parse svc_rdy_ext2 = { };
++	int ret;
++
++	ret = ath11k_wmi_tlv_iter(ab, skb->data, skb->len,
++			ath11k_wmi_tlv_svc_rdy_ext2_parse,
++			&svc_rdy_ext2);
++	if (ret) {
++		ath11k_warn(ab, "failed to parse ext2 event tlv %d\n", ret);
++		goto err;
++	}
++
++	complete(&ab->wmi_sc.service_ready);
++
++	return 0;
++
++err:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
+ }
+ 
+ static int ath11k_pull_vdev_start_resp_tlv(struct ath11k_base *ab, struct sk_buff *skb,
+@@ -5642,6 +6053,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	case WMI_SERVICE_READY_EXT_EVENTID:
+ 		ath11k_service_ready_ext_event(ab, skb);
+ 		break;
++	case WMI_SERVICE_READY_EXT2_EVENTID:
++		ath11k_service_ready_ext2_event(ab, skb);
++		break;
+ 	case WMI_REG_CHAN_LIST_CC_EVENTID:
+ 		ath11k_reg_chan_list_event(ab, skb);
+ 		break;
+@@ -5706,12 +6120,16 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_UTF_EVENTID:
  		ath11k_tm_event_wmi(ab, id, skb);
  		break;
@@ -1390,9 +2070,68 @@
  		ath11k_dbg(ab, ATH11K_DBG_WMI,
  			   "ignoring unsupported event 0x%x\n", id);
  		break;
+@@ -5925,4 +6343,6 @@ void ath11k_wmi_detach(struct ath11k_bas
+ 
+ 	for (i = 0; i < ab->htc.wmi_ep_count; i++)
+ 		ath11k_wmi_pdev_detach(ab, i);
++
++	ath11k_wmi_free_db_ring_caps(ab);
+ }
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -4645,6 +4645,64 @@ struct wmi_obss_spatial_reuse_params_cmd
+@@ -24,6 +24,8 @@ struct ath11k_fw_stats;
+ #define HE_PET_8_USEC            1
+ #define HE_PET_16_USEC           2
+ 
++#define WMI_MAX_CHAINS		 8
++
+ #define WMI_MAX_NUM_SS                    MAX_HE_NSS
+ #define WMI_MAX_NUM_RU                    MAX_HE_RU
+ 
+@@ -584,6 +586,11 @@ enum wmi_tlv_event_id {
+ 	WMI_PDEV_DMA_RING_CFG_RSP_EVENTID,
+ 	WMI_PDEV_DMA_RING_BUF_RELEASE_EVENTID,
+ 	WMI_PDEV_CTL_FAILSAFE_CHECK_EVENTID,
++	WMI_PDEV_CSC_SWITCH_COUNT_STATUS_EVENTID,
++	WMI_PDEV_COLD_BOOT_CAL_DATA_EVENTID,
++	WMI_PDEV_RAP_INFO_EVENTID,
++	WMI_CHAN_RF_CHARACTERIZATION_INFO_EVENTID,
++	WMI_SERVICE_READY_EXT2_EVENTID,
+ 	WMI_VDEV_START_RESP_EVENTID = WMI_TLV_CMD(WMI_GRP_VDEV),
+ 	WMI_VDEV_STOPPED_EVENTID,
+ 	WMI_VDEV_INSTALL_KEY_COMPLETE_EVENTID,
+@@ -2036,6 +2043,14 @@ enum wmi_beacon_gen_mode {
+ 	WMI_BEACON_BURST_MODE = 1
+ };
+ 
++enum wmi_direct_buffer_module {
++	WMI_DIRECT_BUF_SPECTRAL = 0,
++	WMI_DIRECT_BUF_CFR = 1,
++
++	/* keep it last */
++	WMI_DIRECT_BUF_MAX
++};
++
+ struct wmi_host_pdev_band_to_mac {
+ 	u32 pdev_id;
+ 	u32 start_freq;
+@@ -2342,6 +2357,15 @@ struct wmi_mac_addr {
+ 	} __packed;
+ } __packed;
+ 
++struct wmi_dma_ring_capabilities {
++	u32 tlv_header;
++	u32 pdev_id;
++	u32 module_id;
++	u32 min_elem;
++	u32 min_buf_sz;
++	u32 min_buf_align;
++} __packed;
++
+ struct wmi_ready_event {
+ 	struct wmi_abi_version fw_abi_vers;
+ 	struct wmi_mac_addr mac_addr;
+@@ -4621,6 +4645,117 @@ struct wmi_obss_spatial_reuse_params_cmd
  	u32 vdev_id;
  };
  
@@ -1454,28 +2193,172 @@
 +	u32 enable_cmd;
 +} __packed;
 +
- struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd {
- 	u32 tlv_header;
- 	u32 pdev_id;
-@@ -4693,6 +4751,9 @@ struct wmi_dma_buf_release_meta_data {
- 	u32 tlv_header;
- 	s32 noise_floor[WMI_MAX_CHAINS];
- 	u32 reset_delay;
++struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd {
++	u32 tlv_header;
++	u32 pdev_id;
++	u32 module_id;		/* see enum wmi_direct_buffer_module */
++	u32 base_paddr_lo;
++	u32 base_paddr_hi;
++	u32 head_idx_paddr_lo;
++	u32 head_idx_paddr_hi;
++	u32 tail_idx_paddr_lo;
++	u32 tail_idx_paddr_hi;
++	u32 num_elems;		/* Number of elems in the ring */
++	u32 buf_size;		/* size of allocated buffer in bytes */
++
++	/* Number of wmi_dma_buf_release_entry packed together */
++	u32 num_resp_per_event;
++
++	/* Target should timeout and send whatever resp
++	 * it has if this time expires, units in milliseconds
++	 */
++	u32 event_timeout_ms;
++} __packed;
++
++struct ath11k_wmi_dma_buf_release_fixed_param {
++	u32 pdev_id;
++	u32 module_id;
++	u32 num_buf_release_entry;
++	u32 num_meta_data_entry;
++} __packed;
++
++struct wmi_dma_buf_release_entry {
++	u32 tlv_header;
++	u32 paddr_lo;
++
++	/* Bits 11:0:   address of data
++	 * Bits 31:12:  host context data
++	 */
++	u32 paddr_hi;
++} __packed;
++
++#define WMI_SPECTRAL_META_INFO1_FREQ1		GENMASK(15, 0)
++#define WMI_SPECTRAL_META_INFO1_FREQ2		GENMASK(31, 16)
++
++#define WMI_SPECTRAL_META_INFO2_CHN_WIDTH	GENMASK(7, 0)
++
++struct wmi_dma_buf_release_meta_data {
++	u32 tlv_header;
++	s32 noise_floor[WMI_MAX_CHAINS];
++	u32 reset_delay;
 +	u32 freq1;
 +	u32 freq2;
 +	u32 ch_width;
- } __packed;
- 
++} __packed;
++
  struct target_resource_config {
-@@ -4890,4 +4951,8 @@ int ath11k_wmi_send_obss_spr_cmd(struct
+ 	u32 num_vdevs;
+ 	u32 num_peers;
+@@ -4814,4 +4949,10 @@ int ath11k_wmi_send_twt_enable_cmd(struc
+ int ath11k_wmi_send_twt_disable_cmd(struct ath11k *ar, u32 pdev_id);
+ int ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
  				 struct ieee80211_he_obss_pd *he_obss_pd);
- int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
- 		struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param);
++int ath11k_wmi_pdev_dma_ring_cfg(struct ath11k *ar,
++				 struct ath11k_wmi_pdev_dma_ring_cfg_req_cmd *param);
 +int ath11k_wmi_vdev_spectral_enable(struct ath11k *ar, u32 vdev_id,
-+		u32 trigger, u32 enable);
++				    u32 trigger, u32 enable);
 +int ath11k_wmi_vdev_spectral_conf(struct ath11k *ar,
-+		struct ath11k_wmi_vdev_spectral_conf_param *param);
++				  struct ath11k_wmi_vdev_spectral_conf_param *param);
  #endif
+--- a/drivers/net/wireless/ath/ath11k/Makefile
++++ b/drivers/net/wireless/ath/ath11k/Makefile
+@@ -14,7 +14,8 @@ ath11k-y += core.o \
+ 	    dp_rx.o \
+ 	    debug.o \
+ 	    ce.o \
+-	    peer.o
++	    peer.o \
++	    db_ring.o
+ 
+ ifdef CONFIG_QCOM_QMI_HELPERS
+ 	ath11k-y += qmi.o
+@@ -28,6 +29,7 @@ ath11k-$(CPTCFG_NL80211_TESTMODE) += tes
+ ath11k-$(CPTCFG_ATH11K_TRACING) += trace.o
+ ath11k-$(CPTCFG_ATH11K_PKTLOG) += pktlog.o
+ ath11k-$(CONFIG_THERMAL) += thermal.o
++ath11k-$(CPTCFG_ATH11K_SPECTRAL) += spectral.o
+ 
+ # for tracing framework to find trace.h
+ CFLAGS_trace.o := -I$(src)
+--- a/drivers/net/wireless/ath/ath11k/dp.c
++++ b/drivers/net/wireless/ath/ath11k/dp.c
+@@ -152,11 +152,12 @@ int ath11k_dp_srng_setup(struct ath11k_b
+ 	case HAL_RXDMA_DST:
+ 	case HAL_RXDMA_MONITOR_DST:
+ 	case HAL_RXDMA_MONITOR_DESC:
+-	case HAL_RXDMA_DIR_BUF:
+ 		params.intr_batch_cntr_thres_entries =
+ 					HAL_SRNG_INT_BATCH_THRESHOLD_OTHER;
+ 		params.intr_timer_thres_us = HAL_SRNG_INT_TIMER_THRESHOLD_OTHER;
+ 		break;
++	case HAL_RXDMA_DIR_BUF:
++		break;
+ 	default:
+ 		ath11k_warn(ab, "Not a valid ring type in dp :%d\n", type);
+ 		return -EINVAL;
+--- a/drivers/net/wireless/ath/ath11k/Kconfig
++++ b/drivers/net/wireless/ath/ath11k/Kconfig
+@@ -42,3 +42,13 @@ config ATH11K_PKTLOG
+ 	and reception, rate information and ani state. The packet
+ 	log uses ring buffer to dump the data. The buffer size,
+ 	frame filters can be alterted by debugfs entries.
++
++config ATH11K_SPECTRAL
++	bool "QCA ath11k spectral scan support"
++	depends on ATH11K_DEBUGFS
++	depends on RELAY
++	default n
++	help
++	  Enable ath11k spectral scan support
++
++	  Say Y to enable access to the FFT/spectral data via debugfs.
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -404,8 +404,16 @@ static int ath11k_core_pdev_create(struc
+ 		goto err_dp_pdev_free;
+ 	}
+ 
++	ret = ath11k_spectral_init(ab);
++	if (ret) {
++		ath11k_err(ab, "failed to init spectral %d\n", ret);
++		goto err_thermal_unregister;
++	}
++
+ 	return 0;
+ 
++err_thermal_unregister:
++	ath11k_thermal_unregister(ab);
+ err_dp_pdev_free:
+ 	ath11k_dp_pdev_free(ab);
+ err_mac_destroy:
+@@ -420,6 +428,7 @@ err_pdev_debug:
+ static void ath11k_core_pdev_destroy(struct ath11k_base *ab)
+ {
+ 	ath11k_thermal_unregister(ab);
++	ath11k_spectral_deinit(ab);
+ 	ath11k_mac_unregister(ab);
+ 	ath11k_ahb_ext_irq_disable(ab);
+ 	ath11k_dp_pdev_free(ab);
+@@ -583,6 +592,7 @@ static int ath11k_core_reconfigure_on_cr
+ 	ath11k_thermal_unregister(ab);
+ 	ath11k_ahb_ext_irq_disable(ab);
+ 	ath11k_dp_pdev_free(ab);
++	ath11k_spectral_deinit(ab);
+ 	ath11k_ahb_stop(ab);
+ 	ath11k_wmi_detach(ab);
+ 	mutex_unlock(&ab->core_lock);
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -2061,6 +2061,9 @@ static int ath11k_start_scan(struct ath1
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
+ 
++	if (ath11k_spectral_get_mode(ar) == ATH11K_SPECTRAL_BACKGROUND)
++		ath11k_spectral_reset_buffer(ar);
++
+ 	ret = ath11k_wmi_send_scan_start_cmd(ar, arg);
+ 	if (ret)
+ 		return ret;
 --- a/drivers/net/wireless/ath/spectral_common.h
 +++ b/drivers/net/wireless/ath/spectral_common.h
 @@ -24,6 +24,7 @@
@@ -1515,33 +2398,6 @@
 +} __packed;
  
  #endif /* SPECTRAL_COMMON_H */
---- a/drivers/net/wireless/ath/ath11k/Kconfig
-+++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -42,3 +42,14 @@ config ATH11K_PKTLOG
- 	and reception, rate information and ani state. The packet
- 	log uses ring buffer to dump the data. The buffer size,
- 	frame filters can be alterted by debugfs entries.
-+
-+config ATH11K_SPECTRAL
-+	bool "QCA ath11k spectral scan support"
-+	depends on ATH11K_DEBUGFS
-+	depends on RELAY
-+	default n
-+	help
-+	  Enable ath11k spectral scan support
-+
-+	  Say Y to enable access to the FFT/spectral data via debugfs.
-+
---- a/drivers/net/wireless/ath/ath11k/Makefile
-+++ b/drivers/net/wireless/ath/ath11k/Makefile
-@@ -29,6 +29,7 @@ ath11k-$(CPTCFG_NL80211_TESTMODE) += tes
- ath11k-$(CPTCFG_ATH11K_TRACING) += trace.o
- ath11k-$(CPTCFG_ATH11K_PKTLOG) += pktlog.o
- ath11k-$(CONFIG_THERMAL) += thermal.o
-+ath11k-$(CPTCFG_ATH11K_SPECTRAL) += spectral.o
- 
- # for tracing framework to find trace.h
- CFLAGS_trace.o := -I$(src)
 --- a/local-symbols
 +++ b/local-symbols
 @@ -135,3 +135,4 @@ ATH11K_DEBUG=
@@ -1549,38 +2405,3 @@
  ATH11K_TRACING=
  ATH11K_PKTLOG=
 +ATH11K_SPECTRAL=
---- a/drivers/net/wireless/ath/ath11k/core.c
-+++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -404,8 +404,16 @@ static int ath11k_core_pdev_create(struc
- 		goto err_dp_pdev_free;
- 	}
- 
-+	ret = ath11k_spectral_init(ab);
-+	if (ret) {
-+		ath11k_err(ab, "failed to init spectral %d\n", ret);
-+		goto err_thermal_unregister;
-+	}
-+
- 	return 0;
- 
-+err_thermal_unregister:
-+	ath11k_thermal_unregister(ab);
- err_dp_pdev_free:
- 	ath11k_dp_pdev_free(ab);
- err_mac_destroy:
-@@ -420,6 +428,7 @@ err_pdev_debug:
- static void ath11k_core_pdev_destroy(struct ath11k_base *ab)
- {
- 	ath11k_thermal_unregister(ab);
-+	ath11k_spectral_deinit(ab);
- 	ath11k_mac_unregister(ab);
- 	ath11k_ahb_ext_irq_disable(ab);
- 	ath11k_dp_pdev_free(ab);
-@@ -583,6 +592,7 @@ static int ath11k_core_reconfigure_on_cr
- 	ath11k_thermal_unregister(ab);
- 	ath11k_ahb_ext_irq_disable(ab);
- 	ath11k_dp_pdev_free(ab);
-+	ath11k_spectral_deinit(ab);
- 	ath11k_ahb_stop(ab);
- 	ath11k_wmi_detach(ab);
- 	mutex_unlock(&ab->core_lock);
