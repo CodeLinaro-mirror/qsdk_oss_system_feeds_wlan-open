@@ -18,11 +18,9 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  net/mac80211/util.c                        |   7 +
  5 files changed, 717 insertions(+), 66 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
-index d7a9bea..9d1ea60 100644
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -238,7 +238,7 @@ static u8 *ath11k_dp_rxdesc_get_80211hdr(struct hal_rx_desc *rx_desc)
+@@ -238,7 +238,7 @@ static u8 *ath11k_dp_rxdesc_get_80211hdr
  {
  	u8 *rx_pkt_hdr;
  
@@ -31,7 +29,7 @@ index d7a9bea..9d1ea60 100644
  
  	return rx_pkt_hdr;
  }
-@@ -2366,7 +2366,7 @@ static void ath11k_dp_rx_deliver_msdu(struct ath11k *ar, struct napi_struct *nap
+@@ -2375,7 +2375,7 @@ static void ath11k_dp_rx_deliver_msdu(st
  	char tid[32];
  
  	status = IEEE80211_SKB_RXCB(msdu);
@@ -40,7 +38,7 @@ index d7a9bea..9d1ea60 100644
  		he = skb_push(msdu, sizeof(known));
  		memcpy(he, &known, sizeof(known));
  		status->flag |= RX_FLAG_RADIOTAP_HE;
-@@ -4726,12 +4726,16 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11k *ar,
+@@ -4633,12 +4633,16 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  			    struct ieee80211_rx_status *rxs)
  {
  	struct sk_buff *msdu, *mpdu_buf, *prev_buf;
@@ -58,7 +56,7 @@ index d7a9bea..9d1ea60 100644
  	mpdu_buf = NULL;
  
  	if (!head_msdu)
-@@ -4763,38 +4767,27 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11k *ar,
+@@ -4670,38 +4674,27 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  
  		skb_trim(prev_buf, prev_buf->len - HAL_RX_FCS_LEN);
  	} else if (decap_format == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
@@ -100,7 +98,7 @@ index d7a9bea..9d1ea60 100644
  			prev_buf = msdu;
  			msdu = msdu->next;
  		}
-@@ -4824,8 +4817,83 @@ err_merge_fail:
+@@ -4731,8 +4724,83 @@ err_merge_fail:
  	return NULL;
  }
  
@@ -184,7 +182,7 @@ index d7a9bea..9d1ea60 100644
  				    struct sk_buff *tail_msdu,
  				    struct napi_struct *napi)
  {
-@@ -4855,11 +4923,9 @@ static int ath11k_dp_rx_mon_deliver(struct ath11k *ar, u32 mac_id,
+@@ -4762,11 +4830,9 @@ static int ath11k_dp_rx_mon_deliver(stru
  		} else {
  			rxs->flag |= RX_FLAG_ALLOW_SAME_PN;
  		}
@@ -197,7 +195,7 @@ index d7a9bea..9d1ea60 100644
  		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb);
  		mon_skb = skb_next;
  	} while (mon_skb);
-@@ -4926,6 +4992,7 @@ static void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, u32 quota,
+@@ -4833,6 +4899,7 @@ static void ath11k_dp_rx_mon_dest_proces
  		}
  		if (head_msdu && tail_msdu) {
  			ath11k_dp_rx_mon_deliver(ar, dp->mac_id, head_msdu,
@@ -205,7 +203,7 @@ index d7a9bea..9d1ea60 100644
  						 tail_msdu, napi);
  			rx_mon_stats->dest_mpdu_done++;
  		}
-@@ -4966,6 +5033,8 @@ static void ath11k_dp_rx_mon_status_process_tlv(struct ath11k *ar,
+@@ -4873,6 +4940,8 @@ static void ath11k_dp_rx_mon_status_proc
  	while (!skb_queue_empty(&pmon->rx_status_q)) {
  		status_skb = skb_dequeue(&pmon->rx_status_q);
  
@@ -214,8 +212,6 @@ index d7a9bea..9d1ea60 100644
  		tlv_status = ath11k_hal_rx_parse_mon_status(ar->ab, ppdu_info,
  							    status_skb);
  		if (tlv_status == HAL_TLV_STATUS_PPDU_DONE) {
-diff --git a/drivers/net/wireless/ath/ath11k/hal_desc.h b/drivers/net/wireless/ath/ath11k/hal_desc.h
-index 861518a..9ae3e41 100644
 --- a/drivers/net/wireless/ath/ath11k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath11k/hal_desc.h
 @@ -472,6 +472,7 @@ enum hal_tlv_tag {
@@ -226,11 +222,9 @@ index 861518a..9ae3e41 100644
  
  #define HAL_TLV_ALIGN	4
  
-diff --git a/drivers/net/wireless/ath/ath11k/hal_rx.c b/drivers/net/wireless/ath/ath11k/hal_rx.c
-index 730e434..0a21356 100644
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
-@@ -864,12 +864,75 @@ void ath11k_hal_reo_hw_setup(struct ath11k_base *ab)
+@@ -823,12 +823,75 @@ void ath11k_hal_reo_hw_setup(struct ath1
  			   HAL_DEFAULT_REO_TIMEOUT_USEC);
  }
  
@@ -308,7 +302,7 @@ index 730e434..0a21356 100644
  
  	switch (tlv_tag) {
  	case HAL_RX_PPDU_START: {
-@@ -890,6 +953,9 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -849,6 +912,9 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		info0 = __le32_to_cpu(eu_stats->info0);
  		info1 = __le32_to_cpu(eu_stats->info1);
  
@@ -318,7 +312,7 @@ index 730e434..0a21356 100644
  		ppdu_info->tid =
  			ffs(FIELD_GET(HAL_RX_PPDU_END_USER_STATS_INFO6_TID_BITMAP,
  				      __le32_to_cpu(eu_stats->info6))) - 1;
-@@ -913,6 +979,42 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -872,6 +938,42 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->num_mpdu_fcs_err =
  			FIELD_GET(HAL_RX_PPDU_END_USER_STATS_INFO0_MPDU_CNT_FCS_ERR,
  				  info0);
@@ -361,7 +355,7 @@ index 730e434..0a21356 100644
  		break;
  	}
  	case HAL_PHYRX_HT_SIG: {
-@@ -1045,16 +1147,147 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -970,16 +1072,147 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		else
  			ppdu_info->reception_type =
  				HAL_RX_RECEPTION_TYPE_MU_MIMO;
@@ -510,7 +504,7 @@ index 730e434..0a21356 100644
  		ppdu_info->mcs =
  			FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_TRANSMIT_MCS,
  				  info0);
-@@ -1071,22 +1304,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -996,22 +1229,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  				   info0);
  		nsts = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_NSTS, info0);
  
@@ -533,7 +527,7 @@ index 730e434..0a21356 100644
  		ppdu_info->nss = nsts + 1;
  		ppdu_info->dcm = dcm;
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
-@@ -1096,32 +1313,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -1021,32 +1238,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		struct hal_rx_he_sig_a_mu_dl_info *he_sig_a_mu_dl =
  			(struct hal_rx_he_sig_a_mu_dl_info *)tlv_data;
  
@@ -547,8 +541,6 @@ index 730e434..0a21356 100644
 -				  info0);
 -		cp_ltf = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO_INFO0_CP_LTF_SIZE,
 -				   info0);
--
--		switch (cp_ltf) {
 +		ppdu_info->he_mu_flags = 1;
 +
 +		ppdu_info->he_data1 = HE_MU_FORMAT_TYPE;
@@ -593,7 +585,8 @@ index 730e434..0a21356 100644
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO0_TRANSMIT_BW, info0);
 +		ppdu_info->he_data5 = value;
 +		ppdu_info->bw = value;
-+
+ 
+-		switch (cp_ltf) {
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO0_CP_LTF_SIZE, info0);
 +		switch (value) {
  		case 0:
@@ -680,7 +673,7 @@ index 730e434..0a21356 100644
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1135,6 +1453,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -1060,6 +1378,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ru_tones = FIELD_GET(HAL_RX_HE_SIG_B1_MU_INFO_INFO0_RU_ALLOCATION,
  				     info0);
  		ppdu_info->ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(ru_tones);
@@ -688,7 +681,7 @@ index 730e434..0a21356 100644
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1144,14 +1463,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -1069,14 +1388,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_mu->info0);
  
@@ -718,7 +711,7 @@ index 730e434..0a21356 100644
  		break;
  	}
  	case HAL_PHYRX_HE_SIG_B2_OFDMA: {
-@@ -1160,17 +1490,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -1085,17 +1415,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_ofdma->info0);
  
@@ -761,7 +754,7 @@ index 730e434..0a21356 100644
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_OFDMA;
  		break;
  	}
-@@ -1207,6 +1558,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+@@ -1129,6 +1480,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->rx_duration =
  			FIELD_GET(HAL_RX_PPDU_END_DURATION,
  				  __le32_to_cpu(ppdu_rx_duration->info0));
@@ -770,7 +763,7 @@ index 730e434..0a21356 100644
  		break;
  	}
  	case HAL_DUMMY:
-@@ -1230,12 +1583,14 @@ ath11k_hal_rx_parse_mon_status(struct ath11k_base *ab,
+@@ -1152,12 +1505,14 @@ ath11k_hal_rx_parse_mon_status(struct at
  	enum hal_rx_mon_status hal_status = HAL_RX_MON_STATUS_BUF_DONE;
  	u16 tlv_tag;
  	u16 tlv_len;
@@ -785,7 +778,7 @@ index 730e434..0a21356 100644
  		ptr += sizeof(*tlv);
  
  		/* The actual length of PPDU_END is the combined length of many PHY
-@@ -1247,7 +1602,7 @@ ath11k_hal_rx_parse_mon_status(struct ath11k_base *ab,
+@@ -1169,7 +1524,7 @@ ath11k_hal_rx_parse_mon_status(struct at
  			tlv_len = sizeof(struct hal_rx_rxpcu_classification_overview);
  
  		hal_status = ath11k_hal_rx_parse_mon_status_tlv(ab, ppdu_info,
@@ -794,11 +787,9 @@ index 730e434..0a21356 100644
  		ptr += tlv_len;
  		ptr = PTR_ALIGN(ptr, HAL_TLV_ALIGN);
  
-diff --git a/drivers/net/wireless/ath/ath11k/hal_rx.h b/drivers/net/wireless/ath/ath11k/hal_rx.h
-index aa9d0f7..84ed519 100644
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
-@@ -121,6 +121,36 @@ enum hal_rx_mon_status {
+@@ -77,6 +77,36 @@ enum hal_rx_mon_status {
  	HAL_RX_MON_STATUS_BUF_DONE,
  };
  
@@ -835,7 +826,7 @@ index aa9d0f7..84ed519 100644
  struct hal_rx_mon_ppdu_info {
  	u32 ppdu_id;
  	u32 ppdu_ts;
-@@ -138,16 +168,59 @@ struct hal_rx_mon_ppdu_info {
+@@ -93,16 +123,59 @@ struct hal_rx_mon_ppdu_info {
  	u8 mcs;
  	u8 nss;
  	u8 bw;
@@ -895,7 +886,7 @@ index aa9d0f7..84ed519 100644
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
-@@ -180,6 +253,9 @@ struct hal_rx_ppdu_start {
+@@ -135,6 +208,9 @@ struct hal_rx_ppdu_start {
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_BITMAP		GENMASK(15, 0)
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_EOSP_BITMAP	GENMASK(31, 16)
  
@@ -905,7 +896,7 @@ index aa9d0f7..84ed519 100644
  struct hal_rx_ppdu_end_user_stats {
  	__le32 rsvd0[2];
  	__le32 info0;
-@@ -190,10 +266,21 @@ struct hal_rx_ppdu_end_user_stats {
+@@ -145,10 +221,21 @@ struct hal_rx_ppdu_end_user_stats {
  	__le32 rsvd1[2];
  	__le32 info4;
  	__le32 info5;
@@ -928,7 +919,7 @@ index aa9d0f7..84ed519 100644
  #define HAL_RX_HT_SIG_INFO_INFO0_MCS		GENMASK(6, 0)
  #define HAL_RX_HT_SIG_INFO_INFO0_BW		BIT(7)
  
-@@ -236,25 +323,63 @@ struct hal_rx_vht_sig_a_info {
+@@ -191,25 +278,63 @@ struct hal_rx_vht_sig_a_info {
  	__le32 info1;
  } __packed;
  
@@ -996,7 +987,7 @@ index aa9d0f7..84ed519 100644
  
  struct hal_rx_he_sig_a_mu_dl_info {
  	__le32 info0;
-@@ -267,6 +392,7 @@ struct hal_rx_he_sig_b1_mu_info {
+@@ -222,6 +347,7 @@ struct hal_rx_he_sig_b1_mu_info {
  	__le32 info0;
  } __packed;
  
@@ -1004,7 +995,7 @@ index aa9d0f7..84ed519 100644
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_MCS		GENMASK(18, 15)
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_CODING	BIT(20)
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_NSTS		GENMASK(31, 29)
-@@ -275,6 +401,7 @@ struct hal_rx_he_sig_b2_mu_info {
+@@ -230,6 +356,7 @@ struct hal_rx_he_sig_b2_mu_info {
  	__le32 info0;
  } __packed;
  
@@ -1012,7 +1003,7 @@ index aa9d0f7..84ed519 100644
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_NSTS	GENMASK(13, 11)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_TXBF	BIT(19)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_MCS	GENMASK(18, 15)
-@@ -403,4 +530,96 @@ static inline u32 ath11k_he_ru_tones_to_nl80211_he_ru_alloc(u16 ru_tones)
+@@ -353,4 +480,96 @@ static inline u32 ath11k_he_ru_tones_to_
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_1 0xADBEEF
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_2 0xBDBEEF
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_3 0xCDBEEF
@@ -1109,11 +1100,9 @@ index aa9d0f7..84ed519 100644
 +#define HE_STA_CODING_KNOWN 0x80
 +
  #endif
-diff --git a/net/mac80211/util.c b/net/mac80211/util.c
-index 2a9cba8..a2b94b3 100644
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -3239,6 +3239,13 @@ u64 ieee80211_calculate_rx_timestamp(struct ieee80211_local *local,
+@@ -3243,6 +3243,13 @@ u64 ieee80211_calculate_rx_timestamp(str
  		if (status->enc_flags & RX_ENC_FLAG_SHORT_GI)
  			ri.flags |= RATE_INFO_FLAGS_SHORT_GI;
  		break;
@@ -1127,6 +1116,3 @@ index 2a9cba8..a2b94b3 100644
  	default:
  		WARN_ON(1);
  		/* fall through */
--- 
-2.7.4
-
