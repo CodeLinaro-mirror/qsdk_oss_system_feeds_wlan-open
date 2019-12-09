@@ -453,6 +453,7 @@ mac80211_hostapd_setup_base() {
                 bsscolor=$(($bsscolor + 1))
                 bsscolor=$(($bsscolor % 63))
                 append base_cfg "he_bss_color=$bsscolor" "$N"
+		append base_cfg "he_default_pe_duration=4" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
