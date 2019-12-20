@@ -233,12 +233,12 @@ mac80211_hostapd_setup_base() {
 	idx="$channel"
 	case "$htmode" in
 		VHT20|HE20)
-                        if [ $hwmode == "a" ] || [ $htmode != "HE20" ]; then
+                        if [ $channel -ge 36 ] || [ $htmode != "HE20" ]; then
 				enable_ac=1
 			fi
 			;;
 		VHT40|HE40)
-                        if [ $hwmode == "a" ] || [ $htmode != "HE40" ]; then
+                        if [ $channel -ge 36 ] || [ $htmode != "HE40" ]; then
 				case "$(( ($channel / 4) % 2 ))" in
 					1) idx=$(($channel + 2));;
 					0) idx=$(($channel - 2));;
