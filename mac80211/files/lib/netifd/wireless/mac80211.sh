@@ -232,23 +232,17 @@ mac80211_hostapd_setup_base() {
 	enable_ac=0
 	idx="$channel"
 	case "$htmode" in
-		VHT20|HE20)
-                        if [ $channel -ge 36 ] || [ $htmode != "HE20" ]; then
-				enable_ac=1
-			fi
-			;;
+		VHT20|HE20)	enable_ac=1;;
 		VHT40|HE40)
-                        if [ $channel -ge 36 ] || [ $htmode != "HE40" ]; then
-				case "$(( ($channel / 4) % 2 ))" in
-					1) idx=$(($channel + 2));;
-					0) idx=$(($channel - 2));;
-				esac
-				enable_ac=1
-				if [ $channel -ge 36 ]; then
-					append base_cfg "vht_oper_chwidth=0" "$N"
-					append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
-				fi
-                        fi
+			case "$(( ($channel / 4) % 2 ))" in
+				1) idx=$(($channel + 2));;
+				0) idx=$(($channel - 2));;
+			esac
+			enable_ac=1
+			if [ $channel -ge 36 ]; then
+				append base_cfg "vht_oper_chwidth=0" "$N"
+				append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			;;
 		VHT80|HE80)
 			case "$(( ($channel / 4) % 4 ))" in
