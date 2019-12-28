@@ -105,6 +105,8 @@ drv_mac80211_init_iface_config() {
 	config_add_int max_listen_int
 	config_add_int dtim_period start_disabled
 
+	config_add_int fq_limit
+
 	# mesh
 	config_add_string mesh_id
 	config_add_int $MP_CONFIG_INT
@@ -843,6 +845,23 @@ mac80211_setup_adhoc() {
 		${keyspec:+keys $keyspec}
 }
 
+mac80211_set_fq_limit() {
+	json_select data
+	json_get_vars ifname
+	json_select ..
+
+	json_select config
+	json_get_vars fq_limit
+
+	if [ $fq_limit -gt 0 ]; then
+		tc qdisc add dev $ifname parent :1 fq_codel limit $fq_limit
+		tc qdisc add dev $ifname parent :2 fq_codel limit $fq_limit
+		tc qdisc add dev $ifname parent :3 fq_codel limit $fq_limit
+		tc qdisc add dev $ifname parent :4 fq_codel limit $fq_limit
+	fi
+	json_select ..
+}
+
 mac80211_setup_vif() {
 	local name="$1"
 	local failed
@@ -1140,6 +1159,8 @@ drv_mac80211_setup() {
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
 	wireless_set_up
+
+	for_each_interface "ap mesh" mac80211_set_fq_limit
 
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
