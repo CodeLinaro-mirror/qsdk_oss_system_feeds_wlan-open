@@ -62,8 +62,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  	} else if (decap_format == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
 -		__le16 qos_field;
  		u8 qos_pkt = 0;
--
-+		
+ 
  		rx_desc = (struct hal_rx_desc *)head_msdu->data;
  		hdr_desc = ath11k_dp_rxdesc_get_80211hdr(rx_desc);
  
@@ -182,11 +181,10 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  				    struct sk_buff *tail_msdu,
  				    struct napi_struct *napi)
  {
-@@ -4762,11 +4830,9 @@ static int ath11k_dp_rx_mon_deliver(stru
- 		} else {
+@@ -4763,10 +4831,9 @@ static int ath11k_dp_rx_mon_deliver(stru
  			rxs->flag |= RX_FLAG_ALLOW_SAME_PN;
  		}
--		rxs->flag |= RX_FLAG_ONLY_MONITOR;
+ 		rxs->flag |= RX_FLAG_ONLY_MONITOR;
 -
 +		ath11k_update_radiotap(ppduinfo, mon_skb, rxs);
  		status = IEEE80211_SKB_RXCB(mon_skb);
@@ -195,7 +193,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb);
  		mon_skb = skb_next;
  	} while (mon_skb);
-@@ -4833,6 +4899,7 @@ static void ath11k_dp_rx_mon_dest_proces
+@@ -4833,6 +4900,7 @@ static void ath11k_dp_rx_mon_dest_proces
  		}
  		if (head_msdu && tail_msdu) {
  			ath11k_dp_rx_mon_deliver(ar, dp->mac_id, head_msdu,
@@ -203,7 +201,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  						 tail_msdu, napi);
  			rx_mon_stats->dest_mpdu_done++;
  		}
-@@ -4873,6 +4940,8 @@ static void ath11k_dp_rx_mon_status_proc
+@@ -4873,6 +4941,8 @@ static void ath11k_dp_rx_mon_status_proc
  	while (!skb_queue_empty(&pmon->rx_status_q)) {
  		status_skb = skb_dequeue(&pmon->rx_status_q);
  
@@ -355,7 +353,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_PHYRX_HT_SIG: {
-@@ -970,16 +1072,147 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -938,7 +1040,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 		info1 = __le32_to_cpu(vht_sig->info1);
+ 
+ 		ppdu_info->ldpc = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_SU_MU_CODING,
+-					    info0);
++					    info1);
+ 		ppdu_info->mcs = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_MCS,
+ 					   info1);
+ 		gi_setting = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_GI_SETTING,
+@@ -970,23 +1072,153 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		else
  			ppdu_info->reception_type =
  				HAL_RX_RECEPTION_TYPE_MU_MIMO;
@@ -424,7 +431,6 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 +		value = value << HE_DCM_SHIFT;
 +		ppdu_info->he_data3 |= value;
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO1_CODING, info1);
-+		ppdu_info->ldpc = (value == HAL_RX_SU_MU_CODING_LDPC) ? 1 : 0;
 +		value = value << HE_CODING_SHIFT;
 +		ppdu_info->he_data3 |= value;
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO1_LDPC_EXTRA, info1);
@@ -504,7 +510,15 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->mcs =
  			FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_TRANSMIT_MCS,
  				  info0);
-@@ -996,22 +1229,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 		ppdu_info->bw =
+ 			FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_TRANSMIT_BW,
+ 				  info0);
+-		ppdu_info->ldpc = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO1_CODING, info0);
++		ppdu_info->ldpc = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO1_CODING, info1);
+ 		ppdu_info->is_stbc = info1 &
+ 				     HAL_RX_HE_SIG_A_SU_INFO_INFO1_STBC;
+ 		ppdu_info->beamformed = info1 &
+@@ -996,22 +1228,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  				   info0);
  		nsts = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_NSTS, info0);
  
@@ -527,7 +541,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->nss = nsts + 1;
  		ppdu_info->dcm = dcm;
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
-@@ -1021,32 +1238,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1021,32 +1237,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		struct hal_rx_he_sig_a_mu_dl_info *he_sig_a_mu_dl =
  			(struct hal_rx_he_sig_a_mu_dl_info *)tlv_data;
  
@@ -542,7 +556,8 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 -		cp_ltf = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO_INFO0_CP_LTF_SIZE,
 -				   info0);
 +		ppdu_info->he_mu_flags = 1;
-+
+ 
+-		switch (cp_ltf) {
 +		ppdu_info->he_data1 = HE_MU_FORMAT_TYPE;
 +		ppdu_info->he_data1 |=
 +			HE_BSS_COLOR_KNOWN |
@@ -585,8 +600,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO0_TRANSMIT_BW, info0);
 +		ppdu_info->he_data5 = value;
 +		ppdu_info->bw = value;
- 
--		switch (cp_ltf) {
++
 +		value = FIELD_GET(HAL_RX_HE_SIG_A_MU_DL_INFO0_CP_LTF_SIZE, info0);
 +		switch (value) {
  		case 0:
@@ -673,7 +687,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1060,6 +1378,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1060,6 +1377,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ru_tones = FIELD_GET(HAL_RX_HE_SIG_B1_MU_INFO_INFO0_RU_ALLOCATION,
  				     info0);
  		ppdu_info->ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(ru_tones);
@@ -681,7 +695,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1069,14 +1388,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1069,14 +1387,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_mu->info0);
  
@@ -711,7 +725,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_PHYRX_HE_SIG_B2_OFDMA: {
-@@ -1085,17 +1415,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1085,17 +1414,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_ofdma->info0);
  
@@ -754,7 +768,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_OFDMA;
  		break;
  	}
-@@ -1129,6 +1480,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1108,7 +1458,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 		 * PHYRX_OTHER_RECEIVE_INFO TLV.
+ 		 */
+ 		ppdu_info->rssi_comb =
+-			FIELD_GET(HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB,
++			FIELD_GET(HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO0_RSSI_COMB,
+ 				  __le32_to_cpu(rssi->info0));
+ 		break;
+ 	}
+@@ -1129,6 +1479,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->rx_duration =
  			FIELD_GET(HAL_RX_PPDU_END_DURATION,
  				  __le32_to_cpu(ppdu_rx_duration->info0));
@@ -763,7 +786,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_DUMMY:
-@@ -1152,12 +1505,14 @@ ath11k_hal_rx_parse_mon_status(struct at
+@@ -1152,12 +1504,14 @@ ath11k_hal_rx_parse_mon_status(struct at
  	enum hal_rx_mon_status hal_status = HAL_RX_MON_STATUS_BUF_DONE;
  	u16 tlv_tag;
  	u16 tlv_len;
@@ -778,7 +801,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ptr += sizeof(*tlv);
  
  		/* The actual length of PPDU_END is the combined length of many PHY
-@@ -1169,7 +1524,7 @@ ath11k_hal_rx_parse_mon_status(struct at
+@@ -1169,7 +1523,7 @@ ath11k_hal_rx_parse_mon_status(struct at
  			tlv_len = sizeof(struct hal_rx_rxpcu_classification_overview);
  
  		hal_status = ath11k_hal_rx_parse_mon_status_tlv(ab, ppdu_info,
@@ -1003,6 +1026,15 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_NSTS	GENMASK(13, 11)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_TXBF	BIT(19)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_MCS	GENMASK(18, 15)
+@@ -240,7 +367,7 @@ struct hal_rx_he_sig_b2_ofdma_info {
+ 	__le32 info0;
+ } __packed;
+ 
+-#define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB	GENMASK(15, 8)
++#define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO0_RSSI_COMB	GENMASK(15, 8)
+ 
+ struct hal_rx_phyrx_rssi_legacy_info {
+ 	__le32 rsvd[35];
 @@ -353,4 +480,96 @@ static inline u32 ath11k_he_ru_tones_to_
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_1 0xADBEEF
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_2 0xBDBEEF
