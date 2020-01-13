@@ -1,7 +1,5 @@
-Index: backports-20191108-4.4.60-cdd7d0b55972/include/net/mac80211.h
-===================================================================
---- backports-20191108-4.4.60-cdd7d0b55972.orig/include/net/mac80211.h
-+++ backports-20191108-4.4.60-cdd7d0b55972/include/net/mac80211.h
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
 @@ -4378,6 +4378,22 @@ static inline void ieee80211_rx_ni(struc
  }
  
@@ -25,10 +23,8 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/include/net/mac80211.h
   * ieee80211_sta_ps_transition - PS transition for connected sta
   *
   * When operating in AP mode with the %IEEE80211_HW_AP_LINK_PS
-Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
-===================================================================
---- backports-20191108-4.4.60-cdd7d0b55972.orig/net/mac80211/rx.c
-+++ backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
 @@ -2412,13 +2412,15 @@ __ieee80211_data_to_8023(struct ieee8021
  	return 0;
  }
@@ -47,7 +43,31 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
  	struct ethhdr *ehdr = (struct ethhdr *) rx->skb->data;
  
  	/*
-@@ -4647,3 +4649,197 @@ void ieee80211_rx_irqsafe(struct ieee802
+@@ -2471,6 +2473,7 @@ ieee80211_deliver_skb(struct ieee80211_r
+ 	struct sk_buff *skb, *xmit_skb;
+ 	struct ethhdr *ehdr = (struct ethhdr *) rx->skb->data;
+ 	struct sta_info *dsta;
++	struct ieee80211_sta_rx_stats *rx_stats; 
+ 
+ 	skb = rx->skb;
+ 	xmit_skb = NULL;
+@@ -2483,9 +2486,12 @@ ieee80211_deliver_skb(struct ieee80211_r
+ 		 * for non-QoS-data frames. Here we know it's a data
+ 		 * frame, so count MSDUs.
+ 		 */
+-		u64_stats_update_begin(&rx->sta->rx_stats.syncp);
+-		rx->sta->rx_stats.msdu[rx->seqno_idx]++;
+-		u64_stats_update_end(&rx->sta->rx_stats.syncp);
++		rx_stats = &rx->sta->rx_stats;
++		if (ieee80211_hw_check(&rx->local->hw, USES_RSS))
++			rx_stats = this_cpu_ptr(rx->sta->pcpu_rx_stats);
++		u64_stats_update_begin(&rx_stats->syncp);
++		rx_stats->msdu[rx->seqno_idx]++;
++		u64_stats_update_end(&rx_stats->syncp);
+ 	}
+ 
+ 	if ((sdata->vif.type == NL80211_IFTYPE_AP ||
+@@ -4647,3 +4653,204 @@ void ieee80211_rx_irqsafe(struct ieee802
  	tasklet_schedule(&local->tasklet);
  }
  EXPORT_SYMBOL(ieee80211_rx_irqsafe);
@@ -67,9 +87,13 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
 +	struct ieee80211_rx_data rx;
 +	int i;
 +	struct ethhdr *ehdr;
++	struct ieee80211_sta_rx_stats *stats = &sta->rx_stats;
 +
 +	ehdr = (struct ethhdr *)skb->data;
 +	status = IEEE80211_SKB_RXCB(skb);
++
++	if (ieee80211_hw_check(&local->hw, USES_RSS))
++		stats = this_cpu_ptr(sta->pcpu_rx_stats);
 +
 +	/* TODO: Extend ieee80211_rx_decap_offl() with bssid so that Ethernet
 +	 * encap/decap can be supported in Adhoc interface type as well.
@@ -83,36 +107,39 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
 +	I802_DEBUG_INC(local->dot11ReceivedFragmentCount);
 +
 +	if (!is_multicast_ether_addr(ehdr->h_dest)) {
-+		sta->rx_stats.last_rx = jiffies;
-+		sta->rx_stats.last_rate = sta_stats_encode_rate(status);
++		stats->last_rx = jiffies;
++		stats->last_rate = sta_stats_encode_rate(status);
 +	}
 +
 +	if (sdata->vif.type == NL80211_IFTYPE_STATION &&
 +			!is_multicast_ether_addr(ehdr->h_dest))
 +		ieee80211_sta_reset_conn_monitor(sdata);
 +
-+	sta->rx_stats.fragments++;
++	stats->fragments++;
 +
-+	u64_stats_update_begin(&sta->rx_stats.syncp);
-+	sta->rx_stats.bytes += skb->len;
-+	u64_stats_update_end(&sta->rx_stats.syncp);
++	u64_stats_update_begin(&stats->syncp);
++	stats->bytes += skb->len;
++	u64_stats_update_end(&stats->syncp);
 +
 +	if (!(status->flag & RX_FLAG_NO_SIGNAL_VAL)) {
-+		sta->rx_stats.last_signal = status->signal;
-+		ewma_signal_add(&sta->rx_stats_avg.signal, -status->signal);
++		stats->last_signal = status->signal;
++		if (!ieee80211_hw_check(&local->hw, USES_RSS))
++			ewma_signal_add(&sta->rx_stats_avg.signal,
++					-status->signal);
 +	}
 +
 +	if (status->chains) {
-+		sta->rx_stats.chains = status->chains;
++		stats->chains = status->chains;
 +		for (i = 0; i < ARRAY_SIZE(status->chain_signal); i++) {
 +			int signal = status->chain_signal[i];
 +
 +			if (!(status->chains & BIT(i)))
 +				continue;
 +
-+			sta->rx_stats.chain_signal_last[i] = signal;
-+			ewma_signal_add(&sta->rx_stats_avg.chain_signal[i],
-+					-signal);
++			stats->chain_signal_last[i] = signal;
++			if (!ieee80211_hw_check(&local->hw, USES_RSS))
++				ewma_signal_add(&sta->rx_stats_avg.chain_signal[i],
++						-signal);
 +		}
 +	}
 +
@@ -159,7 +186,7 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
 +				 tf->action_code == WLAN_TDLS_CHANNEL_SWITCH_RESPONSE)) {
 +			skb_queue_tail(&local->skb_queue_tdls_chsw, skb);
 +			schedule_work(&local->tdls_chsw_work);
-+			sta->rx_stats.packets++;
++			stats->packets++;
 +			return;
 +		}
 +	}
@@ -199,7 +226,7 @@ Index: backports-20191108-4.4.60-cdd7d0b55972/net/mac80211/rx.c
 +			NULL, GFP_ATOMIC);
 +
 +drop:
-+	sta->rx_stats.dropped++;
++	stats->dropped++;
 +	dev_kfree_skb(skb);
 +}
 +
