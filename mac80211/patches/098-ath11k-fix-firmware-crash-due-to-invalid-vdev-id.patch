@@ -11,7 +11,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -619,6 +619,8 @@ struct ath11k {
+@@ -613,6 +613,8 @@ struct ath11k {
  	struct completion fw_mode_reset;
  	int ap_ps_enabled;
  	enum ath11k_ap_ps_state ap_ps_state;
@@ -22,7 +22,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  struct ath11k_band_cap {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4675,7 +4675,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -4701,7 +4701,7 @@ static int ath11k_mac_op_add_interface(s
  		}
  		break;
  	case WMI_VDEV_TYPE_MONITOR:
@@ -31,7 +31,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  		break;
  	default:
  		break;
-@@ -4789,7 +4789,7 @@ static void ath11k_mac_op_remove_interfa
+@@ -4815,7 +4815,7 @@ static void ath11k_mac_op_remove_interfa
  	}
  
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
@@ -40,7 +40,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  
  err_vdev_del:
  	spin_lock_bh(&ar->data_lock);
-@@ -5317,11 +5317,12 @@ ath11k_mac_op_assign_vif_chanctx(struct
+@@ -5343,11 +5343,12 @@ ath11k_mac_op_assign_vif_chanctx(struct
  			    ctx->def.chan->center_freq, ret);
  		goto err;
  	}
@@ -54,7 +54,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	}
  
  	arvif->is_started = true;
-@@ -5362,7 +5363,7 @@ ath11k_mac_op_unassign_vif_chanctx(struc
+@@ -5388,7 +5389,7 @@ ath11k_mac_op_unassign_vif_chanctx(struc
  			ath11k_warn(ar->ab, "failed to down monitor vdev %i: %d\n",
  				    arvif->vdev_id, ret);
  		arvif->is_up = false;
@@ -63,7 +63,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	}
  
  	ret = ath11k_mac_vdev_stop(arvif);
-@@ -6380,7 +6381,7 @@ static int ath11k_mac_monitor_start(stru
+@@ -6406,7 +6407,7 @@ static int ath11k_mac_monitor_start(stru
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -72,16 +72,15 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  		goto set_monitor_status;
  
  	ret = ath11k_mac_monitor_vdev_create(ar);
-@@ -6397,7 +6398,7 @@ static int ath11k_mac_monitor_start(stru
+@@ -6423,6 +6424,7 @@ static int ath11k_mac_monitor_start(stru
  		return ret;
  	}
  
--	set_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
 +	ar->monitor_vdev_cnt++;
+ 	set_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
  set_monitor_status:
  	ret = ath11k_dp_tx_htt_monitor_mode_ring_config(ar, false);
- 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor started ret %d\n", ret);
-@@ -6411,7 +6412,7 @@ static int ath11k_mac_monitor_stop(struc
+@@ -6437,7 +6439,7 @@ static int ath11k_mac_monitor_stop(struc
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -90,7 +89,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  		goto clear_monitor_status;
  
  	ret = ath11k_mac_monitor_vdev_stop(ar);
-@@ -6419,12 +6420,13 @@ static int ath11k_mac_monitor_stop(struc
+@@ -6445,22 +6447,24 @@ static int ath11k_mac_monitor_stop(struc
  		ath11k_warn(ar->ab, "failed to stop monitor vdev: %d\n", ret);
  		return ret;
  	}
@@ -103,9 +102,14 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
 -	clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
 +	ar->monitor_vdev_cnt--;
  clear_monitor_status:
- 	ret = ath11k_mac_config_mon_status_default(ar, true);
+-	ret = ath11k_mac_config_mon_status_default(ar, true);
++	ret = ath11k_dp_tx_htt_monitor_mode_ring_config(ar, true);
  	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor stopped ret %d\n", ret);
-@@ -6434,7 +6436,7 @@ clear_monitor_status:
+-
++	if(ar->monitor_vdev_cnt <= 0)
++		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
+ 	return ret;
+ }
  
  int ath11k_mac_monitor_recalc(struct ath11k *ar, bool needed)
  {
@@ -114,13 +118,26 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -6968,8 +6970,8 @@ int ath11k_mac_allocate(struct ath11k_ba
- 
- 		INIT_WORK(&ar->wmi_mgmt_tx_work, ath11k_mgmt_over_wmi_tx_work);
+@@ -6996,6 +7000,7 @@ int ath11k_mac_allocate(struct ath11k_ba
  		skb_queue_head_init(&ar->wmi_mgmt_tx_queue);
--		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
+ 		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
  		ar->monitor_vdev_id = -1;
 +		ar->monitor_vdev_cnt = 0;
  	}
  
  	return 0;
+--- a/drivers/net/wireless/ath/ath11k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
+@@ -1030,8 +1030,11 @@ int ath11k_dp_tx_htt_monitor_mode_ring_c
+ 	if (!reset)
+ 		tlv_filter.rx_filter =
+ 				HTT_RX_MON_FILTER_TLV_FLAGS_MON_STATUS_RING;
+-	else
++	else {
+ 		tlv_filter = ath11k_mac_mon_status_filter_default;
++		if (ar->debug.extd_rx_stats)
++			tlv_filter.rx_filter = ar->debug.rx_filter;
++	}
+ 
+ 	ret = ath11k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, dp->mac_id,
+ 					       HAL_RXDMA_MONITOR_STATUS,
