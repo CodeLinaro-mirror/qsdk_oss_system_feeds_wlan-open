@@ -1,0 +1,245 @@
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 7953b22239c9..ea9cce1bf07e 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -528,6 +528,8 @@ struct ath11k {
+ 	u32 num_stations;
+ 	u32 max_num_stations;
+ 	bool monitor_present;
++	struct ath11k_vif *monitor_arvif;
++	bool monitor_started;
+ 	/* To synchronize concurrent synchronous mac80211 callback operations,
+ 	 * concurrent debugfs configuration and concurrent FW statistics events.
+ 	 */
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 9a4c81c5f7d9..42e5ad3d407e 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -631,15 +631,12 @@ static int ath11k_mac_op_config(struct ieee80211_hw *hw, u32 changed)
+ 	struct ieee80211_conf *conf = &hw->conf;
+ 	int ret = 0;
+ 
+-	/* mac80211 requires this op to be present and that's why
+-	 * there's an empty function, this can be extended when
+-	 * required.
+-	 */
+-
+ 	mutex_lock(&ar->conf_mutex);
+ 
+-	if (changed & IEEE80211_CONF_CHANGE_MONITOR)
+-		ath11k_mac_monitor_recalc(ar, conf->flags & IEEE80211_CONF_MONITOR);
++	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
++		ar->monitor_present = conf->flags & IEEE80211_CONF_MONITOR;
++		ath11k_mac_monitor_recalc(ar);
++	}
+ 
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+@@ -4462,6 +4459,9 @@ static void ath11k_mac_op_stop(struct ieee80211_hw *hw)
+ 	ath11k_mac_drain_tx(ar);
+ 
+ 	mutex_lock(&ar->conf_mutex);
++
++	ar->monitor_present = false;
++	ar->monitor_arvif = NULL;
+ 	ret = ath11k_mac_config_mon_status_default(ar, false);
+ 	if (ret)
+ 		ath11k_err(ar->ab, "failed to clear rx_filter for monitor status ring: (%d)\n",
+@@ -4538,8 +4538,8 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 	}
+ 
+ 	if (ar->num_created_vdevs > (TARGET_NUM_VDEVS - 1)) {
+-		ath11k_warn(ab, "failed to create vdev, reached max vdev limit %d\n",
+-			    TARGET_NUM_VDEVS);
++		ath11k_warn(ab, "failed to create vdev %u, reached max vdev limit %d\n",
++			    ar->num_created_vdevs, TARGET_NUM_VDEVS);
+ 		ret = -EBUSY;
+ 		goto err;
+ 	}
+@@ -4730,6 +4730,8 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 		break;
+ 	case WMI_VDEV_TYPE_MONITOR:
+ 		ar->monitor_vdev_cnt++;
++		ar->monitor_arvif = arvif;
++		ath11k_mac_monitor_recalc(ar);
+ 		break;
+ 	default:
+ 		break;
+@@ -4842,8 +4844,11 @@ static void ath11k_mac_op_remove_interface(struct ieee80211_hw *hw,
+ 		ar->num_created_vdevs--;
+ 	}
+ 
+-	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
++	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
+ 		ar->monitor_vdev_cnt--;
++		ath11k_mac_monitor_recalc(ar);
++		ar->monitor_arvif = NULL;
++	}
+ 
+ err_vdev_del:
+ 	spin_lock_bh(&ar->data_lock);
+@@ -4897,6 +4902,7 @@ static void ath11k_mac_op_configure_filter(struct ieee80211_hw *hw,
+ 	changed_flags &= SUPPORTED_FILTERS;
+ 	*total_flags &= SUPPORTED_FILTERS;
+ 	ar->filter_flags = *total_flags;
++	ath11k_mac_monitor_recalc(ar);
+ 
+ 	mutex_unlock(&ar->conf_mutex);
+ }
+@@ -4979,6 +4985,7 @@ static int ath11k_mac_op_add_chanctx(struct ieee80211_hw *hw,
+ 	ar->rx_channel = ctx->def.chan;
+ 	spin_unlock_bh(&ar->data_lock);
+ 
++	ath11k_mac_monitor_recalc(ar);
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	return 0;
+@@ -5003,6 +5010,8 @@ static void ath11k_mac_op_remove_chanctx(struct ieee80211_hw *hw,
+ 	ar->rx_channel = NULL;
+ 	spin_unlock_bh(&ar->data_lock);
+ 
++	ath11k_mac_monitor_recalc(ar);
++
+ 	mutex_unlock(&ar->conf_mutex);
+ }
+ 
+@@ -5284,6 +5293,8 @@ ath11k_mac_update_vif_chan(struct ath11k *ar,
+ 			continue;
+ 		}
+ 	}
++
++	ath11k_mac_monitor_recalc(ar);
+ }
+ 
+ static void
+@@ -6225,6 +6236,27 @@ out:
+ 	return ret;
+ }
+ 
++static void ath11k_mac_num_chanctxs_iter(struct ieee80211_hw *hw,
++					 struct ieee80211_chanctx_conf *conf,
++					 void *data)
++{
++	int *num = data;
++
++	(*num)++;
++}
++
++static int ath11k_mac_num_chanctxs(struct ath11k *ar)
++{
++	int num = 0;
++
++	ieee80211_iter_chan_contexts_atomic(ar->hw,
++					    ath11k_mac_num_chanctxs_iter,
++					    &num);
++
++	return num;
++}
++
++
+ static void
+ ath11k_mac_get_any_chandef_iter(struct ieee80211_hw *hw,
+ 				struct ieee80211_chanctx_conf *conf,
+@@ -6391,6 +6423,7 @@ static int ath11k_mac_monitor_vdev_create(struct ath11k *ar)
+ 
+ 	ar->allocated_vdev_map |= 1LL << ar->monitor_vdev_id;
+ 	ar->ab->free_vdev_map &= ~(1LL << ar->monitor_vdev_id);
++	ar->num_created_vdevs++;
+ 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor vdev %d created\n",
+ 		   ar->monitor_vdev_id);
+ 
+@@ -6420,12 +6453,12 @@ static int ath11k_mac_monitor_vdev_delete(struct ath11k *ar)
+ 	} else {
+ 		ar->allocated_vdev_map &= ~(1LL << ar->monitor_vdev_id);
+ 		ar->ab->free_vdev_map |= 1LL << (ar->monitor_vdev_id);
++		ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor vdev %d deleted\n",
++			   ar->monitor_vdev_id);
+ 		ar->num_created_vdevs--;
+ 		ar->monitor_vdev_id = -1;
+ 	}
+ 
+-	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor vdev %d deleted\n",
+-		   ar->monitor_vdev_id);
+ 	return ret;
+ }
+ 
+@@ -6455,6 +6488,7 @@ static int ath11k_mac_monitor_start(struct ath11k *ar)
+ 	ar->monitor_vdev_cnt++;
+ 	set_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
+ set_monitor_status:
++	ar->monitor_started = true;
+ 	ret = ath11k_dp_tx_htt_monitor_mode_ring_config(ar, false);
+ 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor started ret %d\n", ret);
+ 
+@@ -6483,6 +6517,8 @@ static int ath11k_mac_monitor_stop(struct ath11k *ar)
+ 	}
+ 	ar->monitor_vdev_cnt--;
+ clear_monitor_status:
++	ar->monitor_started = false;
++	ar->monitor_present = false;
+ 	ret = ath11k_dp_tx_htt_monitor_mode_ring_config(ar, true);
+ 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor stopped ret %d\n", ret);
+ 	if(ar->monitor_vdev_cnt <= 0)
+@@ -6490,15 +6526,40 @@ clear_monitor_status:
+ 	return ret;
+ }
+ 
+-int ath11k_mac_monitor_recalc(struct ath11k *ar, bool needed)
++static inline bool ath11k_mac_monitor_vdev_is_needed(struct ath11k *ar)
++ {
++	int num_ctx;
++
++	/* At least one chanctx is required to derive a channel to start
++	 * monitor vdev on.
++	 */
++	num_ctx = ath11k_mac_num_chanctxs(ar);
++	if (num_ctx == 0)
++		return false;
++
++	/* If there's already an existing special monitor interface then don't
++	 * bother creating another monitor vdev.
++	 */
++	if (ar->monitor_arvif)
++		return false;
++
++	return ar->monitor_present;
++}
++
++int ath11k_mac_monitor_recalc(struct ath11k *ar)
+ {
+-	bool started = !!ar->monitor_vdev_cnt;
++	bool started = ar->monitor_started;
++	bool needed;
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
+ 
++	needed = ath11k_mac_monitor_vdev_is_needed(ar);
+ 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC,
+ 		   "mac monitor recalc started? %d needed? %d\n", started, needed);
+ 
++	if (needed == ar->monitor_started)
++		return 0;
++
+ 	if (needed)
+ 		return ath11k_mac_monitor_start(ar);
+ 	else
+@@ -7029,6 +7090,7 @@ int ath11k_mac_allocate(struct ath11k_base *ab)
+ 		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
+ 		ar->monitor_vdev_id = -1;
+ 		ar->monitor_vdev_cnt = 0;
++		ar->monitor_started = false;
+ 	}
+ 
+ 	return 0;
+diff --git a/drivers/net/wireless/ath/ath11k/mac.h b/drivers/net/wireless/ath/ath11k/mac.h
+index 52d9ad9a618c..abfd485565d4 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.h
++++ b/drivers/net/wireless/ath/ath11k/mac.h
+@@ -143,6 +143,6 @@ void ath11k_mac_drain_tx(struct ath11k *ar);
+ void ath11k_mac_peer_cleanup_all(struct ath11k *ar);
+ int ath11k_mac_tx_mgmt_pending_free(int buf_id, void *skb, void *ctx);
+ u8 ath11k_mac_bw_to_mac80211_bw(u8 bw);
+-int ath11k_mac_monitor_recalc(struct ath11k *ar, bool needed);
++int ath11k_mac_monitor_recalc(struct ath11k *ar);
+ enum hal_encrypt_type ath11k_dp_tx_get_encrypt_type(u32 cipher);
+ #endif
