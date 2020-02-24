@@ -1,17 +1,46 @@
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -538,6 +538,8 @@ struct ath11k {
+@@ -197,10 +197,6 @@ enum ath11k_dev_flags {
+ 	ATH11K_FLAG_FW_RESTART_FOR_HOST,
+ };
+ 
+-enum ath11k_monitor_flags {
+-	ATH11K_MONITOR_FLAG_STARTED,
+-};
+-
+ struct ath11k_vif {
+ 	u32 vdev_id;
+ 	enum wmi_vdev_type vdev_type;
+@@ -527,7 +523,6 @@ struct ath11k {
+ 	} mac;
+ 	unsigned long dev_flags;
+ 	unsigned int filter_flags;
+-	unsigned long monitor_flags;
+ 	u32 min_tx_power;
+ 	u32 max_tx_power;
+ 	u32 txpower_limit_2g;
+@@ -537,7 +532,8 @@ struct ath11k {
+ 	u32 chan_tx_pwr;
  	u32 num_stations;
  	u32 max_num_stations;
- 	bool monitor_present;
-+	struct ath11k_vif *monitor_arvif;
+-	bool monitor_present;
++	bool monitor_conf_enabled;
 +	bool monitor_started;
  	/* To synchronize concurrent synchronous mac80211 callback operations,
  	 * concurrent debugfs configuration and concurrent FW statistics events.
  	 */
+@@ -625,7 +621,7 @@ struct ath11k {
+ 	int ap_ps_enabled;
+ 	enum ath11k_ap_ps_state ap_ps_state;
+ 
+-	int monitor_vdev_cnt;
++	bool monitor_vdev_created;
+ };
+ 
+ struct ath11k_band_cap {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -625,531 +625,669 @@ void ath11k_mac_peer_cleanup_all(struct
+@@ -625,571 +625,694 @@ void ath11k_mac_peer_cleanup_all(struct
  	ar->num_stations = 0;
  }
  
@@ -244,7 +273,7 @@
  
 -	if (WARN_ON(ath11k_mac_vif_chan(vif, &def)))
 -		return;
-+	if (ar->monitor_vdev_cnt)
++	if (ar->monitor_vdev_created)
 +		return 0;
  
 -	bss = cfg80211_get_bss(ar->hw->wiphy, def.chan, info->bssid, NULL, 0,
@@ -316,16 +345,26 @@
  	}
  
 -	/* TODO: safe_mode_enabled (bypass 4-way handshake) flag req? */
--}
 +	ret = ath11k_mac_txpower_recalc(ar);
 +	if (ret)
 +		return ret;
++
++	ar->allocated_vdev_map |= 1LL << ar->monitor_vdev_id;
++	ar->ab->free_vdev_map &= ~(1LL << ar->monitor_vdev_id);
++	ar->num_created_vdevs++;
++	ar->monitor_vdev_created = true;
++	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor vdev %d created\n",
++		   ar->monitor_vdev_id);
++
++	return 0;
+ }
  
 -static void ath11k_peer_assoc_h_rates(struct ath11k *ar,
 -				      struct ieee80211_vif *vif,
 -				      struct ieee80211_sta *sta,
 -				      struct peer_assoc_params *arg)
--{
++static int ath11k_mac_monitor_vdev_delete(struct ath11k *ar)
+ {
 -	struct ath11k_vif *arvif = (void *)vif->drv_priv;
 -	struct wmi_rate_set_arg *rateset = &arg->peer_legacy_rates;
 -	struct cfg80211_chan_def def;
@@ -335,50 +374,38 @@
 -	u32 ratemask;
 -	u8 rate;
 -	int i;
-+	ar->allocated_vdev_map |= 1LL << ar->monitor_vdev_id;
-+	ar->ab->free_vdev_map &= ~(1LL << ar->monitor_vdev_id);
-+	ar->num_created_vdevs++;
-+	ar->monitor_vdev_cnt++;
-+	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac monitor vdev %d created\n",
-+		   ar->monitor_vdev_id);
- 
--	lockdep_assert_held(&ar->conf_mutex);
-+	return 0;
-+}
- 
--	if (WARN_ON(ath11k_mac_vif_chan(vif, &def)))
--		return;
-+static int ath11k_mac_monitor_vdev_delete(struct ath11k *ar)
-+{
 +	int ret = 0;
 +	unsigned long time_left = 0;
  
+ 	lockdep_assert_held(&ar->conf_mutex);
+ 
+-	if (WARN_ON(ath11k_mac_vif_chan(vif, &def)))
+-		return;
+-
 -	band = def.chan->band;
 -	sband = ar->hw->wiphy->bands[band];
 -	ratemask = sta->supp_rates[band];
 -	ratemask &= arvif->bitrate_mask.control[band].legacy;
 -	rates = sband->bitrates;
-+	lockdep_assert_held(&ar->conf_mutex);
++	if (!ar->monitor_vdev_created)
++		return 0;
  
 -	rateset->num_rates = 0;
-+	if (!ar->monitor_vdev_cnt)
-+		return 0;
++	reinit_completion(&ar->vdev_delete_done);
  
 -	for (i = 0; i < 32; i++, ratemask >>= 1, rates++) {
 -		if (!(ratemask & 1))
 -			continue;
-+	reinit_completion(&ar->vdev_delete_done);
- 
--		rate = ath11k_mac_bitrate_to_rate(rates->bitrate);
--		rateset->rates[rateset->num_rates] = rate;
--		rateset->num_rates++;
 +	ret = ath11k_wmi_vdev_delete(ar, ar->monitor_vdev_id);
 +	if (ret) {
 +		ath11k_warn(ar->ab, "failed to request wmi monitor vdev %i removal: %d\n",
 +			    ar->monitor_vdev_id, ret);
 +		return ret;
 +	}
-+
+ 
+-		rate = ath11k_mac_bitrate_to_rate(rates->bitrate);
+-		rateset->rates[rateset->num_rates] = rate;
+-		rateset->num_rates++;
 +	time_left = wait_for_completion_timeout(&ar->vdev_delete_done,
 +						ATH11K_VDEV_DELETE_TIMEOUT_HZ);
 +	if (time_left == 0) {
@@ -390,7 +417,7 @@
 +			   ar->monitor_vdev_id);
 +		ar->num_created_vdevs--;
 +		ar->monitor_vdev_id = -1;
-+		ar->monitor_vdev_cnt--;
++		ar->monitor_vdev_created = false;
  	}
 +
 +	return ret;
@@ -493,9 +520,9 @@
 -	arg->peer_mpdu_density =
 -		ath11k_parse_mpdudensity(ht_cap->ampdu_density);
 +	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
-+		ar->monitor_present = conf->flags & IEEE80211_CONF_MONITOR;
-+		if (ar->monitor_present) {
-+			if (ar->monitor_vdev_cnt)
++		ar->monitor_conf_enabled = conf->flags & IEEE80211_CONF_MONITOR;
++		if (ar->monitor_conf_enabled) {
++			if (ar->monitor_vdev_created)
 +				goto exit;
 +			ret = ath11k_mac_monitor_vdev_create(ar);
 +			if (ret)
@@ -504,7 +531,7 @@
 +			if (ret)
 +				goto err_mon_del;
 +		} else {
-+			if (!ar->monitor_vdev_cnt)
++			if (!ar->monitor_vdev_created)
 +				goto exit;
 +			ret = ath11k_mac_monitor_stop(ar);
 +			if (ret)
@@ -937,9 +964,14 @@
  
 -		if (mcs_map)
 -			idx_limit = fls(mcs_map) - 1;
+-		else
+-			idx_limit = -1;
 +	return true;
 +}
-+
+ 
+-		switch (idx_limit) {
+-		case 0: /* fall through */
+-		case 1: /* fall through */
 +static void ath11k_peer_assoc_h_ht(struct ath11k *ar,
 +				   struct ieee80211_vif *vif,
 +				   struct ieee80211_sta *sta,
@@ -1073,10 +1105,15 @@
 +
 +		if (mcs_map)
 +			idx_limit = fls(mcs_map) - 1;
- 		else
- 			idx_limit = -1;
- 
-@@ -1162,34 +1300,19 @@ ath11k_peer_assoc_h_he_limit(u16 tx_mcs_
++		else
++			idx_limit = -1;
++
++		switch (idx_limit) {
++		case 0: /* fall through */
++		case 1: /* fall through */
+ 		case 2: /* fall through */
+ 		case 3: /* fall through */
+ 		case 4: /* fall through */
  		case 5: /* fall through */
  		case 6: /* fall through */
  		case 7:
@@ -1116,7 +1153,7 @@
  			break;
  		}
  
-@@ -1200,92 +1323,261 @@ ath11k_peer_assoc_h_he_limit(u16 tx_mcs_
+@@ -1200,87 +1323,256 @@ ath11k_peer_assoc_h_he_limit(u16 tx_mcs_
  	return tx_mcs_set;
  }
  
@@ -1197,11 +1234,23 @@
 -	 * If a HE STA that does not send VHT cap, but HE and HT cap in assoc
 -	 * request, then use MAX_AMPDU_LEN_FACTOR as 16 to calculate max_ampdu
 -	 * length.
--	 */
++	arg->peer_vht_caps = vht_cap->cap;
++
++	ampdu_factor = (vht_cap->cap &
++			IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_MASK) >>
++		       IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT;
++
++	/* Workaround: Some Netgear/Linksys 11ac APs set Rx A-MPDU factor to
++	 * zero in VHT IE. Using it would result in degraded throughput.
++	 * arg->peer_max_mpdu at this point contains HT max_mpdu so keep
++	 * it if VHT max_mpdu is smaller.
+ 	 */
 -	ampdu_factor = (he_cap->he_cap_elem.mac_cap_info[3] &
 -			IEEE80211_HE_MAC_CAP3_MAX_AMPDU_LEN_EXP_MASK) >>
 -			IEEE80211_HE_MAC_CAP3_MAX_AMPDU_LEN_EXP_SHIFT;
-+	arg->peer_vht_caps = vht_cap->cap;
++	arg->peer_max_mpdu = max(arg->peer_max_mpdu,
++				 (1U << (IEEE80211_HT_MAX_AMPDU_FACTOR +
++					ampdu_factor)) - 1);
  
 -	if (ampdu_factor) {
 -		if (sta->vht_cap.vht_supported)
@@ -1211,35 +1260,17 @@
 -			arg->peer_max_mpdu = (1 << (IEEE80211_HE_HT_MAX_AMPDU_FACTOR +
 -						    ampdu_factor)) - 1;
 -	}
-+	ampdu_factor = (vht_cap->cap &
-+			IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_MASK) >>
-+		       IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT;
++	if (sta->bandwidth == IEEE80211_STA_RX_BW_80)
++		arg->bw_80 = true;
  
 -	if (he_cap->he_cap_elem.phy_cap_info[6] &
 -	    IEEE80211_HE_PHY_CAP6_PPE_THRESHOLD_PRESENT) {
 -		int bit = 7;
 -		int nss, ru;
-+	/* Workaround: Some Netgear/Linksys 11ac APs set Rx A-MPDU factor to
-+	 * zero in VHT IE. Using it would result in degraded throughput.
-+	 * arg->peer_max_mpdu at this point contains HT max_mpdu so keep
-+	 * it if VHT max_mpdu is smaller.
-+	 */
-+	arg->peer_max_mpdu = max(arg->peer_max_mpdu,
-+				 (1U << (IEEE80211_HT_MAX_AMPDU_FACTOR +
-+					ampdu_factor)) - 1);
- 
--		arg->peer_ppet.numss_m1 = he_cap->ppe_thres[0] &
--					  IEEE80211_PPE_THRES_NSS_MASK;
--		arg->peer_ppet.ru_bit_mask =
--			(he_cap->ppe_thres[0] &
--			 IEEE80211_PPE_THRES_RU_INDEX_BITMASK_MASK) >>
--			IEEE80211_PPE_THRES_RU_INDEX_BITMASK_POS;
-+	if (sta->bandwidth == IEEE80211_STA_RX_BW_80)
-+		arg->bw_80 = true;
-+
 +	if (sta->bandwidth == IEEE80211_STA_RX_BW_160)
 +		arg->bw_160 = true;
-+
+ 
+-		arg->peer_ppet.numss_m1 = he_cap->ppe_thres[0] &
 +	/* Calculate peer NSS capability from VHT capabilities if STA
 +	 * supports VHT.
 +	 */
@@ -1435,25 +1466,19 @@
 +		int nss, ru;
 +
 +		arg->peer_ppet.numss_m1 = he_cap->ppe_thres[0] &
-+					  IEEE80211_PPE_THRES_NSS_MASK;
-+		arg->peer_ppet.ru_bit_mask =
-+			(he_cap->ppe_thres[0] &
-+			 IEEE80211_PPE_THRES_RU_INDEX_BITMASK_MASK) >>
-+			IEEE80211_PPE_THRES_RU_INDEX_BITMASK_POS;
- 
- 		for (nss = 0; nss <= arg->peer_ppet.numss_m1; nss++) {
- 			for (ru = 0; ru < 4; ru++) {
-@@ -4484,6 +4776,9 @@ static void ath11k_mac_op_stop(struct ie
+ 					  IEEE80211_PPE_THRES_NSS_MASK;
+ 		arg->peer_ppet.ru_bit_mask =
+ 			(he_cap->ppe_thres[0] &
+@@ -4484,6 +4776,8 @@ static void ath11k_mac_op_stop(struct ie
  	ath11k_mac_drain_tx(ar);
  
  	mutex_lock(&ar->conf_mutex);
 +
-+	ar->monitor_present = false;
-+	ar->monitor_arvif = NULL;
++	ar->monitor_conf_enabled = false;
  	ret = ath11k_mac_config_mon_status_default(ar, false);
  	if (ret)
  		ath11k_err(ar->ab, "failed to clear rx_filter for monitor status ring: (%d)\n",
-@@ -4560,8 +4855,8 @@ static int ath11k_mac_op_add_interface(s
+@@ -4560,8 +4854,8 @@ static int ath11k_mac_op_add_interface(s
  	}
  
  	if (ar->num_created_vdevs > (TARGET_NUM_VDEVS - 1)) {
@@ -1464,7 +1489,7 @@
  		ret = -EBUSY;
  		goto err;
  	}
-@@ -4606,6 +4901,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -4606,6 +4900,7 @@ static int ath11k_mac_op_add_interface(s
  		break;
  	case NL80211_IFTYPE_MONITOR:
  		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
@@ -1472,7 +1497,16 @@
  		break;
  	default:
  		WARN_ON(1);
-@@ -4775,12 +5071,20 @@ static int ath11k_mac_op_add_interface(s
+@@ -4752,7 +5047,7 @@ static int ath11k_mac_op_add_interface(s
+ 		}
+ 		break;
+ 	case WMI_VDEV_TYPE_MONITOR:
+-		ar->monitor_vdev_cnt++;
++		ar->monitor_vdev_created = true;
+ 		break;
+ 	default:
+ 		break;
+@@ -4775,12 +5070,20 @@ static int ath11k_mac_op_add_interface(s
  	ath11k_dp_vdev_tx_attach(ar, arvif);
  
  	ret = ath11k_mac_ap_ps_recalc(ar);
@@ -1482,7 +1516,7 @@
 +		ret = 0;
 +	}
 +
-+	if (vif->type != NL80211_IFTYPE_MONITOR && ar->monitor_present) {
++	if (vif->type != NL80211_IFTYPE_MONITOR && ar->monitor_conf_enabled) {
 +		ret = ath11k_mac_monitor_vdev_create(ar);
 +		if (ret)
 +			goto err_peer_del;
@@ -1495,20 +1529,21 @@
  
  err_peer_del:
  	if (arvif->vdev_type == WMI_VDEV_TYPE_AP) {
-@@ -4865,8 +5169,11 @@ static void ath11k_mac_op_remove_interfa
+@@ -4865,8 +5168,11 @@ static void ath11k_mac_op_remove_interfa
  		ar->num_created_vdevs--;
  	}
  
 -	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
+-		ar->monitor_vdev_cnt--;
 +	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
- 		ar->monitor_vdev_cnt--;
++		ar->monitor_vdev_created = false;
 +	}
-+	else if (ar->monitor_vdev_cnt && !ar->monitor_started)
++	else if (ar->monitor_vdev_created && !ar->monitor_started)
 +		ret = ath11k_mac_monitor_vdev_delete(ar);
  
  err_vdev_del:
  	spin_lock_bh(&ar->data_lock);
-@@ -5029,20 +5336,6 @@ static void ath11k_mac_op_remove_chanctx
+@@ -5029,20 +5335,6 @@ static void ath11k_mac_op_remove_chanctx
  	mutex_unlock(&ar->conf_mutex);
  }
  
@@ -1529,7 +1564,7 @@
  static int
  ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
  			      const struct cfg80211_chan_def *chandef,
-@@ -5244,12 +5537,16 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -5244,12 +5536,16 @@ ath11k_mac_update_vif_chan(struct ath11k
  	struct ath11k_vif *arvif;
  	int ret;
  	int i;
@@ -1546,20 +1581,20 @@
  		ath11k_dbg(ab, ATH11K_DBG_MAC,
  			   "mac chanctx switch vdev_id %i freq %hu->%hu width %d->%d\n",
  			   arvif->vdev_id,
-@@ -5307,6 +5604,12 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -5307,6 +5603,12 @@ ath11k_mac_update_vif_chan(struct ath11k
  			continue;
  		}
  	}
 +
 +	/* Restart the internal monitor vdev on new channel */
-+	if (!monitor_vif && ar->monitor_vdev_cnt) {
++	if (!monitor_vif && ar->monitor_vdev_created) {
 +		if (!ath11k_mac_monitor_stop(ar))
 +			ath11k_mac_monitor_start(ar);
 +	}
  }
  
  static void
-@@ -5387,6 +5690,15 @@ ath11k_mac_op_assign_vif_chanctx(struct
+@@ -5387,6 +5689,15 @@ ath11k_mac_op_assign_vif_chanctx(struct
  		return -EBUSY;
  	}
  
@@ -1575,7 +1610,7 @@
  	ret = ath11k_mac_vdev_start(arvif, &ctx->def);
  	if (ret) {
  		ath11k_warn(ab, "failed to start vdev %i addr %pM on freq %d: %d\n",
-@@ -5395,17 +5707,14 @@ ath11k_mac_op_assign_vif_chanctx(struct
+@@ -5395,17 +5706,14 @@ ath11k_mac_op_assign_vif_chanctx(struct
  		goto err;
  	}
  
@@ -1588,7 +1623,7 @@
 -
  	arvif->is_started = true;
  
-+	if (arvif->vdev_type != WMI_VDEV_TYPE_MONITOR && ar->monitor_vdev_cnt)
++	if (arvif->vdev_type != WMI_VDEV_TYPE_MONITOR && ar->monitor_vdev_created)
 +		ath11k_mac_monitor_start(ar);
 +
  	/* TODO: Setup ps and cts/rts protection */
@@ -1597,7 +1632,7 @@
  	mutex_unlock(&ar->conf_mutex);
  
  	return 0;
-@@ -5435,14 +5744,17 @@ ath11k_mac_op_unassign_vif_chanctx(struc
+@@ -5435,12 +5743,15 @@ ath11k_mac_op_unassign_vif_chanctx(struc
  	WARN_ON(!arvif->is_started);
  
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
@@ -1607,8 +1642,6 @@
 -				    arvif->vdev_id, ret);
 -		arvif->is_up = false;
 -		ar->monitor_vdev_cnt--;
--	}
--
 +		ret = ath11k_mac_monitor_stop(ar);
 +		if (ret) {
 +			mutex_unlock(&ar->conf_mutex);
@@ -1618,26 +1651,27 @@
 +		arvif->is_started = false;
 +		mutex_unlock(&ar->conf_mutex);
 +		return;
-+	}
-+
+ 	}
+ 
  	ret = ath11k_mac_vdev_stop(arvif);
- 	if (ret)
- 		ath11k_warn(ab, "failed to stop vdev %i: %d\n",
-@@ -5450,6 +5762,10 @@ ath11k_mac_op_unassign_vif_chanctx(struc
+@@ -5450,6 +5761,10 @@ ath11k_mac_op_unassign_vif_chanctx(struc
  
  	arvif->is_started = false;
  
 +	if (arvif->vdev_type != WMI_VDEV_TYPE_MONITOR &&
-+	    ar->num_started_vdevs == 1 && ar->monitor_vdev_cnt)
++	    ar->num_started_vdevs == 1 && ar->monitor_vdev_created)
 +		ath11k_mac_monitor_stop(ar);
 +
  	mutex_unlock(&ar->conf_mutex);
  }
  
-@@ -6034,498 +6350,218 @@ ath11k_mac_op_set_bitrate_mask(struct ie
- static void
- ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
- 				enum ieee80211_reconfig_type reconfig_type)
+@@ -6031,501 +6346,221 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+ 	return ret;
+ }
+ 
+-static void
+-ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+-				enum ieee80211_reconfig_type reconfig_type)
 -{
 -	struct ath11k *ar = hw->priv;
 -
@@ -1967,6 +2001,9 @@
 -	int bit, ret = 0;
 -	u8 tmp_addr[6] = {0};
 -	u16 nss = 0;
++static void
++ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
++				enum ieee80211_reconfig_type reconfig_type)
 +{
 +	struct ath11k *ar = hw->priv;
  
@@ -2295,10 +2332,14 @@
  }
  
  static const struct ieee80211_ops ath11k_ops = {
-@@ -7052,6 +7088,7 @@ int ath11k_mac_allocate(struct ath11k_ba
- 		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
+@@ -7049,9 +7084,9 @@ int ath11k_mac_allocate(struct ath11k_ba
+ 
+ 		INIT_WORK(&ar->wmi_mgmt_tx_work, ath11k_mgmt_over_wmi_tx_work);
+ 		skb_queue_head_init(&ar->wmi_mgmt_tx_queue);
+-		clear_bit(ATH11K_MONITOR_FLAG_STARTED, &ar->monitor_flags);
  		ar->monitor_vdev_id = -1;
- 		ar->monitor_vdev_cnt = 0;
+-		ar->monitor_vdev_cnt = 0;
++		ar->monitor_vdev_created = false;
 +		ar->monitor_started = false;
  	}
  
