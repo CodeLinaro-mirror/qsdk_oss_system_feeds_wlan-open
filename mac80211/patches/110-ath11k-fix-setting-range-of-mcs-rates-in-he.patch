@@ -1,64 +1,23 @@
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1135,7 +1135,9 @@ static int ath11k_mac_get_max_he_mcs_map
- 
- static u16
- ath11k_peer_assoc_h_he_limit(u16 tx_mcs_set,
--			     const u16 he_mcs_limit[NL80211_HE_NSS_MAX])
-+			     const u16 he_mcs_limit[NL80211_HE_NSS_MAX],
-+			     const struct ieee80211_sta_he_cap *he_cap,
-+			     struct peer_assoc_params *arg)
- {
- 	int idx_limit;
- 	int nss;
-@@ -1175,6 +1177,19 @@ ath11k_peer_assoc_h_he_limit(u16 tx_mcs_
- 			/* fall through */
- 		case -1:
- 			mcs = IEEE80211_HE_MCS_NOT_SUPPORTED;
-+			/* Disable MU operation when user disables all mcs rates
-+			 * in NSS0 or NSS1
-+			 */
-+			if ((nss == 0 || nss == 1) &&
-+			    he_cap->he_cap_elem.phy_cap_info[HECAP_PHYDWORD_4] &
-+			    IEEE80211_HE_PHY_CAP4_SU_BEAMFORMEE) {
-+				arg->peer_vht_caps &=
-+					~IEEE80211_VHT_CAP_MU_BEAMFORMEE_CAPABLE;
-+				arg->peer_he_cap_macinfo_internal |=
-+					IEEE80211_HE_DL_MU_SUPPORT_DISABLE <<
-+						IEEE80211_HE_DL_MUMIMO_SUPP_S;
-+			}
+@@ -1335,6 +1335,16 @@ static void ath11k_peer_assoc_h_he(struc
+ 			he_tx_mcs = v;
+ 		break;
+ 	}
 +
- 			break;
- 		}
- 
-@@ -1304,7 +1319,7 @@ static void ath11k_peer_assoc_h_he(struc
- 			arg->peer_he_rx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_80_80] = v;
- 
- 			v = le16_to_cpu(he_cap->he_mcs_nss_supp.tx_mcs_80p80);
--			v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask);
-+			v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask, he_cap, arg);
- 			arg->peer_he_tx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_80_80] = v;
- 
- 			arg->peer_he_mcs_count++;
-@@ -1314,7 +1329,7 @@ static void ath11k_peer_assoc_h_he(struc
- 		arg->peer_he_rx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_160] = v;
- 
- 		v = le16_to_cpu(he_cap->he_mcs_nss_supp.tx_mcs_160);
--		v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask);
-+		v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask, he_cap, arg);
- 		arg->peer_he_tx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_160] = v;
- 
- 		arg->peer_he_mcs_count++;
-@@ -1327,7 +1342,7 @@ static void ath11k_peer_assoc_h_he(struc
- 		arg->peer_he_rx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_80] = v;
- 
- 		v = le16_to_cpu(he_cap->he_mcs_nss_supp.tx_mcs_80);
--		v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask);
-+		v = ath11k_peer_assoc_h_he_limit(v, he_mcs_mask, he_cap, arg);
- 		arg->peer_he_tx_mcs_set[WMI_HECAP_TXRX_MCS_NSS_IDX_80] = v;
- 
- 		arg->peer_he_mcs_count++;
-@@ -5978,7 +5993,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
++	if ((he_mcs_mask[0] == 0 || he_mcs_mask[1] == 0) &&
++	    (he_cap->he_cap_elem.phy_cap_info[HECAP_PHYDWORD_4] &
++	    IEEE80211_HE_PHY_CAP4_SU_BEAMFORMEE)) {
++		arg->peer_vht_caps &= ~IEEE80211_VHT_CAP_MU_BEAMFORMEE_CAPABLE;
++		arg->peer_he_cap_macinfo_internal |=
++			IEEE80211_HE_DL_MU_SUPPORT_DISABLE <<
++				IEEE80211_HE_DL_MUMIMO_SUPP_S;
++	}
++
+ 	/* Calculate peer NSS capability from HE capabilities if STA
+ 	 * supports HE.
+ 	 */
+@@ -5978,7 +5988,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  			 * RATEMASK CMD
  			 */
  			ath11k_warn(ar->ab,
@@ -67,7 +26,7 @@
  			return -EINVAL;
  		}
  
-@@ -5988,7 +6003,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -5988,7 +5998,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  		if (!ath11k_mac_he_mcs_range_present(ar, band, mask) &&
  		    num_rates > 1) {
  			ath11k_warn(ar->ab,
@@ -78,7 +37,7 @@
  
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1967,8 +1967,8 @@ int ath11k_wmi_send_peer_assoc_cmd(struc
+@@ -1966,8 +1966,8 @@ int ath11k_wmi_send_peer_assoc_cmd(struc
  				     FIELD_PREP(WMI_TLV_LEN,
  						sizeof(*he_mcs) - TLV_HDR_SIZE);
  
