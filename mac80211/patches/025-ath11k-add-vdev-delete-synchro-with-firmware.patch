@@ -1,6 +1,8 @@
---- a/drivers/net/wireless/ath/ath11k/core.c
-+++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -689,6 +689,7 @@ static void ath11k_core_restart(struct w
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/core.c	2020-03-03 17:17:23.409457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.c	2020-03-03 17:17:23.465457280 +0530
+@@ -689,6 +689,7 @@
  		complete(&ar->peer_assoc_done);
  		complete(&ar->install_key_done);
  		complete(&ar->vdev_setup_done);
@@ -8,19 +10,15 @@
  		complete(&ar->bss_survey_done);
  		complete(&ar->thermal.wmi_sync);
  		wake_up(&ar->dp.tx_empty_waitq);
---- a/drivers/net/wireless/ath/ath11k/core.h
-+++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -358,6 +358,7 @@ struct ath11k_sta {
- 	struct ath11k_rx_peer_stats *rx_stats;
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/core.h	2020-03-03 17:17:23.437457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.h	2020-03-03 17:22:06.617453700 +0530
+@@ -429,9 +429,11 @@
  };
  
-+#define ATH11K_VDEV_DELETE_TIMEOUT_HZ (5 * HZ)
- #define ATH11K_NUM_CHANS 41
- #define ATH11K_MAX_5G_CHAN 173
- 
-@@ -430,8 +431,9 @@ struct ath11k_per_peer_tx_stats {
- 
  #define ATH11K_FLUSH_TIMEOUT (5 * HZ)
++#define ATH11K_VDEV_DELETE_TIMEOUT_HZ (5 * HZ)
  
 -struct ath11k_vdev_stop_status {
 +struct ath11k_vdev_stop_delete_status {
@@ -29,7 +27,7 @@
  	u32  vdev_id;
  };
  
-@@ -523,8 +525,9 @@ struct ath11k {
+@@ -523,8 +525,9 @@
  	struct completion install_key_done;
  
  	int last_wmi_vdev_start_status;
@@ -40,9 +38,11 @@
  
  	int num_peers;
  	int max_num_peers;
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -432,8 +432,8 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/mac.c	2020-03-03 17:17:23.437457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.c	2020-03-03 17:41:26.453439036 +0530
+@@ -432,8 +432,8 @@
  	return NULL;
  }
  
@@ -53,7 +53,7 @@
  {
  	int i;
  	struct ath11k_pdev *pdev;
-@@ -445,9 +445,15 @@ struct ath11k *ath11k_mac_get_ar_vdev_st
+@@ -445,9 +445,15 @@
  			ar = pdev->ar;
  
  			spin_lock_bh(&ar->data_lock);
@@ -72,7 +72,7 @@
  				spin_unlock_bh(&ar->data_lock);
  				return ar;
  			}
-@@ -4324,6 +4330,7 @@ static void ath11k_mac_op_remove_interfa
+@@ -4324,6 +4330,7 @@
  	struct ath11k *ar = hw->priv;
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
  	struct ath11k_base *ab = ar->ab;
@@ -80,27 +80,29 @@
  	int ret;
  	int i;
  
-@@ -4332,9 +4339,10 @@ static void ath11k_mac_op_remove_interfa
+@@ -4332,11 +4339,6 @@
  	ath11k_dbg(ab, ATH11K_DBG_MAC, "mac remove interface (vdev %d)\n",
  		   arvif->vdev_id);
  
 -	ab->free_vdev_map |= 1LL << (arvif->vdev_id);
- 	spin_lock_bh(&ar->data_lock);
- 	list_del(&arvif->list);
-+	ar->vdev_stop_delete_status.delete_in_progress = true;
-+	ar->vdev_stop_delete_status.vdev_id = arvif->vdev_id;
- 	spin_unlock_bh(&ar->data_lock);
- 
+-	spin_lock_bh(&ar->data_lock);
+-	list_del(&arvif->list);
+-	spin_unlock_bh(&ar->data_lock);
+-
  	if (arvif->vdev_type == WMI_VDEV_TYPE_AP) {
-@@ -4345,12 +4353,25 @@ static void ath11k_mac_op_remove_interfa
+ 		ret = ath11k_peer_delete(ar, arvif->vdev_id, vif->addr);
+ 		if (ret)
+@@ -4344,12 +4346,28 @@
+ 				    arvif->vdev_id, ret);
  	}
  
++	reinit_completion(&ar->vdev_delete_done);
++
  	ret = ath11k_wmi_vdev_delete(ar, arvif->vdev_id);
 -	if (ret)
 +	if (ret) {
  		ath11k_warn(ab, "failed to delete WMI vdev %d: %d\n",
  			    arvif->vdev_id, ret);
-+		ar->vdev_stop_delete_status.delete_in_progress = false;
 +		goto err_vdev_del;
 +	}
  
@@ -109,18 +111,19 @@
 +						ATH11K_VDEV_DELETE_TIMEOUT_HZ);
 +	if (time_left == 0) {
 +		ath11k_warn(ab, "Timeout in receiving vdev delete response\n");
-+		ar->vdev_stop_delete_status.delete_in_progress = false;
-+	}
-+	else {
++	} else {
 +		ab->free_vdev_map |= 1LL << (arvif->vdev_id);
 +		ar->num_created_vdevs--;
 +	}
- 
++
 +err_vdev_del:
++	spin_lock_bh(&ar->data_lock);
++	list_del(&arvif->list);
++	spin_unlock_bh(&ar->data_lock);
+ 
  	ath11k_peer_cleanup(ar, arvif->vdev_id);
  
- 	idr_for_each(&ar->txmgmt_idr,
-@@ -4547,6 +4568,7 @@ ath11k_mac_vdev_start_restart(struct ath
+@@ -4547,6 +4565,7 @@
  	lockdep_assert_held(&ar->conf_mutex);
  
  	reinit_completion(&ar->vdev_setup_done);
@@ -128,7 +131,7 @@
  
  	arg.vdev_id = arvif->vdev_id;
  	arg.dtim_period = arvif->dtim_period;
-@@ -4642,11 +4664,12 @@ static int ath11k_mac_vdev_stop(struct a
+@@ -4642,11 +4661,12 @@
  	lockdep_assert_held(&ar->conf_mutex);
  
  	reinit_completion(&ar->vdev_setup_done);
@@ -143,7 +146,7 @@
  
  	spin_unlock_bh(&ar->data_lock);
  
-@@ -4677,7 +4700,7 @@ static int ath11k_mac_vdev_stop(struct a
+@@ -4677,7 +4697,7 @@
  	return 0;
  err:
  	spin_lock_bh(&ar->data_lock);
@@ -152,7 +155,7 @@
  	spin_unlock_bh(&ar->data_lock);
  
  	return ret;
-@@ -6072,6 +6095,7 @@ int ath11k_mac_allocate(struct ath11k_ba
+@@ -6072,6 +6092,7 @@
  		INIT_LIST_HEAD(&ar->ppdu_stats_info);
  		mutex_init(&ar->conf_mutex);
  		init_completion(&ar->vdev_setup_done);
@@ -160,9 +163,11 @@
  		init_completion(&ar->peer_assoc_done);
  		init_completion(&ar->install_key_done);
  		init_completion(&ar->bss_survey_done);
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -123,6 +123,8 @@ static const struct wmi_tlv_policy wmi_t
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/wmi.c	2020-03-03 17:17:23.441457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.c	2020-03-03 17:29:09.425448354 +0530
+@@ -123,6 +123,8 @@
  		= { .min_len = sizeof(struct wmi_stats_event) },
  	[WMI_TAG_PDEV_CTL_FAILSAFE_CHECK_EVENT]
  		= { .min_len = sizeof(struct wmi_pdev_ctl_failsafe_chk_event) },
@@ -171,7 +176,7 @@
  };
  
  #define PRIMAP(_hw_mode_) \
-@@ -4002,6 +4004,33 @@ static int ath11k_pull_peer_del_resp_ev(
+@@ -4002,6 +4004,33 @@
  	return 0;
  }
  
@@ -205,14 +210,14 @@
  static int ath11k_pull_bcn_tx_status_ev(struct ath11k_base *ab, void *evt_buf,
  					u32 len, u32 *vdev_id,
  					u32 *tx_status)
-@@ -5321,6 +5350,32 @@ static void ath11k_peer_delete_resp_even
+@@ -5321,6 +5350,32 @@
  	 */
  }
  
 +static void ath11k_vdev_delete_resp_event(struct ath11k_base *ab, struct sk_buff *skb)
 +{
 +	struct ath11k *ar;
-+	u32 vdev_id;
++	u32 vdev_id = 0;
 +
 +	if (ath11k_pull_vdev_del_resp_ev(ab, skb, &vdev_id) != 0) {
 +		ath11k_warn(ab, "failed to extract vdev delete resp");
@@ -238,7 +243,7 @@
  static inline const char *ath11k_wmi_vdev_resp_print(u32 vdev_resp_status)
  {
  	switch (vdev_resp_status) {
-@@ -5397,7 +5452,7 @@ static void ath11k_vdev_stopped_event(st
+@@ -5397,7 +5452,7 @@
  	}
  
  	rcu_read_lock();
@@ -247,22 +252,29 @@
  	if (!ar) {
  		ath11k_warn(ab, "invalid vdev id in vdev stopped ev %d",
  			    vdev_id);
-@@ -6259,9 +6314,11 @@ static void ath11k_wmi_tlv_op_rx(struct
- 	case WMI_PDEV_DMA_RING_BUF_RELEASE_EVENTID:
- 		ath11k_wmi_pdev_dma_ring_buf_release_event(ab, skb);
+@@ -6261,7 +6316,6 @@
  		break;
-+	case WMI_VDEV_DELETE_RESP_EVENTID:
-+		ath11k_vdev_delete_resp_event(ab, skb);
-+		break;
  	/* add Unsupported events here */
  	case WMI_TBTTOFFSET_EXT_UPDATE_EVENTID:
 -	case WMI_VDEV_DELETE_RESP_EVENTID:
  	case WMI_PEER_OPER_MODE_CHANGE_EVENTID:
  	case WMI_TWT_ENABLE_EVENTID:
  	case WMI_TWT_DISABLE_EVENTID:
---- a/drivers/net/wireless/ath/ath11k/wmi.h
-+++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -3912,6 +3912,10 @@ struct wmi_peer_delete_resp_event {
+@@ -6272,6 +6326,9 @@
+ 	case WMI_PDEV_DFS_RADAR_DETECTION_EVENTID:
+ 		ath11k_wmi_pdev_dfs_radar_detected_event(ab, skb);
+ 		break;
++	case WMI_VDEV_DELETE_RESP_EVENTID:
++		ath11k_vdev_delete_resp_event(ab, skb);
++		break;
+ 	/* TODO: Add remaining events */
+ 	default:
+ 		ath11k_warn(ab, "Unknown eventid: 0x%x\n", id);
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.h
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/wmi.h	2020-03-03 17:17:23.441457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.h	2020-03-03 17:17:23.469457280 +0530
+@@ -3912,6 +3912,10 @@
  	struct wmi_mac_addr peer_macaddr;
  } __packed;
  
@@ -273,9 +285,11 @@
  struct wmi_bcn_tx_status_event {
  	u32 vdev_id;
  	u32 tx_status;
---- a/drivers/net/wireless/ath/ath11k/mac.h
-+++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -141,7 +141,8 @@ struct ath11k *ath11k_mac_get_ar_by_vdev
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.h
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/mac.h	2020-03-03 17:17:23.437457280 +0530
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.h	2020-03-03 17:17:23.469457280 +0530
+@@ -141,7 +141,8 @@
  struct ath11k *ath11k_mac_get_ar_by_pdev_id(struct ath11k_base *ab, u32 pdev_id);
  struct ath11k *ath11k_mac_get_ar_vdev_stop_status(struct ath11k_base *ab,
  						  u32 vdev_id);
