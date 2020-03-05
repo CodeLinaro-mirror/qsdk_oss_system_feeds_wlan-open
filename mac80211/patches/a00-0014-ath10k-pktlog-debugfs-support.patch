@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath10k/Kconfig
 +++ b/drivers/net/wireless/ath/ath10k/Kconfig
-@@ -94,3 +94,12 @@ config ATH10K_DFS_CERTIFIED
+@@ -93,3 +93,12 @@ config ATH10K_DFS_CERTIFIED
  	---help---
  	This option enables DFS support for initiating radiation on
  	ath10k.
@@ -15,17 +15,17 @@
 +	frame filters can be alterted by debugfs entries.
 --- a/drivers/net/wireless/ath/ath10k/Makefile
 +++ b/drivers/net/wireless/ath/ath10k/Makefile
-@@ -21,6 +21,7 @@ ath10k_core-$(CPTCFG_NL80211_TESTMODE) += testmode.o
+@@ -21,6 +21,7 @@ ath10k_core-$(CPTCFG_NL80211_TESTMODE) +
  ath10k_core-$(CPTCFG_ATH10K_TRACING) += trace.o
  ath10k_core-$(CONFIG_THERMAL) += thermal.o
  ath10k_core-$(CPTCFG_MAC80211_DEBUGFS) += debugfs_sta.o
 +ath10k_core-$(CPTCFG_ATH10K_PKTLOG) += pktlog.o
  ath10k_core-$(CONFIG_PM) += wow.o
- ath10k_core-$(CONFIG_DEV_COREDUMP) += coredump.o
+ ath10k_core-y += coredump.o
  ath10k_core-$(CPTCFG_ATH10K_CE) += ce.o
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
-@@ -38,6 +38,7 @@
+@@ -27,6 +27,7 @@
  #include "thermal.h"
  #include "wow.h"
  #include "swap.h"
@@ -33,7 +33,7 @@
  
  #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
-@@ -635,6 +636,11 @@ struct ath10k_debug {
+@@ -633,6 +634,11 @@ struct ath10k_debug {
  	u32 nf_cal_period;
  	void *cal_data;
  	u32 enable_extd_tx_stats;
@@ -47,7 +47,7 @@
  enum ath10k_state {
 --- a/drivers/net/wireless/ath/ath10k/debug.c
 +++ b/drivers/net/wireless/ath/ath10k/debug.c
-@@ -2489,6 +2489,7 @@ void ath10k_debug_destroy(struct ath10k *ar)
+@@ -2489,6 +2489,7 @@ void ath10k_debug_destroy(struct ath10k
  	ar->debug.cal_data = NULL;
  
  	ath10k_debug_fw_stats_reset(ar);
@@ -55,7 +55,7 @@
  
  	kfree(ar->debug.tpc_stats);
  }
-@@ -2570,6 +2571,8 @@ int ath10k_debug_register(struct ath10k *ar)
+@@ -2570,6 +2571,8 @@ int ath10k_debug_register(struct ath10k
  	debugfs_create_file("pktlog_filter", 0644, ar->debug.debugfs_phy, ar,
  			    &fops_pktlog_filter);
  
@@ -64,7 +64,7 @@
  	if (test_bit(WMI_SERVICE_THERM_THROT, ar->wmi.svc_map))
  		debugfs_create_file("quiet_period", 0644, ar->debug.debugfs_phy, ar,
  				    &fops_quiet_period);
-@@ -2615,6 +2618,7 @@ int ath10k_debug_register(struct ath10k *ar)
+@@ -2615,6 +2618,7 @@ int ath10k_debug_register(struct ath10k
  void ath10k_debug_unregister(struct ath10k *ar)
  {
  	cancel_delayed_work_sync(&ar->debug.htt_stats_dwork);
@@ -74,7 +74,7 @@
  #endif /* CPTCFG_ATH10K_DEBUGFS */
 --- a/drivers/net/wireless/ath/ath10k/debug.h
 +++ b/drivers/net/wireless/ath/ath10k/debug.h
-@@ -69,6 +69,14 @@ enum ath10k_dbg_aggr_mode {
+@@ -58,6 +58,14 @@ enum ath10k_dbg_aggr_mode {
  enum ath_pktlog_type {
  	ATH_PKTLOG_TYPE_TX_CTRL = 1,
  	ATH_PKTLOG_TYPE_TX_STAT,
@@ -89,7 +89,7 @@
  };
  
  struct ath10k_pktlog_hdr {
-@@ -80,6 +88,16 @@ struct ath10k_pktlog_hdr {
+@@ -69,6 +77,16 @@ struct ath10k_pktlog_hdr {
  	u8 payload[0];
  } __packed;
  
@@ -108,7 +108,7 @@
  
 --- a/drivers/net/wireless/ath/ath10k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath10k/debugfs_sta.c
-@@ -19,6 +19,7 @@
+@@ -8,6 +8,7 @@
  #include "wmi-ops.h"
  #include "txrx.h"
  #include "debug.h"
@@ -118,7 +118,15 @@
  						struct ath10k_sta_tid_stats *stats,
 --- a/drivers/net/wireless/ath/ath10k/htt_rx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
-@@ -2322,6 +2322,7 @@ static int ath10k_htt_rx_in_ord_ind(struct ath10k *ar, struct sk_buff *skb)
+@@ -2043,6 +2043,7 @@ static int ath10k_htt_rx_handle_amsdu(st
+ 
+ 	num_msdus = skb_queue_len(&amsdu);
+ 
++	ath10k_pktlog_rx(ar, &amsdu);
+ 	ath10k_htt_rx_h_ppdu(ar, &amsdu, rx_status, 0xffff);
+ 
+ 	/* only for ret = 1 indicates chained msdus */
+@@ -2584,6 +2585,7 @@ static int ath10k_htt_rx_in_ord_ind(stru
  			 * better to report something than nothing though. This
  			 * should still give an idea about rx rate to the user.
  			 */
@@ -126,7 +134,7 @@
  			ath10k_htt_rx_h_ppdu(ar, &amsdu, status, vdev_id);
  			ath10k_htt_rx_h_filter(ar, &amsdu, status, NULL);
  			ath10k_htt_rx_h_mpdu(ar, &amsdu, status, false, NULL,
-@@ -3049,6 +3050,7 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
+@@ -3397,6 +3399,7 @@ bool ath10k_htt_t2h_msg_handler(struct a
  					offsetof(struct htt_resp,
  						 pktlog_msg.payload));
  
@@ -134,7 +142,7 @@
  		if (ath10k_peer_stats_enabled(ar))
  			ath10k_fetch_10_2_tx_stats(ar,
  						   resp->pktlog_msg.payload);
-@@ -3113,6 +3115,7 @@ void ath10k_htt_rx_pktlog_completion_handler(struct ath10k *ar,
+@@ -3461,6 +3464,7 @@ void ath10k_htt_rx_pktlog_completion_han
  					     struct sk_buff *skb)
  {
  	trace_ath10k_htt_pktlog(ar, skb->data, skb->len);
@@ -875,7 +883,7 @@
 +	hdr.missed_cnt = 0;
 +	hdr.log_type = ATH_PKTLOG_TYPE_RX_STAT;
 +	hdr.timestamp = rx_desc->ppdu_end.common.tsf_timestamp;
-+	hdr.size = 292; /* rx desc size (excluding fw_rx_desc_base) */
++	hdr.size = 296; /* rx desc size (excluding fw_rx_desc_base) */
 +	hdr.type_specific_data = 0;
 +
 +	hdr_arg.payload_size = hdr.size;
@@ -906,8 +914,8 @@
 +	memcpy(log_data, &rx_desc->ppdu_start, 40);
 +	log_data += 40;
 +
-+	memcpy(log_data, &rx_desc->ppdu_end, 108);
-+	log_data += 108;
++	memcpy(log_data, &rx_desc->ppdu_end, 112);
++	log_data += 112;
 +
 +	memcpy(log_data, &rx_desc->rx_hdr_status, 64);
 +}
@@ -1317,7 +1325,7 @@
 +#endif /* _PKTLOG_H_ */
 --- a/local-symbols
 +++ b/local-symbols
-@@ -131,3 +131,4 @@ ATH10K_DEBUGFS=
+@@ -129,3 +129,4 @@ ATH10K_DEBUGFS=
  ATH10K_SPECTRAL=
  ATH10K_TRACING=
  ATH10K_DFS_CERTIFIED=
