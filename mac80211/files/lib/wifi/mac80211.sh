@@ -200,9 +200,12 @@ post_mac80211() {
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 
 	if [ "$enable_smp_affinity" -eq 1 ]; then
+		[ -f "/lib/smp_affinity_settings.sh" ] && {
+                        . /lib/smp_affinity_settings.sh
+                        enable_smp_affinity_wifi
+                }
 		[ -f "/lib/update_smp_affinity.sh" ] && {
 			. /lib/update_smp_affinity.sh
-			enable_smp_affinity_wifi
 			enable_smp_affinity_wigig
 		}
 	fi
