@@ -1,21 +1,25 @@
---- a/drivers/net/wireless/ath/ath11k/core.h
-+++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -197,6 +197,14 @@ enum ath11k_dev_flags {
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/core.h
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/core.h
+@@ -197,6 +197,16 @@ enum ath11k_dev_flags {
  	ATH11K_FLAG_FW_RESTART_FOR_HOST,
  };
  
 +#define ATH11K_STATS_MGMT_FRM_TYPE_MAX 16
 +
 +struct ath11k_mgmt_frame_stats {
-+      u32 tx_succ_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
-+      u32 tx_fail_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
-+      u32 rx_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
++	u32 tx_succ_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
++	u32 tx_fail_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
++	u32 rx_cnt[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
++	u32 tx_compl_succ[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
++	u32 tx_compl_fail[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
 +};
 +
  struct ath11k_vif {
  	u32 vdev_id;
  	enum wmi_vdev_type vdev_type;
-@@ -241,6 +249,7 @@ struct ath11k_vif {
+@@ -241,6 +251,7 @@ struct ath11k_vif {
  	int rtscts_prot_mode;
  	int txpower;
  	struct dentry *debugfs_twt;
@@ -23,9 +27,11 @@
  };
  
  struct ath11k_vif_iter {
---- a/drivers/net/wireless/ath/ath11k/debug.c
-+++ b/drivers/net/wireless/ath/ath11k/debug.c
-@@ -1568,6 +1568,73 @@ static const struct file_operations fops
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/debug.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/debug.c
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/debug.c
+@@ -1625,6 +1625,83 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -78,6 +84,16 @@
 +		for (i = 0; i < ATH11K_STATS_MGMT_FRM_TYPE_MAX-1; i++)
 +			len += scnprintf(buf + len, size - len, "	%s: %d\n", mgmt_frm_type[i],
 +					 mgmt_stats->rx_cnt[i]);
++
++		len += scnprintf(buf + len, size - len, " Tx completion stats :\n");
++		len += scnprintf(buf + len, size - len, " success completions:\n");
++		for (i = 0; i < ATH11K_STATS_MGMT_FRM_TYPE_MAX-1; i++)
++			len += scnprintf(buf + len, size - len, "       %s: %d\n", mgmt_frm_type[i],
++					 mgmt_stats->tx_compl_succ[i]);
++		len += scnprintf(buf + len, size - len, " failure completions:\n");
++		for (i = 0; i < ATH11K_STATS_MGMT_FRM_TYPE_MAX-1; i++)
++			len += scnprintf(buf + len, size - len, "       %s: %d\n", mgmt_frm_type[i],
++					 mgmt_stats->tx_compl_fail[i]);
 +	}
 +
 +	spin_unlock_bh(&ar->data_lock);
@@ -99,7 +115,7 @@
  int ath11k_debug_register(struct ath11k *ar)
  {
  	struct ath11k_base *ab = ar->ab;
-@@ -1609,6 +1676,8 @@ int ath11k_debug_register(struct ath11k
+@@ -1669,6 +1746,8 @@ int ath11k_debug_register(struct ath11k
  	debugfs_create_file("btcoex_duty_cycle", 0644,
  	                    ar->debug.debugfs_pdev, ar,
  	                    &fops__btcoex_duty_cycle);
@@ -108,9 +124,11 @@
  
  	if (ar->hw->wiphy->bands[NL80211_BAND_5GHZ]) {
  		debugfs_create_file("dfs_simulate_radar", 0200,
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4602,21 +4602,36 @@ static void ath11k_mac_op_tx(struct ieee
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/mac.c
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/mac.c
+@@ -4611,21 +4611,36 @@ static void ath11k_mac_op_tx(struct ieee
  	struct ieee80211_vif *vif = info->control.vif;
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
  	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
@@ -149,9 +167,11 @@
  		}
  		return;
  	}
---- a/drivers/net/wireless/ath/ath11k/peer.c
-+++ b/drivers/net/wireless/ath/ath11k/peer.c
-@@ -311,6 +311,7 @@ int ath11k_peer_create(struct ath11k *ar
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/peer.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/peer.c
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/peer.c
+@@ -317,6 +317,7 @@ int ath11k_peer_create(struct ath11k *ar
  	arvif->ast_hash = peer->ast_hash;
  	peer->sec_type = HAL_ENCRYPT_TYPE_OPEN;
  	peer->sec_type_grp = HAL_ENCRYPT_TYPE_OPEN;
@@ -159,8 +179,10 @@
  
  	ar->num_peers++;
  
---- a/drivers/net/wireless/ath/ath11k/peer.h
-+++ b/drivers/net/wireless/ath/ath11k/peer.h
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/peer.h
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/peer.h
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/peer.h
 @@ -20,6 +20,7 @@ struct ppdu_user_delayba {
  struct ath11k_peer {
  	struct list_head list;
@@ -169,9 +191,56 @@
  	int vdev_id;
  	u8 addr[ETH_ALEN];
  	int peer_id;
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -5953,6 +5953,11 @@ static void ath11k_mgmt_rx_event(struct
+Index: backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.c
+===================================================================
+--- backports-20191227-4.4.60-b805aa84b44f.orig/drivers/net/wireless/ath/ath11k/wmi.c
++++ backports-20191227-4.4.60-b805aa84b44f/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -4639,6 +4639,12 @@ static int wmi_process_mgmt_tx_comp(stru
+ 	struct sk_buff *msdu;
+ 	struct ieee80211_tx_info *info;
+ 	struct ath11k_skb_cb *skb_cb;
++	struct ieee80211_hdr *hdr;
++	struct ath11k_peer *peer;
++	struct ieee80211_vif *vif;
++	struct ath11k_vif *arvif;
++	struct ath11k_mgmt_frame_stats *mgmt_stats;
++	u16 frm_type;
+ 
+ 	spin_lock_bh(&ar->txmgmt_idr_lock);
+ 	msdu = idr_find(&ar->txmgmt_idr, desc_id);
+@@ -4660,6 +4666,31 @@ static int wmi_process_mgmt_tx_comp(stru
+ 	if ((!(info->flags & IEEE80211_TX_CTL_NO_ACK)) && !status)
+ 		info->flags |= IEEE80211_TX_STAT_ACK;
+ 
++	hdr = (struct ieee80211_hdr *)msdu->data;
++	frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
++
++	spin_lock_bh(&ar->ab->base_lock);
++	peer = ath11k_peer_find_by_addr(ar->ab, hdr->addr2);
++	if (!peer) {
++		spin_unlock_bh(&ar->ab->base_lock);
++		ath11k_warn(ar->ab, "failed to find peer to update txcompl mgmt stats\n");
++		goto skip_mgmt_stats;
++	}
++
++	vif = peer->vif;
++	spin_unlock_bh(&ar->ab->base_lock);
++
++	spin_lock_bh(&ar->data_lock);
++	arvif = ath11k_vif_to_arvif(vif);
++	mgmt_stats = &arvif->mgmt_stats;
++
++	if (!status)
++		mgmt_stats->tx_compl_succ[frm_type]++;
++	else
++		mgmt_stats->tx_compl_fail[frm_type]++;
++	spin_unlock_bh(&ar->data_lock);
++
++skip_mgmt_stats:
+ 	ieee80211_tx_status_irqsafe(ar->hw, msdu);
+ 
+ 	if (atomic_read(&ar->num_pending_mgmt_tx))
+@@ -5987,6 +6018,11 @@ static void ath11k_mgmt_rx_event(struct
  	struct ieee80211_hdr *hdr;
  	u16 fc;
  	struct ieee80211_supported_band *sband;
@@ -183,12 +252,12 @@
  
  	if (ath11k_pull_mgmt_rx_params_tlv(ab, skb, &rx_ev) != 0) {
  		ath11k_warn(ab, "failed to extract mgmt rx event");
-@@ -6011,7 +6016,32 @@ static void ath11k_mgmt_rx_event(struct
+@@ -6045,7 +6081,32 @@ static void ath11k_mgmt_rx_event(struct
  
  	hdr = (struct ieee80211_hdr *)skb->data;
  	fc = le16_to_cpu(hdr->frame_control);
 +	frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, fc);
- 
++
 +	spin_lock_bh(&ab->base_lock);
 +
 +	peer = ath11k_peer_find_by_addr(ab, hdr->addr1);
@@ -211,7 +280,7 @@
 +	mgmt_stats->rx_cnt[frm_type]++;
 +
 +	spin_unlock_bh(&ar->data_lock);
-+
+ 
 +skip_mgmt_stats:
  	/* Firmware is guaranteed to report all essential management frames via
  	 * WMI while it can deliver some extra via HTT. Since there can be
