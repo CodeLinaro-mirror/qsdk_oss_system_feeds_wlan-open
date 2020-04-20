@@ -48,8 +48,8 @@
  			   PTR_ERR(ar_ahb->cpu_init_rst));
 --- a/drivers/net/wireless/ath/ath11k/Kconfig
 +++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -6,7 +6,6 @@ config ATH11K
- 	depends on REMOTEPROC
+@@ -7,7 +7,6 @@ config ATH11K
+ 	depends on CRYPTO_MICHAEL_MIC
  	depends on ARCH_QCOM || COMPILE_TEST
  	select ATH_COMMON
 -	depends on QCOM_QMI_HELPERS
@@ -69,7 +69,7 @@
  #define WMI_MAX_MEM_REQS        32
 --- a/include/linux/backport-refcount.h
 +++ b/include/linux/backport-refcount.h
-@@ -167,30 +167,9 @@ static inline __must_check bool refcount
+@@ -180,30 +180,9 @@ static inline __must_check bool refcount
  	return old;
  }
  
@@ -101,7 +101,7 @@
  }
  
  /**
-@@ -228,39 +207,9 @@ static inline void refcount_inc(refcount
+@@ -241,39 +220,9 @@ static inline void refcount_inc(refcount
  	refcount_add(1, r);
  }
  
@@ -142,7 +142,7 @@
  }
  
  /**
-@@ -281,20 +230,9 @@ static inline __must_check bool refcount
+@@ -294,20 +243,9 @@ static inline __must_check bool refcount
  	return refcount_sub_and_test(1, r);
  }
  
@@ -166,7 +166,7 @@
  extern __must_check bool refcount_dec_if_one(refcount_t *r);
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -30,6 +30,8 @@
+@@ -31,6 +31,8 @@
  #include "reg.h"
  #include "rdev-ops.h"
  
@@ -175,3 +175,64 @@
  static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
  				   struct genl_info *info,
  				   struct cfg80211_crypto_settings *settings,
+@@ -13159,8 +13161,11 @@ static int nl80211_vendor_check_policy(c
+ 		NL_SET_ERR_MSG_ATTR(extack, attr, "expected nested data");
+ 		return -EINVAL;
+ 	}
+-
++#if LINUX_VERSION_IS_LESS(4,20,0)
++	return nla_validate_nested(attr, vcmd->maxattr, vcmd->policy);
++#else
+ 	return nla_validate_nested(attr, vcmd->maxattr, vcmd->policy, extack);
++#endif
+ }
+ 
+ static int nl80211_vendor_cmd(struct sk_buff *skb, struct genl_info *info)
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -4686,6 +4686,9 @@ struct wiphy_iftype_akm_suites {
+ struct wiphy {
+ 	/* assign these fields before you register the wiphy */
+ 
++#define WIPHY_COMPAT_PAD_SIZE  2048
++	u8 padding[WIPHY_COMPAT_PAD_SIZE];
++
+ 	u8 perm_addr[ETH_ALEN];
+ 	u8 addr_mask[ETH_ALEN];
+ 
+--- a/net/wireless/scan.c
++++ b/net/wireless/scan.c
+@@ -556,8 +556,14 @@ cfg80211_find_sched_scan_req(struct cfg8
+ {
+ 	struct cfg80211_sched_scan_request *pos;
+ 
++#if LINUX_VERSION_IS_LESS(4,20,0)
++	WARN_ON_ONCE(!rcu_read_lock_held() && !lockdep_rtnl_is_held());
++
++	list_for_each_entry_rcu(pos, &rdev->sched_scan_req_list, list) {
++#else
+ 	list_for_each_entry_rcu(pos, &rdev->sched_scan_req_list, list,
+ 				lockdep_rtnl_is_held()) {
++#endif
+ 		if (pos->reqid == reqid)
+ 			return pos;
+ 	}
+--- a/backport-include/linux/pm_qos.h
++++ b/backport-include/linux/pm_qos.h
+@@ -13,4 +13,16 @@
+ #define PM_QOS_DEFAULT_VALUE -1
+ #endif
+ 
++#ifdef CONFIG_CPU_IDLE
++#define cpu_latency_qos_add_request LINUX_BACKPORT(cpu_latency_qos_add_request)
++void cpu_latency_qos_add_request(struct pm_qos_request *req, s32 value);
++#define cpu_latency_qos_remove_request LINUX_BACKPORT(cpu_latency_qos_remove_request)
++void cpu_latency_qos_remove_request(struct pm_qos_request *req);
++#else
++#define cpu_latency_qos_add_request LINUX_BACKPORT(cpu_latency_qos_add_request)
++static inline void cpu_latency_qos_add_request(struct pm_qos_request *req,
++					       s32 value) {}
++#define cpu_latency_qos_remove_request LINUX_BACKPORT(cpu_latency_qos_remove_request)
++static inline void cpu_latency_qos_remove_request(struct pm_qos_request *req) {}
++#endif
+ #endif	/* _COMPAT_LINUX_PM_QOS_H */

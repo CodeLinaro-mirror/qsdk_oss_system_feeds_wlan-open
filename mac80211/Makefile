@@ -3,15 +3,15 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=mac80211
 
-PKG_BACKPORTS_VERSION:=368e8c51a596
+PKG_BACKPORTS_VERSION:=abe05f0c83f5
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=b805aa84b44f
+PKG_KERNEL_VERSION:=9de9a9b19d3f
 PKG_KERNEL_SOURCE_URL:=git://codeaurora.org/quic/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
-PKG_VERSION:=20191227
+PKG_VERSION:=20200415
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -230,13 +230,15 @@ define DownloadBackports
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit db3bdcb9 && git revert --no-edit 0628cda3)
+	git revert --no-edit db3bdcb9 && git revert --no-edit 0628cda3 && \
+	git revert --no-edit e3ae39ed)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
+	rm -rf patches/0003-cfg80211-wext-padding/include_net_cfg80211.patch && \
 	git revert --no-edit b35b2767 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))

@@ -1,22 +1,3 @@
-From: John Crispin <john@phrozen.org>
-Subject: [PATCH] ath11k: add tx hw 802.11 encapusaltion offloading support
-Date: Sun, 14 Jul 2019 16:10:55 +0200
-
-
-This patch adds support for ethernet rxtx mode to the driver. The feature
-is enabled via a new module parameter. If enabled to driver will enable
-the feature on a per vif basis if all other requirements were met.
-
-Signed-off-by: Shashidhar Lakkavalli <slakkavalli@datto.com>
-Signed-off-by: John Crispin <john@phrozen.org>
----
-This patch depends on https://patchwork.kernel.org/patch/11003671/
-
- drivers/net/wireless/ath/ath11k/core.h  |  5 +++
- drivers/net/wireless/ath/ath11k/dp_tx.c | 19 ++++++++---
- drivers/net/wireless/ath/ath11k/mac.c   | 42 ++++++++++++++++++++-----
- 3 files changed, 55 insertions(+), 11 deletions(-)
-
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
 @@ -74,9 +74,14 @@ static inline enum wme_ac ath11k_tid_to_
@@ -60,11 +41,11 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
 -	if (!ieee80211_is_data_qos(hdr->frame_control))
 +	if (cb->flags & ATH11K_SKB_HW_80211_ENCAP)
 +		return skb->priority % IEEE80211_QOS_CTL_TID_MASK;
-+	else if (!ieee80211_is_data_qos(hdr->frame_control))
++	else if(!ieee80211_is_data_qos(hdr->frame_control))
  		return HAL_DESC_REO_NON_QOS_TID;
  	else
  		return skb->priority & IEEE80211_QOS_CTL_TID_MASK;
-@@ -88,7 +95,8 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+@@ -90,7 +97,8 @@ int ath11k_dp_tx(struct ath11k *ar, stru
  	if (test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags))
  		return -ESHUTDOWN;
  
@@ -74,33 +55,18 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
  		return -ENOTSUPP;
  
  	pool_id = skb_get_queue_mapping(skb) & (ATH11K_HW_MAX_QUEUES - 1);
-@@ -150,13 +158,14 @@ int ath11k_dp_tx(struct ath11k *ar, stru
- 	case HAL_TCL_ENCAP_TYPE_NATIVE_WIFI:
- 		ath11k_dp_tx_encap_nwifi(skb);
- 		break;
-+	case HAL_TCL_ENCAP_TYPE_ETHERNET:
-+		break;
- 	case HAL_TCL_ENCAP_TYPE_RAW:
- 		if (!test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags)) {
- 			ret = -EINVAL;
- 			goto fail_remove_idr;
+@@ -178,6 +186,8 @@ tcl_ring_sel:
  		}
  		break;
--	case HAL_TCL_ENCAP_TYPE_ETHERNET:
+ 	case HAL_TCL_ENCAP_TYPE_ETHERNET:
++		/* no need to encap */
++		break;
  	case HAL_TCL_ENCAP_TYPE_802_3:
  		/* TODO: Take care of other encap modes as well */
  		ret = -EINVAL;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4098,6 +4098,7 @@ static int ath11k_mac_mgmt_tx_wmi(struct
- {
- 	struct ath11k_base *ab = ar->ab;
- 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
-+	struct ieee80211_tx_info *info;
- 	dma_addr_t paddr;
- 	int buf_id;
- 	int ret;
-@@ -4223,6 +4224,7 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -4550,6 +4550,7 @@ static void ath11k_mac_op_tx(struct ieee
  			     struct ieee80211_tx_control *control,
  			     struct sk_buff *skb)
  {
@@ -108,7 +74,7 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
  	struct ath11k *ar = hw->priv;
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	struct ieee80211_vif *vif = info->control.vif;
-@@ -4231,7 +4233,10 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -4558,7 +4559,10 @@ static void ath11k_mac_op_tx(struct ieee
  	bool is_prb_rsp;
  	int ret;
  
@@ -120,7 +86,7 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
  		ret = ath11k_mac_mgmt_tx(ar, skb, is_prb_rsp);
  		if (ret) {
-@@ -4449,6 +4454,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -4778,6 +4782,7 @@ static int ath11k_mac_op_add_interface(s
  	struct vdev_create_params vdev_param = {0};
  	struct peer_create_params peer_param;
  	u32 param_id, param_value;
@@ -128,7 +94,7 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
  	u16 nss;
  	int i;
  	int ret;
-@@ -4545,10 +4551,22 @@ static int ath11k_mac_op_add_interface(s
+@@ -4874,10 +4879,22 @@ static int ath11k_mac_op_add_interface(s
  	spin_unlock_bh(&ar->data_lock);
  
  	param_id = WMI_VDEV_PARAM_TX_ENCAP_TYPE;
@@ -152,18 +118,3 @@ This patch depends on https://patchwork.kernel.org/patch/11003671/
  
  	ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
  					    param_id, param_value);
-@@ -6675,9 +6693,13 @@ static int __ath11k_mac_register(struct
- 	/* Use normal tx path for raw mode as fast-tx path does not
- 	 * ensure tailroom availability for including MIC length.
- 	 */
--	if (!test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
-+	if (!test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags)) {
- 		ieee80211_hw_set(ar->hw, SUPPORT_FAST_XMIT);
- 
-+		if (ath11k_ethernet_mode)
-+			ieee80211_hw_set(ar->hw, SUPPORTS_80211_ENCAP);
-+	}
-+
- 	ieee80211_hw_set(ar->hw, CONNECTION_MONITOR);
- 	ieee80211_hw_set(ar->hw, SUPPORTS_PER_STA_GTK);
- 	ieee80211_hw_set(ar->hw, WANT_MONITOR_VIF);
