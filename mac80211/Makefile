@@ -217,6 +217,11 @@ else
   endef
 endif
 
+removeBackport ?= $(shell wget $(SERVER_PATH)/$(PKG_SOURCE) -P $(TOPDIR)/dl/);
+ifeq ($(FORCED_BACKPORTS),false)
+$(call removeBackport)
+endif
+
 define DownloadBackports
   $(eval $(Download/Defaults))
   $(eval $(Download/backports))
