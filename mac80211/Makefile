@@ -348,8 +348,10 @@ define KernelPackage/ath11k
   DEPENDS+= +kmod-ath +TARGET_ipq_ipq807x:kmod-qrtr_mproc +TARGET_ipq_ipq807x_64:kmod-qrtr_mproc \
 	+TARGET_ipq_ipq60xx:kmod-qrtr_mproc +TARGET_ipq_ipq60xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
   FILES:= \
-	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko
-  AUTOLOAD:=$(call AutoProbe,ath11k)
+	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko \
+	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko \
+	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_pci.ko
+  AUTOLOAD:=$(call AutoProbe,ath11k ath11k_ahb ath11k_pci)
 endef
 
 define KernelPackage/ath11k/description
@@ -436,7 +438,7 @@ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
-config-$(call config_package,ath11k) += ATH11K
+config-$(call config_package,ath11k) += ATH11K ATH11K_PCI ATH11K_AHB
 config-$(call config_package,wil6210) += ATH_CARDS WIL6210
 
 config-$(CONFIG_PACKAGE_WIL6210_NSS_SUPPORT) += WIL6210_NSS_SUPPORT
