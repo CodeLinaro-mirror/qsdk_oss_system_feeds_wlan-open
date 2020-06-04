@@ -17,6 +17,16 @@ MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh
 MP_CONFIG_BOOL="mesh_auto_open_plinks mesh_fwding"
 MP_CONFIG_STRING="mesh_power_mode"
 
+HE_MU_EDCA_PARAMS="he_mu_edca_ac_be_aifsn he_mu_edca_ac_be_aci he_mu_edca_ac_be_ecwmin
+		   he_mu_edca_ac_be_ecwmax he_mu_edca_ac_be_timer he_mu_edca_ac_bk_aifsn
+		   he_mu_edca_ac_bk_aci he_mu_edca_ac_bk_ecwmin he_mu_edca_ac_bk_ecwmax
+		   he_mu_edca_ac_bk_timer he_mu_edca_ac_vi_ecwmin he_mu_edca_ac_vi_ecwmax
+		   he_mu_edca_ac_vi_aifsn he_mu_edca_ac_vi_aci he_mu_edca_ac_vi_timer
+		   he_mu_edca_ac_vo_aifsn he_mu_edca_ac_vo_aci he_mu_edca_ac_vo_ecwmin
+		   he_mu_edca_ac_vo_ecwmax he_mu_edca_ac_vo_timer"
+HE_MU_EDCA_PARAMS_DEFAULT="8 0 9 10 255 15 1 9 10 255 5 7 5 2 255 5 3 5 7 255"
+
+
 set_wifi_up() {
 	local vif="$1"
 	local ifname="$2"
@@ -60,6 +70,13 @@ bridge_interface() {(
         done
 )}
 
+
+mu_edca_init_config() {
+	for param in $HE_MU_EDCA_PARAMS; do
+		config_add_int $param
+	done
+}
+
 drv_mac80211_init_device_config() {
 	hostapd_common_add_device_config
 
@@ -68,7 +85,8 @@ drv_mac80211_init_device_config() {
 	config_add_string board_file
 	config_add_int beacon_int chanbw frag rts
 	config_add_int rxantenna txantenna antenna_gain txpower distance
-	config_add_boolean noscan
+	mu_edca_init_config
+	config_add_boolean noscan he_mu_edca
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_boolean \
@@ -147,6 +165,27 @@ mac80211_add_he_capabilities() {
 	IFS="$oifs"
 }
 
+mac80211_set_he_muedca_params() {
+	json_select config
+
+	for param in $HE_MU_EDCA_PARAMS; do
+		json_get_vars $param
+
+		eval set_value=\$$param
+		if [ -n "$set_value" ]; then
+			eval $params=$set_value
+		else
+			eval $param=$1
+		fi
+
+		shift 1
+		eval mu_edca_setting=\$$param
+		append base_cfg "$param=$mu_edca_setting" "$N"
+	done
+
+	json_select ..
+}
+
 mac80211_hostapd_setup_base() {
 	local phy="$1"
 
@@ -155,7 +194,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
-	json_get_vars noscan
+	json_get_vars noscan he_mu_edca:-he_mu_edca=0
 	json_get_values ht_capab_list ht_capab
 
 	ieee80211n=1
@@ -450,30 +489,14 @@ mac80211_hostapd_setup_base() {
                 bsscolor=$(($bsscolor % 63))
                 append base_cfg "he_bss_color=$bsscolor" "$N"
 		append base_cfg "he_default_pe_duration=4" "$N"
-		append base_cfg "he_mu_edca_qos_info_param_count=0" "$N"
-                append base_cfg "he_mu_edca_qos_info_q_ack=0" "$N"
-                append base_cfg "he_mu_edca_qos_info_queue_request=0" "$N"
-                append base_cfg "he_mu_edca_qos_info_txop_request=0" "$N"
-                append base_cfg "he_mu_edca_ac_be_aifsn=8" "$N"
-                append base_cfg "he_mu_edca_ac_be_aci=0" "$N"
-                append base_cfg "he_mu_edca_ac_be_ecwmin=9" "$N"
-                append base_cfg "he_mu_edca_ac_be_ecwmax=10" "$N"
-                append base_cfg "he_mu_edca_ac_be_timer=255" "$N"
-                append base_cfg "he_mu_edca_ac_bk_aifsn=15" "$N"
-                append base_cfg "he_mu_edca_ac_bk_aci=1" "$N"
-                append base_cfg "he_mu_edca_ac_bk_ecwmin=9" "$N"
-                append base_cfg "he_mu_edca_ac_bk_ecwmax=10" "$N"
-                append base_cfg "he_mu_edca_ac_bk_timer=255" "$N"
-                append base_cfg "he_mu_edca_ac_vi_ecwmin=5" "$N"
-                append base_cfg "he_mu_edca_ac_vi_ecwmax=7" "$N"
-                append base_cfg "he_mu_edca_ac_vi_aifsn=5" "$N"
-                append base_cfg "he_mu_edca_ac_vi_aci=2" "$N"
-                append base_cfg "he_mu_edca_ac_vi_timer=255" "$N"
-                append base_cfg "he_mu_edca_ac_vo_aifsn=5" "$N"
-                append base_cfg "he_mu_edca_ac_vo_aci=3" "$N"
-                append base_cfg "he_mu_edca_ac_vo_ecwmin=5" "$N"
-                append base_cfg "he_mu_edca_ac_vo_ecwmax=7" "$N"
-                append base_cfg "he_mu_edca_ac_vo_timer=255" "$N"
+		json_select ..
+		[ "$he_mu_edca" != "0" ] && {
+			append base_cfg "he_mu_edca_qos_info_param_count=1" "$N"
+			append base_cfg "he_mu_edca_qos_info_q_ack=0" "$N"
+			append base_cfg "he_mu_edca_qos_info_queue_request=0" "$N"
+			append base_cfg "he_mu_edca_qos_info_txop_request=0" "$N"
+			mac80211_set_he_muedca_params $HE_MU_EDCA_PARAMS_DEFAULT
+		}
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
@@ -484,7 +507,6 @@ ${noscan:+noscan=$noscan}
 $base_cfg
 
 EOF
-	json_select ..
 }
 
 mac80211_hostapd_setup_bss() {
