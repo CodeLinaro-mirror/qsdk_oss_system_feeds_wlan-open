@@ -182,8 +182,6 @@ mac80211_set_he_muedca_params() {
 		eval mu_edca_setting=\$$param
 		append base_cfg "$param=$mu_edca_setting" "$N"
 	done
-
-	json_select ..
 }
 
 mac80211_hostapd_setup_base() {
@@ -507,6 +505,7 @@ ${noscan:+noscan=$noscan}
 $base_cfg
 
 EOF
+	json_select ..
 }
 
 mac80211_hostapd_setup_bss() {
