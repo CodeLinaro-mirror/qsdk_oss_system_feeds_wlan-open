@@ -1,6 +1,8 @@
---- a/drivers/net/wireless/ath/ath11k/core.c
-+++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -645,6 +645,9 @@ int ath11k_core_qmi_firmware_ready(struc
+Index: backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20200415-4.4.60-9de9a9b19d3f.orig/drivers/net/wireless/ath/ath11k/core.c
++++ backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/core.c
+@@ -643,6 +643,9 @@ int ath11k_core_qmi_firmware_ready(struc
  #endif
  
  	ath11k_ahb_ext_irq_enable(ab);
@@ -10,9 +12,11 @@
  	mutex_unlock(&ab->core_lock);
  
  	return 0;
---- a/drivers/net/wireless/ath/ath11k/core.h
-+++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -867,6 +867,7 @@ struct ath11k_base *ath11k_core_alloc(st
+Index: backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20200415-4.4.60-9de9a9b19d3f.orig/drivers/net/wireless/ath/ath11k/core.h
++++ backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/core.h
+@@ -879,6 +879,7 @@ struct ath11k_base *ath11k_core_alloc(st
  void ath11k_core_free(struct ath11k_base *ath11k);
  int ath11k_core_fetch_bdf(struct ath11k_base *ath11k,
  			  struct ath11k_board_data *bd);
@@ -20,8 +24,10 @@
  void ath11k_core_free_bdf(struct ath11k_base *ab, struct ath11k_board_data *bd);
  
  void ath11k_core_halt(struct ath11k *ar);
---- a/drivers/net/wireless/ath/ath11k/qmi.c
-+++ b/drivers/net/wireless/ath/ath11k/qmi.c
+Index: backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/qmi.c
+===================================================================
+--- backports-20200415-4.4.60-9de9a9b19d3f.orig/drivers/net/wireless/ath/ath11k/qmi.c
++++ backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/qmi.c
 @@ -14,6 +14,194 @@ unsigned int enable_cold_boot_cal = 1;
  module_param(enable_cold_boot_cal, uint, 0644);
  MODULE_PARM_DESC(enable_cold_boot_cal, "cold boot calibration enable:1 disable:0");
@@ -217,7 +223,7 @@
  static struct qmi_elem_info qmi_wlanfw_host_cap_req_msg_v01_ei[] = {
  	{
  		.data_type	= QMI_OPT_FLAG,
-@@ -1504,6 +1692,146 @@ static struct qmi_elem_info qmi_wlanfw_c
+@@ -1504,6 +1692,150 @@ static struct qmi_elem_info qmi_wlanfw_c
  	},
  };
  
@@ -225,30 +231,33 @@
 +					     const u8 *buffer, unsigned int file_len)
 +{
 +	int ret = 0;
-+	struct qmi_wlanfw_qdss_trace_config_download_req_msg_v01 req;
++	struct qmi_wlanfw_qdss_trace_config_download_req_msg_v01 *req;
 +	struct qmi_wlanfw_qdss_trace_config_download_resp_msg_v01 resp;
 +	struct qmi_txn txn = {};
 +	const u8 *temp = buffer;
 +	unsigned int  remaining;
 +
-+	memset(&req, 0, sizeof(req));
++	req = kzalloc(sizeof(*req), GFP_KERNEL);
++	if (!req)
++		return -ENOMEM;
++
 +	memset(&resp, 0, sizeof(resp));
 +
 +	remaining = file_len;
 +	while (remaining) {
-+		req.total_size_valid = 1;
-+		req.total_size = file_len;
-+		req.seg_id_valid = 1;
-+		req.data_valid = 1;
-+		req.end_valid = 1;
++		req->total_size_valid = 1;
++		req->total_size = file_len;
++		req->seg_id_valid = 1;
++		req->data_valid = 1;
++		req->end_valid = 1;
 +
 +		if (remaining > QMI_WLANFW_MAX_DATA_SIZE_V01) {
-+			req.data_len = QMI_WLANFW_MAX_DATA_SIZE_V01;
++			req->data_len = QMI_WLANFW_MAX_DATA_SIZE_V01;
 +		} else {
-+			req.data_len = remaining;
-+			req.end = 1;
++			req->data_len = remaining;
++			req->end = 1;
 +		}
-+		memcpy(req.data, temp, req.data_len);
++		memcpy(req->data, temp, req->data_len);
 +
 +		ret = qmi_txn_init(&ab->qmi.handle, &txn,
 +				   qmi_wlanfw_qdss_trace_config_download_resp_msg_v01_ei,
@@ -259,7 +268,7 @@
 +		ret = qmi_send_request(&ab->qmi.handle, NULL, &txn,
 +				       QMI_WLANFW_QDSS_TRACE_CONFIG_DOWNLOAD_REQ_V01,
 +				       QMI_WLANFW_QDSS_TRACE_CONFIG_DOWNLOAD_REQ_MSG_V01_MAX_LEN,
-+				       qmi_wlanfw_qdss_trace_config_download_req_msg_v01_ei, &req);
++				       qmi_wlanfw_qdss_trace_config_download_req_msg_v01_ei, req);
 +		if (ret < 0) {
 +			ath11k_warn(ab, "Failed to send QDSS config download request,err = %d\n", ret);
 +			goto out;
@@ -275,12 +284,13 @@
 +			ret = -EINVAL;
 +			goto out;
 +		}
-+		remaining -= req.data_len;
-+		temp += req.data_len;
-+		req.seg_id++;
++		remaining -= req->data_len;
++		temp += req->data_len;
++		req->seg_id++;
 +	}
 +
 +out:
++	kfree(req);
 +	return ret;
 +}
 +
@@ -364,7 +374,7 @@
  static int ath11k_qmi_host_cap_send(struct ath11k_base *ab)
  {
  	struct qmi_wlanfw_host_cap_req_msg_v01 req;
-@@ -1587,7 +1915,12 @@ static int ath11k_qmi_fw_ind_register_se
+@@ -1587,7 +1919,12 @@ static int ath11k_qmi_fw_ind_register_se
  	req->cal_done_enable = 1;
  	req->fw_init_done_enable_valid = 1;
  	req->fw_init_done_enable = 1;
@@ -378,7 +388,7 @@
  	req->pin_connect_result_enable_valid = 0;
  	req->pin_connect_result_enable = 0;
  
-@@ -2114,6 +2447,27 @@ void ath11k_qmi_firmware_stop(struct ath
+@@ -2114,6 +2451,27 @@ void ath11k_qmi_firmware_stop(struct ath
  	}
  }
  
@@ -406,8 +416,10 @@
  int ath11k_qmi_firmware_start(struct ath11k_base *ab,
  			      u32 mode)
  {
---- a/drivers/net/wireless/ath/ath11k/qmi.h
-+++ b/drivers/net/wireless/ath/ath11k/qmi.h
+Index: backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/qmi.h
+===================================================================
+--- backports-20200415-4.4.60-9de9a9b19d3f.orig/drivers/net/wireless/ath/ath11k/qmi.h
++++ backports-20200415-4.4.60-9de9a9b19d3f/drivers/net/wireless/ath/ath11k/qmi.h
 @@ -26,6 +26,8 @@
  #define ATH11K_QMI_WLANFW_MAX_NUM_MEM_SEG_V01	32
  #define ATH11K_QMI_CALDB_SIZE			0x480000
