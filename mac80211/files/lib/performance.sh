@@ -21,6 +21,19 @@ perf_setup(){
 		#read the "/etc/config/wireless" file to check whether nss is enabled or not if not then set 0
 		config_get enable_nss mac80211 enable_nss 0
 
+                if [ "$enable_nss" -eq 1 ]; then
+                        /etc/init.d/qca-nss-ecm start
+			sysctl -w dev.nss.n2hcfg.n2h_queue_limit_core0=256 >/dev/null 2>/dev/null
+			sysctl -w dev.nss.n2hcfg.n2h_queue_limit_core1=256 >/dev/null 2>/dev/null
+
+                        #Experimental values below. Subject to changes after analysis
+                        # TODO : allocate mem as per platform
+                        sysctl -w dev.nss.n2hcfg.extra_pbuf_core0=9000000 >/dev/null 2>/dev/null
+                        sysctl -w dev.nss.n2hcfg.n2h_high_water_core0=67392 >/dev/null 2>/dev/null
+                        sysctl -w dev.nss.n2hcfg.n2h_wifi_pool_buf=40960 >/dev/null 2>/dev/null
+                        return;
+                fi
+
 		if [ "$enable_nss" -eq 0 ]; then
 			/etc/init.d/qca-nss-ecm stop
 		fi
