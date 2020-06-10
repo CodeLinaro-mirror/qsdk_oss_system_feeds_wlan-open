@@ -15,7 +15,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -798,6 +798,8 @@ struct ath11k_base {
+@@ -801,6 +801,8 @@ struct ath11k_base {
  	bool mhi_support;
  	bool fixed_mem_region;
  	bool use_register_windowing;
@@ -94,17 +94,17 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  {
  	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
 +        u32 window_start;
-+
-+        if (ab->static_window_map && offset >= MAX_UNWINDOWED_ADDRESS) {
-+                window_start = ath11k_pci_get_window_start(ab, offset);
  
 -	if (ab->use_register_windowing) {
++        if (ab->use_register_windowing && ab->static_window_map &&
++	    offset >= MAX_UNWINDOWED_ADDRESS) {
++                window_start = ath11k_pci_get_window_start(ab, offset);
++
 +                if (window_start)
-+                        iowrite32(value, ar_pci->mem + window_start +
-+                                  (offset & WINDOW_RANGE_MASK));
-+		else
-+			iowrite32(value, ar_pci->mem + offset);
-+        } else if (ab->use_register_windowing) {
++			offset = offset & WINDOW_RANGE_MASK;
++
++		iowrite32(value, ar_pci->mem + window_start + offset);
++        } else if (ab->use_register_windowing && !ab->static_window_map) {
  		spin_lock_bh(&ar_pci->window_lock);
  		ath11k_pci_select_window(ar_pci, offset);
  		iowrite32(value, ar_pci->mem + WINDOW_START + (offset & WINDOW_RANGE_MASK));
@@ -114,17 +114,17 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
 -	u32 val;
 +        u32 val, window_start;
++
++        if (ab->use_register_windowing && ab->static_window_map &&
++	    offset >= MAX_UNWINDOWED_ADDRESS) {
++                window_start = ath11k_pci_get_window_start(ab, offset);
  
 -	if (ab->use_register_windowing) {
-+        if (ab->static_window_map && offset >= MAX_UNWINDOWED_ADDRESS) {
-+                window_start = ath11k_pci_get_window_start(ab, offset);
++		if (window_start)
++			offset = offset & WINDOW_RANGE_MASK;
 +
-+                if (window_start)
-+                        val = ioread32(ar_pci->mem + window_start +
-+                                       (offset & WINDOW_RANGE_MASK));
-+                else
-+                        val = ioread32(ar_pci->mem + offset);
-+        } else if (ab->use_register_windowing) {
++		val = ioread32(ar_pci->mem + window_start + offset);
++        } else if (ab->use_register_windowing && !ab->static_window_map) {
  		spin_lock_bh(&ar_pci->window_lock);
  		ath11k_pci_select_window(ar_pci, offset);
  		val = ioread32(ar_pci->mem + WINDOW_START + (offset & WINDOW_RANGE_MASK));
@@ -193,7 +193,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +++ b/drivers/net/wireless/ath/ath11k/hif.h
 @@ -94,6 +94,7 @@ struct ath11k_hif_ops {
  				   u32 *base_vector);
- 	void (*get_msi_address)(struct ath11k_base *ab, u32 *msi_addr_lo,
+ 	int (*get_msi_address)(struct ath11k_base *ab, u32 *msi_addr_lo,
  				u32 *msi_addr_hi);
 +	u32 (*get_window_offset)(struct ath11k_base *ab, u32 offset);
  };
@@ -201,7 +201,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  static inline int ath11k_hif_start(struct ath11k_base *sc)
 @@ -161,4 +162,12 @@ static inline int ath11k_get_msi_address
  
- 	ab->hif.ops->get_msi_address(ab, msi_addr_lo, msi_addr_hi);
+ 	return ab->hif.ops->get_msi_address(ab, msi_addr_lo, msi_addr_hi);
  }
 +
 +static inline u32 ath11k_hif_get_window_offset(struct ath11k_base *ab, u32 offset)
