@@ -99,6 +99,10 @@ EOF
 		[ -n "$type" ] || break
 		devidx=$(($devidx + 1))
 	done
+
+	#add this delay for empty wifi script issue in rdp413
+	sleep 1
+
 	for _dev in /sys/class/ieee80211/*; do
 		[ -e "$_dev" ] || continue
 		dev="${_dev##*/}"
