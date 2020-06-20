@@ -31,11 +31,21 @@ if [ -e /sys/devices/platform/soc/c000000.wifi/devcoredump/data ] && [ "$ACTION"
 	FILENAME="IPQ6018-m3dump-$TIMESTAMP.bin"
 	DUMPPATH="/sys/devices/platform/soc/c000000.wifi/devcoredump/data"
 fi
+
+if [ -e /sys/bus/pci/devices/0000\:01\:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="qcn9000-pci0-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/bus/pci/devices/0000\:01\:00.0/devcoredump/data"
+fi
+
+if [ -e /sys/bus/pci/devices/0001\:01\:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="qcn9000-pci1-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/bus/pci/devices/0001\:01\:00.0/devcoredump/data"
+fi
+
 if [ -n "$FILENAME" ]; then
 	printf "%s\n" "Collecting dump_data in $SERVER" > /dev/console
-	cp $DUMPPATH /$FILENAME
-	cd /
-	$(tftp -l $FILENAME -p $SERVER 2>&1)
+	cp $DUMPPATH /tmp/$FILENAME
+	$(tftp -l /tmp/$FILENAME -p $SERVER 2>&1)
 	if [ $? -eq 0 ]; then
 		printf "%s\n" "dump_data collected in $SERVER" \
 								> /dev/console
@@ -44,6 +54,5 @@ if [ -n "$FILENAME" ]; then
 								> /dev/console
 	fi
 	echo 1 > $DUMPPATH
-	rm $FILENAME
-	cd -
+	rm /tmp/$FILENAME
 fi
