@@ -1,6 +1,6 @@
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -1941,6 +1941,7 @@ struct cfg80211_scan_info {
+@@ -2020,6 +2020,7 @@ struct cfg80211_scan_info {
   * @channels: channels to scan on.
   * @n_channels: total number of channels to scan
   * @scan_width: channel width for scanning
@@ -8,7 +8,7 @@
   * @ie: optional information element(s) to add into Probe Request or %NULL
   * @ie_len: length of ie in octets
   * @duration: how long to listen on each channel, in TUs. If
-@@ -1967,6 +1968,7 @@ struct cfg80211_scan_request {
+@@ -2046,6 +2047,7 @@ struct cfg80211_scan_request {
  	int n_ssids;
  	u32 n_channels;
  	enum nl80211_bss_scan_width scan_width;
@@ -18,44 +18,47 @@
  	u16 duration;
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -5539,6 +5539,9 @@ enum nl80211_feature_flags {
-  *	feature, which prevents bufferbloat by using the expected transmission
-  *	time to limit the amount of data buffered in the hardware.
+@@ -5773,6 +5773,12 @@ enum nl80211_feature_flags {
+  * @NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211_TX_STATUS: The driver
+  *	can report tx status for control port over nl80211 tx operations.
   *
 + * @NL80211_EXT_FEATURE_WIDE_BAND_SCAN: Driver/device supports wide band scan
 + *	 on a frequency along with its corresponding phymode (40Mhz, 80Mhz)
 + *
++ * @NL80211_EXT_FEATURE_WIDE_BAND_SCAN: Driver/device supports wide band scan
++ *	on a frequency along with its corresponding phymode (40Mhz, 80Mhz)
++ *
   * @NUM_NL80211_EXT_FEATURES: number of extended features.
   * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
   */
-@@ -5585,6 +5588,7 @@ enum nl80211_ext_feature_index {
+@@ -5819,6 +5825,7 @@ enum nl80211_ext_feature_index {
  	NL80211_EXT_FEATURE_STA_TX_PWR,
  	NL80211_EXT_FEATURE_SAE_OFFLOAD,
  	NL80211_EXT_FEATURE_VLAN_OFFLOAD,
 +	NL80211_EXT_FEATURE_WIDE_BAND_SCAN,
  	NL80211_EXT_FEATURE_AQL,
- 
- 	/* add new features before the definition below */
-@@ -5697,6 +5701,8 @@ enum nl80211_timeout_reason {
-  * @NL80211_SCAN_FLAG_MIN_PREQ_CONTENT: minimize probe request content to
-  *	only have supported rates and no additional capabilities (unless
-  *	added by userspace explicitly.)
+ 	NL80211_EXT_FEATURE_BEACON_PROTECTION,
+ 	NL80211_EXT_FEATURE_CONTROL_PORT_NO_PREAUTH,
+@@ -5942,6 +5949,8 @@ enum nl80211_timeout_reason {
+  * @NL80211_SCAN_FLAG_FREQ_KHZ: report scan results with
+  *	%NL80211_ATTR_SCAN_FREQ_KHZ. This also means
+  *	%NL80211_ATTR_SCAN_FREQUENCIES will not be included.
 + * @NL80211_SCAN_FLAG_WIDE_BAND_SCAN: This flag intends the driver to perform
 + *	wide band scan only if the driver supports it.
   */
  enum nl80211_scan_flags {
  	NL80211_SCAN_FLAG_LOW_PRIORITY				= 1<<0,
-@@ -5712,6 +5718,7 @@ enum nl80211_scan_flags {
- 	NL80211_SCAN_FLAG_HIGH_ACCURACY				= 1<<10,
+@@ -5958,6 +5967,7 @@ enum nl80211_scan_flags {
  	NL80211_SCAN_FLAG_RANDOM_SN				= 1<<11,
  	NL80211_SCAN_FLAG_MIN_PREQ_CONTENT			= 1<<12,
-+	NL80211_SCAN_FLAG_WIDE_BAND_SCAN			= 1<<13,
+ 	NL80211_SCAN_FLAG_FREQ_KHZ				= 1<<13,
++	NL80211_SCAN_FLAG_WIDE_BAND_SCAN			= 1<<14,
  };
  
  /**
 --- a/net/mac80211/scan.c
 +++ b/net/mac80211/scan.c
-@@ -687,11 +687,13 @@ static int __ieee80211_start_scan(struct
+@@ -695,11 +695,13 @@ static int __ieee80211_start_scan(struct
  
  		local->hw_scan_req = kmalloc(
  				sizeof(*local->hw_scan_req) +
@@ -71,7 +74,7 @@
  		ies = (u8 *)local->hw_scan_req +
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -7583,7 +7583,10 @@ nl80211_check_scan_flags(struct wiphy *w
+@@ -7743,7 +7743,10 @@ nl80211_check_scan_flags(struct wiphy *w
  				     NL80211_EXT_FEATURE_SCAN_RANDOM_SN) ||
  	    !nl80211_check_scan_feat(wiphy, *flags,
  				     NL80211_SCAN_FLAG_MIN_PREQ_CONTENT,
@@ -83,10 +86,10 @@
  		return -EOPNOTSUPP;
  
  	if (*flags & NL80211_SCAN_FLAG_RANDOM_ADDR) {
-@@ -7606,10 +7609,12 @@ static int nl80211_trigger_scan(struct s
- 	struct cfg80211_registered_device *rdev = info->user_ptr[0];
- 	struct wireless_dev *wdev = info->user_ptr[1];
+@@ -7768,10 +7771,12 @@ static int nl80211_trigger_scan(struct s
  	struct cfg80211_scan_request *request;
+ 	struct nlattr *scan_freqs = NULL;
+ 	bool scan_freqs_khz = false;
 +	struct cfg80211_chan_def chandef;
  	struct nlattr *attr;
  	struct wiphy *wiphy;
@@ -97,11 +100,11 @@
  
  	wiphy = &rdev->wiphy;
  
-@@ -7624,7 +7629,14 @@ static int nl80211_trigger_scan(struct s
+@@ -7786,7 +7791,14 @@ static int nl80211_trigger_scan(struct s
  		goto unlock;
  	}
  
--	if (info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]) {
+-	if (info->attrs[NL80211_ATTR_SCAN_FREQ_KHZ]) {
 +	if (info->attrs[NL80211_ATTR_WIPHY_FREQ]) {
 +		n_channels = 1;
 +		if (nl80211_parse_chandef(rdev, info, &chandef)) {
@@ -109,11 +112,11 @@
 +			goto unlock;
 +		}
 +		chandef_found = true;
-+	} else if (info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]) {
- 		n_channels = validate_scan_freqs(
- 				info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]);
- 		if (!n_channels) {
-@@ -7655,6 +7667,7 @@ static int nl80211_trigger_scan(struct s
++	} else if (info->attrs[NL80211_ATTR_SCAN_FREQ_KHZ]) {
+ 		if (!wiphy_ext_feature_isset(wiphy,
+ 					     NL80211_EXT_FEATURE_SCAN_FREQ_KHZ))
+ 			return -EOPNOTSUPP;
+@@ -7825,6 +7837,7 @@ static int nl80211_trigger_scan(struct s
  	}
  
  	request = kzalloc(sizeof(*request)
@@ -121,7 +124,7 @@
  			+ sizeof(*request->ssids) * n_ssids
  			+ sizeof(*request->channels) * n_channels
  			+ ie_len, GFP_KERNEL);
-@@ -7663,6 +7676,12 @@ static int nl80211_trigger_scan(struct s
+@@ -7833,6 +7846,12 @@ static int nl80211_trigger_scan(struct s
  		goto unlock;
  	}
  
@@ -134,7 +137,7 @@
  	if (n_ssids)
  		request->ssids = (void *)&request->channels[n_channels];
  	request->n_ssids = n_ssids;
-@@ -7693,7 +7712,7 @@ static int nl80211_trigger_scan(struct s
+@@ -7866,7 +7885,7 @@ static int nl80211_trigger_scan(struct s
  			request->channels[i] = chan;
  			i++;
  		}
@@ -143,7 +146,7 @@
  		enum nl80211_band band;
  
  		/* all channels */
-@@ -7716,31 +7735,32 @@ static int nl80211_trigger_scan(struct s
+@@ -7889,31 +7908,32 @@ static int nl80211_trigger_scan(struct s
  		}
  	}
  

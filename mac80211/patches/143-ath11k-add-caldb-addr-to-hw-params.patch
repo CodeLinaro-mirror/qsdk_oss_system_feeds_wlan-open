@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -632,13 +632,20 @@ void ath11k_ahb_power_down(struct ath11k
+@@ -643,12 +643,19 @@ static void ath11k_ahb_power_down(struct
  
  int ath11k_ahb_fwreset_from_cold_boot(struct ath11k_base *ab)
  {
@@ -12,17 +12,16 @@
  	ath11k_dbg(ab, ATH11K_DBG_AHB, "wait for cold boot done\n");
 -	while (ab->qmi.cal_done == 0)
 -		msleep(ATH11K_FW_READY_DELAY);
- 
++
 +	timeout = wait_event_timeout(ab->qmi.cold_boot_waitq, (ab->qmi.cal_done  == 1),
 +				     ATH11K_COLD_BOOT_FW_RESET_DELAY);
 +	if (timeout <= 0) {
 +		ath11k_warn(ab, "Coldboot Calibration timed out\n");
 +                return -ETIMEDOUT;
 +	}
-+	
+ 
  	/* reset the firmware */
  	ath11k_ahb_power_down(ab);
- 	ath11k_ahb_power_up(ab);
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -38,6 +38,7 @@ static const struct ath11k_hw_params ath
@@ -41,7 +40,7 @@
  		.hw_ops = &qca6018_ops,
  	},
  };
-@@ -950,6 +952,7 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -953,6 +955,7 @@ struct ath11k_base *ath11k_core_alloc(st
  	INIT_LIST_HEAD(&ab->peers);
  	init_waitqueue_head(&ab->peer_mapping_wq);
  	init_waitqueue_head(&ab->wmi_ab.tx_credits_wq);
@@ -61,7 +60,7 @@
  #define ATH11K_EXT_IRQ_NUM_MAX	16
 --- a/drivers/net/wireless/ath/ath11k/hw.h
 +++ b/drivers/net/wireless/ath/ath11k/hw.h
-@@ -113,6 +113,7 @@ struct ath11k_hw_params {
+@@ -119,6 +119,7 @@ struct ath11k_hw_params {
  	u16 dev_id;
  	u8 max_radios;
  	u32 bdf_addr;
@@ -82,7 +81,7 @@
  MODULE_PARM_DESC(enable_cold_boot_cal, "cold boot calibration enable:1 disable:0");
  
  unsigned int enable_qdss_trace = 1;
-@@ -2021,7 +2021,6 @@ out:
+@@ -2025,7 +2025,6 @@ out:
  static int ath11k_qmi_alloc_target_mem_chunk(struct ath11k_base *ab)
  {
  	int i, idx;
@@ -90,7 +89,7 @@
  
  	for (i = 0, idx = 0; i < ab->qmi.mem_seg_count; i++) {
  		switch (ab->qmi.target_mem[i].type) {
-@@ -2038,15 +2037,9 @@ static int ath11k_qmi_alloc_target_mem_c
+@@ -2042,15 +2041,9 @@ static int ath11k_qmi_alloc_target_mem_c
  				return -EINVAL;
  			}
  
@@ -108,7 +107,7 @@
  			} else {
  				ab->qmi.target_mem[idx].paddr = 0;
  				ab->qmi.target_mem[idx].vaddr = 0;
-@@ -2505,7 +2498,7 @@ int ath11k_qmi_firmware_start(struct ath
+@@ -2508,7 +2501,7 @@ int ath11k_qmi_firmware_start(struct ath
  int ath11k_qmi_process_coldboot_calibration(struct ath11k_base *ab)
  {
  	int ret;
@@ -117,7 +116,7 @@
  
  	ret = ath11k_qmi_wlanfw_mode_send(ab, ATH11K_FIRMWARE_MODE_COLD_BOOT);
  	if (ret < 0) {
-@@ -2514,14 +2507,12 @@ int ath11k_qmi_process_coldboot_calibrat
+@@ -2517,14 +2510,12 @@ int ath11k_qmi_process_coldboot_calibrat
  	}
  
  	ath11k_info(ab, "Coldboot calibration wait started\n");
@@ -138,7 +137,7 @@
  
  	ath11k_info(ab, "Coldboot calibration wait ended\n");
  
-@@ -2673,6 +2664,7 @@ static void ath11k_qmi_msg_cold_boot_cal
+@@ -2676,6 +2667,7 @@ static void ath11k_qmi_msg_cold_boot_cal
  	struct ath11k_base *ab = qmi->ab;
  
  	ab->qmi.cal_done = 1;

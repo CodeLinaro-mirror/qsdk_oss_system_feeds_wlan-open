@@ -25,7 +25,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -14,8 +14,14 @@
- #include "debug.h"
+ #include "hif.h"
  
  unsigned int ath11k_debug_mask;
 +unsigned int rawmode;
@@ -39,7 +39,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  
  static const struct ath11k_hw_params ath11k_hw_params = {
  	.name = "ipq8074",
-@@ -547,6 +553,23 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -557,6 +563,23 @@ int ath11k_core_qmi_firmware_ready(struc
  		return ret;
  	}
  
@@ -65,7 +65,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	if (ret) {
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -53,6 +53,13 @@ enum wme_ac {
+@@ -55,6 +55,13 @@ enum wme_ac {
  #define ATH11K_VHT_MCS_MAX	9
  #define ATH11K_HE_MCS_MAX	11
  
@@ -81,7 +81,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	return (((tid == 0) || (tid == 3)) ? WME_AC_BE :
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2040,8 +2040,6 @@ static void ath11k_dp_rx_h_mpdu(struct a
+@@ -2068,8 +2068,6 @@ static void ath11k_dp_rx_h_mpdu(struct a
  	mcast = is_multicast_ether_addr(hdr->addr1);
  	fill_crypto_hdr = mcast;
  
@@ -90,7 +90,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath11k_peer_find_by_addr(ar->ab, hdr->addr2);
  	if (peer) {
-@@ -2056,6 +2054,10 @@ static void ath11k_dp_rx_h_mpdu(struct a
+@@ -2084,6 +2082,10 @@ static void ath11k_dp_rx_h_mpdu(struct a
  
  	err_bitmap = ath11k_dp_rx_h_attn_mpdu_err(rx_desc);
  
@@ -101,7 +101,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	/* Clear per-MPDU flags while leaving per-PPDU flags intact */
  	rx_status->flag &= ~(RX_FLAG_FAILED_FCS_CRC |
  			     RX_FLAG_MMIC_ERROR |
-@@ -2253,6 +2255,8 @@ static void ath11k_dp_rx_deliver_msdu(st
+@@ -2285,6 +2287,8 @@ static void ath11k_dp_rx_deliver_msdu(st
  		   !!(status->flag & RX_FLAG_MMIC_ERROR),
  		   !!(status->flag & RX_FLAG_AMSDU_MORE));
  
@@ -112,20 +112,18 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	ieee80211_rx_napi(ar->hw, NULL, msdu, napi);
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -16,7 +16,11 @@ ath11k_txq_tcl_ring_map[ATH11K_HW_MAX_QU
- static enum hal_tcl_encap_type
+@@ -13,6 +13,10 @@ static enum hal_tcl_encap_type
  ath11k_dp_tx_get_encap_type(struct ath11k_vif *arvif, struct sk_buff *skb)
  {
--	/* TODO: Determine encap type based on vif_type and configuration */
+ 	struct ieee80211_tx_info *tx_info = IEEE80211_SKB_CB(skb);
 +	struct ath11k_base *ab = arvif->ar->ab;
 +
 +	if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
 +		return HAL_TCL_ENCAP_TYPE_RAW;
-+
- 	return HAL_TCL_ENCAP_TYPE_NATIVE_WIFI;
- }
  
-@@ -110,11 +114,17 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+ 	if (tx_info->control.flags & IEEE80211_TX_CTRL_HW_80211_ENCAP)
+ 		return HAL_TCL_ENCAP_TYPE_ETHERNET;
+@@ -137,11 +141,17 @@ tcl_ring_sel:
  	ti.encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
  	ti.meta_data_flags = arvif->tcl_metadata;
  
@@ -148,7 +146,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  
  	ti.addr_search_flags = arvif->hal_addr_search_flags;
  	ti.search_type = arvif->search_type;
-@@ -124,7 +134,8 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+@@ -151,7 +161,8 @@ tcl_ring_sel:
  	ti.bss_ast_hash = arvif->ast_hash;
  	ti.dscp_tid_tbl_idx = 0;
  
@@ -158,7 +156,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_IP4_CKSUM_EN, 1) |
  			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP4_CKSUM_EN, 1) |
  			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP6_CKSUM_EN, 1) |
-@@ -144,10 +155,11 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+@@ -171,10 +182,11 @@ tcl_ring_sel:
  		ath11k_dp_tx_encap_nwifi(skb);
  		break;
  	case HAL_TCL_ENCAP_TYPE_RAW:
@@ -172,9 +170,9 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
 +		}
 +		break;
  	case HAL_TCL_ENCAP_TYPE_ETHERNET:
- 	case HAL_TCL_ENCAP_TYPE_802_3:
- 		/* TODO: Take care of other encap modes as well */
-@@ -186,6 +198,9 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+ 		/* no need to encap */
+ 		break;
+@@ -229,6 +241,9 @@ tcl_ring_sel:
  		goto fail_unmap_dma;
  	}
  
@@ -184,7 +182,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	ath11k_hal_tx_cmd_desc_setup(ab, hal_tcl_desc +
  					 sizeof(struct hal_tlv_hdr), &ti);
  
-@@ -300,7 +315,6 @@ ath11k_dp_tx_process_htt_tx_complete(str
+@@ -346,7 +361,6 @@ ath11k_dp_tx_process_htt_tx_complete(str
  
  	wbm_status = FIELD_GET(HTT_TX_WBM_COMP_INFO0_STATUS,
  			       status_desc->info0);
@@ -194,7 +192,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_DROP:
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2258,6 +2258,9 @@ static int ath11k_install_key(struct ath
+@@ -2372,6 +2372,9 @@ static int ath11k_install_key(struct ath
  
  	reinit_completion(&ar->install_key_done);
  
@@ -204,7 +202,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	if (cmd == DISABLE_KEY) {
  		/* TODO: Check if FW expects  value other than NONE for del */
  		/* arg.key_cipher = WMI_CIPHER_NONE; */
-@@ -2289,8 +2292,12 @@ static int ath11k_install_key(struct ath
+@@ -2403,8 +2406,12 @@ static int ath11k_install_key(struct ath
  		return -EOPNOTSUPP;
  	}
  
@@ -217,7 +215,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	if (ret)
  		return ret;
  
-@@ -2362,6 +2369,9 @@ static int ath11k_mac_op_set_key(struct
+@@ -2476,6 +2483,9 @@ static int ath11k_mac_op_set_key(struct
  	    key->cipher == WLAN_CIPHER_SUITE_BIP_CMAC_256)
  		return 1;
  
@@ -227,18 +225,17 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	if (key->keyidx > WMI_MAX_KEY_INDEX)
  		return -ENOSPC;
  
-@@ -4220,6 +4230,10 @@ static int ath11k_mac_op_add_interface(s
+@@ -4427,6 +4437,9 @@ static int ath11k_mac_op_add_interface(s
+ 	else
+ 		param_value = ATH11K_HW_TXRX_NATIVE_WIFI;
  
- 	param_id = WMI_VDEV_PARAM_TX_ENCAP_TYPE;
- 	param_value = ATH11K_HW_TXRX_NATIVE_WIFI;
-+
 +	if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
 +		param_value = ATH11K_HW_TXRX_RAW;
 +
  	ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
  					    param_id, param_value);
  	if (ret) {
-@@ -5855,8 +5869,10 @@ static int __ath11k_mac_register(struct
+@@ -6096,8 +6109,10 @@ static int __ath11k_mac_register(struct
  
  	ath11k_reg_init(ar);
  
@@ -253,7 +250,7 @@ Signed-off-by: Manikanta Pubbisetty <mpubbise@codeaurora.org>
  	if (ret) {
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -3229,6 +3229,10 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
+@@ -3362,6 +3362,10 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
  	config.rx_timeout_pri[2] = TARGET_RX_TIMEOUT_LO_PRI;
  	config.rx_timeout_pri[3] = TARGET_RX_TIMEOUT_HI_PRI;
  	config.rx_decap_mode = TARGET_DECAP_MODE_NATIVE_WIFI;

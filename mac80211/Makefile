@@ -7,11 +7,11 @@ PKG_BACKPORTS_VERSION:=c0c7d2bb77ff
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=9de9a9b19d3f
+PKG_KERNEL_VERSION:=9a94b73e75
 PKG_KERNEL_SOURCE_URL:=git://codeaurora.org/quic/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
-PKG_VERSION:=20200415
+PKG_VERSION:=20200628
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -235,7 +235,8 @@ define DownloadBackports
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit db3bdcb9 && git revert --no-edit 0628cda3)
+	git revert --no-edit db3bdcb9 && git revert --no-edit 0628cda3 && \
+	git revert --no-edit c8ffcd && git revert --no-edit 7309f7730)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
