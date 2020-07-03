@@ -1,0 +1,128 @@
+From 7cd0f57bb16412d3af58eb14810b684ffea645da Mon Sep 17 00:00:00 2001
+From: Johannes Berg <johannes.berg@intel.com>
+Date: Thu, 26 Mar 2020 15:09:42 +0200
+Subject: [PATCH] mac80211: drop data frames without key on encrypted links
+
+If we know that we have an encrypted link (based on having had
+a key configured for TX in the past) then drop all data frames
+in the key selection handler if there's no key anymore.
+
+This fixes an issue with mac80211 internal TXQs - there we can
+buffer frames for an encrypted link, but then if the key is no
+longer there when they're dequeued, the frames are sent without
+encryption. This happens if a station is disconnected while the
+frames are still on the TXQ.
+
+Detecting that a link should be encrypted based on a first key
+having been configured for TX is fine as there are no use cases
+for a connection going from with encryption to no encryption.
+With extended key IDs, however, there is a case of having a key
+configured for only decryption, so we can't just trigger this
+behaviour on a key being configured.
+
+Cc: stable@vger.kernel.org
+Reported-by: Jouni Malinen <j@w1.fi>
+Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+Signed-off-by: Luca Coelho <luciano.coelho@intel.com>
+Link: https://lore.kernel.org/r/iwlwifi.20200326150855.6865c7f28a14.I9fb1d911b064262d33e33dfba730cdeef83926ca@changeid
+Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+---
+ net/mac80211/debugfs_sta.c |  2 ++
+ net/mac80211/key.c         |  2 ++
+ net/mac80211/sta_info.h    |  3 +++
+ net/mac80211/tx.c          | 10 ++++++++--
+ 4 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/net/mac80211/debugfs_sta.c b/net/mac80211/debugfs_sta.c
+index 30c2681..bfaabb5 100644
+--- a/net/mac80211/debugfs_sta.c
++++ b/net/mac80211/debugfs_sta.c
+@@ -4,6 +4,7 @@
+  * Copyright 2007	Johannes Berg <johannes@sipsolutions.net>
+  * Copyright 2013-2014  Intel Mobile Communications GmbH
+  * Copyright(c) 2016 Intel Deutschland GmbH
++ * Copyright (C) 2018 - 2020 Intel Corporation
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -80,6 +81,7 @@ static const char * const sta_flag_names[] = {
+ 	FLAG(MPSP_OWNER),
+ 	FLAG(MPSP_RECIPIENT),
+ 	FLAG(PS_DELIVER),
++	FLAG(USES_ENCRYPTION),
+ #undef FLAG
+ };
+ 
+diff --git a/net/mac80211/key.c b/net/mac80211/key.c
+index 691969d..729edae 100644
+--- a/net/mac80211/key.c
++++ b/net/mac80211/key.c
+@@ -5,6 +5,7 @@
+  * Copyright 2007-2008	Johannes Berg <johannes@sipsolutions.net>
+  * Copyright 2013-2014  Intel Mobile Communications GmbH
+  * Copyright 2015	Intel Deutschland GmbH
++ * Copyright 2018-2020  Intel Corporation
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -336,6 +337,7 @@ static void ieee80211_key_replace(struct ieee80211_sub_if_data *sdata,
+ 	if (sta) {
+ 		if (pairwise) {
+ 			rcu_assign_pointer(sta->ptk[idx], new);
++			set_sta_flag(sta, WLAN_STA_USES_ENCRYPTION);
+ 			sta->ptk_idx = idx;
+ 			ieee80211_check_fast_xmit(sta);
+ 		} else {
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index 4adaa58..2af657d 100644
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -70,6 +70,8 @@
+  * @WLAN_STA_MPSP_RECIPIENT: local STA is recipient of a MPSP.
+  * @WLAN_STA_PS_DELIVER: station woke up, but we're still blocking TX
+  *	until pending frames are delivered
++ * @WLAN_STA_USES_ENCRYPTION: This station was configured for encryption,
++ *      so drop all packets without a key later.
+  *
+  * @NUM_WLAN_STA_FLAGS: number of defined flags
+  */
+@@ -100,6 +102,7 @@ enum ieee80211_sta_info_flags {
+ 	WLAN_STA_MPSP_OWNER,
+ 	WLAN_STA_MPSP_RECIPIENT,
+ 	WLAN_STA_PS_DELIVER,
++	WLAN_STA_USES_ENCRYPTION,
+ 
+ 	NUM_WLAN_STA_FLAGS,
+ };
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index d430c6a..3b1ffb2 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -593,9 +593,12 @@ ieee80211_tx_h_select_key(struct ieee80211_tx_data *tx)
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(tx->skb);
+ 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)tx->skb->data;
+ 
+-	if (unlikely(info->flags & IEEE80211_TX_INTFL_DONT_ENCRYPT))
++	if (unlikely(info->flags & IEEE80211_TX_INTFL_DONT_ENCRYPT)) {
+ 		tx->key = NULL;
+-	else if (tx->sta &&
++		return TX_CONTINUE;
++	}
++
++	if (tx->sta &&
+ 		 (key = rcu_dereference(tx->sta->ptk[tx->sta->ptk_idx])))
+ 		tx->key = key;
+ 	else if (ieee80211_is_group_privacy_action(tx->skb) &&
+@@ -657,6 +660,9 @@ ieee80211_tx_h_select_key(struct ieee80211_tx_data *tx)
+ 		if (!skip_hw && tx->key &&
+ 		    tx->key->flags & KEY_FLAG_UPLOADED_TO_HARDWARE)
+ 			info->control.hw_key = &tx->key->conf;
++	} else if (!ieee80211_is_mgmt(hdr->frame_control) && tx->sta &&
++			test_sta_flag(tx->sta, WLAN_STA_USES_ENCRYPTION)) {
++		return TX_DROP;
+ 	}
+ 
+ 	return TX_CONTINUE;
+-- 
+2.7.4
+
