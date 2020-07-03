@@ -32,14 +32,14 @@ if [ -e /sys/devices/platform/soc/c000000.wifi/devcoredump/data ] && [ "$ACTION"
 	DUMPPATH="/sys/devices/platform/soc/c000000.wifi/devcoredump/data"
 fi
 
-if [ -e /sys/bus/pci/devices/0000\:01\:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+if [ -e /sys/bus/pci/devices/0000:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
 	FILENAME="qcn9000-pci0-q6dump-$TIMESTAMP.bin"
-	DUMPPATH="/sys/bus/pci/devices/0000\:01\:00.0/devcoredump/data"
+	DUMPPATH="/sys/bus/pci/devices/0000:01:00.0/devcoredump/data"
 fi
 
-if [ -e /sys/bus/pci/devices/0001\:01\:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+if [ -e /sys/bus/pci/devices/0001:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
 	FILENAME="qcn9000-pci1-q6dump-$TIMESTAMP.bin"
-	DUMPPATH="/sys/bus/pci/devices/0001\:01\:00.0/devcoredump/data"
+	DUMPPATH="/sys/bus/pci/devices/0001:01:00.0/devcoredump/data"
 fi
 
 if [ -n "$FILENAME" ]; then
