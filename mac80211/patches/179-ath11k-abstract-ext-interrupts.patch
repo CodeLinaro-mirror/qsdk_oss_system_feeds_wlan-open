@@ -378,7 +378,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  	void (*write32)(struct ath11k_base *sc, u32 address, u32 data);
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -13,6 +13,71 @@
+@@ -13,6 +13,83 @@
  #include "pci.h"
  #include "debug.h"
  
@@ -447,10 +447,22 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
 +	ATH11K_REO_STATUS_RING_MASK_0,
 +};
 +
- const char *irq_name[ATH11K_IRQ_NUM_MAX] = {
- 	"bhi",
- 	"mhi-er0",
-@@ -488,6 +553,18 @@ int ath11k_get_user_msi_assignment(struc
++const char *dp_irq_name[ATH11K_MAX_PCI_DOMAINS + 1][ATH11K_EXT_IRQ_GRP_NUM_MAX] = {
++	{
++		ATH11K_PCI_DP_IRQS_NAME(0)
++	},
++	{
++		ATH11K_PCI_DP_IRQS_NAME(1)
++	},
++	{
++		ATH11K_PCI_DP_IRQS_NAME()
++	},
++};
++
+ const char *ce_irq_name[ATH11K_MAX_PCI_DOMAINS + 1][MAX_CE_COUNT] = {
+ 	{
+ 		ATH11K_PCI_CE_IRQS_NAME(0)
+@@ -446,6 +523,18 @@ int ath11k_get_user_msi_assignment(struc
  						 base_vector);
  }
  
@@ -469,7 +481,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  static void ath11k_pci_free_irq(struct ath11k_base *ab)
  {
  	int irq_idx;
-@@ -499,6 +576,8 @@ static void ath11k_pci_free_irq(struct a
+@@ -457,6 +546,8 @@ static void ath11k_pci_free_irq(struct a
  		irq_idx = ATH11K_IRQ_CE0_OFFSET + i;
  		free_irq(ab->irq_num[irq_idx], &ab->ce.ce_pipe[i]);
  	}
@@ -478,7 +490,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  }
  
  static void ath11k_pci_ce_irq_enable(struct ath11k_base *ab, u16 ce_id)
-@@ -555,12 +634,176 @@ static irqreturn_t ath11k_pci_ce_interru
+@@ -513,12 +604,181 @@ static irqreturn_t ath11k_pci_ce_interru
  {
  	struct ath11k_ce_pipe *ce_pipe = arg;
  
@@ -595,6 +607,11 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
 +	int ret;
 +	int num_vectors = 0;
 +	u32 user_base_data = 0, base_vector = 0, base_idx;
++	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
++	u8 domain_id = pci_domain_nr(ar_pci->pdev->bus);
++
++	if (domain_id > ATH11K_MAX_PCI_DOMAINS)
++		domain_id = ATH11K_MAX_PCI_DOMAINS;
 +
 +	ab->tx_ring_mask = ath11k_tx_ring_mask;
 +	ab->rx_mon_status_ring_mask = rx_mon_status_ring_mask;
@@ -641,7 +658,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
 +			irq_set_status_flags(irq, IRQ_NOAUTOEN);
 +			ret = request_irq(irq, ath11k_pci_ext_interrupt_handler,
 +					  IRQF_SHARED | IRQF_NO_SUSPEND,
-+					  "DP_EXT_IRQ", irq_grp);
++					  dp_irq_name[domain_id][i], irq_grp);
 +			if (ret) {
 +				ath11k_err(ab, "failed request_irq for %d\n",
 +					   vector);
@@ -655,7 +672,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  static int ath11k_pci_config_irq(struct ath11k_base *ab)
  {
  	struct ath11k_ce_pipe *ce_pipe;
-@@ -600,7 +843,7 @@ static int ath11k_pci_config_irq(struct
+@@ -563,7 +823,7 @@ static int ath11k_pci_config_irq(struct
  		msi_data_idx++;
  	}
  
@@ -664,7 +681,7 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  
  	return ret;
  }
-@@ -904,6 +1147,8 @@ static const struct ath11k_hif_ops ath11
+@@ -867,6 +1127,8 @@ static const struct ath11k_hif_ops ath11
  	.write32 = ath11k_pci_write32,
  	.power_down = ath11k_pci_power_down,
  	.power_up = ath11k_pci_power_up,
@@ -684,3 +701,27 @@ Subject: [PATCH 1179/1179] ath11k abstract ext interrupts
  }
  
  dma_addr_t ath11k_hal_srng_get_hp_addr(struct ath11k_base *ab,
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -30,6 +30,21 @@
+ 
+ #define STR_CONV(str) #str
+ 
++/* dp irq naming convention is based on the ext irq groups defined in pci.c */
++#define ATH11K_PCI_DP_IRQS_NAME(x) \
++	STR_CONV(pci##x##_wbm2host_tx_completions_ring1),\
++	STR_CONV(pci##x##_wbm2host_tx_completions_ring2),\
++	STR_CONV(pci##x##_wbm2host_tx_completions_ring3),\
++	STR_CONV(pci##x##_lmac_reo_misc_irq),\
++	STR_CONV(pci##x##_reo2host_destination_ring1),\
++	STR_CONV(pci##x##_reo2host_destination_ring2),\
++	STR_CONV(pci##x##_reo2host_destination_ring3),\
++	STR_CONV(pci##x##_reo2host_destination_ring4),\
++	/* Currently only 8 msi are registered */ \
++	STR_CONV(pci##x##_dp_res1),\
++	STR_CONV(pci##x##_dp_res2),\
++	STR_CONV(pci##x##_dp_res3),
++
+ #define ATH11K_PCI_CE_IRQS_NAME(x) \
+ 	STR_CONV(pci##x##_ce0),\
+ 	STR_CONV(pci##x##_ce1),\
