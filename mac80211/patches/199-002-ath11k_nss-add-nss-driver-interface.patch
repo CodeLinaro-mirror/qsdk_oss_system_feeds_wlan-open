@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,1808 @@
+@@ -0,0 +1,1828 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -58,6 +58,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +#include "core.h"
 +#include "peer.h"
 +#include "dp_rx.h"
++#include "hif.h"
 +
 +extern unsigned int ath11k_frame_mode;
 +
@@ -1006,6 +1007,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +{
 +	struct ath11k_hal *hal = &ab->hal;
 +	struct hal_srng *srng;
++	u32 offset;
 +	int i;
 +
 +	if (ring_id < 0) {
@@ -1029,8 +1031,15 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		   hsi->entry_size, hsi->num_entries, hsi->flags);
 +
 +	for (i = 0; i < HAL_SRNG_NUM_REG_GRP; i++) {
-+		//TODO subject to change if pine (~8074v2 or ~6018)
-+		hsi->hwreg_base[i]  = (u32)ab->mem_pa + srng->hwreg_base[i];
++		offset = srng->hwreg_base[i];
++
++		/* For PCI based devices, get the umac ring base address offset
++		 * based on window register configuration.
++		 */
++		if (!(srng->flags & HAL_SRNG_FLAGS_LMAC_RING))
++			offset = ath11k_hif_get_window_offset(ab, srng->hwreg_base[i]);
++
++		hsi->hwreg_base[i]  = (u32)ab->mem_pa + offset;
 +
 +		ath11k_dbg(ab, ATH11K_DBG_NSS, "SRNG Register %d address %d\n",
 +			   i, hsi->hwreg_base[i]);
@@ -1190,6 +1199,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		return ATH11K_WIFILI_TARGET_TYPE_QCA8074V2;
 +	case ATH11K_HW_IPQ6018:
 +		return ATH11K_WIFILI_TARGET_TYPE_QCA6018;
++	case ATH11K_HW_QCN90XX:
++		return ATH11K_WIFILI_TARGET_TYPE_QCN9000;
 +	default:
 +		ath11k_warn(ab, "NSS Offload not supported for this HW\n");
 +		return ATH11K_WIFILI_TARGET_TYPE_UNKNOWN;
@@ -1202,23 +1213,27 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	case ATH11K_HW_IPQ8074:
 +	case ATH11K_HW_IPQ6018:
 +		return NSS_WIFILI_INTERNAL_INTERFACE;
++	case ATH11K_HW_QCN90XX:
++		return nss_get_available_wifili_external_if();
 +	default:
 +		/* This can't happen since we validated target type earlier */
 +		WARN_ON(1);
-+		return NSS_WIFILI_INTERNAL_INTERFACE;
++		return NSS_MAX_NET_INTERFACES;
 +	}
 +}
 +
 +static int ath11k_nss_get_dynamic_interface_type(struct ath11k_base *ab)
 +{
-+	switch (ab->hw_rev) {
-+	case ATH11K_HW_IPQ8074:
-+	case ATH11K_HW_IPQ6018:
++	switch (ab->nss.if_num) {
++	case NSS_WIFILI_INTERNAL_INTERFACE:
 +		return NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_INTERNAL;
++	case NSS_WIFILI_EXTERNAL_INTERFACE0:
++		return NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_EXTERNAL0;
++	case NSS_WIFILI_EXTERNAL_INTERFACE1:
++		return NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_EXTERNAL1;
 +	default:
-+		/* This can't happen since we validated target type earlier */
-+		WARN_ON(1);
-+		return NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_INTERNAL;
++		ath11k_warn(ab, "NSS Offload invalid interface\n");
++		return NSS_DYNAMIC_INTERFACE_TYPE_NONE;
 +	}
 +}
 +
@@ -1294,6 +1309,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	wim->flags |= WIFILI_NSS_CCE_DISABLED;
 +
 +	ab->nss.if_num = ath11k_nss_get_interface_type(ab);
++
++	if (ab->nss.if_num >= NSS_MAX_NET_INTERFACES) {
++		ath11k_warn(ab, "NSS invalid interface\n");
++		goto free;
++	}
 +
 +	/* register callbacks for events and exceptions with nss */
 +	nss_contex = nss_register_wifili_if(ab->nss.if_num, NULL,
