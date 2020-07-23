@@ -550,8 +550,8 @@ mac80211_hostapd_setup_base() {
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
 
 		append base_cfg "he_default_pe_duration=4" "$N"
-		json_select ..
 		[ "$he_mu_edca" != "0" ] && {
+			json_select ..
 			append base_cfg "he_mu_edca_qos_info_param_count=1" "$N"
 			append base_cfg "he_mu_edca_qos_info_q_ack=0" "$N"
 			append base_cfg "he_mu_edca_qos_info_queue_request=0" "$N"
