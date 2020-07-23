@@ -110,7 +110,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-
+	config_add_boolean multiple_bssid
 }
 
 drv_mac80211_init_iface_config() {
@@ -533,7 +533,8 @@ mac80211_hostapd_setup_base() {
 		he_mu_beamformer:1 \
 		he_twt_required:0 \
 		he_spr_sr_control:0 \
-		
+		multiple_bssid:0
+
 
 		append base_cfg "ieee80211ax=1" "$N"
 		he_phy_cap=$(iw phy "$phy" info | awk -F "[()]" '/HE PHY Capabilities/ { print $2 }' | head -1)
@@ -550,6 +551,7 @@ mac80211_hostapd_setup_base() {
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
 
 		append base_cfg "he_default_pe_duration=4" "$N"
+		append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
 		[ "$he_mu_edca" != "0" ] && {
 			json_select ..
 			append base_cfg "he_mu_edca_qos_info_param_count=1" "$N"
@@ -673,6 +675,16 @@ mac80211_generate_mac() {
 	local oIFS="$IFS"; IFS=":"; set -- $ref; IFS="$oIFS"
 
 	macidx=$(($id + 1))
+
+	if [ $multiple_bssid -eq 1 ] && [ $id -gt 0 ]; then
+		local ref_dec=$( printf '%d\n' $( echo "0x$ref" | tr -d ':' ) )
+		local bssid_l_mask=$(((1 << $max_bssid_ind) - 1))
+		local bssid_l=$(((($ref_dec & $bssid_l_mask) + $id) % $max_bssid))
+		local bssid_h=$((($bssid_l_mask ^ 0xFFFFFFFFFFFF) & $ref_dec))
+		printf $( echo $( printf '%012x\n' $((bssid_h | bssid_l))) | sed 's!\(..\)!\1:!g;s!:$!!' )
+		return
+	fi
+
 	[ "$((0x$mask1))" -gt 0 ] && {
 		b1="0x$1"
 		[ "$id" -gt 0 ] && \
@@ -733,7 +745,7 @@ find_phy() {
 }
 
 mac80211_check_ap() {
-	has_ap=1
+	has_ap=$((has_ap+1))
 }
 
 mac80211_iw_interface_add() {
@@ -775,6 +787,8 @@ mac80211_prepare_vif() {
 	json_select config
 
 	json_get_vars ifname mode ssid wds extsta powersave macaddr
+	local multiple_bssid_param=
+	[ "$1" -eq 1 ] && multiple_bssid_param=multiple_bssid
 
 	for wdev in $(list_phy_interfaces "$phy"); do
 		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
@@ -822,7 +836,7 @@ mac80211_prepare_vif() {
 			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
 
 			[ -n "$hostapd_ctrl" ] || {
-				mac80211_iw_interface_add "$phy" "$ifname" managed || return
+				mac80211_iw_interface_add "$phy" "$ifname" __ap ${multiple_bssid_param} || return
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
 			}
 			ap_ifname=$ifname
@@ -1196,7 +1210,7 @@ drv_mac80211_setup() {
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
-		htmode band
+		htmode band multiple_bssid
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
@@ -1252,14 +1266,26 @@ drv_mac80211_setup() {
 	[ -n "$frag" ] && iw phy "$phy" set frag "${frag%%.*}"
 	[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 
-	has_ap=
+	has_ap=0
 	hostapd_ctrl=
 	for_each_interface "ap" mac80211_check_ap
 
 	rm -f "$hostapd_conf_file"
-	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy"
+	[ "$has_ap" -gt 0 ] && mac80211_hostapd_setup_base "$phy"
 
-	for_each_interface "ap" mac80211_prepare_vif
+	if [ $multiple_bssid -eq 1 ] && [ "$has_ap" -gt 1 ]; then
+		max_bssid_ind=0
+		local iter=$((has_ap-1))
+		while [ "$iter" -gt 0 ]
+		do
+			max_bssid_ind=$((max_bssid_ind+1))
+			iter=$((iter >> 1))
+		done
+
+		max_bssid=$((1 << max_bssid_ind))
+	fi
+
+	for_each_interface "ap" mac80211_prepare_vif ${multiple_bssid}
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 	[ -n "$board_file" ] && {
 		file=/sys/class/net/$ifname/device/wil6210/board_file

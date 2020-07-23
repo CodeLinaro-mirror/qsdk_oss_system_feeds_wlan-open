@@ -1,0 +1,136 @@
+From a08aa0d044b072681a008421e4e7bf4b4b6d9429 Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Mon, 6 Jul 2020 13:52:10 +0200
+Subject: [PATCH 01/10] nl80211: add basic multiple bssid support
+
+This patch adds support for passing the multiple bssid config to the
+kernel when adding an interface. A bss can be legacy, transmitting or
+non-transmitting. A non-transmitting BSSID will have a parent interface,
+which needs to be transmitting.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ include/net/cfg80211.h       |  9 +++++++++
+ include/uapi/linux/nl80211.h | 25 +++++++++++++++++++++++++
+ net/wireless/nl80211.c       | 14 ++++++++++++++
+ 3 files changed, 48 insertions(+)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index b9f7a81293c1..7e7a807f5b38 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -606,6 +606,8 @@ struct vif_params {
+ 	u8 macaddr[ETH_ALEN];
+ 	const u8 *vht_mumimo_groups;
+ 	const u8 *vht_mumimo_follow_addr;
++	enum nl80211_multi_bssid_mode multi_bssid_mode;
++	u32 multi_bssid_parent;
+ };
+ 
+ /**
+@@ -5156,6 +5158,9 @@ struct cfg80211_cqm_config;
+  * @pmsr_free_wk: (private) peer measurements cleanup work
+  * @unprot_beacon_reported: (private) timestamp of last
+  *	unprotected beacon report
++ * @multi_bssid_mode: Is this a legacy, transmitted or non-transmitted bssid
++ * @multi_bssid_parent: a non-transmitted bssid has a transmitted parent
++ * @multi_bssid_list: linked list for tracking parent - child relations.
+  */
+ struct wireless_dev {
+ 	struct wiphy *wiphy;
+@@ -5235,6 +5240,10 @@ struct wireless_dev {
+ 	struct work_struct pmsr_free_wk;
+ 
+ 	unsigned long unprot_beacon_reported;
++
++	enum nl80211_multi_bssid_mode multi_bssid_mode;
++	struct wireless_dev *multi_bssid_parent;
++	struct list_head multi_bssid_list;
+ };
+ 
+ static inline u8 *wdev_address(struct wireless_dev *wdev)
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 30e2b3726a52..77ed6e4deadc 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -2522,6 +2522,12 @@ enum nl80211_commands {
+  *	unsolicited broadcast probe response. It is a nested attribute, see
+  *	&enum nl80211_unsol_bcast_probe_resp_attributes.
+  *
++ * @NL80211_ATTR_MULTI_BSSID_MODE: Set the (Non-)Transmitted flag for this
++ *	BSSIDs beacon.
++ *
++ * @NL80211_ATTR_MULTI_BSSID_PARENT: If this is a Non-Transmitted BSSID, define
++ *	the parent interface.
++ *
+  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
+  * @NL80211_ATTR_MAX: highest attribute number currently defined
+  * @__NL80211_ATTR_AFTER_LAST: internal use
+@@ -3010,6 +3016,9 @@ enum nl80211_attrs {
+ 
+ 	NL80211_ATTR_UNSOL_BCAST_PROBE_RESP,
+ 
++	NL80211_ATTR_MULTI_BSSID_MODE,
++	NL80211_ATTR_MULTI_BSSID_PARENT,
++
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+ 	__NL80211_ATTR_AFTER_LAST,
+@@ -6827,6 +6836,22 @@ enum nl80211_peer_measurement_ftm_failure_reasons {
+ 	NL80211_PMSR_FTM_FAILURE_BAD_CHANGED_PARAMS,
+ };
+ 
++/**
++ * enum nl80211_multi_bssid_mode - Multiple BSSID beacon type
++ *
++ * Used by cfg80211_ap_settings
++ *
++ * @MULTIPLE_BSSID_LEGACY: This BSS is not part of a multiple BSSID group
++ * @MULTIPLE_BSSID_TRANSMITTED: This BSS is broadcasting a multiple BSSID
++ *                                    beacon
++ * @MULTIPLE_BSSID_NON_TRANSMITTED: This BSS is not broadcasting a beacon
++ */
++enum nl80211_multi_bssid_mode {
++	NL80211_MULTIPLE_BSSID_LEGACY = 0,
++	NL80211_MULTIPLE_BSSID_TRANSMITTED,
++	NL80211_MULTIPLE_BSSID_NON_TRANSMITTED,
++};
++
+ /**
+  * enum nl80211_peer_measurement_ftm_resp - FTM response attributes
+  * @__NL80211_PMSR_FTM_RESP_ATTR_INVALID: invalid
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index d63aeb9dfe64..10b1a2dc4b4a 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -758,6 +758,10 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+ 		NLA_POLICY_NESTED(fils_discovery_policy),
+ 	[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP] =
+ 		NLA_POLICY_NESTED(unsol_bcast_probe_resp_policy),
++	[NL80211_ATTR_MULTI_BSSID_MODE] = NLA_POLICY_RANGE(NLA_U8,
++					NL80211_MULTIPLE_BSSID_LEGACY,
++					NL80211_MULTIPLE_BSSID_NON_TRANSMITTED),
++	[NL80211_ATTR_MULTI_BSSID_PARENT] = { .type = NLA_U32 },
+ };
+ 
+ /* policy for the key attributes */
+@@ -3864,6 +3868,16 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
+ 	if (err < 0)
+ 		return err;
+ 
++	if (info->attrs[NL80211_ATTR_MULTI_BSSID_MODE])
++		params.multi_bssid_mode =
++			nla_get_u8(info->attrs[NL80211_ATTR_MULTI_BSSID_MODE]);
++	if (info->attrs[NL80211_ATTR_MULTI_BSSID_PARENT])
++		params.multi_bssid_parent =
++			nla_get_u8(info->attrs[NL80211_ATTR_MULTI_BSSID_PARENT]);
++	if (params.multi_bssid_mode == NL80211_MULTIPLE_BSSID_NON_TRANSMITTED &&
++			!params.multi_bssid_parent)
++		return -EOPNOTSUPP;
++
+ 	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+ 	if (!msg)
+ 		return -ENOMEM;
+-- 
+2.25.0
+

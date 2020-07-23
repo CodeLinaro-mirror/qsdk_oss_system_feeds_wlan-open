@@ -1,0 +1,114 @@
+From ba95e1ca4924118693bfa701ca8d9b2d1057d386 Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Mon, 6 Jul 2020 13:52:11 +0200
+Subject: [PATCH 02/10] nl80211: add attributes for multiple bssid related
+ settings
+
+When we start a multiple bssid AP we need to pass the index and number of
+peers to the kernel. This info needs to be propagated to the driver.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ include/net/cfg80211.h       | 12 ++++++++++++
+ include/uapi/linux/nl80211.h |  7 +++++++
+ net/wireless/nl80211.c       | 15 +++++++++++++++
+ 3 files changed, 34 insertions(+)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 7e7a807f5b38..0a35edc51378 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -455,6 +455,17 @@ struct ieee80211_supported_band {
+ 	const struct ieee80211_sband_iftype_data *iftype_data;
+ };
+ 
++/**
++ * struct ieee80211_multi_bssid - AP settings for multi bssid
++ *
++ * @index: the index of this AP in the multi bssid group.
++ * @count: the total number of multi bssid peer APs.
++ */
++struct ieee80211_multi_bssid {
++	u32 index;
++	u32 count;
++};
++
+ /**
+  * ieee80211_get_sband_iftype_data - return sband data for a given iftype
+  * @sband: the sband to search for the STA on
+@@ -1168,6 +1179,7 @@ struct cfg80211_ap_settings {
+ 	struct cfg80211_he_bss_color he_bss_color;
+ 	struct cfg80211_fils_discovery fils_discovery;
+ 	struct cfg80211_unsol_bcast_probe_resp unsol_bcast_probe_resp;
++	struct ieee80211_multi_bssid multi_bssid;
+ };
+ 
+ /**
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 77ed6e4deadc..5cf86af91c7d 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -2528,6 +2528,11 @@ enum nl80211_commands {
+  * @NL80211_ATTR_MULTI_BSSID_PARENT: If this is a Non-Transmitted BSSID, define
+  *	the parent interface.
+  *
++ * @NL80211_ATTR_MULTI_BSSID_INDEX: The index of this BSS inside the multi bssid
++ *	IE.
++ *
++ * @NL80211_ATTR_MULTI_BSSID_COUNT: The number of BSSs inside the multi bssid IE.
++ *
+  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
+  * @NL80211_ATTR_MAX: highest attribute number currently defined
+  * @__NL80211_ATTR_AFTER_LAST: internal use
+@@ -3018,6 +3023,8 @@ enum nl80211_attrs {
+ 
+ 	NL80211_ATTR_MULTI_BSSID_MODE,
+ 	NL80211_ATTR_MULTI_BSSID_PARENT,
++	NL80211_ATTR_MULTI_BSSID_INDEX,
++	NL80211_ATTR_MULTI_BSSID_COUNT,
+ 
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 10b1a2dc4b4a..53c8c8b127f0 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -762,6 +762,8 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+ 					NL80211_MULTIPLE_BSSID_LEGACY,
+ 					NL80211_MULTIPLE_BSSID_NON_TRANSMITTED),
+ 	[NL80211_ATTR_MULTI_BSSID_PARENT] = { .type = NLA_U32 },
++	[NL80211_ATTR_MULTI_BSSID_INDEX] = { .type = NLA_U32 },
++	[NL80211_ATTR_MULTI_BSSID_COUNT] = { .type = NLA_U32 },
+ };
+ 
+ /* policy for the key attributes */
+@@ -5079,6 +5081,11 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+ 	    !info->attrs[NL80211_ATTR_BEACON_HEAD])
+ 		return -EINVAL;
+ 
++	if (wdev->multi_bssid_mode == NL80211_MULTIPLE_BSSID_NON_TRANSMITTED &&
++	    (!info->attrs[NL80211_ATTR_MULTI_BSSID_INDEX] ||
++	     !info->attrs[NL80211_ATTR_MULTI_BSSID_COUNT]))
++		return -EINVAL;
++
+ 	err = nl80211_parse_beacon(rdev, info->attrs, &params.beacon);
+ 	if (err)
+ 		return err;
+@@ -5251,6 +5258,14 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+ 			return err;
+ 	}
+ 
++	if (info->attrs[NL80211_ATTR_MULTI_BSSID_INDEX])
++		params.multi_bssid.index = nla_get_u32(
++				info->attrs[NL80211_ATTR_MULTI_BSSID_INDEX]);
++
++	if (info->attrs[NL80211_ATTR_MULTI_BSSID_COUNT])
++		params.multi_bssid.count = nla_get_u32(
++				info->attrs[NL80211_ATTR_MULTI_BSSID_COUNT]);
++
+ 	nl80211_calculate_ap_params(&params);
+ 
+ 	if (info->attrs[NL80211_ATTR_EXTERNAL_AUTH_SUPPORT])
+-- 
+2.25.0
+

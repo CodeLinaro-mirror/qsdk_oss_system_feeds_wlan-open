@@ -1,0 +1,131 @@
+From 722d61a21e1af6882d23ff02daaf1084d013b05a Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Wed, 15 Jul 2020 16:38:33 -0700
+Subject: [PATCH 06/10] ath11k: pass multiple bssid info to FW when a new vdev
+ is created
+
+When we use multiple bssid the FW needs to know if the bssid is
+non/transmitting and what the vdev_id of the parent is. This patch adds
+the required code to achieve this.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ drivers/net/wireless/ath/ath11k/mac.c | 28 +++++++++++++++++++++++++--
+ drivers/net/wireless/ath/ath11k/wmi.c |  2 ++
+ drivers/net/wireless/ath/ath11k/wmi.h | 10 ++++++++++
+ 3 files changed, 38 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 4f6f6e3fdf0d..28327a43c089 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -5167,17 +5167,36 @@ static void ath11k_mac_op_stop(struct ieee80211_hw *hw)
+ 	atomic_set(&ar->num_pending_mgmt_tx, 0);
+ }
+ 
+-static void
++static int
+ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+ 				    struct vdev_create_params *params)
+ {
+ 	struct ath11k *ar = arvif->ar;
+ 	struct ath11k_pdev *pdev = ar->pdev;
++	struct ieee80211_vif *parent;
+ 
+ 	params->if_id = arvif->vdev_id;
+ 	params->type = arvif->vdev_type;
+ 	params->subtype = arvif->vdev_subtype;
+ 	params->pdev_id = pdev->pdev_id;
++	params->vdevid_trans = 0;
++	switch (ieee80211_get_multi_bssid_mode(arvif->vif)) {
++	case NL80211_MULTIPLE_BSSID_TRANSMITTED:
++		params->flags = WMI_HOST_VDEV_FLAGS_TRANSMIT_AP;
++		break;
++	case NL80211_MULTIPLE_BSSID_NON_TRANSMITTED:
++		params->flags = WMI_HOST_VDEV_FLAGS_NON_TRANSMIT_AP;
++		parent = ieee80211_get_multi_bssid_parent(arvif->vif);
++		if (!parent)
++			return -ENOENT;
++		if (ar->hw->wiphy != ieee80211_vif_to_wdev(parent)->wiphy)
++			return -EINVAL;
++		params->vdevid_trans = ath11k_vif_to_arvif(parent)->vdev_id;
++		break;
++	default:
++		params->flags = WMI_HOST_VDEV_FLAGS_NON_MBSSID_AP;
++		break;
++	}
+ 
+ 	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
+ 		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
+@@ -5192,6 +5211,7 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+ 		params->chains[NL80211_BAND_6GHZ].tx = ar->num_tx_chains;
+ 		params->chains[NL80211_BAND_6GHZ].rx = ar->num_rx_chains;
+ 	}
++	return 0;
+ }
+ 
+ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -5284,7 +5304,11 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 	for (i = 0; i < ARRAY_SIZE(vif->hw_queue); i++)
+ 		vif->hw_queue[i] = i % (ATH11K_HW_MAX_QUEUES - 1);
+ 
+-	ath11k_mac_setup_vdev_create_params(arvif, &vdev_param);
++	ret = ath11k_mac_setup_vdev_create_params(arvif, &vdev_param);
++	if (ret) {
++		ath11k_warn(ab, "failed to prepare vdev %d\n", ret);
++		goto err;
++	}
+ 
+ 	ret = ath11k_wmi_vdev_create(ar, vif->addr, &vdev_param);
+ 	if (ret) {
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
+index 2806efccd562..91d20a2e1b82 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -681,6 +681,8 @@ int ath11k_wmi_vdev_create(struct ath11k *ar, u8 *macaddr,
+ 	cmd->vdev_subtype = param->subtype;
+ 	cmd->num_cfg_txrx_streams = WMI_NUM_SUPPORTED_BAND_MAX;
+ 	cmd->pdev_id = param->pdev_id;
++	cmd->flags = param->flags;
++	cmd->vdevid_trans = param->vdevid_trans;
+ 	ether_addr_copy(cmd->vdev_macaddr.addr, macaddr);
+ 
+ 	ptr = skb->data + sizeof(*cmd);
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.h b/drivers/net/wireless/ath/ath11k/wmi.h
+index fb7ece7466c0..7515b14514c2 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -138,6 +138,12 @@ enum {
+ 	WMI_AUTORATE_3200NS_GI = (1 << 11),
+ };
+ 
++enum {
++	WMI_HOST_VDEV_FLAGS_NON_MBSSID_AP	= 1,
++	WMI_HOST_VDEV_FLAGS_TRANSMIT_AP		= 2,
++	WMI_HOST_VDEV_FLAGS_NON_TRANSMIT_AP	= 4,
++};
++
+ /*
+  * wmi command groups.
+  */
+@@ -2525,6 +2531,8 @@ struct vdev_create_params {
+ 		u8 rx;
+ 	} chains[NUM_NL80211_BANDS];
+ 	u32 pdev_id;
++	u32 flags;
++	u32 vdevid_trans;
+ };
+ 
+ struct wmi_vdev_create_cmd {
+@@ -2535,6 +2543,8 @@ struct wmi_vdev_create_cmd {
+ 	struct wmi_mac_addr vdev_macaddr;
+ 	u32 num_cfg_txrx_streams;
+ 	u32 pdev_id;
++	u32 flags;
++	u32 vdevid_trans;
+ } __packed;
+ 
+ struct wmi_vdev_txrx_streams {
+-- 
+2.25.0
+
