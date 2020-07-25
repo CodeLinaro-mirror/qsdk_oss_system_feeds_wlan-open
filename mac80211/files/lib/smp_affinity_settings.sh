@@ -40,7 +40,7 @@ enable_affinity_hk_cp01_c1() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 }
 
-enable_affinity_hk10_c2() {
+enable_affinity_hk10() {
 	# Enable smp affinity for PCIE attach
 	#pci 0
 
@@ -103,11 +103,11 @@ enable_smp_affinity_wifi() {
 					;;
 			ap-hk10-c2)
 					#case for rdp413
-					enable_affinity_hk10_c2
+					enable_affinity_hk10
 					;;
 			ap-hk10-c1)
 					#case for rdp412
-					enable_affinity_hk10_c1
+					enable_affinity_hk10
 					enable_affinity_hk_cp01_c1
 					;;
 			*)
