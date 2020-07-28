@@ -482,10 +482,6 @@ mac80211_hostapd_setup_base() {
 		he_spr_sr_control:${he_phy_cap:14:2}:0x1:$he_spr_sr_control \
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
 
-                bsscolor=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
-                bsscolor=$(($bsscolor + 1))
-                bsscolor=$(($bsscolor % 63))
-                append base_cfg "he_bss_color=$bsscolor" "$N"
 		append base_cfg "he_default_pe_duration=4" "$N"
 		json_select ..
 		[ "$he_mu_edca" != "0" ] && {
