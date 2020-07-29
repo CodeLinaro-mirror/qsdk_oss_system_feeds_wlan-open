@@ -236,7 +236,7 @@ define DownloadBackports
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
 	git revert --no-edit db3bdcb9 && git revert --no-edit 0628cda3 && \
-	git revert --no-edit c8ffcd && git revert --no-edit 7309f7730)
+	git revert --no-edit c8ffcd)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
