@@ -100,8 +100,24 @@ EOF
 		devidx=$(($devidx + 1))
 	done
 
-	#add this delay for empty wifi script issue in rdp413
-	sleep 1
+	#add this delay for empty wifi script issue
+	count=0
+	while :; do
+		count=$((count+1))
+		for dev_avail in /sys/class/ieee80211/*
+		do
+			if [ -e "$dev_avail" ]
+			then
+				 break 2
+			fi
+		done
+		sleep 1
+		#check for 10 secs otherwise break loop
+		if [ $count -gt 10 ]
+		then
+			break
+		fi
+	done
 
 	for _dev in /sys/class/ieee80211/*; do
 		[ -e "$_dev" ] || continue
