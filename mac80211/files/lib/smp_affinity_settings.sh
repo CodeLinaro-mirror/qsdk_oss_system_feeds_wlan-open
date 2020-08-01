@@ -97,6 +97,7 @@ enable_smp_affinity_wifi() {
 
 		case "$board" in
 			ap-cp01-c1 | \
+			ap-oak03 | \
 			ap-hk01-c1)
 					#case for rdp393,rdp385,rdp352
 					enable_affinity_hk_cp01_c1
