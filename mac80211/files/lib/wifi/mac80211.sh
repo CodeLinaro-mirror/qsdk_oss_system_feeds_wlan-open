@@ -102,19 +102,13 @@ EOF
 
 	#add this delay for empty wifi script issue
 	count=0
-	while :; do
-		count=$((count+1))
-		for dev_avail in /sys/class/ieee80211/*
-		do
-			if [ -e "$dev_avail" ]
-			then
-				 break 2
-			fi
-		done
-		sleep 1
-		#check for 10 secs otherwise break loop
-		if [ $count -gt 10 ]
+	while [ $count -le 10 ]
+	do
+		sleep  1
+		if ([ $(ls /sys/class/ieee80211 | wc -l  | grep -w "0") ])
 		then
+			count=$(( count+1 ))
+		else
 			break
 		fi
 	done
