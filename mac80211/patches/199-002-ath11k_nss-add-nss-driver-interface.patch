@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2148 @@
+@@ -0,0 +1,2227 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -392,11 +392,90 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	}
 +}
 +
++void ath11k_nss_process_mic_error(struct ath11k_base *ab, struct sk_buff *skb)
++{
++	struct ath11k_vif *arvif;
++	struct ath11k_peer *peer = NULL;
++	struct hal_rx_desc *desc = (struct hal_rx_desc *)skb->data;
++	struct wireless_dev *wdev;
++	u16 peer_id;
++	u8 peer_addr[ETH_ALEN];
++	u8 ucast_keyidx, mcast_keyidx;
++	bool is_mcbc;
++
++	if (!ath11k_dp_rx_h_msdu_end_first_msdu(ab, desc))
++		goto fail;
++
++	is_mcbc = ath11k_dp_rx_h_attn_is_mcbc(ab, desc);
++	peer_id = ath11k_dp_rx_h_mpdu_start_peer_id(ab, desc);
++
++	spin_lock_bh(&ab->base_lock);
++	peer = ath11k_peer_find_by_id(ab, peer_id);
++	if (!peer) {
++		ath11k_info(ab, "ath11k_nss:peer not found");
++		spin_unlock_bh(&ab->base_lock);
++		goto fail;
++	}
++
++	if (!peer->vif) {
++		ath11k_warn(ab, "ath11k_nss:vif not found");
++		spin_unlock_bh(&ab->base_lock);
++		goto fail;
++	}
++
++	ether_addr_copy(peer_addr, peer->addr);
++	mcast_keyidx = peer->mcast_keyidx;
++	ucast_keyidx = peer->ucast_keyidx;
++	arvif = ath11k_vif_to_arvif(peer->vif);
++	spin_unlock_bh(&ab->base_lock);
++
++	if (!arvif->is_started) {
++		ath11k_warn(ab, "ath11k_nss:arvif not started");
++		goto fail;
++	}
++
++	wdev = ieee80211_vif_to_wdev_relaxed(arvif->vif);
++	if (!wdev) {
++		ath11k_warn(ab, "ath11k_nss: wdev is null\n");
++		goto fail;
++	}
++
++	if (!wdev->netdev) {
++		ath11k_warn(ab, "ath11k_nss: netdev is null\n");
++		goto fail;
++	}
++
++	cfg80211_michael_mic_failure(wdev->netdev, peer_addr,
++				     is_mcbc ? NL80211_KEYTYPE_GROUP :
++				     NL80211_KEYTYPE_PAIRWISE,
++				     is_mcbc ? mcast_keyidx : ucast_keyidx,
++				     NULL, GFP_ATOMIC);
++	kfree(skb);
++	return;
++
++fail:
++	kfree(skb);
++	ath11k_warn(ab, "ath11k_nss: Failed to handle mic error\n");
++	return;
++}
++
 +static void
 +ath11k_nss_wifili_ext_callback_fn(struct ath11k_base *ab, struct sk_buff *skb,
 +				  __attribute__((unused)) struct napi_struct *napi)
 +{
-+	/* TODO */
++	struct nss_wifili_soc_per_packet_metadata *wepm;
++
++	wepm = (struct nss_wifili_soc_per_packet_metadata *)(skb->head +
++					      NSS_WIFILI_SOC_PER_PACKET_METADATA_OFFSET);
++
++	switch (wepm->pkt_type) {
++	case NSS_WIFILI_SOC_EXT_DATA_PKT_MIC_ERROR:
++		ath11k_nss_process_mic_error(ab, skb);
++		break;
++	default:
++		kfree(skb);
++		break;
++	}
 +}
 +
 +void ath11k_nss_vdev_cfg_cb(void *app_data, struct nss_cmn_msg *msg)
