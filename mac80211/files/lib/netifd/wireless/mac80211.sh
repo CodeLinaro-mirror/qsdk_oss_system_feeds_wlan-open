@@ -83,7 +83,7 @@ drv_mac80211_init_device_config() {
 	config_add_string path phy 'macaddr:macaddr'
 	config_add_string hwmode
 	config_add_string board_file
-	config_add_int beacon_int chanbw frag rts
+	config_add_int beacon_int chanbw frag rts fils_discovery unsol_bcast_presp
 	config_add_int rxantenna txantenna antenna_gain txpower distance band
 	mu_edca_init_config
 	config_add_boolean noscan he_mu_edca
@@ -560,6 +560,16 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "he_mu_edca_qos_info_txop_request=0" "$N"
 			mac80211_set_he_muedca_params $HE_MU_EDCA_PARAMS_DEFAULT
 		}
+
+		if [ $freq == 5935 ] || ([ $freq -gt 5950 ] && [ $freq -le 7115 ]); then
+			if [ -z $fils_discovery ] && [ -z $unsol_bcast_presp ]; then
+				append base_cfg "fils_discovery_max_interval=20" "$N"
+			elif [ -n $fils_discovery ] && [ $fils_discovery -gt 0 ] && [ $fils_discovery -le 20 ]; then
+				append base_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
+			elif [ -n $unsol_bcast_presp ] && [ $unsol_bcast_presp -gt 0 ] && [ $unsol_bcast_presp -le 20 ]; then
+				append base_cfg "unsol_bcast_probe_resp_interval=$unsol_bcast_presp" "$N"
+			fi
+		fi
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
@@ -1210,7 +1220,9 @@ drv_mac80211_setup() {
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
-		htmode band multiple_bssid
+		htmode band multiple_bssid \
+		fils_discovery unsol_bcast_presp
+
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
