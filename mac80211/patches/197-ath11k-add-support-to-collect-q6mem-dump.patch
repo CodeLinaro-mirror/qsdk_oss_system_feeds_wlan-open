@@ -22,33 +22,21 @@ Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/core
 ===================================================================
 --- backports-20200628-4.4.60-9a94b73e75.orig/drivers/net/wireless/ath/ath11k/core.c
 +++ backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/core.c
-@@ -621,6 +621,7 @@ int ath11k_core_ssr_notifier_cb(struct n
+@@ -621,7 +621,8 @@ int ath11k_core_ssr_notifier_cb(struct n
  	/* TODO Add more driver stats */
  
  	/* Crash the system once all the stats are dumped */
 -	BUG_ON(1);
 +	if(!qmi->ab->fw_recovery_support)
 +		BUG_ON(1);
-
-	return 0;
-@@ -876,6 +877,12 @@ static void ath11k_core_reset(struct wor
  
- 	ab->is_reset = true;
- 
-+	/* Crash the system once all the stats are dumped */
-+	if(!ab->fw_recovery_support) {
-+		ath11k_core_dump_bp_stats(ab);
-+		ath11k_hal_dump_srng_stats(ab);
-+		BUG_ON(1);
-+	}
- 	/* prepare coredump */
- 	ath11k_coredump_download_rddm(ab);
- 
+ 	return 0;
+ }
 Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/core.h
 ===================================================================
 --- backports-20200628-4.4.60-9a94b73e75.orig/drivers/net/wireless/ath/ath11k/core.h
 +++ backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/core.h
-@@ -844,6 +844,7 @@ struct ath11k_base {
+@@ -838,6 +838,7 @@ struct ath11k_base {
  	const struct hal_srng_regs *srng_regs;
  	u32 sw_pdev_id_map[MAX_RADIOS];
  	u32 hw_pdev_id_map[MAX_RADIOS];
@@ -56,11 +44,19 @@ Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/core
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
+@@ -986,6 +987,7 @@ void ath11k_core_free_bdf(struct ath11k_
+ 
+ void ath11k_core_halt(struct ath11k *ar);
+ int ath11k_core_pre_init(struct ath11k_base *ab);
++void ath11k_core_dump_bp_stats(struct ath11k_base *ab);
+ void ath11k_coredump_qdss_dump(struct ath11k_base *ab,
+ 			       struct ath11k_qmi_event_qdss_trace_save_data *event_data);
+ 
 Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/debug.c
 ===================================================================
 --- backports-20200628-4.4.60-9a94b73e75.orig/drivers/net/wireless/ath/ath11k/debug.c
 +++ backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/debug.c
-@@ -1131,6 +1131,48 @@ static const struct file_operations fops
+@@ -1204,6 +1204,48 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -109,7 +105,7 @@ Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/debu
  int ath11k_debug_pdev_create(struct ath11k_base *ab)
  {
  	char soc_name[11] = {0};
-@@ -1155,6 +1197,10 @@ int ath11k_debug_pdev_create(struct ath1
+@@ -1231,6 +1273,10 @@ int ath11k_debug_pdev_create(struct ath1
  	debugfs_create_file("soc_dp_stats", 0600, ab->debugfs_soc, ab,
  			    &fops_soc_dp_stats);
  
@@ -124,7 +120,7 @@ Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/pci.
 ===================================================================
 --- backports-20200628-4.4.60-9a94b73e75.orig/drivers/net/wireless/ath/ath11k/pci.c
 +++ backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1233,6 +1233,8 @@ static int ath11k_pci_probe(struct pci_d
+@@ -1213,6 +1213,8 @@ static int ath11k_pci_probe(struct pci_d
  		ab->fixed_mem_region = false;
  	}
  
@@ -133,3 +129,29 @@ Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/pci.
  	spin_lock_init(&ar_pci->window_lock);
  
  	ret = ath11k_pci_claim(ar_pci, pdev);
+Index: backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/coredump.c
+===================================================================
+--- backports-20200628-4.4.60-9a94b73e75.orig/drivers/net/wireless/ath/ath11k/coredump.c
++++ backports-20200628-4.4.60-9a94b73e75/drivers/net/wireless/ath/ath11k/coredump.c
+@@ -93,6 +93,7 @@ static void ath11k_coredump_free_q6dump(
+ void ath11k_coredump_build_inline(struct ath11k_pci *ar_pci,
+ 				  struct ath11k_dump_segment *segments, int num_seg)
+ {
++	struct ath11k_base *ab = ar_pci->ab;
+ 	struct ath11k_coredump_state *dump_state;
+ 	struct timespec64 timestamp;
+ 	struct ath11k_dump_file_data *file_data;
+@@ -127,6 +128,13 @@ void ath11k_coredump_build_inline(struct
+ 	file_data->seg =(struct ath11k_dump_segment *)buf;
+ 	memcpy(file_data->seg, segments, num_seg * sizeof(*segments));
+ 
++	/* Crash the system once all the stats are dumped */
++	if(!ab->fw_recovery_support) {
++		ath11k_core_dump_bp_stats(ab);
++		ath11k_hal_dump_srng_stats(ab);
++		BUG_ON(1);
++	}
++
+ 	dump_state = vzalloc(sizeof(*dump_state));
+ 	if(!dump_state)
+ 		return;
