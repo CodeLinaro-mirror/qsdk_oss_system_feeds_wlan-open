@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2106 @@
+@@ -0,0 +1,2149 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -79,6 +79,45 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	}
 +
 +	return ATH11K_NSS_OPMODE_UNKNOWN;
++}
++
++static void ath11k_nss_wifili_stats_sync(struct ath11k_base *ab,
++					 struct nss_wifili_stats_sync_msg *wlsoc_stats)
++{
++	struct nss_wifili_device_stats *devstats = &wlsoc_stats->stats;
++	struct ath11k_soc_dp_stats *soc_stats = &ab->soc_stats;
++	int i;
++
++	spin_lock_bh(&ab->base_lock);
++
++	soc_stats->err_ring_pkts += devstats->rxwbm_stats.err_src_rxdma;
++	soc_stats->invalid_rbm += devstats->rxwbm_stats.invalid_buf_mgr;
++
++	for (i = 0; i < HAL_REO_ENTR_RING_RXDMA_ECODE_MAX; i++)
++		soc_stats->rxdma_error[i] += devstats->rxwbm_stats.err_dma_codes[i];
++
++	for (i = 0; i < HAL_REO_DEST_RING_ERROR_CODE_MAX; i++)
++		soc_stats->reo_error[i] += devstats->rxwbm_stats.err_reo_codes[i];
++
++	for (i = 0; i < DP_REO_DST_RING_MAX; i++)
++		soc_stats->hal_reo_error[i] += devstats->rxreo_stats[i].ring_error;
++
++	for (i = 0; i < DP_TCL_NUM_RING_MAX; i++)
++		soc_stats->tx_err.desc_na[i] += devstats->tcl_stats[i].tcl_ring_full;
++
++
++	for (i = 0; i < NSS_WIFILI_MAX_TCL_DATA_RINGS_MSG; i++)
++		atomic_add(devstats->txcomp_stats[i].invalid_bufsrc
++			  + devstats->txcomp_stats[i].invalid_cookie
++			  + devstats->tx_sw_pool_stats[i].desc_alloc_fail
++			  + devstats->tx_ext_sw_pool_stats[i].desc_alloc_fail,
++			  &soc_stats->tx_err.misc_fail);
++
++	for (i = 0; i < DP_TCL_NUM_RING_MAX; i++)
++		atomic_add(devstats->tx_data_stats[i].tx_send_fail_cnt,
++			   &soc_stats->tx_err.misc_fail);
++
++	spin_unlock_bh(&ab->base_lock);
 +}
 +
 +static void ath11k_nss_get_peer_tx_tid_stats(struct ath11k_base *ab, int npeers, struct nss_wifili_sojourn_peer_stats *stats)
@@ -323,7 +362,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +		break;
 +	case NSS_WIFILI_STATS_MSG:
-+		/* TODO */
++		if (response == NSS_CMN_RESPONSE_EMSG) {
++			ath11k_warn(ab, "soc_dp_stats failed to get updated\n");
++			break;
++		}
++		ath11k_nss_wifili_stats_sync(ab, &msg->msg.wlsoc_stats);
 +		break;
 +	case NSS_WIFILI_PEER_STATS_MSG:
 +		peer_stats = &msg->msg.peer_stats.stats;
