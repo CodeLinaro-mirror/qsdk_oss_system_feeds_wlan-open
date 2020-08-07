@@ -1,0 +1,130 @@
+From db1a10e54e9f2fc3b88400bbd9dcc703b74c3df9 Mon Sep 17 00:00:00 2001
+From: Karthikeyan Kathirvel <kathirve@codeaurora.org>
+Date: Sat, 8 Aug 2020 11:40:36 +0530
+Subject: [PATCH] ath11k: monitor ring stuck
+
+More than 20000 ppdu id jumping can cause status ring and destination
+ring processing not sync. The status ring is processed and the
+destination ring is not processed. Since destination is not reaped for
+so long, backpressure is occured at destination ring.
+
+Added a workaround to update the ppdu id with the latest ppdu, this will
+reap the destination ring and will avoid stuck. Increased monitor ring
+sizes to avoid the early backpressure.
+
+Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
+Change-Id: I7c6e815c9b7d316c841330537a64d0c3481361e2
+---
+ drivers/net/wireless/ath/ath11k/dp.h    | 18 ++++++++++++++----
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 31 ++++++++++++++++++++++++++++---
+ 2 files changed, 42 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/dp.h b/drivers/net/wireless/ath/ath11k/dp.h
+index e84d5c9..bff7ad2 100644
+--- a/drivers/net/wireless/ath/ath11k/dp.h
++++ b/drivers/net/wireless/ath/ath11k/dp.h
+@@ -97,6 +97,8 @@ struct ath11k_pdev_mon_stats {
+ 	u32 dest_mpdu_drop;
+ 	u32 dup_mon_linkdesc_cnt;
+ 	u32 dup_mon_buf_cnt;
++	u32 dest_mon_stuck;
++	u32 dest_mon_not_reaped;
+ };
+ 
+ struct dp_link_desc_bank {
+@@ -117,6 +119,13 @@ struct dp_link_desc_bank {
+ 	(DP_RX_DESC_COOKIE_INDEX_MAX | DP_RX_DESC_COOKIE_POOL_ID_MAX)
+ #define DP_NOT_PPDU_ID_WRAP_AROUND 20000
+ 
++/*
++ * The destination ring processing is stuck if the destination is not
++ * moving while status ring moves 16 ppdu. the destination ring processing
++ * skips this destination ring ppdu as walkaround
++ */
++#define MON_DEST_RING_STUCK_MAX_CNT 16
++
+ enum ath11k_dp_ppdu_state {
+ 	DP_PPDU_STATUS_START,
+ 	DP_PPDU_STATUS_DONE,
+@@ -139,6 +148,7 @@ struct ath11k_mon_data {
+ 
+ struct ath11k_pdev_dp {
+ 	u32 mac_id;
++	u32 mon_dest_ring_stuck_cnt;
+ 	atomic_t num_tx_pending;
+ 	wait_queue_head_t tx_empty_waitq;
+ 	struct dp_rxdma_ring rx_refill_buf_ring;
+@@ -184,10 +194,10 @@ struct ath11k_pdev_dp {
+ #define DP_RXDMA_BUF_RING_SIZE		4096
+ #define DP_RXDMA_REFILL_RING_SIZE	2048
+ #define DP_RXDMA_ERR_DST_RING_SIZE	1024
+-#define DP_RXDMA_MON_STATUS_RING_SIZE	1024
+-#define DP_RXDMA_MONITOR_BUF_RING_SIZE	4096
+-#define DP_RXDMA_MONITOR_DST_RING_SIZE	2048
+-#define DP_RXDMA_MONITOR_DESC_RING_SIZE	4096
++#define DP_RXDMA_MON_STATUS_RING_SIZE	2048
++#define DP_RXDMA_MONITOR_BUF_RING_SIZE	8192
++#define DP_RXDMA_MONITOR_DST_RING_SIZE	8192
++#define DP_RXDMA_MONITOR_DESC_RING_SIZE	8192
+ 
+ #define DP_RX_BUFFER_SIZE	2048
+ #define	DP_RX_BUFFER_SIZE_LITE  1024
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 14ee48d..5b27d89 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -5258,6 +5258,7 @@ void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, u32 quota,
+ 	u32 rx_bufs_used;
+ 	struct ath11k_pdev_mon_stats *rx_mon_stats;
+ 	u32	 npackets = 0;
++	u32 mpdu_rx_bufs_used;
+ 
+ 	mon_dst_srng = &ar->ab->hal.srng_list[dp->rxdma_mon_dst_ring.ring_id];
+ 
+@@ -5282,16 +5283,40 @@ void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, u32 quota,
+ 		head_msdu = NULL;
+ 		tail_msdu = NULL;
+ 
+-		rx_bufs_used += ath11k_dp_rx_mon_mpdu_pop(ar, ring_entry,
++		mpdu_rx_bufs_used = ath11k_dp_rx_mon_mpdu_pop(ar, ring_entry,
+ 							  &head_msdu,
+ 							  &tail_msdu,
+ 							  &npackets, &ppdu_id);
+ 
++		rx_bufs_used += mpdu_rx_bufs_used;
++
++		if (mpdu_rx_bufs_used)
++			dp->mon_dest_ring_stuck_cnt = 0;
++		else {
++			dp->mon_dest_ring_stuck_cnt++;
++			rx_mon_stats->dest_mon_not_reaped++;
++		}
++
++		if (dp->mon_dest_ring_stuck_cnt > MON_DEST_RING_STUCK_MAX_CNT) {
++			rx_mon_stats->dest_mon_stuck++;
++			ath11k_dbg(ar->ab, ATH11K_DBG_DATA,
++				   "status ring ppdu_id=%d dest ring ppdu_id=%d mon_dest_ring_stuck_cnt=%d" \
++				   "dest_mon_not_reaped=%lu dest_mon_stuck=%lu\n",
++				   pmon->mon_ppdu_info.ppdu_id, ppdu_id,dp->mon_dest_ring_stuck_cnt,
++				   rx_mon_stats->dest_mon_not_reaped, rx_mon_stats->dest_mon_stuck);
++
++			pmon->mon_ppdu_info.ppdu_id = ppdu_id;
++			continue;
++		}
++
+ 		if (ppdu_id != pmon->mon_ppdu_info.ppdu_id) {
+ 			pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
+ 			ath11k_dbg(ar->ab, ATH11K_DBG_DATA,
+-				   "dest_rx: new ppdu_id %x != status ppdu_id %x",
+-				   ppdu_id, pmon->mon_ppdu_info.ppdu_id);
++				   "dest_rx: new ppdu_id %x != status ppdu_id %x dest_mon_not_reaped = %lu" \
++				   "dest_mon_stuck = %lu\n",
++				   ppdu_id, pmon->mon_ppdu_info.ppdu_id,
++				   rx_mon_stats->dest_mon_not_reaped,
++				   rx_mon_stats->dest_mon_stuck);
+ 			break;
+ 		}
+ 		if (head_msdu && tail_msdu) {
+-- 
+2.7.4
+
