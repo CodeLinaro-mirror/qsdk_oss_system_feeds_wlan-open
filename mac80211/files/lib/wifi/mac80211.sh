@@ -109,6 +109,7 @@ EOF
 		then
 			count=$(( count+1 ))
 		else
+			sleep 1
 			break
 		fi
 	done
