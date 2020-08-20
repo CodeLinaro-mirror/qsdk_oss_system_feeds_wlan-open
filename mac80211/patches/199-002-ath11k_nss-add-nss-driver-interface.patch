@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2230 @@
+@@ -0,0 +1,2234 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -58,10 +58,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +#include "core.h"
 +#include "peer.h"
 +#include "dp_rx.h"
++#include "dp_tx.h"
 +#include "hif.h"
 +#include "../../../../../net/mac80211/sta_info.h"
-+
-+extern unsigned int ath11k_frame_mode;
 +
 +/*-----------------------------ATH11K-NSS Helpers--------------------------*/
 +
@@ -210,18 +209,6 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +{
 +	if (ab->nss.enabled)
 +		tlv_filter->rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS;
-+}
-+
-+static enum ath11k_hw_txrx_mode
-+ath11k_nss_get_decap_type(struct ath11k_base *ab)
-+{
-+	if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
-+		return ATH11K_HW_TXRX_RAW;
-+
-+	if (ath11k_frame_mode == ATH11K_HW_TXRX_ETHERNET)
-+		return ATH11K_HW_TXRX_ETHERNET;
-+
-+	return ATH11K_HW_TXRX_NATIVE_WIFI;
 +}
 +
 +static u32 ath11k_nss_cipher_type(struct ath11k_base *ab, u32 cipher)
@@ -670,7 +657,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "dp rx msdu from nss: ",
 +			skb->data, skb->len);
 +
-+	decap_type = ath11k_nss_get_decap_type(ab);
++	decap_type = arvif->nss.decap;
 +
 +	switch (decap_type) {
 +	case ATH11K_HW_TXRX_RAW:
@@ -703,11 +690,19 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +{
 +	struct ath11k *ar = arvif->ar;
 +	nss_tx_status_t status;
++	int encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
++	struct ath11k_soc_dp_stats *soc_stats = &ar->ab->soc_stats;
 +
-+	if (ath11k_frame_mode == ATH11K_HW_TXRX_ETHERNET)
++	if(encap_type != arvif->nss.encap) {
++		ath11k_warn(ar->ab, "encap mismatch in nss tx skb encap type %d" \
++			    "vif encap type %d\n", encap_type, arvif->nss.encap);
++		goto drop;
++	}
++
++	if (encap_type == HAL_TCL_ENCAP_TYPE_ETHERNET)
 +		goto send;
 +
-+	if (test_bit(ATH11K_FLAG_RAW_MODE, &ar->ab->dev_flags))
++	if (encap_type == HAL_TCL_ENCAP_TYPE_RAW)
 +		ath11k_nss_tx_encap_raw(skb);
 +	else
 +		ath11k_nss_tx_encap_nwifi(skb);
@@ -722,6 +717,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
 +
 +	return status;
++drop:
++	atomic_inc(&soc_stats->tx_err.misc_fail);
++	WARN_ON_ONCE(1);
++	return -EINVAL;
 +}
 +
 +int ath11k_nss_vdev_set_cmd(struct ath11k_vif *arvif, int cmd, int val)
@@ -747,6 +746,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	 */
 +	if (cmd == NSS_WIFI_VDEV_SECURITY_TYPE_CMD)
 +		val = ath11k_nss_cipher_type(ar->ab, val);
++
++	if (cmd == NSS_WIFI_VDEV_ENCAP_TYPE_CMD)
++		arvif->nss.encap = val;
++	else if (cmd == NSS_WIFI_VDEV_DECAP_TYPE_CMD)
++		arvif->nss.decap = val;
 +
 +	vdev_cmd = &vdev_msg->msg.vdev_cmd;
 +	vdev_cmd->cmd = cmd;
@@ -2280,7 +2284,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -0,0 +1,263 @@
+@@ -0,0 +1,267 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -2418,6 +2422,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	int if_num;
 +	/* Used for completion status for vdev config nss messages */
 +	struct completion complete;
++	/* Keep the copy of encap type for nss */
++	int encap;
++	/* Keep the copy of decap type for nss */
++	int decap;
 +};
 +
 +/* Structure to hold the pdev/radio related info for nss offload support */
