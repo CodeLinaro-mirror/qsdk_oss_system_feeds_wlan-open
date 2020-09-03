@@ -104,7 +104,59 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  extern unsigned int ath11k_frame_mode;
  
-@@ -461,6 +468,10 @@ static void ath11k_core_pdev_destroy(str
+@@ -419,23 +426,30 @@ static int ath11k_core_pdev_create(struc
+ 		return ret;
+ 	}
+ 
+-	ret = ath11k_mac_register(ab);
++	ret = ath11k_dp_pdev_alloc(ab);
+ 	if (ret) {
+-		ath11k_err(ab, "failed register the radio with mac80211: %d\n", ret);
++		ath11k_err(ab, "failed to attach DP pdev: %d\n", ret);
+ 		return ret;
+ 	}
+ 
+-	ret = ath11k_dp_pdev_alloc(ab);
++	ret = ath11k_nss_setup(ab);
+ 	if (ret) {
+-		ath11k_err(ab, "failed to attach DP pdev: %d\n", ret);
+-		goto err_mac_unregister;
++		ath11k_err(ab, "failed to setup nss driver interface%d",
++			   ret);
++		goto err_dp_pdev_free;
++	}
++
++	ret = ath11k_mac_register(ab);
++	if (ret) {
++		ath11k_err(ab, "failed register the radio with mac80211: %d\n", ret);
++		goto err_nss_tear;
+ 	}
+ 
+ 	ret = ath11k_thermal_register(ab);
+ 	if (ret) {
+ 		ath11k_err(ab, "could not register thermal device: %d\n",
+ 			   ret);
+-		goto err_dp_pdev_free;
++		goto err_mac_unregister;
+ 	}
+ 
+ 	ret = ath11k_spectral_init(ab);
+@@ -448,10 +462,12 @@ static int ath11k_core_pdev_create(struc
+ 
+ err_thermal_unregister:
+ 	ath11k_thermal_unregister(ab);
+-err_dp_pdev_free:
+-	ath11k_dp_pdev_free(ab);
+ err_mac_unregister:
+ 	ath11k_mac_unregister(ab);
++err_nss_tear:
++	ath11k_nss_teardown(ab);
++err_dp_pdev_free:
++	ath11k_dp_pdev_free(ab);
+ 
+ 	return ret;
+ }
+@@ -461,6 +477,10 @@ static void ath11k_core_pdev_destroy(str
  	ath11k_spectral_deinit(ab);
  	ath11k_thermal_unregister(ab);
  	ath11k_mac_unregister(ab);
@@ -115,22 +167,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_hif_irq_disable(ab);
  	ath11k_dp_pdev_free(ab);
  }
-@@ -668,6 +679,14 @@ int ath11k_core_qmi_firmware_ready(struc
- 		goto err_core_stop;
- 	}
- 
-+	/* Validate nss support for current hw and initialize nss driver interface */
-+	ret = ath11k_nss_setup(ab);
-+	if (ret) {
-+		ath11k_err(ab, "failed to setup nss driver interface, fallback to regular datapath %d",
-+			   ret);
-+		goto err_core_stop;
-+	}
-+
- #ifdef CONFIG_QCOM_QMI_HELPERS
- 	/* Register a notifier after mac registration
- 	 * to be called on fw crash
-@@ -700,6 +719,10 @@ static int ath11k_core_reconfigure_on_cr
+@@ -700,6 +720,10 @@ static int ath11k_core_reconfigure_on_cr
  	int ret;
  
  	mutex_lock(&ab->core_lock);
@@ -141,7 +178,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_thermal_unregister(ab);
  	ath11k_hif_irq_disable(ab);
  	ath11k_dp_pdev_free(ab);
-@@ -975,6 +998,8 @@ int ath11k_core_pre_init(struct ath11k_b
+@@ -975,6 +999,8 @@ int ath11k_core_pre_init(struct ath11k_b
  
  	ret = ath11k_ce_attr_attach(ab);
  
@@ -150,7 +187,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	return ret;
  }
  EXPORT_SYMBOL(ath11k_core_pre_init);
-@@ -1012,7 +1037,6 @@ int ath11k_core_init(struct ath11k_base
+@@ -1012,7 +1038,6 @@ int ath11k_core_init(struct ath11k_base
  		ath11k_err(ab, "failed to create soc core: %d\n", ret);
  		return ret;
  	}
@@ -728,7 +765,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	.configure_filter		= ath11k_mac_op_configure_filter,
  	.hw_scan                        = ath11k_mac_op_hw_scan,
  	.cancel_hw_scan                 = ath11k_mac_op_cancel_hw_scan,
-@@ -7351,6 +7451,9 @@ static int __ath11k_mac_register(struct
+@@ -7353,6 +7453,9 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, SW_CRYPTO_CONTROL);
  	}
  
@@ -810,7 +847,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +ATH11K_NSS_SUPPORT=
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -751,6 +751,11 @@ static int ath11k_pci_ext_irq_config(str
+@@ -754,6 +754,11 @@ static int ath11k_pci_ext_irq_config(str
  		netif_napi_add(&irq_grp->napi_ndev, &irq_grp->napi,
  			       ath11k_pci_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
  
@@ -822,15 +859,15 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		if (ath11k_tx_ring_mask[i] || ath11k_rx_ring_mask[i] ||
  		    ath11k_rx_err_ring_mask[i] || ath11k_rx_wbm_rel_ring_mask[i] ||
  		    ath11k_reo_status_ring_mask[i] || ath11k_rxdma2host_ring_mask[i] ||
-@@ -999,6 +1004,7 @@ static int ath11k_pci_claim(struct ath11
+@@ -1003,6 +1008,7 @@ static int ath11k_pci_claim(struct ath11
  		goto clear_master;
  	}
  
 +	ar_pci->mem_pa = pci_resource_start(pdev, PCI_BAR_NUM);
  	ath11k_dbg(ab, ATH11K_DBG_BOOT, "boot pci_mem 0x%pK\n", ar_pci->mem);
- 	return 0;
  
-@@ -1224,6 +1230,7 @@ static int ath11k_pci_probe(struct pci_d
+ 	pci_read_config_word(pdev, pdev->msi_cap + PCI_MSI_FLAGS, &control);
+@@ -1232,6 +1238,7 @@ static int ath11k_pci_probe(struct pci_d
  	}
  
  	ab->mem = ar_pci->mem;
