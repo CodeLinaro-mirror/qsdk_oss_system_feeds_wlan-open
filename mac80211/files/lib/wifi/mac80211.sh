@@ -127,7 +127,7 @@ EOF
 		htmode=""
 		ht_capab=""
 
-		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
+		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
 		(iw phy "$dev" info | grep -q '5745 MHz' && (iw phy "$dev" info | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
 		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
 
@@ -135,6 +135,13 @@ EOF
 		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
 
 		[ "$mode_band" = a ] && htmode="VHT80"
+
+		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5745 MHz' || {
+			iw phy "$dev" info | grep -q '5955 MHz' && {
+				channel="53"; htmode="HE80";
+				append ht_capab "	option band	3" "$N"
+			}
+		}
 
 		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
 
