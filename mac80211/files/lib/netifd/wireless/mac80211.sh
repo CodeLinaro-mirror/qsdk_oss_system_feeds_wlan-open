@@ -787,8 +787,6 @@ mac80211_prepare_vif() {
 	json_select config
 
 	json_get_vars ifname mode ssid wds extsta powersave macaddr
-	local multiple_bssid_param=
-	[ "$1" -eq 1 ] && multiple_bssid_param=multiple_bssid
 
 	for wdev in $(list_phy_interfaces "$phy"); do
 		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
@@ -836,7 +834,7 @@ mac80211_prepare_vif() {
 			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
 
 			[ -n "$hostapd_ctrl" ] || {
-				mac80211_iw_interface_add "$phy" "$ifname" __ap ${multiple_bssid_param} || return
+				mac80211_iw_interface_add "$phy" "$ifname" __ap || return
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
 			}
 			ap_ifname=$ifname
