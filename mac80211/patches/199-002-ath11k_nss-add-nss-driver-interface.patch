@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2327 @@
+@@ -0,0 +1,2336 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -1512,6 +1512,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +{
 +	struct ath11k_hal *hal = &ab->hal;
 +	struct hal_srng *srng;
++	u32 offset;
 +	int i;
 +
 +	if (ring_id < 0) {
@@ -1535,7 +1536,15 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		   hsi->entry_size, hsi->num_entries, hsi->flags);
 +
 +	for (i = 0; i < HAL_SRNG_NUM_REG_GRP; i++) {
-+		hsi->hwreg_base[i]  = (u32)ab->mem_pa + srng->hwreg_base[i];
++		offset = srng->hwreg_base[i];
++
++		/* For PCI based devices, get the umac ring base address offset
++		 * based on window register configuration.
++		 */
++		if (!(srng->flags & HAL_SRNG_FLAGS_LMAC_RING))
++			offset = ath11k_hif_get_window_offset(ab, srng->hwreg_base[i]);
++
++		hsi->hwreg_base[i]  = (u32)ab->mem_pa + offset;
 +
 +		ath11k_dbg(ab, ATH11K_DBG_NSS, "SRNG Register %d address %d\n",
 +			   i, hsi->hwreg_base[i]);
@@ -2645,3 +2654,59 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 +#endif /* CPTCFG_ATH11K_NSS_SUPPORT */
 +#endif
+--- a/drivers/net/wireless/ath/ath11k/hif.h
++++ b/drivers/net/wireless/ath/ath11k/hif.h
+@@ -49,6 +49,7 @@ struct ath11k_hif_ops {
+ 				   u32 *base_vector);
+ 	int (*get_msi_address)(struct ath11k_base *ab, u32 *msi_addr_lo,
+ 				u32 *msi_addr_hi);
++	u32 (*get_window_offset)(struct ath11k_base *ab, u32 offset);
+ 	void (*get_ce_msi_idx)(struct ath11k_base *ab, u32 ce_id, u32 *msi_idx);
+ };
+ 
+@@ -118,6 +119,14 @@ static inline int ath11k_get_msi_address
+ 	return ab->hif.ops->get_msi_address(ab, msi_addr_lo, msi_addr_hi);
+ }
+ 
++static inline u32 ath11k_hif_get_window_offset(struct ath11k_base *ab, u32 offset)
++{
++	if (ab->hif.ops->get_window_offset)
++		return ab->hif.ops->get_window_offset(ab, offset);
++
++	return offset;
++}
++
+ static inline void ath11k_get_ce_msi_idx(struct ath11k_base *ab, u32 ce_id,
+ 					u32 *msi_data_idx)
+ {
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -377,6 +377,20 @@ static inline u32 ath11k_pci_get_window_
+         return window_start;
+ }
+ 
++static inline u32 ath11k_pci_get_window_offset(struct ath11k_base *ab,
++                                               u32 offset)
++{
++        u32 window_start;
++
++        if (ab->static_window_map) {
++                window_start = ath11k_pci_get_window_start(ab, offset);
++
++                if (window_start)
++                        offset = window_start + (offset & WINDOW_RANGE_MASK);
++        }
++        return offset;
++}
++
+ static void ath11k_pci_write32(struct ath11k_base *ab, u32 offset, u32 value)
+ {
+ 	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
+@@ -1154,6 +1168,7 @@ static const struct ath11k_hif_ops ath11
+ 	.get_msi_address =  ath11k_pci_get_msi_address,
+ 	.get_user_msi_vector = ath11k_get_user_msi_assignment,
+ 	.map_service_to_pipe = ath11k_pci_map_service_to_pipe,
++	.get_window_offset = ath11k_pci_get_window_offset,
+ 	.get_ce_msi_idx = ath11k_pci_get_ce_msi_idx,
+ };
+ 
