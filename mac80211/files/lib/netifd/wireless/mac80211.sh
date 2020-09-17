@@ -554,7 +554,7 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
 		[ "$he_mu_edca" != "0" ] && {
 			json_select ..
-			append base_cfg "he_mu_edca_qos_info_param_count=1" "$N"
+			append base_cfg "he_mu_edca_qos_info_param_count=0" "$N"
 			append base_cfg "he_mu_edca_qos_info_q_ack=0" "$N"
 			append base_cfg "he_mu_edca_qos_info_queue_request=0" "$N"
 			append base_cfg "he_mu_edca_qos_info_txop_request=0" "$N"
