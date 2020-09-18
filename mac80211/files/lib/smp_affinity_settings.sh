@@ -106,8 +106,9 @@ enable_smp_affinity_wifi() {
 					#case for rdp413
 					enable_affinity_hk10
 					;;
+			ap-hk14 | \
 			ap-hk10-c1)
-					#case for rdp412
+					#case for rdp412,rdp419
 					enable_affinity_hk10
 					enable_affinity_hk_cp01_c1
 					;;
