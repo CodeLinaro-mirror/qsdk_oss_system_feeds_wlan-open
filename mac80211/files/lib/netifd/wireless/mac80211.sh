@@ -1224,6 +1224,20 @@ drv_mac80211_setup() {
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
+	count=0
+
+	while [ $count -le 10 ]
+	do
+		sleep 1
+		if lsmod | grep ath11k_pci
+		then
+			[ "$count" -gt 0 ] && read -t 3
+			break;
+		else
+			count=$(( count+1 ))
+		fi
+	done
+
 	find_phy $1 || {
 		echo "Could not find PHY for device '$1'"
 		wireless_set_retry 0
