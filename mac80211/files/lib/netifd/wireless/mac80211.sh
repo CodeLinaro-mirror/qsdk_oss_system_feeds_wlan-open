@@ -483,45 +483,41 @@ mac80211_hostapd_setup_base() {
 	# 802.11ax
 	enable_ax=0
 	idx="$channel"
+	is_6ghz=0
+	if [ -n "$band" ] && [ "$band" -eq 3 ]; then
+		is_6ghz=1
+	fi
 
 	case "$htmode" in
 		HE20)	enable_ax=1
-			if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-				append base_cfg "op_class=131" "$N"
+			if [ "$is_6ghz" == "1" ]; then
+				if [ $freq == 5935 ]; then
+					append base_cfg "op_class=136" "$N"
+				else
+					append base_cfg "op_class=131" "$N"
+				fi
 			fi
 			;;
 		HE40)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "40")"
-			if [ $freq -ge 5180 ] && [ $freq != 5935 ]; then
-				if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-					append base_cfg "op_class=132" "$N"
-				fi
-				append base_cfg "he_oper_chwidth=0" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
-			fi
+			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=132" "$N"
+			append base_cfg "he_oper_chwidth=0" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 		HE80)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "80")"
-			if [ $freq != 5935 ]; then
-				if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-					append base_cfg "op_class=133" "$N"
-				fi
-				append base_cfg "he_oper_chwidth=1" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
-			fi
+			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=133" "$N"
+			append base_cfg "he_oper_chwidth=1" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 		HE160)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "160")"
-			if [ $freq != 5935 ]; then
-				if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-					append base_cfg "op_class=134" "$N"
-				fi
-				append base_cfg "he_oper_chwidth=2" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
-			fi
+			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=134" "$N"
+			append base_cfg "he_oper_chwidth=2" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 	esac
 
