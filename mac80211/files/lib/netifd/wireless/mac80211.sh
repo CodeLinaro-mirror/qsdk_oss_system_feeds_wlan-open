@@ -110,7 +110,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid
+	config_add_boolean multiple_bssid ema
 }
 
 drv_mac80211_init_iface_config() {
@@ -529,7 +529,7 @@ mac80211_hostapd_setup_base() {
 		he_mu_beamformer:1 \
 		he_twt_required:0 \
 		he_spr_sr_control:0 \
-		multiple_bssid:0
+		multiple_bssid ema
 
 
 		append base_cfg "ieee80211ax=1" "$N"
@@ -547,7 +547,6 @@ mac80211_hostapd_setup_base() {
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
 
 		append base_cfg "he_default_pe_duration=4" "$N"
-		append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
 		[ "$he_mu_edca" != "0" ] && {
 			json_select ..
 			append base_cfg "he_mu_edca_qos_info_param_count=0" "$N"
@@ -565,7 +564,15 @@ mac80211_hostapd_setup_base() {
 			elif [ -n $unsol_bcast_presp ] && [ $unsol_bcast_presp -gt 0 ] && [ $unsol_bcast_presp -le 20 ]; then
 				append base_cfg "unsol_bcast_probe_resp_interval=$unsol_bcast_presp" "$N"
 			fi
+
+			if [ -z $multiple_bssid ] && [ -z $ema ]; then
+				multiple_bssid=1
+				ema=1
+			fi
 		fi
+
+		[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
+		[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=${ema}" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
