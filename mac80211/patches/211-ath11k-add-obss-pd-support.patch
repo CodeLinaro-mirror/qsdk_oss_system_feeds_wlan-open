@@ -1,4 +1,4 @@
-From 5c8836fd71997fa93e15339d6ba0264fc4de8bf8 Mon Sep 17 00:00:00 2001
+From 81694575884dc69535252a6f44128323fd6a2504 Mon Sep 17 00:00:00 2001
 From: Rajkumar Manoharan <rmanohar@codeaurora.org>
 Date: Sat, 26 Sep 2020 23:17:03 -0700
 Subject: [PATCH 1/3] nl80211: fix OBSS PD min and max offset validation
@@ -55,7 +55,7 @@ index 11691ca5cb4f..8c1e3cf08fc1 100644
 2.7.4
 
 
-From d1dd489d05979a6727dc936a5b5c4100c3616b5d Mon Sep 17 00:00:00 2001
+From 9bb17f65d41b87674b096fa0066d2695d22aa248 Mon Sep 17 00:00:00 2001
 From: Rajkumar Manoharan <rmanohar@codeaurora.org>
 Date: Sat, 26 Sep 2020 23:03:24 -0700
 Subject: [PATCH 2/3] nl80211: extend spatial reuse parameter set
@@ -202,7 +202,7 @@ index 8c1e3cf08fc1..43b57d428dcb 100644
 2.7.4
 
 
-From 45ebd824d8c0a59c6a7dfe11bf043a5529b5517f Mon Sep 17 00:00:00 2001
+From 5cbffbf00a5ff82ff11e93f7cf67202f8f9c4fd4 Mon Sep 17 00:00:00 2001
 From: Rajkumar Manoharan <rmanohar@codeaurora.org>
 Date: Wed, 30 Sep 2020 23:56:34 -0700
 Subject: [PATCH 3/3] ath11k: add support to configure spatial reuse parameter
@@ -214,17 +214,17 @@ support to configure fields of SPR element to firmware.
 
 Signed-off-by: Rajkumar Manoharan <rmanohar@codeaurora.org>
 ---
- drivers/net/wireless/ath/ath11k/mac.c | 131 +++++++++++++++++++-
- drivers/net/wireless/ath/ath11k/mac.h |   7 ++
+ drivers/net/wireless/ath/ath11k/mac.c | 134 +++++++++++++++++++-
+ drivers/net/wireless/ath/ath11k/mac.h |   6 +
  drivers/net/wireless/ath/ath11k/wmi.c | 227 ++++++++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath11k/wmi.h |  26 ++++
- 4 files changed, 389 insertions(+), 2 deletions(-)
+ 4 files changed, 391 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index b560e5c4bdc1..0e1eef8df4f1 100644
+index 6e45ea3b63f8..625b1ff20a7f 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2757,6 +2757,134 @@ static void ath11k_mac_op_nss_bss_info_changed(struct ieee80211_hw *hw,
+@@ -2760,6 +2760,137 @@ static void ath11k_mac_op_nss_bss_info_changed(struct ieee80211_hw *hw,
  	mutex_unlock(&ar->conf_mutex);
  }
  
@@ -233,7 +233,7 @@ index b560e5c4bdc1..0e1eef8df4f1 100644
 +{
 +	u32 bitmap[2], param_id, param_val, pdev_id;
 +	int ret;
-+	s8 thresh;
++	s8 non_srg_th = 0, srg_th = 0;
 +
 +	pdev_id = ar->pdev->pdev_id;
 +
@@ -245,6 +245,7 @@ index b560e5c4bdc1..0e1eef8df4f1 100644
 +			ath11k_warn(ar->ab,
 +				    "Failed to set obss_pd_threshold for pdev: %u\n",
 +				    pdev_id);
++		return;
 +	}
 +
 +	ath11k_dbg(ar->ab, ATH11K_DBG_MAC,
@@ -255,32 +256,34 @@ index b560e5c4bdc1..0e1eef8df4f1 100644
 +	param_val = 0;
 +	if (he_obss_pd->sr_ctrl &
 +	    IEEE80211_HE_SPR_NON_SRG_OBSS_PD_SR_DISALLOWED) {
-+		thresh = ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD_DISALLOWED;
++		non_srg_th = ATH11K_OBSS_PD_MAX_THRESHOLD;
 +	} else {
 +		if (he_obss_pd->sr_ctrl &
 +		    IEEE80211_HE_SPR_NON_SRG_OFFSET_PRESENT)
-+			thresh = (ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD -
-+				     he_obss_pd->non_srg_max_offset);
++			non_srg_th = (ATH11K_OBSS_PD_MAX_THRESHOLD +
++				      he_obss_pd->non_srg_max_offset);
 +		else
-+			thresh = ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD;
++			non_srg_th = ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD;
 +		param_val |= ATH11K_OBSS_PD_NON_SRG_EN;
 +	}
-+	param_val |= (thresh & 0xff);
++
++	if (he_obss_pd->sr_ctrl & IEEE80211_HE_SPR_SRG_INFORMATION_PRESENT) {
++		srg_th = ATH11K_OBSS_PD_MAX_THRESHOLD + he_obss_pd->max_offset;
++		param_val |= ATH11K_OBSS_PD_SRG_EN;
++	}
 +
 +	if (test_bit(WMI_TLV_SERVICE_SRG_SRP_SPATIAL_REUSE_SUPPORT,
 +		     ar->ab->wmi_ab.svc_map)) {
-+		if (he_obss_pd->sr_ctrl &
-+		    IEEE80211_HE_SPR_SRG_INFORMATION_PRESENT) {
-+			thresh = ATH11K_OBSS_PD_SRG_MAX_THRESHOLD +
-+				 he_obss_pd->max_offset;
-+			param_val |= ((u16)(thresh << 7) & 0xff00);
-+			param_val |= ATH11K_OBSS_PD_SRG_EN;
-+		}
 +		param_val |= ATH11K_OBSS_PD_THRESHOLD_IN_DBM;
++		param_val |= ((u16)(srg_th << 7) & 0xff00);
 +	} else {
-+		param_val &= ~ATH11K_OBSS_PD_THRESHOLD_IN_DBM;
++		non_srg_th = ATH11K_DEFAULT_NOISE_FLOOR + abs(non_srg_th);
++		/* SRG not supported and threshold in dB */
++		param_val &= ~(ATH11K_OBSS_PD_SRG_EN |
++			       ATH11K_OBSS_PD_THRESHOLD_IN_DBM);
 +	}
 +
++	param_val |= (non_srg_th & 0xff);
 +	ret = ath11k_wmi_pdev_set_param(ar, param_id, param_val, pdev_id);
 +	if (ret)
 +		ath11k_warn(ar->ab,
@@ -359,7 +362,7 @@ index b560e5c4bdc1..0e1eef8df4f1 100644
  static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  					   struct ieee80211_vif *vif,
  					   struct ieee80211_bss_conf *info,
-@@ -2995,8 +3123,7 @@ static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+@@ -2998,8 +3129,7 @@ static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  	}
  
  	if (changed & BSS_CHANGED_HE_OBSS_PD)
@@ -370,16 +373,15 @@ index b560e5c4bdc1..0e1eef8df4f1 100644
  	if (changed & BSS_CHANGED_HE_BSS_COLOR) {
  		if (vif->type == NL80211_IFTYPE_AP) {
 diff --git a/drivers/net/wireless/ath/ath11k/mac.h b/drivers/net/wireless/ath/ath11k/mac.h
-index b778f2dbdc6b..0c7c7e4bf351 100644
+index b778f2dbdc6b..60550113aa9f 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -127,6 +127,13 @@ struct ath11k_generic_iter {
+@@ -127,6 +127,12 @@ struct ath11k_generic_iter {
  #define IEEE80211_HE_DL_MU_SUPPORT_ENABLE        2
  #define IEEE80211_HE_DL_MU_SUPPORT_INVALID       3
  
-+#define ATH11K_OBSS_PD_SRG_MAX_THRESHOLD		-82
++#define ATH11K_OBSS_PD_MAX_THRESHOLD			-82
 +#define ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD		-62
-+#define ATH11K_OBSS_PD_NON_SRG_MAX_THRESHOLD_DISALLOWED	-82
 +#define ATH11K_OBSS_PD_THRESHOLD_IN_DBM			BIT(29)
 +#define ATH11K_OBSS_PD_SRG_EN				BIT(30)
 +#define ATH11K_OBSS_PD_NON_SRG_EN			BIT(31)
@@ -388,10 +390,10 @@ index b778f2dbdc6b..0c7c7e4bf351 100644
  
  int ath11k_mac_ap_ps_recalc(struct ath11k *ar);
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index d644aacbb050..833d92a24d6f 100644
+index e8b742750916..9d77aa8f9f30 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -3423,6 +3423,233 @@ ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
+@@ -3468,6 +3468,233 @@ ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
  }
  
  int
@@ -626,7 +628,7 @@ index d644aacbb050..833d92a24d6f 100644
  					     u8 bss_color, u32 period,
  					     bool enable)
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.h b/drivers/net/wireless/ath/ath11k/wmi.h
-index 938c793d50a0..3efc66a93a8c 100644
+index a243a352a2e9..fc3d1185a468 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -960,6 +960,9 @@ enum wmi_tlv_pdev_param {
@@ -653,7 +655,7 @@ index 938c793d50a0..3efc66a93a8c 100644
  	WMI_TAG_TPC_STATS_GET_CMD = 0x38B,
  	WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM,
  	WMI_TAG_TPC_STATS_CONFIG_EVENT,
-@@ -5200,6 +5210,12 @@ struct wmi_obss_spatial_reuse_params_cmd {
+@@ -5230,6 +5240,12 @@ struct wmi_obss_spatial_reuse_params_cmd {
  	u32 vdev_id;
  } __packed;
  
@@ -666,7 +668,7 @@ index 938c793d50a0..3efc66a93a8c 100644
  #define ATH11K_BSS_COLOR_COLLISION_SCAN_PERIOD_MS		200
  #define ATH11K_OBSS_COLOR_COLLISION_DETECTION_DISABLE		0
  #define ATH11K_OBSS_COLOR_COLLISION_DETECTION			1
-@@ -5758,6 +5774,16 @@ int ath11k_wmi_send_twt_resume_dialog_cmd(struct ath11k *ar,
+@@ -5791,6 +5807,16 @@ int ath11k_wmi_send_twt_resume_dialog_cmd(struct ath11k *ar,
  		struct wmi_twt_resume_dialog_params *params);
  int ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
  				 struct ieee80211_he_obss_pd *he_obss_pd);
