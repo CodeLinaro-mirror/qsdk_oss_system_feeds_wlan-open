@@ -87,6 +87,7 @@ drv_mac80211_init_device_config() {
 	config_add_int rxantenna txantenna antenna_gain txpower distance band
 	mu_edca_init_config
 	config_add_boolean noscan he_mu_edca
+	config_add_int he_spr_sr_control he_spr_non_srg_obss_pd_max_offset
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_boolean \
@@ -250,6 +251,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
 	json_get_vars noscan he_mu_edca:-he_mu_edca=0
+	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1
 	json_get_values ht_capab_list ht_capab
 
 	if [ "$band" != 3 ]; then
@@ -554,6 +556,11 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "he_mu_edca_qos_info_queue_request=0" "$N"
 			append base_cfg "he_mu_edca_qos_info_txop_request=0" "$N"
 			mac80211_set_he_muedca_params $HE_MU_EDCA_PARAMS_DEFAULT
+		}
+
+		[ "$he_spr_sr_control" != "0" ] && {
+			append base_cfg "he_spr_sr_control=$he_spr_sr_control" "$N"
+			append base_cfg "he_spr_non_srg_obss_pd_max_offset=$he_spr_non_srg_obss_pd_max_offset" "$N"
 		}
 
 		if [ $freq == 5935 ] || ([ $freq -gt 5950 ] && [ $freq -le 7115 ]); then
