@@ -133,6 +133,8 @@ EOF
 		channel="36"
 		htmode=""
 		ht_capab=""
+		encryption="none"
+		security=""
 
 		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
 		(iw phy "$dev" info | grep -q '5745 MHz' && (iw phy "$dev" info | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
@@ -145,12 +147,18 @@ EOF
 
 		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5745 MHz' || {
 			iw phy "$dev" info | grep -q '5955 MHz' && {
-				channel="53"; htmode="HE80";
+				channel="49"; htmode="HE80"; encryption="sae";
 				append ht_capab "	option band	3" "$N"
 			}
 		}
 
 		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
+
+		append security "	option encryption  $encryption" "$N"
+		if [ $encryption == "sae" ]; then
+			append security "	option sae_pwe	1" "$N"
+			append security "	option key	0123456789" "$N"
+		fi
 
 		if [ -x /usr/bin/readlink -a -h /sys/class/ieee80211/${dev} ]; then
 			path="$(readlink -f /sys/class/ieee80211/${dev}/device)"
@@ -182,7 +190,7 @@ config wifi-iface
 	option network  lan
 	option mode     ap
 	option ssid     OpenWrt
-	option encryption none
+$security
 
 EOF
 	devidx=$(($devidx + 1))
