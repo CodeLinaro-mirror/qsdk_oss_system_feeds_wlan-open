@@ -1145,12 +1145,12 @@ mac80211_interface_cleanup() {
 		if [ "$phy_name" != "$phy" ]; then
 			continue
 		fi
-		# 11ad uses single hostapd and single wpa_supplicant instance
-		[ -f "/var/run/hostapd-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
-			hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
+		[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
+			hostapd_cli -iglobal raw REMOVE ${wdev}
 			rm /var/run/hostapd-${wdev}.lock
+			rm /var/run/hostapd/${wdev}
 		}
-		[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && [ $hwmode = "ad" ] && { \
+		[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
 			wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
 			rm /var/run/wpa_supplicant-${wdev}.lock
 		}
@@ -1161,30 +1161,27 @@ mac80211_interface_cleanup() {
 }
 
 drv_mac80211_cleanup() {
-	if eval "type hostapd_common_cleanup" 2>/dev/null >/dev/null; then
-		hostapd_common_cleanup
-	else
-		# 11ad uses single hostapd and single wpa_supplicant instance
-		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
-			for wdev in $(list_phy_interfaces "$phy"); do
-				#Ensure the interface belongs to the correct phy
-				phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
-				if ["$phy_name" != $phy]; then
-					continue
-				fi
-				if [ -f "/var/run/hostapd-${wdev}.lock" ]; then
-					hostapd_cli -p /var/run/hostapd raw REMOVE ${wdev}
-					rm /var/run/hostapd-${wdev}.lock
-				fi
-				if [ -f "/var/run/wpa_supplicant-${wdev}.lock" ]; then
-					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
-					rm /var/run/wpa_supplicant-${wdev}.lock
-				fi
+	for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
+		for wdev in $(list_phy_interfaces "$phy"); do
+			#Ensure the interface belongs to the correct phy
+			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+			if ["$phy_name" != $phy]; then
+				continue
+			fi
+			if [ -f "/var/run/hostapd-${wdev}.lock" ]; then
+				hostapd_cli -iglobal raw REMOVE ${wdev}
+				rm /var/run/hostapd-${wdev}.lock
 				ifconfig "$wdev" down 2>/dev/null
 				iw dev "$wdev" del
-			done
+			fi
+			if [ -f "/var/run/wpa_supplicant-${wdev}.lock" ]; then
+				wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+				rm /var/run/wpa_supplicant-${wdev}.lock
+				ifconfig "$wdev" down 2>/dev/null
+				iw dev "$wdev" del
+			fi
 		done
-	fi
+	done
 }
 
 mac80211_map_config_ifaces_to_json() {
@@ -1327,34 +1324,12 @@ drv_mac80211_setup() {
 	}
 
 	[ -n "$hostapd_ctrl" ] && {
-		# 11ad uses single hostapd instance
-		if [ $hwmode = "11ad" ]; then
-			if ! [ -f "/var/run/hostapd-global.pid" ]
-			then
-				# run the single instance of hostapd
-				hostapd -g /var/run/hostapd/global -B -P /var/run/hostapd-global.pid
-				ret="$?"
-				wireless_add_process "$(cat /var/run/hostapd-global.pid)" "/usr/sbin/hostapd" 1
-				[ "$ret" != 0 ] && {
-					wireless_setup_failed HOSTAPD_START_FAILED
-					return
-				}
-			fi
-			ifname="wlan${phy#phy}"
-			[ -f "/var/run/hostapd-$ifname.lock" ] &&
-				rm /var/run/hostapd-$ifname.lock
-			# let hostapd manage interface $ifname
-			hostapd_cli -p /var/run/hostapd raw ADD bss_config=$ifname:$hostapd_conf_file
-			touch /var/run/hostapd-$ifname.lock
-		else
-			/usr/sbin/hostapd -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
-			ret="$?"
-			wireless_add_process "$(cat /var/run/wifi-$phy.pid)" "/usr/sbin/hostapd" 1
-			[ "$ret" != 0 ] && {
-				wireless_setup_failed HOSTAPD_START_FAILED
-				return
-			}
-		fi
+		ifname="wlan${phy#phy}"
+		[ -f "/var/run/hostapd-$ifname.lock" ] &&
+			rm /var/run/hostapd-$ifname.lock
+		# let hostapd manage interface $ifname
+		hostapd_cli -iglobal raw ADD bss_config=$ifname:$hostapd_conf_file
+		touch /var/run/hostapd-$ifname.lock
 	}
 
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
