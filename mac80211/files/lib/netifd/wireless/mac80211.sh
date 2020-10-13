@@ -111,7 +111,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema
+	config_add_boolean multiple_bssid ema oob
 }
 
 drv_mac80211_init_iface_config() {
@@ -535,7 +535,7 @@ mac80211_hostapd_setup_base() {
 		he_mu_beamformer:1 \
 		he_twt_required:0 \
 		he_spr_sr_control:0 \
-		multiple_bssid ema
+		multiple_bssid ema oob:0
 
 
 		append base_cfg "ieee80211ax=1" "$N"
@@ -579,6 +579,10 @@ mac80211_hostapd_setup_base() {
 			if [ -z $multiple_bssid ] && [ -z $ema ]; then
 				multiple_bssid=1
 				ema=1
+			fi
+
+			if [ $oob -gt 0 ]; then
+				append base_cfg "he_co_locate=1" "$N"
 			fi
 		fi
 
