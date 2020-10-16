@@ -503,9 +503,13 @@ mac80211_hostapd_setup_base() {
 		HE40)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "40")"
-			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=132" "$N"
-			append base_cfg "he_oper_chwidth=0" "$N"
-			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ $freq -ge 5180 ]; then
+				if [ "$is_6ghz" == "1" ]; then
+					append base_cfg "op_class=132" "$N"
+				fi
+				append base_cfg "he_oper_chwidth=0" "$N"
+				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			;;
 		HE80)
 			enable_ax=1
