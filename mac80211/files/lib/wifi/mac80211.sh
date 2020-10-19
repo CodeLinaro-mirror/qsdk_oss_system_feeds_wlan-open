@@ -97,6 +97,7 @@ detect_mac80211() {
 config smp_affinity  mac80211
 	option enable_smp_affinity	1
 	option enable_nss		$nss
+	option enable_color		1
 
 EOF
 	fi

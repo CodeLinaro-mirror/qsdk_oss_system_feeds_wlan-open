@@ -552,7 +552,9 @@ mac80211_hostapd_setup_base() {
 		he_spr_sr_control:${he_phy_cap:14:2}:0x1:$he_spr_sr_control \
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
 
+		append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
 		append base_cfg "he_default_pe_duration=4" "$N"
+
 		[ "$he_mu_edca" != "0" ] && {
 			json_select ..
 			append base_cfg "he_mu_edca_qos_info_param_count=0" "$N"
@@ -566,6 +568,14 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "he_spr_sr_control=$he_spr_sr_control" "$N"
 			append base_cfg "he_spr_non_srg_obss_pd_max_offset=$he_spr_non_srg_obss_pd_max_offset" "$N"
 		}
+		config_get enable_color mac80211 enable_color 1
+                if [ $enable_color -eq 1 ]; then
+                        bsscolor=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
+                        bsscolor=$(($bsscolor % 63))
+                        bsscolor=$(($bsscolor + 1))
+                fi
+
+		[ -n "$bsscolor" ] && append base_cfg "he_bss_color=$bsscolor" "$N"
 
 		if [ $freq == 5935 ] || ([ $freq -gt 5950 ] && [ $freq -le 7115 ]); then
 			if [ -z $fils_discovery ] && [ -z $unsol_bcast_presp ]; then
