@@ -83,13 +83,20 @@ check_mac80211_device() {
 
 detect_mac80211() {
 	devidx=0
+	nss=0
+
+	board=$(cat /tmp/sysinfo/board_name)
+	case "$board" in
+		ap-mp*)nss=1 ;;
+	esac
+
 	config_load wireless
 
 	if [ ! -f "/etc/config/wireless" ] || ! grep -q "enable_smp_affinity" "/etc/config/wireless"; then
 		cat <<EOF
 config smp_affinity  mac80211
 	option enable_smp_affinity	1
-	option enable_nss		0
+	option enable_nss		$nss
 
 EOF
 	fi
@@ -220,6 +227,7 @@ post_mac80211() {
 	local action=${1}
 
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
+	config_get enable_nss mac80211 enable_nss 0
 
 	if [ "$enable_smp_affinity" -eq 1 ]; then
 		[ -f "/lib/smp_affinity_settings.sh" ] && {
@@ -239,6 +247,17 @@ post_mac80211() {
 			}
 			if [ -f "/etc/init.d/lbd" ]; then
 				start_lbd &
+			fi
+
+			nss_modval=$(cat /sys/module/ath11k/parameters/nss_offload)
+
+			if [ "$enable_nss" -ne $nss_modval ]; then
+				echo  $enable_nss > /sys/module/ath11k/parameters/nss_offload
+				rmmod ath11k_pci
+				rmmod ath11k_ahb
+				sleep 1
+				insmod ath11k_ahb
+				insmod ath11k_pci
 			fi
 		;;
 	esac
