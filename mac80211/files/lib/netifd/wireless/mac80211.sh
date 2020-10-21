@@ -83,7 +83,7 @@ drv_mac80211_init_device_config() {
 	config_add_string path phy 'macaddr:macaddr'
 	config_add_string hwmode
 	config_add_string board_file
-	config_add_int beacon_int chanbw frag rts fils_discovery unsol_bcast_presp
+	config_add_int beacon_int chanbw frag rts
 	config_add_int rxantenna txantenna antenna_gain txpower distance band
 	mu_edca_init_config
 	config_add_boolean noscan he_mu_edca
@@ -111,7 +111,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema oob
+	config_add_boolean multiple_bssid ema
 }
 
 drv_mac80211_init_iface_config() {
@@ -125,6 +125,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int dtim_period start_disabled
 
 	config_add_int fq_limit
+	config_add_int fils_discovery unsol_bcast_presp
 
 	# mesh
 	config_add_string mesh_id
@@ -535,7 +536,7 @@ mac80211_hostapd_setup_base() {
 		he_mu_beamformer:1 \
 		he_twt_required:0 \
 		he_spr_sr_control:0 \
-		multiple_bssid ema oob:0
+		multiple_bssid ema
 
 
 		append base_cfg "ieee80211ax=1" "$N"
@@ -550,9 +551,8 @@ mac80211_hostapd_setup_base() {
 		he_su_beamformee:${he_phy_cap:8:2}:0x1:$he_su_beamformee \
 		he_mu_beamformer:${he_phy_cap:8:2}:0x2:$he_mu_beamformer \
 		he_spr_sr_control:${he_phy_cap:14:2}:0x1:$he_spr_sr_control \
-		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required \
+		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required
 
-		append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
 		append base_cfg "he_default_pe_duration=4" "$N"
 
 		[ "$he_mu_edca" != "0" ] && {
@@ -577,27 +577,18 @@ mac80211_hostapd_setup_base() {
 
 		[ -n "$bsscolor" ] && append base_cfg "he_bss_color=$bsscolor" "$N"
 
-		if [ $freq == 5935 ] || ([ $freq -gt 5950 ] && [ $freq -le 7115 ]); then
-			if [ -z $fils_discovery ] && [ -z $unsol_bcast_presp ]; then
-				append base_cfg "fils_discovery_max_interval=20" "$N"
-			elif [ -n $fils_discovery ] && [ $fils_discovery -gt 0 ] && [ $fils_discovery -le 20 ]; then
-				append base_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
-			elif [ -n $unsol_bcast_presp ] && [ $unsol_bcast_presp -gt 0 ] && [ $unsol_bcast_presp -le 20 ]; then
-				append base_cfg "unsol_bcast_probe_resp_interval=$unsol_bcast_presp" "$N"
-			fi
-
+		if [ "$is_6ghz" == "1" ]; then
 			if [ -z $multiple_bssid ] && [ -z $ema ]; then
 				multiple_bssid=1
 				ema=1
 			fi
-
-			if [ $oob -gt 0 ]; then
-				append base_cfg "he_co_locate=1" "$N"
-			fi
+			append base_cfg "he_co_locate=1" "$N"
 		fi
 
-		[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "multiple_bssid=${multiple_bssid}" "$N"
-		[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=${ema}" "$N"
+		if [ "$has_ap" -gt 1 ]; then
+			[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "multiple_bssid=1" "$N"
+			[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
+		fi
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
@@ -641,6 +632,7 @@ mac80211_hostapd_setup_bss() {
 
 	hostapd_set_bss_options hostapd_cfg "$vif" || return 1
 	json_get_vars wds dtim_period max_listen_int start_disabled
+	json_get_vars fils_discovery:0 unsol_bcast_presp:0
 
 	set_default wds 0
 	set_default start_disabled 0
@@ -671,6 +663,23 @@ mac80211_hostapd_setup_bss() {
 		fi
 	fi
 
+	if [ "$is_6ghz" == "1" ]; then
+		fils_cfg=
+		if [ "$unsol_bcast_presp" -gt 0 ] && [ "$unsol_bcast_presp" -le 20 ]; then
+			append fils_cfg "unsol_bcast_probe_resp_interval=$unsol_bcast_presp" "$N"
+		elif [ "$fils_discovery" -gt 0 ] && [ "$fils_discovery" -le 20 ]; then
+			append fils_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
+		else
+			append fils_cfg "fils_discovery_max_interval=20" "$N"
+		fi
+
+		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -eq 1 ] && [ "$type" == "interface" ]; then
+			append hostapd_cfg "$fils_cfg" "$N"
+		elif [ -z "$multiple_bssid" ] || [ "$multiple_bssid" -eq 0 ]; then
+			append hostapd_cfg "$fils_cfg" "$N"
+		fi
+	fi
+
 	cat >> /var/run/hostapd-$phy.conf <<EOF
 $hostapd_cfg
 bssid=$macaddr
@@ -689,6 +698,7 @@ mac80211_get_addr() {
 mac80211_generate_mac() {
 	local phy="$1"
 	local id="${macidx:-0}"
+	local mode="$2"
 
 	local ref="$(cat /sys/class/ieee80211/${phy}/macaddress)"
 	local mask="$(cat /sys/class/ieee80211/${phy}/address_mask)"
@@ -714,7 +724,7 @@ mac80211_generate_mac() {
 
 	macidx=$(($id + 1))
 
-	if [ $multiple_bssid -eq 1 ] && [ $id -gt 0 ]; then
+	if [ "$mode" == "ap" ] && [ $multiple_bssid -eq 1 ] && [ $id -gt 0 ]; then
 		local ref_dec=$( printf '%d\n' $( echo "0x$ref" | tr -d ':' ) )
 		local bssid_l_mask=$(((1 << $max_bssid_ind) - 1))
 		local bssid_l=$(((($ref_dec & $bssid_l_mask) + $id) % $max_bssid))
@@ -846,7 +856,7 @@ mac80211_prepare_vif() {
 	json_select ..
 
 	[ -n "$macaddr" ] || {
-		macaddr="$(mac80211_generate_mac $phy)"
+		macaddr="$(mac80211_generate_mac $phy $mode)"
 		macidx="$(($macidx + 1))"
 	}
 
@@ -1243,8 +1253,7 @@ drv_mac80211_setup() {
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
-		htmode band multiple_bssid \
-		fils_discovery unsol_bcast_presp
+		htmode band multiple_bssid
 
 	json_get_values basic_rate_list basic_rate
 	json_select ..
