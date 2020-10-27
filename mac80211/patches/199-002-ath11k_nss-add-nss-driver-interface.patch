@@ -19,7 +19,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/Kconfig
 +++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -12,6 +12,15 @@ config ATH11K
+@@ -11,6 +11,15 @@ config ATH11K
  
  	  If you choose to build a module, it'll be called ath11k.
  
@@ -33,14 +33,14 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	  If unsure, say Y to enable NSS offload support.
 +
  config ATH11K_AHB
- 	tristate "ath11k AHB support"
- 	depends on ATH11K && REMOTEPROC
+ 	tristate "Atheros ath11k AHB support"
+ 	depends on m
 --- a/drivers/net/wireless/ath/ath11k/Makefile
 +++ b/drivers/net/wireless/ath/ath11k/Makefile
 @@ -26,6 +26,7 @@ ath11k-$(CONFIG_THERMAL) += thermal.o
+ ath11k-$(CONFIG_WANT_DEV_COREDUMP) += coredump.o
  ath11k-$(CPTCFG_ATH11K_SPECTRAL) += spectral.o
  ath11k-$(CPTCFG_ATH11K_PKTLOG) += pktlog.o
- ath11k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
 +ath11k-$(CPTCFG_ATH11K_NSS_SUPPORT) += nss.o
  
  obj-$(CPTCFG_ATH11K_AHB) += ath11k_ahb.o
@@ -1707,7 +1707,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		return ATH11K_WIFILI_TARGET_TYPE_QCA8074V2;
 +	case ATH11K_HW_IPQ6018:
 +		return ATH11K_WIFILI_TARGET_TYPE_QCA6018;
-+	case ATH11K_HW_QCN90XX:
++	case ATH11K_HW_QCN9000:
 +		return ATH11K_WIFILI_TARGET_TYPE_QCN9000;
 +	case ATH11K_HW_IPQ5018:
 +		return ATH11K_WIFILI_TARGET_TYPE_QCA5018;
@@ -1724,7 +1724,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	case ATH11K_HW_IPQ6018:
 +	case ATH11K_HW_IPQ5018:
 +		return NSS_WIFILI_INTERNAL_INTERFACE;
-+	case ATH11K_HW_QCN90XX:
++	case ATH11K_HW_QCN9000:
 +		return nss_get_available_wifili_external_if();
 +	default:
 +		/* This can't happen since we validated target type earlier */
@@ -2659,16 +2659,16 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +#endif
 --- a/drivers/net/wireless/ath/ath11k/hif.h
 +++ b/drivers/net/wireless/ath/ath11k/hif.h
-@@ -49,6 +49,7 @@ struct ath11k_hif_ops {
+@@ -24,6 +24,7 @@ struct ath11k_hif_ops {
  				   u32 *base_vector);
- 	int (*get_msi_address)(struct ath11k_base *ab, u32 *msi_addr_lo,
+ 	void (*get_msi_address)(struct ath11k_base *ab, u32 *msi_addr_lo,
  				u32 *msi_addr_hi);
 +	u32 (*get_window_offset)(struct ath11k_base *ab, u32 offset);
  	void (*get_ce_msi_idx)(struct ath11k_base *ab, u32 ce_id, u32 *msi_idx);
  };
  
-@@ -118,6 +119,14 @@ static inline int ath11k_get_msi_address
- 	return ab->hif.ops->get_msi_address(ab, msi_addr_lo, msi_addr_hi);
+@@ -94,6 +95,14 @@ static inline void ath11k_get_msi_addres
+ 	ab->hif.ops->get_msi_address(ab, msi_addr_lo, msi_addr_hi);
  }
  
 +static inline u32 ath11k_hif_get_window_offset(struct ath11k_base *ab, u32 offset)
@@ -2680,12 +2680,12 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 +
  static inline void ath11k_get_ce_msi_idx(struct ath11k_base *ab, u32 ce_id,
- 					u32 *msi_data_idx)
+ 					 u32 *msi_data_idx)
  {
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -377,6 +377,20 @@ static inline u32 ath11k_pci_get_window_
-         return window_start;
+@@ -160,6 +160,20 @@ static inline u32 ath11k_pci_get_window_
+ 	return window_start;
  }
  
 +static inline u32 ath11k_pci_get_window_offset(struct ath11k_base *ab,
@@ -2693,7 +2693,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +{
 +        u32 window_start;
 +
-+        if (ab->static_window_map) {
++        if (ab->bus_params.static_window_map) {
 +                window_start = ath11k_pci_get_window_start(ab, offset);
 +
 +                if (window_start)
@@ -2702,10 +2702,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +        return offset;
 +}
 +
- static void ath11k_pci_write32(struct ath11k_base *ab, u32 offset, u32 value)
+ void ath11k_pci_write32(struct ath11k_base *ab, u32 offset, u32 value)
  {
- 	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
-@@ -1154,6 +1168,7 @@ static const struct ath11k_hif_ops ath11
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+@@ -939,6 +953,7 @@ static const struct ath11k_hif_ops ath11
  	.get_msi_address =  ath11k_pci_get_msi_address,
  	.get_user_msi_vector = ath11k_get_user_msi_assignment,
  	.map_service_to_pipe = ath11k_pci_map_service_to_pipe,
