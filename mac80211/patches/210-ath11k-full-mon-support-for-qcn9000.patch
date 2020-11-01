@@ -438,7 +438,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  static int ath11k_dp_rx_pdev_mon_status_attach(struct ath11k *ar)
  {
  	struct ath11k_pdev_dp *dp = &ar->dp;
-@@ -5582,3 +5624,355 @@ int ath11k_dp_rx_pdev_mon_detach(struct
+@@ -5582,3 +5624,374 @@ int ath11k_dp_rx_pdev_mon_detach(struct
  	ath11k_dp_mon_link_free(ar);
  	return 0;
  }
@@ -468,7 +468,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 +	u32 total_len = 0, frag_len = 0, sw_cookie;
 +	u16 num_msdus = 0;
 +	u8 rxdma_err;
-+	bool is_frag;
++	bool is_frag, is_first_msdu;
 +	bool drop_mpdu = false;
 +
 +	rx_mon_stats = &pmon->rx_mon_stats;
@@ -499,6 +499,9 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 +			drop_mpdu = true;
 +		}
 +	}
++
++	is_frag = false;
++	is_first_msdu = true;
 +
 +	do {
 +		rx_msdu_link_desc =
@@ -547,6 +550,16 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 +
 +			rx_pkt_offset = sizeof(struct hal_rx_desc);
 +			l2_hdr_offset = ath11k_dp_rx_h_msdu_end_l3pad(ar->ab, rx_desc);
++
++			if (is_first_msdu) {
++				if (!ath11k_dp_rxdesc_mpdu_valid(ar->ab, rx_desc)) {
++					drop_mpdu = true;
++					dev_kfree_skb_any(msdu);
++					msdu = NULL;
++					goto next_msdu;
++				}
++				is_first_msdu = false;
++			}
 +
 +			ath11k_dp_mon_get_buf_len(&msdu_list.msdu_info[i],
 +						  &is_frag, &total_len,
@@ -670,7 +683,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 +	struct ath11k_pdev_dp *dp = &ar->dp;
 +	struct ath11k_mon_data *pmon = (struct ath11k_mon_data *)&dp->mon_data;
 +	struct hal_sw_mon_ring_entries *sw_mon_entries;
-+	int quota = 0, work = 0;
++	int quota = 0, work = 0, count;
 +
 +	sw_mon_entries = &pmon->sw_mon_entries;
 +
@@ -678,6 +691,12 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 +		quota = ath11k_dp_rx_process_mon_status(ab, mac_id,
 +							napi, 1);
 +		if (pmon->mon_status_buf_state == DP_MON_STATUS_MATCH) {
++			count = sw_mon_entries->status_buf_count;
++			if (count > 1) {
++				quota += ath11k_dp_rx_process_mon_status(ab, mac_id,
++									 napi, count);
++			}
++
 +			ath11k_dp_rx_full_mon_deliver_ppdu(ar, dp->mac_id,
 +							   pmon, napi);
 +			pmon->hold_mon_dst_ring = false;
