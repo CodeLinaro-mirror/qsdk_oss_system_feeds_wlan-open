@@ -1,4 +1,4 @@
-From 9bcd28f5cc09a8d454c7f73603e718e7ab040be3 Mon Sep 17 00:00:00 2001
+From 81694575884dc69535252a6f44128323fd6a2504 Mon Sep 17 00:00:00 2001
 From: Rajkumar Manoharan <rmanohar@codeaurora.org>
 Date: Sat, 26 Sep 2020 23:17:03 -0700
 Subject: [PATCH 1/3] nl80211: fix OBSS PD min and max offset validation
@@ -12,36 +12,67 @@ Signed-off-by: Rajkumar Manoharan <rmanohar@codeaurora.org>
  net/wireless/nl80211.c | 21 ++++++++++-----------
  1 file changed, 10 insertions(+), 11 deletions(-)
 
-diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 2d7f504ac832..35066fd71408 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -4844,16 +4844,14 @@ static int nl80211_parse_he_obss_pd(struct nlattr *attrs,
+@@ -322,6 +322,13 @@ he_obss_pd_policy[NL80211_HE_OBSS_PD_ATT
+ 		NLA_POLICY_RANGE(NLA_U8, 1, 20),
+ 	[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET] =
+ 		NLA_POLICY_RANGE(NLA_U8, 1, 20),
++	[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET] =
++		NLA_POLICY_RANGE(NLA_U8, 1, 20),
++	[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP] =
++		NLA_POLICY_EXACT_LEN(8),
++	[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP] =
++		NLA_POLICY_EXACT_LEN(8),
++	[NL80211_HE_OBSS_PD_ATTR_SR_CTRL] = { .type = NLA_U8 },
+ };
+ 
+ static const struct nla_policy
+@@ -4844,18 +4851,36 @@ static int nl80211_parse_he_obss_pd(stru
  	if (err)
  		return err;
  
 -	if (!tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET] ||
 -	    !tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET])
--		return -EINVAL;
--
++	if (!tb[NL80211_HE_OBSS_PD_ATTR_SR_CTRL])
+ 		return -EINVAL;
+ 
 -	he_obss_pd->min_offset =
 -		nla_get_u32(tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET]);
 -	he_obss_pd->max_offset =
 -		nla_get_u32(tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET]);
--
--	if (he_obss_pd->min_offset >= he_obss_pd->max_offset)
++	he_obss_pd->sr_ctrl = nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_SR_CTRL]);
++
 +	if (tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET])
 +		he_obss_pd->min_offset =
 +			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET]);
 +	if (tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET])
 +		he_obss_pd->max_offset =
 +			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET]);
-+
++	if (tb[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET])
++		he_obss_pd->non_srg_max_offset =
++			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET]);
+ 
+-	if (he_obss_pd->min_offset >= he_obss_pd->max_offset)
 +	if (he_obss_pd->min_offset > he_obss_pd->max_offset)
  		return -EINVAL;
  
++	if (tb[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP]) {
++		memcpy(he_obss_pd->bss_color_bitmap,
++		       nla_data(tb[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP]),
++		       sizeof(he_obss_pd->bss_color_bitmap));
++	}
++
++	if (tb[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP]) {
++		memcpy(he_obss_pd->partial_bssid_bitmap,
++		       nla_data(tb[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP]),
++		       sizeof(he_obss_pd->partial_bssid_bitmap));
++	}
++
  	he_obss_pd->enable = true;
-@@ -5239,7 +5237,8 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+ 
+ 	return 0;
+@@ -5239,7 +5264,8 @@ static int nl80211_start_ap(struct sk_bu
  		err = nl80211_parse_he_obss_pd(
  					info->attrs[NL80211_ATTR_HE_OBSS_PD],
  					&params.he_obss_pd);
@@ -51,28 +82,9 @@ index 2d7f504ac832..35066fd71408 100644
  	}
  
  	if (info->attrs[NL80211_ATTR_HE_BSS_COLOR]) {
--- 
-2.7.4
-
-
-From 8a32194eeb7d370c35ab5377c59d813333a2c5cf Mon Sep 17 00:00:00 2001
-From: Rajkumar Manoharan <rmanohar@codeaurora.org>
-Date: Sat, 26 Sep 2020 23:03:24 -0700
-Subject: [PATCH 2/3] nl80211: extend spatial reuse parameter set
-
-Signed-off-by: Rajkumar Manoharan <rmanohar@codeaurora.org>
----
- include/linux/ieee80211.h    |  7 +++++--
- include/net/cfg80211.h       | 10 ++++++++++
- include/uapi/linux/nl80211.h | 11 +++++++++++
- net/wireless/nl80211.c       | 27 +++++++++++++++++++++++++++
- 4 files changed, 53 insertions(+), 2 deletions(-)
-
-diff --git a/include/linux/ieee80211.h b/include/linux/ieee80211.h
-index 532035f90940..6a63b18da2fc 100644
 --- a/include/linux/ieee80211.h
 +++ b/include/linux/ieee80211.h
-@@ -2294,8 +2294,11 @@ ieee80211_he_6ghz_oper(const struct ieee80211_he_operation *he_oper)
+@@ -2294,8 +2294,11 @@ ieee80211_he_6ghz_oper(const struct ieee
  }
  
  /* HE Spatial Reuse defines */
@@ -86,8 +98,6 @@ index 532035f90940..6a63b18da2fc 100644
  
  /*
   * ieee80211_he_spr_size - calculate 802.11ax HE Spatial Reuse IE size
-diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
-index f509b770175f..00ab64659ca1 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -255,13 +255,23 @@ struct ieee80211_rate {
@@ -114,11 +124,9 @@ index f509b770175f..00ab64659ca1 100644
  };
  
  /**
-diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
-index d09aab5377a1..17f4a8df5470 100644
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -6940,6 +6940,13 @@ enum nl80211_peer_measurement_ftm_resp {
+@@ -6992,6 +6992,13 @@ enum nl80211_peer_measurement_ftm_resp {
   *
   * @NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET: the OBSS PD minimum tx power offset.
   * @NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET: the OBSS PD maximum tx power offset.
@@ -132,7 +140,7 @@ index d09aab5377a1..17f4a8df5470 100644
   *
   * @__NL80211_HE_OBSS_PD_ATTR_LAST: Internal
   * @NL80211_HE_OBSS_PD_ATTR_MAX: highest OBSS PD attribute.
-@@ -6949,6 +6956,10 @@ enum nl80211_obss_pd_attributes {
+@@ -7001,6 +7008,10 @@ enum nl80211_obss_pd_attributes {
  
  	NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET,
  	NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET,
@@ -143,139 +151,9 @@ index d09aab5377a1..17f4a8df5470 100644
  
  	/* keep last */
  	__NL80211_HE_OBSS_PD_ATTR_LAST,
-diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 35066fd71408..03a0eab3d8f4 100644
---- a/net/wireless/nl80211.c
-+++ b/net/wireless/nl80211.c
-@@ -322,6 +322,13 @@ he_obss_pd_policy[NL80211_HE_OBSS_PD_ATTR_MAX + 1] = {
- 		NLA_POLICY_RANGE(NLA_U8, 1, 20),
- 	[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET] =
- 		NLA_POLICY_RANGE(NLA_U8, 1, 20),
-+	[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET] =
-+		NLA_POLICY_RANGE(NLA_U8, 1, 20),
-+	[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP] =
-+		NLA_POLICY_EXACT_LEN(8),
-+	[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP] =
-+		NLA_POLICY_EXACT_LEN(8),
-+	[NL80211_HE_OBSS_PD_ATTR_SR_CTRL] = { .type = NLA_U8 },
- };
- 
- static const struct nla_policy
-@@ -4844,16 +4851,36 @@ static int nl80211_parse_he_obss_pd(struct nlattr *attrs,
- 	if (err)
- 		return err;
- 
-+	if (!tb[NL80211_HE_OBSS_PD_ATTR_SR_CTRL])
-+		return -EINVAL;
-+
-+	he_obss_pd->sr_ctrl = nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_SR_CTRL]);
-+
- 	if (tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET])
- 		he_obss_pd->min_offset =
- 			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_MIN_OFFSET]);
- 	if (tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET])
- 		he_obss_pd->max_offset =
- 			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_MAX_OFFSET]);
-+	if (tb[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET])
-+		he_obss_pd->non_srg_max_offset =
-+			nla_get_u8(tb[NL80211_HE_OBSS_PD_ATTR_NON_SRG_MAX_OFFSET]);
- 
- 	if (he_obss_pd->min_offset > he_obss_pd->max_offset)
- 		return -EINVAL;
- 
-+	if (tb[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP]) {
-+		memcpy(he_obss_pd->bss_color_bitmap,
-+		       nla_data(tb[NL80211_HE_OBSS_PD_ATTR_BSS_COLOR_BITMAP]),
-+		       sizeof(he_obss_pd->bss_color_bitmap));
-+	}
-+
-+	if (tb[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP]) {
-+		memcpy(he_obss_pd->partial_bssid_bitmap,
-+		       nla_data(tb[NL80211_HE_OBSS_PD_ATTR_PARTIAL_BSSID_BITMAP]),
-+		       sizeof(he_obss_pd->partial_bssid_bitmap));
-+	}
-+
- 	he_obss_pd->enable = true;
- 
- 	return 0;
--- 
-2.7.4
-
-
-From 24cecce3252e2a4cfe23b0a736b32d682e272a18 Mon Sep 17 00:00:00 2001
-From: Rajkumar Manoharan <rmanohar@codeaurora.org>
-Date: Wed, 30 Sep 2020 23:56:34 -0700
-Subject: [PATCH 3/3] ath11k: add support to configure spatial reuse parameter
- set
-
-The SPR parameter set comprises OBSS PD threshold for SRG
-and non SRG and Bitmap of BSS color and partial BSSID. This adds
-support to configure fields of SPR element to firmware.
-
-Signed-off-by: Rajkumar Manoharan <rmanohar@codeaurora.org>
----
- drivers/net/wireless/ath/ath11k/debug_htt_stats.c |  12 ++
- drivers/net/wireless/ath/ath11k/debug_htt_stats.h |  15 +-
- drivers/net/wireless/ath/ath11k/mac.c             | 134 ++++++++++++-
- drivers/net/wireless/ath/ath11k/mac.h             |   6 +
- drivers/net/wireless/ath/ath11k/wmi.c             | 227 ++++++++++++++++++++++
- drivers/net/wireless/ath/ath11k/wmi.h             |  26 +++
- 6 files changed, 416 insertions(+), 4 deletions(-)
-
-diff --git a/drivers/net/wireless/ath/ath11k/debug_htt_stats.c b/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
-index 2aa1c8796723..0f57efb5dfda 100644
---- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
-+++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
-@@ -3678,6 +3678,18 @@ htt_print_pdev_obss_pd_stats_tlv_v(const void *tag_buf,
- 			   htt_stats_buf->num_obss_tx_ppdu_success);
- 	len += HTT_DBG_OUT(buf + len, buf_len - len, "OBSS Tx failures PPDU = %u\n",
- 			   htt_stats_buf->num_obss_tx_ppdu_failure);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG Opportunities = %u\n",
-+			   htt_stats_buf->num_non_srg_opportunities);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG tried PPDU = %u\n",
-+			   htt_stats_buf->num_non_srg_ppdu_tried);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG success PPDU = %u\n",
-+			   htt_stats_buf->num_non_srg_ppdu_success);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG Opportunies = %u\n",
-+			   htt_stats_buf->num_srg_opportunities);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG tried PPDU = %u\n",
-+			   htt_stats_buf->num_srg_ppdu_tried);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG success PPDU = %u\n",
-+			   htt_stats_buf->num_srg_ppdu_success);
- 
- 	if (len >= buf_len)
- 		buf[buf_len - 1] = 0;
-diff --git a/drivers/net/wireless/ath/ath11k/debug_htt_stats.h b/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
-index 9ccd7dd665d8..ed80ccbf30fe 100644
---- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
-+++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
-@@ -1715,8 +1715,19 @@ struct htt_tx_sounding_stats_tlv {
- };
- 
- struct htt_pdev_obss_pd_stats_tlv {
--	u32        num_obss_tx_ppdu_success;
--	u32        num_obss_tx_ppdu_failure;
-+	u32 num_obss_tx_ppdu_success;
-+	u32 num_obss_tx_ppdu_failure;
-+	u32 num_sr_tx_transmissions;
-+	u32 num_spatial_reuse_opportunities;
-+	u32 num_non_srg_opportunities;
-+	u32 num_non_srg_ppdu_tried;
-+	u32 num_non_srg_ppdu_success;
-+	u32 num_srg_opportunities;
-+	u32 num_srg_ppdu_tried;
-+	u32 num_srg_ppdu_success;
-+	u32 num_psr_opportunities;
-+	u32 num_psr_ppdu_tried;
-+	u32 num_psr_ppdu_success;
- };
- 
- void ath11k_debug_htt_stats_init(struct ath11k *ar);
-diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index e8cf6f143e51..b59edf898559 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2760,6 +2760,137 @@ static void ath11k_mac_op_nss_bss_info_changed(struct ieee80211_hw *hw,
+@@ -2768,6 +2768,137 @@ static void ath11k_mac_op_nss_bss_info_c
  	mutex_unlock(&ar->conf_mutex);
  }
  
@@ -413,7 +291,7 @@ index e8cf6f143e51..b59edf898559 100644
  static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  					   struct ieee80211_vif *vif,
  					   struct ieee80211_bss_conf *info,
-@@ -2998,8 +3129,7 @@ static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+@@ -3006,8 +3137,7 @@ static void ath11k_mac_op_bss_info_chang
  	}
  
  	if (changed & BSS_CHANGED_HE_OBSS_PD)
@@ -423,8 +301,6 @@ index e8cf6f143e51..b59edf898559 100644
  
  	if (changed & BSS_CHANGED_HE_BSS_COLOR) {
  		if (vif->type == NL80211_IFTYPE_AP) {
-diff --git a/drivers/net/wireless/ath/ath11k/mac.h b/drivers/net/wireless/ath/ath11k/mac.h
-index b778f2dbdc6b..60550113aa9f 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
 @@ -127,6 +127,12 @@ struct ath11k_generic_iter {
@@ -440,11 +316,9 @@ index b778f2dbdc6b..60550113aa9f 100644
  extern const struct htt_rx_ring_tlv_filter ath11k_mac_mon_status_filter_default;
  
  int ath11k_mac_ap_ps_recalc(struct ath11k *ar);
-diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index 4753514da3d7..3f4a45c4becc 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -3470,6 +3470,233 @@ ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
+@@ -3476,6 +3476,233 @@ ath11k_wmi_send_obss_spr_cmd(struct ath1
  }
  
  int
@@ -678,8 +552,6 @@ index 4753514da3d7..3f4a45c4becc 100644
  ath11k_wmi_send_obss_color_collision_cfg_cmd(struct ath11k *ar, u32 vdev_id,
  					     u8 bss_color, u32 period,
  					     bool enable)
-diff --git a/drivers/net/wireless/ath/ath11k/wmi.h b/drivers/net/wireless/ath/ath11k/wmi.h
-index a243a352a2e9..fc3d1185a468 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -960,6 +960,9 @@ enum wmi_tlv_pdev_param {
@@ -706,7 +578,7 @@ index a243a352a2e9..fc3d1185a468 100644
  	WMI_TAG_TPC_STATS_GET_CMD = 0x38B,
  	WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM,
  	WMI_TAG_TPC_STATS_CONFIG_EVENT,
-@@ -5230,6 +5240,12 @@ struct wmi_obss_spatial_reuse_params_cmd {
+@@ -5221,6 +5231,12 @@ struct wmi_obss_spatial_reuse_params_cmd
  	u32 vdev_id;
  } __packed;
  
@@ -719,7 +591,7 @@ index a243a352a2e9..fc3d1185a468 100644
  #define ATH11K_BSS_COLOR_COLLISION_SCAN_PERIOD_MS		200
  #define ATH11K_OBSS_COLOR_COLLISION_DETECTION_DISABLE		0
  #define ATH11K_OBSS_COLOR_COLLISION_DETECTION			1
-@@ -5791,6 +5807,16 @@ int ath11k_wmi_send_twt_resume_dialog_cmd(struct ath11k *ar,
+@@ -5782,6 +5798,16 @@ int ath11k_wmi_send_twt_resume_dialog_cm
  		struct wmi_twt_resume_dialog_params *params);
  int ath11k_wmi_send_obss_spr_cmd(struct ath11k *ar, u32 vdev_id,
  				 struct ieee80211_he_obss_pd *he_obss_pd);
@@ -736,6 +608,48 @@ index a243a352a2e9..fc3d1185a468 100644
  int ath11k_send_coex_config_cmd(struct ath11k *ar,
  			       struct coex_config_arg *coex_config);
  int ath11k_wmi_pdev_ap_ps_cmd_send(struct ath11k *ar, u8 pdev_id, u32 value);
--- 
-2.7.4
-
+--- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
++++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
+@@ -3678,6 +3678,18 @@ htt_print_pdev_obss_pd_stats_tlv_v(const
+ 			   htt_stats_buf->num_obss_tx_ppdu_success);
+ 	len += HTT_DBG_OUT(buf + len, buf_len - len, "OBSS Tx failures PPDU = %u\n",
+ 			   htt_stats_buf->num_obss_tx_ppdu_failure);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG Opportunities = %u\n",
++			   htt_stats_buf->num_non_srg_opportunities);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG tried PPDU = %u\n",
++			   htt_stats_buf->num_non_srg_ppdu_tried);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG success PPDU = %u\n",
++			   htt_stats_buf->num_non_srg_ppdu_success);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG Opportunies = %u\n",
++			   htt_stats_buf->num_srg_opportunities);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG tried PPDU = %u\n",
++			   htt_stats_buf->num_srg_ppdu_tried);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG success PPDU = %u\n",
++			   htt_stats_buf->num_srg_ppdu_success);
+ 
+ 	if (len >= buf_len)
+ 		buf[buf_len - 1] = 0;
+--- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
++++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
+@@ -1715,8 +1715,19 @@ struct htt_tx_sounding_stats_tlv {
+ };
+ 
+ struct htt_pdev_obss_pd_stats_tlv {
+-	u32        num_obss_tx_ppdu_success;
+-	u32        num_obss_tx_ppdu_failure;
++	u32 num_obss_tx_ppdu_success;
++	u32 num_obss_tx_ppdu_failure;
++	u32 num_sr_tx_transmissions;
++	u32 num_spatial_reuse_opportunities;
++	u32 num_non_srg_opportunities;
++	u32 num_non_srg_ppdu_tried;
++	u32 num_non_srg_ppdu_success;
++	u32 num_srg_opportunities;
++	u32 num_srg_ppdu_tried;
++	u32 num_srg_ppdu_success;
++	u32 num_psr_opportunities;
++	u32 num_psr_ppdu_tried;
++	u32 num_psr_ppdu_success;
+ };
+ 
+ void ath11k_debug_htt_stats_init(struct ath11k *ar);
