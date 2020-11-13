@@ -1,10 +1,13 @@
-From 7a0b11dffdd426c2db176db0c92a60f7d345dba7 Mon Sep 17 00:00:00 2001
+From 89468d2a9cf800395e81b696d6f44a63e29a4e27 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <alokad@codeaurora.org>
 Date: Fri, 23 Oct 2020 17:02:06 -0700
 Subject: [PATCH] ath11k: Fixes in EMA beacon transmission offload
 
-(1) Firmware crash on non-MBSSID VAP bring up: Fixed by explicitly setting
-    WMI_HOST_VDEV_FLAGS_NON_MBSSID_AP flag.
+(1) Firmware crash on non-MBSSID VAP bring up: Fixed by explicitly
+    setting WMI_HOST_VDEV_FLAGS_NON_MBSSID_AP flag.
+    Also, the calculation for beacon_tx_offload_max_vdev is changed to
+    include ema_max_vap_cnt without which FW allocates insufficient
+    memory for beacons resulting in either a crash or no beacons.
 
 (2) Only first EMA beacon transmitted: Fixed by using correct index in
     function __ieee80211_beacon_get().
@@ -24,17 +27,46 @@ Subject: [PATCH] ath11k: Fixes in EMA beacon transmission offload
 
 Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
 ---
+ drivers/net/wireless/ath/ath11k/hw.c  |  4 ++
+ drivers/net/wireless/ath/ath11k/hw.h  |  1 +
  drivers/net/wireless/ath/ath11k/mac.c | 68 +++++++++++++++------------
- drivers/net/wireless/ath/ath11k/wmi.c | 16 ++-----
+ drivers/net/wireless/ath/ath11k/wmi.c | 21 +++------
  net/mac80211/cfg.c                    | 13 +++--
  net/mac80211/tx.c                     |  8 ++--
- 4 files changed, 57 insertions(+), 48 deletions(-)
+ 6 files changed, 65 insertions(+), 50 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath11k/hw.c b/drivers/net/wireless/ath/ath11k/hw.c
+index 208dfc4bddb1..b2278075fc6d 100644
+--- a/drivers/net/wireless/ath/ath11k/hw.c
++++ b/drivers/net/wireless/ath/ath11k/hw.c
+@@ -144,6 +144,10 @@ static void ath11k_init_wmi_config_ipq8074(struct ath11k_base *ab,
+ 	config->peer_map_unmap_v2_support = 1;
+ 	config->twt_ap_pdev_count = ab->num_radios;
+ 	config->twt_ap_sta_count = 1000;
++	config->ema_max_vap_cnt = ab->num_radios;
++	config->ema_max_profile_period = TARGET_EMA_MAX_PROFILE_PERIOD;
++	config->beacon_tx_offload_max_vdev += config->ema_max_vap_cnt;
++
+ }
+ 
+ static int ath11k_hw_mac_id_to_pdev_id_ipq8074(struct ath11k_hw_params *hw,
+diff --git a/drivers/net/wireless/ath/ath11k/hw.h b/drivers/net/wireless/ath/ath11k/hw.h
+index 5f69508673f8..f791a7f462f4 100644
+--- a/drivers/net/wireless/ath/ath11k/hw.h
++++ b/drivers/net/wireless/ath/ath11k/hw.h
+@@ -70,6 +70,7 @@
+ #define TARGET_NUM_WDS_ENTRIES		32
+ #define TARGET_DMA_BURST_SIZE		1
+ #define TARGET_RX_BATCHMODE		1
++#define TARGET_EMA_MAX_PROFILE_PERIOD	8
+ 
+ #define ATH11K_HW_MAX_QUEUES		4
+ #define ATH11K_QUEUE_LEN		4096
 diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index 9b34d2fbefbe..a72a41bf6de8 100644
+index 1705f6cade90..c6b41ebc8e38 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1121,7 +1121,6 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
+@@ -1122,7 +1122,6 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
  			     WMI_BEACON_EMA_PARAM_FIRST_TMPL_SHIFT;
  		ema_param |= (ema_idx + 1 == ema_cnt ? 1 : 0) <<
  			     WMI_BEACON_EMA_PARAM_LAST_TMPL_SHIFT;
@@ -42,7 +74,7 @@ index 9b34d2fbefbe..a72a41bf6de8 100644
  	}
  
  	ret = ath11k_wmi_bcn_tmpl(ar, arvif->vdev_id, &offs, bcn, ema_param);
-@@ -1149,14 +1148,11 @@ static int ath11k_mac_setup_bcn_tmpl_ema(struct ath11k_vif *arvif)
+@@ -1150,14 +1149,11 @@ static int ath11k_mac_setup_bcn_tmpl_ema(struct ath11k_vif *arvif)
  		return -EPERM;
  	}
  
@@ -57,7 +89,7 @@ index 9b34d2fbefbe..a72a41bf6de8 100644
  
  	ieee80211_beacon_free_ema_list(&bcns);
  
-@@ -5755,20 +5751,26 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+@@ -5775,20 +5771,26 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
  	params->subtype = arvif->vdev_subtype;
  	params->pdev_id = pdev->pdev_id;
  	params->vdevid_trans = 0;
@@ -97,7 +129,7 @@ index 9b34d2fbefbe..a72a41bf6de8 100644
  
  	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
  		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
-@@ -6404,21 +6406,27 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
+@@ -6427,21 +6429,27 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
@@ -139,7 +171,7 @@ index 9b34d2fbefbe..a72a41bf6de8 100644
  		   "mac vdev %d start center_freq %d phymode %s\n",
  		   arg.vdev_id, arg.channel.freq,
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index 6065654bed6d..44a52a2cb889 100644
+index b24e578b5b47..b1c9c86b8942 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
 @@ -742,12 +742,8 @@ int ath11k_wmi_vdev_create(struct ath11k *ar, u8 *macaddr,
@@ -179,11 +211,23 @@ index 6065654bed6d..44a52a2cb889 100644
  	}
  
  	cmd->flags |= WMI_VDEV_START_LDPC_RX_ENABLED;
+@@ -4398,8 +4390,9 @@ int ath11k_wmi_cmd_init(struct ath11k_base *ab)
+ 	config.peer_map_unmap_v2_support = 1;
+ 	config.twt_ap_pdev_count = ab->num_radios;
+ 	config.twt_ap_sta_count = 1000;
+-	config.ema_max_vap_cnt = 16;
+-	config.ema_max_profile_period = 8;
++	config.ema_max_vap_cnt = ab->num_radios;
++	config.ema_max_profile_period = TARGET_EMA_MAX_PROFILE_PERIOD;
++	config.beacon_tx_offload_max_vdev += config.ema_max_vap_cnt;
+ 
+ 	ab->hw_params.hw_ops->wmi_init_config(ab, &config);
+ 
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index ee744a6818b7..af369e2d664d 100644
+index 4179a50fc692..67f306121072 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -3259,6 +3259,16 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif)
+@@ -3247,6 +3247,16 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif)
  {
  	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
  
@@ -200,7 +244,7 @@ index ee744a6818b7..af369e2d664d 100644
  	ieee80211_queue_work(&sdata->local->hw,
  			     &sdata->csa_finalize_work);
  }
-@@ -3563,9 +3573,6 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
+@@ -3551,9 +3561,6 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
  	if (sdata->vif.csa_active)
  		return -EBUSY;
  
