@@ -261,6 +261,7 @@ post_mac80211() {
 			nss_modval=$(cat /sys/module/ath11k/parameters/nss_offload)
 
 			if [ "$enable_nss" -ne $nss_modval ]; then
+				echo 0 > /sys/module/ath11k/parameters/enable_cold_boot_cal
 				echo  $enable_nss > /sys/module/ath11k/parameters/nss_offload
 				rmmod ath11k_pci
 				rmmod ath11k_ahb

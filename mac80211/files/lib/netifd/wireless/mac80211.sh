@@ -1265,7 +1265,8 @@ drv_mac80211_setup() {
 		sleep 1
 		if lsmod | grep ath11k_pci
 		then
-			[ "$count" -gt 0 ] && read -t 3
+			[ "$count" -gt 0 ]
+			sleep 3
 			break;
 		else
 			count=$(( count+1 ))
