@@ -1,4 +1,4 @@
-From 0ea32d782976d5e49ae9455e27f11e7fd5c97393 Mon Sep 17 00:00:00 2001
+From af787c48670bab9fbc947052073fa9c0e126e367 Mon Sep 17 00:00:00 2001
 From: John Crispin <john@phrozen.org>
 Date: Tue, 20 Oct 2020 13:50:59 -0700
 Subject: [PATCH 1/5] nl80211: add basic multiple bssid support
@@ -18,7 +18,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  3 files changed, 14 insertions(+), 21 deletions(-)
 
 diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
-index fee42138c691..0a0b40c55d2c 100644
+index e7a1dbb84fa7..2ba64744e072 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -487,14 +487,14 @@ struct ieee80211_supported_band {
@@ -40,12 +40,12 @@ index fee42138c691..0a0b40c55d2c 100644
  
  /**
 diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
-index b38ca3367bd2..737db61c9bd1 100644
+index dd281675af2e..f52c8d92b5c8 100644
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -2554,9 +2554,6 @@ enum nl80211_commands {
-  *	unsolicited broadcast probe response. It is a nested attribute, see
-  *	&enum nl80211_unsol_bcast_probe_resp_attributes.
+@@ -2571,9 +2571,6 @@ enum nl80211_commands {
+  * @NL80211_ATTR_HE_MUEDCA_PARAMS: MU-EDCA AC parameters for the
+  *	%NL80211_CMD_UPDATE_HE_MUEDCA_PARAMS command.
   *
 - * @NL80211_ATTR_MULTIPLE_BSSID_NON_TRANSMITTING: Set the Non-Transmitted flag for this
 - *	BSSIDs beacon.
@@ -53,7 +53,7 @@ index b38ca3367bd2..737db61c9bd1 100644
   * @NL80211_ATTR_MULTIPLE_BSSID_PARENT: If this is a Non-Transmitted BSSID, define
   *	the parent (transmitting) interface.
   *
-@@ -2568,6 +2565,8 @@ enum nl80211_commands {
+@@ -2585,6 +2582,8 @@ enum nl80211_commands {
   * @NL80211_ATTR_MULTIPLE_BSSID_IES: The Elements that describe our multiple BSS group.
   *	these get passed separately as the kernel might need to split them up for EMA VAP.
   *
@@ -62,9 +62,9 @@ index b38ca3367bd2..737db61c9bd1 100644
   * @NL80211_ATTR_OBSS_COLOR_BITMAP: bitmap of the u64 BSS colors for the
   *      %NL80211_CMD_OBSS_COLOR_COLLISION event.
   *
-@@ -3070,11 +3069,11 @@ enum nl80211_attrs {
+@@ -3090,11 +3089,11 @@ enum nl80211_attrs {
  
- 	NL80211_ATTR_UNSOL_BCAST_PROBE_RESP,
+ 	NL80211_ATTR_HE_MUEDCA_PARAMS,
  
 -	NL80211_ATTR_MULTIPLE_BSSID_NON_TRANSMITTING,
  	NL80211_ATTR_MULTIPLE_BSSID_PARENT,
@@ -76,10 +76,10 @@ index b38ca3367bd2..737db61c9bd1 100644
  	NL80211_ATTR_OBSS_COLOR_BITMAP,
  
 diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 04728dcd96f7..0bb2a922a4ac 100644
+index 588adc51ae77..5905dd7db75f 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -765,11 +765,11 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+@@ -769,11 +769,11 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
  		NLA_POLICY_NESTED(fils_discovery_policy),
  	[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP] =
  		NLA_POLICY_NESTED(unsol_bcast_probe_resp_policy),
@@ -93,7 +93,7 @@ index 04728dcd96f7..0bb2a922a4ac 100644
  	[NL80211_ATTR_OBSS_COLOR_BITMAP] = { .type = NLA_U64 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COUNT] = { .type = NLA_U8 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COLOR] = { .type = NLA_U8 },
-@@ -3873,14 +3873,6 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
+@@ -3877,14 +3877,6 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
  			return err;
  	}
  
@@ -108,8 +108,8 @@ index 04728dcd96f7..0bb2a922a4ac 100644
  	if (!cfg80211_iftype_allowed(&rdev->wiphy, type, params.use_4addr, 0))
  		return -EOPNOTSUPP;
  
-@@ -5300,6 +5292,10 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
- 			return err;
+@@ -5323,6 +5315,10 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+ 			goto out;
  	}
  
 +	if (info->attrs[NL80211_ATTR_MULTIPLE_BSSID_PARENT])
@@ -119,7 +119,7 @@ index 04728dcd96f7..0bb2a922a4ac 100644
  	if (info->attrs[NL80211_ATTR_MULTIPLE_BSSID_INDEX])
  		params.multiple_bssid.index = nla_get_u8(
  				info->attrs[NL80211_ATTR_MULTIPLE_BSSID_INDEX]);
-@@ -5307,10 +5303,8 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+@@ -5330,10 +5326,8 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
  	if (info->attrs[NL80211_ATTR_MULTIPLE_BSSID_COUNT])
  		params.multiple_bssid.count = nla_get_u8(
  				info->attrs[NL80211_ATTR_MULTIPLE_BSSID_COUNT]);
@@ -136,7 +136,7 @@ index 04728dcd96f7..0bb2a922a4ac 100644
 2.25.0
 
 
-From f31f389e5efcfb6bf104001a8e05ade69ec7fd4b Mon Sep 17 00:00:00 2001
+From c8998ca44327b2f9dbdb0f47522417858220fdc2 Mon Sep 17 00:00:00 2001
 From: John Crispin <john@phrozen.org>
 Date: Tue, 20 Oct 2020 14:23:02 -0700
 Subject: [PATCH 2/5] mac80211: add multiple bssid support to interface
@@ -160,7 +160,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  3 files changed, 63 insertions(+), 50 deletions(-)
 
 diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index 92c17055fc81..6c3ee1cba4a2 100644
+index 5f4a5e86645b..ebe1822d2356 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
 @@ -642,7 +642,7 @@ struct ieee80211_fils_discovery {
@@ -215,7 +215,7 @@ index 92c17055fc81..6c3ee1cba4a2 100644
  
  	bool color_change_active;
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index dc664c7bdc88..00a4b9f49979 100644
+index 5e8755435d24..e50a69c25a6d 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
 @@ -111,8 +111,8 @@ static int ieee80211_set_mon_options(struct ieee80211_sub_if_data *sdata,
@@ -309,7 +309,7 @@ index dc664c7bdc88..00a4b9f49979 100644
  		}
  	}
  
-@@ -1209,6 +1208,9 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
+@@ -1214,6 +1213,9 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
  		       sizeof(*params->he_cap));
  	}
  
@@ -319,7 +319,7 @@ index dc664c7bdc88..00a4b9f49979 100644
  	mutex_lock(&local->mtx);
  	err = ieee80211_vif_use_channel(sdata, &params->chandef,
  					IEEE80211_CHANCTX_SHARED);
-@@ -4321,19 +4323,19 @@ static void ieee80211_color_change_bss_config_notify(struct ieee80211_sub_if_dat
+@@ -4309,19 +4311,19 @@ static void ieee80211_color_change_bss_config_notify(struct ieee80211_sub_if_dat
  	ieee80211_bss_info_change_notify(sdata, changed);
  
  	if (ieee80211_hw_check(&sdata->local->hw, SUPPORTS_MULTI_BSSID_AP) &&
@@ -384,7 +384,7 @@ index 7199972c7cd3..6b0388542147 100644
 2.25.0
 
 
-From 100c290ea355af8691471184ece9cc5a805ed454 Mon Sep 17 00:00:00 2001
+From acc7bd542b47cdefb373eee145509a265fe504ce Mon Sep 17 00:00:00 2001
 From: John Crispin <john@phrozen.org>
 Date: Tue, 20 Oct 2020 14:37:21 -0700
 Subject: [PATCH 3/5] mac80211: add multiple bssid/EMA support to beacon
@@ -411,7 +411,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
  2 files changed, 201 insertions(+), 33 deletions(-)
 
 diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index 6c3ee1cba4a2..82a0ea5e2ff6 100644
+index ebe1822d2356..636f577e1340 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
 @@ -4868,6 +4868,7 @@ struct ieee80211_mutable_offsets {
@@ -787,7 +787,7 @@ index cf5082c04eca..89d903c990f8 100644
 2.25.0
 
 
-From 4a7957dd07e438e9509d0d728e76ba872a03d6f3 Mon Sep 17 00:00:00 2001
+From 1d79e56f5a89230ae150ed5d840cecb8ef5696a8 Mon Sep 17 00:00:00 2001
 From: John Crispin <john@phrozen.org>
 Date: Thu, 15 Oct 2020 18:11:33 -0700
 Subject: [PATCH 4/5] mac80211: don't allow CSA on non-transmitting interfaces
@@ -803,10 +803,10 @@ Signed-off-by: John Crispin <john@phrozen.org>
  1 file changed, 3 insertions(+)
 
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 00a4b9f49979..ee744a6818b7 100644
+index e50a69c25a6d..4179a50fc692 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -3563,6 +3563,9 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
+@@ -3551,6 +3551,9 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
  	if (sdata->vif.csa_active)
  		return -EBUSY;
  
@@ -820,7 +820,7 @@ index 00a4b9f49979..ee744a6818b7 100644
 2.25.0
 
 
-From 6c7b2989af6b0af9f109719e261442ebe2d72e99 Mon Sep 17 00:00:00 2001
+From 3307ad5a2e005ad800e02a6154e95b6cd4450a95 Mon Sep 17 00:00:00 2001
 From: John Crispin <john@phrozen.org>
 Date: Tue, 20 Oct 2020 14:58:39 -0700
 Subject: [PATCH 5/5] ath11k: add EMA support
@@ -837,10 +837,10 @@ Signed-off-by: John Crispin <john@phrozen.org>
  3 files changed, 125 insertions(+), 48 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index a1c3ac894867..9b34d2fbefbe 100644
+index 29fddb10b4c3..213513c27fec 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1084,32 +1084,19 @@ err_mon_del:
+@@ -1085,32 +1085,19 @@ err_mon_del:
  	return ret;
  }
  
@@ -877,7 +877,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  	ies = bcn->data + ieee80211_get_hdrlen_from_skb(bcn);
  	ies += sizeof(mgmt->u.beacon);
  
-@@ -1127,9 +1114,17 @@ static int ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif)
+@@ -1128,9 +1115,17 @@ static int ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif)
  				    ies, (skb_tail_pointer(bcn) - ies)))
  		arvif->wpaie_present = true;
  
@@ -897,7 +897,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  
  	if (ret)
  		ath11k_warn(ab, "failed to submit beacon template command: %d\n",
-@@ -1138,38 +1133,90 @@ static int ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif)
+@@ -1139,38 +1134,90 @@ static int ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif)
  	return ret;
  }
  
@@ -1010,7 +1010,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  
  	ath11k_mac_setup_bcn_tmpl(arvif);
  }
-@@ -3157,7 +3204,7 @@ static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+@@ -3158,7 +3205,7 @@ static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  			ret = ath11k_wmi_send_obss_color_collision_cfg_cmd(
  				ar, arvif->vdev_id, info->he_bss_color.color,
  				ATH11K_BSS_COLOR_COLLISION_DETECTION_AP_PERIOD_MS,
@@ -1019,7 +1019,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  				(info->he_bss_color.enabled & color_collision_enable) : 0);
  
  			if (ret)
-@@ -5708,7 +5755,7 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+@@ -5730,7 +5777,7 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
  	params->subtype = arvif->vdev_subtype;
  	params->pdev_id = pdev->pdev_id;
  	params->vdevid_trans = 0;
@@ -1028,7 +1028,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  		params->flags = WMI_HOST_VDEV_FLAGS_NON_TRANSMIT_AP;
  		parent = arvif->vif->multiple_bssid.parent;
  		if (!parent)
-@@ -5716,10 +5763,13 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+@@ -5738,10 +5785,13 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
  		if (ar->hw->wiphy != ieee80211_vif_to_wdev(parent)->wiphy)
  			return -EINVAL;
  		params->vdevid_trans = ath11k_vif_to_arvif(parent)->vdev_id;
@@ -1043,7 +1043,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
  		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
  		params->chains[NL80211_BAND_2GHZ].rx = ar->num_rx_chains;
-@@ -6354,7 +6404,7 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
+@@ -6379,7 +6429,7 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
@@ -1052,7 +1052,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  		arg.mbss_capability_flags = WMI_HOST_VDEV_FLAGS_NON_TRANSMIT_AP;
  		parent = arvif->vif->multiple_bssid.parent;
  		if (!parent)
-@@ -6362,10 +6412,13 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
+@@ -6387,10 +6437,13 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
  		if (ar->hw->wiphy != ieee80211_vif_to_wdev(parent)->wiphy)
  			return -EINVAL;
  		arg.vdevid_trans = ath11k_vif_to_arvif(parent)->vdev_id;
@@ -1068,7 +1068,7 @@ index a1c3ac894867..9b34d2fbefbe 100644
  		   "mac vdev %d start center_freq %d phymode %s\n",
  		   arg.vdev_id, arg.channel.freq,
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index 330eb7362fcc..6065654bed6d 100644
+index 21b14b0644e5..b24e578b5b47 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
 @@ -1890,7 +1890,7 @@ int ath11k_wmi_send_bcn_offload_control_cmd(struct ath11k *ar,
@@ -1088,7 +1088,7 @@ index 330eb7362fcc..6065654bed6d 100644
  
  	ptr = skb->data + sizeof(*cmd);
  
-@@ -4111,6 +4112,8 @@ ath11k_wmi_copy_resource_config(struct wmi_resource_config *wmi_cfg,
+@@ -4163,6 +4164,8 @@ ath11k_wmi_copy_resource_config(struct wmi_resource_config *wmi_cfg,
  	wmi_cfg->sched_params = tg_cfg->sched_params;
  	wmi_cfg->twt_ap_pdev_count = tg_cfg->twt_ap_pdev_count;
  	wmi_cfg->twt_ap_sta_count = tg_cfg->twt_ap_sta_count;
@@ -1097,7 +1097,7 @@ index 330eb7362fcc..6065654bed6d 100644
  }
  
  static int ath11k_init_cmd_send(struct ath11k_pdev_wmi *wmi,
-@@ -4343,6 +4346,8 @@ int ath11k_wmi_cmd_init(struct ath11k_base *ab)
+@@ -4395,6 +4398,8 @@ int ath11k_wmi_cmd_init(struct ath11k_base *ab)
  	config.peer_map_unmap_v2_support = 1;
  	config.twt_ap_pdev_count = ab->num_radios;
  	config.twt_ap_sta_count = 1000;
@@ -1107,10 +1107,10 @@ index 330eb7362fcc..6065654bed6d 100644
  	ab->hw_params.hw_ops->wmi_init_config(ab, &config);
  
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.h b/drivers/net/wireless/ath/ath11k/wmi.h
-index f74fcdac1699..1b25272141e2 100644
+index 5a1cd41db0e5..20cba1d26475 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -2428,6 +2428,18 @@ struct wmi_resource_config {
+@@ -2429,6 +2429,18 @@ struct wmi_resource_config {
  	u32 sched_params;
  	u32 twt_ap_pdev_count;
  	u32 twt_ap_sta_count;
@@ -1129,7 +1129,7 @@ index f74fcdac1699..1b25272141e2 100644
  } __packed;
  
  struct wmi_service_ready_event {
-@@ -3658,6 +3670,11 @@ struct wmi_get_pdev_temperature_cmd {
+@@ -3679,6 +3691,11 @@ struct wmi_ftm_event_msg {
  
  #define WMI_BEACON_TX_BUFFER_SIZE	512
  
@@ -1141,7 +1141,7 @@ index f74fcdac1699..1b25272141e2 100644
  struct wmi_bcn_tmpl_cmd {
  	u32 tlv_header;
  	u32 vdev_id;
-@@ -5507,6 +5524,8 @@ struct target_resource_config {
+@@ -5578,6 +5595,8 @@ struct target_resource_config {
  	u32 sched_params;
  	u32 twt_ap_pdev_count;
  	u32 twt_ap_sta_count;
@@ -1150,7 +1150,7 @@ index f74fcdac1699..1b25272141e2 100644
  };
  
  enum wmi_tpc_pream_bw {
-@@ -5734,7 +5753,7 @@ int ath11k_wmi_qos_null_send(struct ath11k *ar, u32 vdev_id, u32 buf_id,
+@@ -5805,7 +5824,7 @@ int ath11k_wmi_qos_null_send(struct ath11k *ar, u32 vdev_id, u32 buf_id,
  			     struct sk_buff *frame);
  int ath11k_wmi_bcn_tmpl(struct ath11k *ar, u32 vdev_id,
  			struct ieee80211_mutable_offsets *offs,
