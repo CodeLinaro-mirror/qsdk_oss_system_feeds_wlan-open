@@ -48,7 +48,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  struct ath11k_per_peer_tx_stats {
 --- a/drivers/net/wireless/ath/ath11k/debug.c
 +++ b/drivers/net/wireless/ath/ath11k/debug.c
-@@ -347,6 +347,142 @@ void ath11k_debugfs_twt(struct ath11k_vi
+@@ -347,6 +347,217 @@ void ath11k_debugfs_twt(struct ath11k_vi
  }
  #endif
  
@@ -70,6 +70,9 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +
 +	ret = sscanf(buf, "%u %u", &param.stats_id, &param.action);
 +	if (ret != 2)
++		return -EINVAL;
++
++	if (!param.action || param.action > WMI_REQ_CTRL_PATH_STAT_RESET)
 +		return -EINVAL;
 +
 +	ret = ath11k_wmi_send_wmi_ctrl_stats_cmd(arvif->ar, &param);
@@ -150,6 +153,75 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	return ret_val;
 +}
 +
++int wmi_ctrl_path_cal_stat(struct ath11k_vif *arvif, const char __user *ubuf,
++			   size_t count, loff_t *ppos)
++{
++	const int size = 2048;
++	char *buf;
++	u8 cal_type_mask, cal_prof_mask, is_periodic_cal;
++	int len = 0, ret_val;
++	struct wmi_ctrl_path_stats_list *stats;
++	struct wmi_ctrl_path_cal_stats *cal_stats;
++
++	buf = kzalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	len += scnprintf(buf + len, size - len,
++			 "WMI_CTRL_PATH_CAL_STATS\n");
++	len += scnprintf(buf + len, size - len,
++			 "%s\t\t%s\t%s\t%s\t%s\t%s\n",
++			 "cal_profile", "cal_type",
++			 "cal_triggered_cnt", "cal_fail_cnt",
++			 "cal_fcs_cnt", "cal_fcs_fail_cnt");
++
++	list_for_each_entry (stats, &arvif->ar->debug.wmi_list, list) {
++		if (!stats)
++			break;
++
++		cal_stats = stats->stats_ptr;
++
++		cal_prof_mask = FIELD_GET(WMI_CTRL_PATH_CAL_PROF_MASK,
++					  cal_stats->cal_info);
++		if (cal_prof_mask == WMI_CTRL_PATH_STATS_CAL_PROFILE_INVALID)
++			continue;
++
++		cal_type_mask = FIELD_GET(WMI_CTRL_PATH_CAL_TYPE_MASK,
++					  cal_stats->cal_info);
++		is_periodic_cal = FIELD_GET(WMI_CTRL_PATH_IS_PERIODIC_CAL,
++					    cal_stats->cal_info);
++
++
++		if (!is_periodic_cal) {
++			len +=
++		scnprintf(buf + len, size - len,
++			  "%s\t%s\t\t\t%d\t%d\t%d\t%d\n",
++			  wmi_ctrl_path_cal_prof_id_to_name(cal_prof_mask),
++			  wmi_ctrl_path_cal_type_id_to_name(cal_type_mask),
++			  cal_stats->cal_triggered_cnt,
++			  cal_stats->cal_fail_cnt,
++			  cal_stats->cal_fcs_cnt,
++			  cal_stats->cal_fcs_fail_cnt);
++		} else {
++			len +=
++		scnprintf(buf + len, size - len,
++			  "%s\t%s\t\t\t%d\t%d\t%d\t%d\n",
++			  "PERIODIC_CAL",
++			  wmi_ctrl_path_periodic_cal_type_id_to_name(cal_type_mask),
++			  cal_stats->cal_triggered_cnt,
++			  cal_stats->cal_fail_cnt,
++			  cal_stats->cal_fcs_cnt,
++			  cal_stats->cal_fcs_fail_cnt);
++		}
++
++	}
++
++	ret_val =  simple_read_from_buffer(ubuf, count, ppos, buf, len);
++	ath11k_wmi_crl_path_stats_list_free(&arvif->ar->debug.wmi_list);
++	kfree(buf);
++	return ret_val;
++}
++
 +static ssize_t ath11k_read_wmi_ctrl_path_stats(struct file *file,
 +		const char __user *ubuf,
 +		size_t count, loff_t *ppos)
@@ -163,6 +235,9 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	switch (tagid) {
 +	case WMI_CTRL_PATH_PDEV_STATS:
 +		ret_val = wmi_ctrl_path_pdev_stat(arvif, ubuf, count, ppos);
++		break;
++	case WMI_CTRL_PATH_CAL_STATS:
++		ret_val = wmi_ctrl_path_cal_stat(arvif, ubuf, count, ppos);
 +		break;
 +	/* Add case for newly wmi ctrl path added stats here */
 +	default :
@@ -214,7 +289,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -3044,6 +3044,97 @@ ath11k_wmi_send_twt_add_dialog_cmd(struc
+@@ -3044,6 +3044,102 @@ ath11k_wmi_send_twt_add_dialog_cmd(struc
  }
  
  int
@@ -237,6 +312,11 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +
 +	switch (param->stats_id) {
 +	case WMI_REQ_CTRL_PATH_PDEV_TX_STAT:
++		pdev_id_array[num_pdev_idx] = ar->pdev->pdev_id;
++		stats_id = (1 << param->stats_id);
++		num_pdev_idx++;
++		break;
++	case WMI_REQ_CTRL_PATH_CAL_STAT:
 +		pdev_id_array[num_pdev_idx] = ar->pdev->pdev_id;
 +		stats_id = (1 << param->stats_id);
 +		num_pdev_idx++;
@@ -312,7 +392,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  ath11k_wmi_send_twt_del_dialog_cmd(struct ath11k *ar,
  				  struct wmi_twt_del_dialog_params *params)
  {
-@@ -7125,6 +7216,154 @@ exit:
+@@ -7125,6 +7221,190 @@ exit:
  	rcu_read_unlock();
  }
  
@@ -357,6 +437,39 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	return 0;
 +}
 +
++int wmi_print_ctrl_path_cal_stats_tlv(struct ath11k_base *ab, u16 len,
++				      const void *ptr, void *data)
++{
++	struct wmi_ctrl_path_stats_ev_parse_param *stats_buff = (struct wmi_ctrl_path_stats_ev_parse_param *)data;
++	struct wmi_ctrl_path_cal_stats *cal_stats_skb = (struct wmi_ctrl_path_cal_stats *)ptr;
++	struct wmi_ctrl_path_cal_stats *cal_stats = NULL;
++	struct wmi_ctrl_path_stats_list *stats = kzalloc(sizeof(struct wmi_ctrl_path_stats_list),GFP_ATOMIC);
++	struct ath11k *ar = NULL;
++
++	if (!stats)
++		return -ENOMEM;
++
++	cal_stats = kzalloc(sizeof(*cal_stats), GFP_ATOMIC);
++	if (!cal_stats) {
++		kfree(stats);
++		return -ENOMEM;
++	}
++
++	memcpy(cal_stats, cal_stats_skb, sizeof(struct wmi_ctrl_path_cal_stats));
++	stats->stats_ptr = cal_stats;
++	list_add_tail(&stats->list, &stats_buff->list);
++
++	ar = ath11k_mac_get_ar_by_pdev_id(ab, cal_stats_skb->pdev_id + 1);
++	if (!ar) {
++		ath11k_warn(ab, "Failed to get ar for wmi ctrl cal stats\n");
++		return -EINVAL;
++	}
++
++	ar->debug.wmi_ctrl_path_stats_tagid = WMI_CTRL_PATH_CAL_STATS;
++	stats_buff->ar = ar;
++	return 0;
++}
++
 +static int ath11k_wmi_ctrl_stats_subtlv_parser(struct ath11k_base *ab,
 +					      u16 tag, u16 len,
 +					      const void *ptr, void *data)
@@ -368,6 +481,9 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +		break;
 +	case WMI_CTRL_PATH_PDEV_STATS:
 +		ret = wmi_print_ctrl_path_pdev_tx_stats_tlv(ab, len, ptr, data);
++		break;
++	case WMI_CTRL_PATH_CAL_STATS:
++		ret = wmi_print_ctrl_path_cal_stats_tlv(ab, len, ptr, data);
 +		break;
 +	/* Add case for newly wmi ctrl path added stats here */
 +	default:
@@ -467,7 +583,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  static struct ath11k *ath11k_get_ar_on_scan_abort(struct ath11k_base *ab,
  						  u32 vdev_id)
  {
-@@ -8606,6 +8845,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -8607,6 +8887,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_QOS_NULL_FRAME_TX_COMPLETION_EVENTID:
  		ath11k_qos_null_compl_event(ab, skb);
  		break;
@@ -488,7 +604,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	WMI_SET_ARP_NS_OFFLOAD_CMDID = WMI_TLV_CMD(WMI_GRP_ARP_NS_OFL),
  	WMI_ADD_PROACTIVE_ARP_RSP_PATTERN_CMDID,
  	WMI_DEL_PROACTIVE_ARP_RSP_PATTERN_CMDID,
-@@ -720,6 +722,8 @@ enum wmi_tlv_event_id {
+@@ -723,6 +725,8 @@ enum wmi_tlv_event_id {
  	WMI_UPDATE_RCPI_EVENTID,
  	WMI_PEER_STATS_INFO_EVENTID,
  	WMI_RADIO_CHAN_STATS_EVENTID,
@@ -497,7 +613,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	WMI_NLO_MATCH_EVENTID = WMI_TLV_CMD(WMI_GRP_NLO_OFL),
  	WMI_NLO_SCAN_COMPLETE_EVENTID,
  	WMI_APFIND_EVENTID,
-@@ -1877,6 +1881,11 @@ enum wmi_tlv_tag {
+@@ -1880,6 +1884,11 @@ enum wmi_tlv_tag {
  	WMI_TAG_PDEV_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
  	WMI_TAG_PDEV_NON_SRG_OBSS_COLOR_ENABLE_BITMAP_CMD,
  	WMI_TAG_PDEV_NON_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
@@ -509,7 +625,15 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	WMI_TAG_TPC_STATS_GET_CMD = 0x38B,
  	WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM,
  	WMI_TAG_TPC_STATS_CONFIG_EVENT,
-@@ -5296,6 +5305,87 @@ struct wmi_twt_resume_dialog_params_cmd
+@@ -1889,6 +1898,7 @@ enum wmi_tlv_tag {
+ 	/* TODO add all the missing cmds */
+ 	WMI_TAG_QOS_NULL_FRAME_TX_SEND = 0x3A6,
+ 	WMI_TAG_QOS_NULL_FRAME_TX_STATUS,
++	WMI_CTRL_PATH_CAL_STATS = 0x3BC,
+ 
+ 	WMI_TAG_MAX
+ };
+@@ -5299,6 +5309,257 @@ struct wmi_twt_resume_dialog_params_cmd
  	u32 next_twt_size;
  };
  
@@ -536,6 +660,166 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +#define WMI_MGMT_FRAME_SUBTYPE_MAX 16
 +#define WMI_MAX_STRING_LEN 256
 +
++enum wmi_ctrl_path_cal_prof_id {
++	WMI_CTRL_PATH_STATS_CAL_PROF_COLD_BOOT_CAL = 0,
++	WMI_CTRL_PATH_STATS_CAL_PROF_FULL_CHAN_SWITCH,
++	WMI_CTRL_PATH_STATS_CAL_PROF_SCAN_CHAN_SWITCH,
++	WMI_CTRL_PATH_STATS_CAL_PROF_DPD_SPLIT_CAL,
++	WMI_CTRL_PATH_STATS_CAL_PROF_TEMP_TRIGEER_CAL,
++	WMI_CTRL_PATH_STATS_CAL_PROF_POWER_SAVE_WAKE_UP,
++	WMI_CTRL_PATH_STATS_CAL_PROF_TIMER_TRIGGER_CAL,
++	WMI_CTRL_PATH_STATS_CAL_PROF_FTM_TRIGGER_CAL,
++	WMI_CTRL_PATH_STATS_CAL_PROF_AGILE_OR_POWER_DOWN_DTIM,
++	WMI_CTRL_PATH_STATS_CAL_PROF_NOISY_ENV_RXDO,
++	/* IDs from 10 to 30 for future use*/
++	WMI_CTRL_PATH_STATS_CAL_PROFILE_INVALID = 0x1F,
++};
++
++static inline const char *
++wmi_ctrl_path_cal_prof_id_to_name(u8 prof_id) {
++	switch (prof_id) {
++	case WMI_CTRL_PATH_STATS_CAL_PROF_COLD_BOOT_CAL:
++		return "COLD_BOOT_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_FULL_CHAN_SWITCH:
++		return "FULL_CHAN_SWITCH";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_SCAN_CHAN_SWITCH:
++		return "SCAN_CHAN_SWITCH";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_DPD_SPLIT_CAL:
++		return "DPD_SPLIT_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_TEMP_TRIGEER_CAL:
++		return "TEMP_TRIGEER_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_POWER_SAVE_WAKE_UP:
++		return "POWER_SAVE_WAKE_UP";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_TIMER_TRIGGER_CAL:
++		return "TIMER_TRIGGER_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_FTM_TRIGGER_CAL:
++		return "FTM_TRIGGER_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_AGILE_OR_POWER_DOWN_DTIM:
++		return "AGILE_OR_POWER_DOWN_DTIM";
++	case WMI_CTRL_PATH_STATS_CAL_PROF_NOISY_ENV_RXDO:
++		return "NOISY_ENV_RXDO";
++	case WMI_CTRL_PATH_STATS_CAL_PROFILE_INVALID:
++		break;
++	}
++	return "UNKOWN_CAL_PROFILE";
++}
++
++enum wmi_ctrl_path_cal_type_id {
++	WMI_CTRL_PATH_STATS_CAL_TYPE_ADC = 0,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DAC,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_PROCESS,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_NOISE_FLOOR,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_COMB_TXLO_TXIQ_RXIQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_TXLO,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_TXIQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_RXIQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_IM2,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_LNA,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_LP_RXDCO,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_LP_RXIQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_MEMORYLESS,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_MEMORY,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_IBF,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_PDET_AND_PAL,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO_IQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO_DTIM,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_TPC_CAL,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_TIMEREQ,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_BWFILTER,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_PEF,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_PADROOP,
++	WMI_CTRL_PATH_STATS_CAL_TYPE_SELFCALTPC,
++	/* IDs 25 to 254 for future use*/
++	WMI_CTRL_PATH_STATS_CAL_TYPE_INVALID = 0xff,
++};
++
++static inline const char *
++wmi_ctrl_path_cal_type_id_to_name(u8 type_id) {
++	switch (type_id) {
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_ADC:
++		return "ADC";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DAC:
++		return "DAC";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_PROCESS:
++		return "PROCESS";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_NOISE_FLOOR:
++		return "NOISE_FLOOR";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO:
++		return "RXDCO";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_COMB_TXLO_TXIQ_RXIQ:
++		return "COMB_TXLO_TXIQ_RXIQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_TXLO:
++		return "TXLO";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_TXIQ:
++		return "TXIQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_RXIQ:
++		return "RXIQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_IM2:
++		return "IM2";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_LNA:
++		return "LNA";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_LP_RXDCO:
++		return "DPD_LP_RXDCO";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_LP_RXIQ:
++		return "DPD_LP_RXIQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_MEMORYLESS:
++		return "DPD_MEMORYLESS";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_MEMORY:
++		return "DPD_MEMORY";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_IBF:
++		return "IBF";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_PDET_AND_PAL:
++		return "PDET_AND_PA";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO_IQ:
++		return "RXDCO_IQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_RXDCO_DTIM:
++		return "RXDCO_DTIM";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_TPC_CAL:
++		return "TPC_CAL";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_DPD_TIMEREQ:
++		return "DPD_TIMEREQ";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_BWFILTER:
++		return "BWFILTER";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_PEF:
++		return "PEF";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_PADROOP:
++		return "PADROOP";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_SELFCALTPC:
++		return "SELFCALTPC";
++	case WMI_CTRL_PATH_STATS_CAL_TYPE_INVALID:
++		break;
++	}
++	return "UNKNOWN_CAL_TYPE";
++}
++
++enum wmi_ctrl_path_periodic_cal_type_id {
++	WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_NOISE_FLOOR,
++	WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_DPD_MEMORYLESS,
++	WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_DPD_MEMORY,
++	/* IDs 3 to 254 for future use*/
++	WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_INVALID = 0xFF,
++};
++
++static inline const char *
++wmi_ctrl_path_periodic_cal_type_id_to_name(u8 type_id) {
++	switch(type_id) {
++	case WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_NOISE_FLOOR:
++		return "NOISE_FLOOR";
++	case WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_DPD_MEMORYLESS:
++		return "DPD_MEMORYLESS";
++	case WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_DPD_MEMORY:
++		return "DPD_MEMORY";
++	case WMI_CTRL_PATH_STATS_PERIODIC_CAL_TYPE_INVALID:
++		break;
++	}
++	return "UNKNOWN_PERIODIC_CAL_TYPE";
++}
++
++#define WMI_CTRL_PATH_CAL_PROF_MASK	GENMASK(12, 8)
++#define WMI_CTRL_PATH_CAL_TYPE_MASK	GENMASK(7, 0)
++#define WMI_CTRL_PATH_IS_PERIODIC_CAL	GENMASK(13, 13)
++
 +struct wmi_ctrl_path_pdev_stats {
 +	u32 pdev_id;
 +	u32 tx_mgmt_subtype[WMI_MGMT_FRAME_SUBTYPE_MAX];
@@ -547,6 +831,15 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	u32 tot_peer_del_cnt;
 +	u32 tot_peer_del_resp_cnt;
 +	u32 vdev_pause_fail_rt_to_sched_algo_fifo_full_cnt;
++};
++
++struct wmi_ctrl_path_cal_stats {
++	u32 pdev_id;
++	u32 cal_info;
++	u32 cal_triggered_cnt;
++	u32 cal_fail_cnt;
++	u32 cal_fcs_cnt;
++	u32 cal_fcs_fail_cnt;
 +};
 +
 +struct  wmi_ctrl_path_stats_cmd_param {
@@ -584,6 +877,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	WMI_REQ_CTRL_PATH_PDEV_TX_STAT   = 1,
 +	WMI_REQ_CTRL_PATH_VDEV_EXTD_STAT = 2,
 +	WMI_REQ_CTRL_PATH_MEM_STAT       = 3,
++	WMI_REQ_CTRL_PATH_CAL_STAT       = 5,
 +};
 +
 +enum wmi_ctrl_path_stats_action {
@@ -597,7 +891,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  struct wmi_obss_spatial_reuse_params_cmd {
  	u32 tlv_header;
  	u32 pdev_id;
-@@ -5805,6 +5895,7 @@ struct wmi_qos_null_tx_cmd {
+@@ -5808,6 +6069,7 @@ struct wmi_qos_null_tx_cmd {
  
  #define WMI_SERVICE_READY_TIMEOUT_HZ (5 * HZ)
  #define WMI_SEND_TIMEOUT_HZ (3 * HZ)
@@ -605,7 +899,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  
  struct ath11k_wmi_base {
  	struct ath11k_base *ab;
-@@ -5986,4 +6077,6 @@ int ath11k_wmi_pdev_get_tpc_table_cmdid(
+@@ -5989,4 +6251,6 @@ int ath11k_wmi_pdev_get_tpc_table_cmdid(
  void ath11k_wmi_free_tpc_stats_mem(struct ath11k *ar);
  int ath11k_wmi_send_aggr_size_cmd(struct ath11k *ar,
  				  struct set_custom_aggr_size_params *params);
