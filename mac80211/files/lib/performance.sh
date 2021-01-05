@@ -13,11 +13,12 @@
 # WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+[ -e /lib/smp_affinity_settings.sh ] && . /lib/smp_affinity_settings.sh
 
 perf_setup(){
 
 	if [ -d "/sys/kernel/debug/ath11k" ]; then
-
+		local board=$(ipq806x_board_name)
 		#read the to check whether nss_offload is enabled or not if not then set 0
 		enable_nss_offload=$(cat /sys/module/ath11k/parameters/nss_offload)
 
@@ -38,10 +39,11 @@ perf_setup(){
 			/etc/init.d/qca-nss-ecm stop
 		fi
 
-		#check for number of radio available
-		[ -d "/sys/class/net/wlan0" ] && echo e > /sys/class/net/wlan0/queues/rx-0/rps_cpus
-		[ -d "/sys/class/net/wlan1" ] && echo e > /sys/class/net/wlan1/queues/rx-0/rps_cpus
-		[ -d "/sys/class/net/wlan2" ] && echo e > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+		if [ "$board" != "ap-hk14" ]; then
+			[ -d "/sys/class/net/wlan0" ] && echo e > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+			[ -d "/sys/class/net/wlan1" ] && echo e > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+			[ -d "/sys/class/net/wlan2" ] && echo e > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+		fi
 
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core0
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core1
