@@ -18,6 +18,7 @@
 sta_intf="$1"
 ap_intf="$2"
 hostapd_conf="$3"
+dfs_log=1
 
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
 
@@ -235,22 +236,30 @@ do
 		[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
 		#echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), starting AP" > /dev/ttyMSM0
 		wpa_cli -i $sta_intf signal_poll
-		hostapd_adjust_config
-		#echo "Enabling below hostapd config:" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf status 2> /dev/null
-		[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ] && hostapd_cli -i $ap_intf enable
-		sleep 4
-		#echo "Hostapd state: $(hostapd_cli status 2> /dev/null | grep state | cut -d'=' -f 2)" > /dev/ttyMSM0
+		sta_chan=$(iw $sta_intf info 2> /dev/null | grep channel | cut -d' ' -f 2)
+		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ]; then
+			hostapd_adjust_config
+			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
+			hostapd_cli -i $ap_intf status 2> /dev/null
+			[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ] && hostapd_cli -i $ap_intf enable
+			sleep 4
+			#echo "Hostapd state: $(hostapd_cli status 2> /dev/null | grep state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
-		if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
-			echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
-			date >> /tmp/apsta_debug.log
-			hostapd_cli -i $ap_intf status >> /tmp/apsta_debug.log
-			wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
-			wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
-			date >> /tmp/apsta_debug.log
-			wifi down
-			exit
+			if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+				echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
+				date >> /tmp/apsta_debug.log
+				hostapd_cli -i $ap_intf status >> /tmp/apsta_debug.log
+				wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
+				wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
+				date >> /tmp/apsta_debug.log
+				wifi down
+				exit
+			fi
+		else
+			if [ $dfs_log == 1 ]; then
+				echo "DFS channel($sta_chan) is not supported for repeater, so bringdown AP" > /dev/ttyMSM0
+				dfs_log=0
+			fi
 		fi
 	fi
 done &

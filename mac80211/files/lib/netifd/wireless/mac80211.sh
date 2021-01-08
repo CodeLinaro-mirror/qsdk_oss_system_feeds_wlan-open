@@ -1345,6 +1345,12 @@ drv_mac80211_setup() {
 		touch /var/run/hostapd-$ifname.lock
 	}
 
+	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
+		hostapd_cli -i $ap_ifname set ieee80211h 0
+		hostapd_cli -i $ap_ifname set ieee80211d 0
+		echo "disable dfs support for repeater AP" > /dev/ttyMSM0
+	fi
+
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
 	wireless_set_up
