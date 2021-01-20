@@ -20,11 +20,12 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 ===================================================================
 --- backports-20200902_001-4.4.60-931c337125.orig/drivers/net/wireless/ath/ath11k/ahb.c
 +++ backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -774,6 +774,13 @@ static int ath11k_ahb_remove(struct plat
+@@ -774,6 +774,14 @@ static int ath11k_ahb_remove(struct plat
  
  	reinit_completion(&ab->driver_recovery);
  
 +	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
++		qcom_unregister_ssr_notifier(&ab->qmi.ssr_nb);
 +		ath11k_ahb_power_down(ab);
 +		ath11k_debug_pdev_destroy(ab);
 +		ath11k_qmi_deinit_service(ab);
@@ -34,7 +35,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  	if (test_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags))
  		wait_for_completion_timeout(&ab->driver_recovery,
  					    ATH11K_AHB_RECOVERY_TIMEOUT);
-@@ -782,8 +789,8 @@ static int ath11k_ahb_remove(struct plat
+@@ -782,8 +790,8 @@ static int ath11k_ahb_remove(struct plat
  	cancel_work_sync(&ab->restart_work);
  
  	ath11k_core_deinit(ab);
@@ -72,7 +73,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
 ===================================================================
 --- backports-20200902_001-4.4.60-931c337125.orig/drivers/net/wireless/ath/ath11k/qmi.c
 +++ backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/qmi.c
-@@ -2586,9 +2586,6 @@ static int ath11k_qmi_assign_target_mem_
+@@ -2694,9 +2694,6 @@ static int ath11k_qmi_assign_target_mem_
  			idx++;
  			break;
  		case CALDB_MEM_REGION_TYPE:
@@ -82,7 +83,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  			if (ath11k_host_ddr_addr) {
  				addr = ath11k_host_ddr_addr +
  					ATH11K_HOST_DDR_CALDB_OFFSET;
-@@ -2908,7 +2905,10 @@ out:
+@@ -3015,7 +3012,10 @@ out:
  	ath11k_core_free_bdf(ab, &bd);
  	ath11k_dbg(ab, ATH11K_DBG_QMI, "qmi BDF downloaded\n");
  
@@ -94,7 +95,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  }
  
  static int ath11k_qmi_m3_load(struct ath11k_base *ab)
-@@ -3396,34 +3396,38 @@ ath11k_qmi_driver_event_post(struct ath1
+@@ -3503,34 +3503,38 @@ ath11k_qmi_driver_event_post(struct ath1
  	return 0;
  }
  
@@ -140,7 +141,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  }
  
  int ath11k_qmi_pci_alloc_qdss_mem(struct ath11k_qmi *qmi)
-@@ -3593,28 +3597,29 @@ static void ath11k_qmi_event_qdss_trace_
+@@ -3700,28 +3704,29 @@ static void ath11k_qmi_event_qdss_trace_
  	ath11k_dbg(ab, ATH11K_DBG_QMI, "QDSS configuration is completed and trace started\n");
  }
  
@@ -175,7 +176,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  }
  
  static void ath11k_qmi_msg_mem_request_cb(struct qmi_handle *qmi_hdl,
-@@ -4027,6 +4032,7 @@ static void ath11k_qmi_driver_event_work
+@@ -4134,6 +4139,7 @@ static void ath11k_qmi_driver_event_work
  					      event_work);
  	struct ath11k_qmi_driver_event *event;
  	struct ath11k_base *ab = qmi->ab;
@@ -183,7 +184,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  
  	spin_lock(&qmi->event_lock);
  	while (!list_empty(&qmi->event_list)) {
-@@ -4040,17 +4046,17 @@ static void ath11k_qmi_driver_event_work
+@@ -4147,17 +4153,17 @@ static void ath11k_qmi_driver_event_work
  
  		switch (event->type) {
  		case ATH11K_QMI_EVENT_SERVER_ARRIVE:
@@ -204,7 +205,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  			break;
  		case ATH11K_QMI_EVENT_FW_READY:
  			if (test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags)) {
-@@ -4065,6 +4071,7 @@ static void ath11k_qmi_driver_event_work
+@@ -4172,6 +4178,7 @@ static void ath11k_qmi_driver_event_work
  				clear_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
  				ath11k_core_qmi_firmware_ready(ab);
  				set_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags);
@@ -212,7 +213,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  			}
  			break;
  		case ATH11K_QMI_EVENT_COLD_BOOT_CAL_DONE:
-@@ -4083,6 +4090,9 @@ static void ath11k_qmi_driver_event_work
+@@ -4190,6 +4197,9 @@ static void ath11k_qmi_driver_event_work
  			break;
  		}
  		kfree(event);
@@ -222,7 +223,7 @@ Index: backports-20200902_001-4.4.60-931c337125/drivers/net/wireless/ath/ath11k/
  		spin_lock(&qmi->event_lock);
  	}
  	spin_unlock(&qmi->event_lock);
-@@ -4136,6 +4146,7 @@ out:
+@@ -4243,6 +4253,7 @@ out:
  	kfree(req);
  	return ret;
  }
