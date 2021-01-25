@@ -1,0 +1,75 @@
+From 3a74003841f04a5daac160e26c51d81c1dd99fd7 Mon Sep 17 00:00:00 2001
+From: Anilkumar Kolli <akolli@codeaurora.org>
+Date: Mon, 25 Jan 2021 19:54:00 +0530
+Subject: ath11k: Fix rate in monior mode radiotap header
+
+Packet Rate info is not part of msdu in mon_dst_ring,
+rate is updated from monitor status ring.
+
+Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/dp_rx.c  | 20 ++++++++++++++++----
+ drivers/net/wireless/ath/ath11k/hal_rx.c |  1 +
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 14469a21c400..cd6091cee0c9 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -5606,10 +5606,12 @@ ath11k_dp_rx_update_radiotap_he_mu(struct hal_rx_mon_ppdu_info *rx_status,
+ 	rtap_buf[rtap_len] = rx_status->he_RU[3];
+ }
+ 
+-static void ath11k_update_radiotap(struct hal_rx_mon_ppdu_info *ppduinfo,
+-				    struct sk_buff *mon_skb,
+-				    struct ieee80211_rx_status *rxs)
++static void ath11k_update_radiotap(struct ath11k *ar,
++				   struct hal_rx_mon_ppdu_info *ppduinfo,
++				   struct sk_buff *mon_skb,
++				   struct ieee80211_rx_status *rxs)
+ {
++	struct ieee80211_supported_band *sband;
+ 	u8 *ptr = NULL;
+ 
+ 	if (ppduinfo->he_mu_flags) {
+@@ -5631,6 +5633,16 @@ static void ath11k_update_radiotap(struct hal_rx_mon_ppdu_info *ppduinfo,
+ 	if (ppduinfo->nss)
+ 		rxs->nss = ppduinfo->nss;
+ 
++	if (ppduinfo->vht_flags || ppduinfo->he_flags) {
++		rxs->rate_idx = ppduinfo->rate;
++	} else if (ppduinfo->ht_flags) {
++		rxs->rate_idx = ppduinfo->rate + (8 * (ppduinfo->nss - 1));
++	} else {
++		sband = &ar->mac.sbands[rxs->band];
++		rxs->rate_idx = ath11k_mac_hw_rate_to_idx(sband, ppduinfo->rate,
++							  ppduinfo->cck_flag);
++	}
++
+ 	rxs->mactime = ppduinfo->tsft;
+ }
+ 
+@@ -5665,7 +5677,7 @@ static int ath11k_dp_rx_mon_deliver(struct ath11k *ar, u32 mac_id,
+ 			rxs->flag |= RX_FLAG_ALLOW_SAME_PN;
+ 		}
+ 		rxs->flag |= RX_FLAG_ONLY_MONITOR;
+-		ath11k_update_radiotap(ppduinfo, mon_skb, rxs);
++		ath11k_update_radiotap(ar, ppduinfo, mon_skb, rxs);
+ 		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb, rxs);
+ 		mon_skb = skb_next;
+ 	} while (mon_skb);
+diff --git a/drivers/net/wireless/ath/ath11k/hal_rx.c b/drivers/net/wireless/ath/ath11k/hal_rx.c
+index 1b9481947512..3d800745a889 100644
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
+@@ -1059,6 +1059,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struct ath11k_base *ab,
+ 			rate = HAL_RX_LEGACY_RATE_INVALID;
+ 		}
+ 		ppdu_info->rate = rate;
++		ppdu_info->cck_flag = 1;
+ 		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
+ 		break;
+ 	}
+-- 
+2.7.4
+
