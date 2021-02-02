@@ -1356,8 +1356,6 @@ drv_mac80211_setup() {
 
 	wireless_set_up
 
-	for_each_interface "ap mesh" mac80211_set_fq_limit
-
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
 			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
@@ -1367,6 +1365,8 @@ drv_mac80211_setup() {
 	[ -f "/lib/performance.sh" ] && {
 		. /lib/performance.sh
 	}
+	for_each_interface "ap mesh" mac80211_set_fq_limit
+
 
 }
 
