@@ -1189,6 +1189,7 @@ mac80211_interface_cleanup() {
 }
 
 drv_mac80211_cleanup() {
+	killall wpa_supplicant
 	for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 		for wdev in $(list_phy_interfaces "$phy"); do
 			#Ensure the interface belongs to the correct phy
