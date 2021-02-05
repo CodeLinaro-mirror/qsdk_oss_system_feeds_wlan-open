@@ -1,0 +1,143 @@
+From f519082615620ecfaa4f61da60b67eb7bfd02b54 Mon Sep 17 00:00:00 2001
+From: Sriram R <srirrama@codeaurora.org>
+Date: Fri, 5 Feb 2021 18:55:14 +0530
+Subject: [PATCH] ath11k: Validate subframe SA/DA to TA/RA mapping for 3addr
+ frames
+
+As per IEEE Std 802.11-2016, 10.12 A-MSDU operation
+        An A-MSDU contains only MSDUs whose DA parameter values map
+        to a single RA value (see 9.3.2.2).
+        An A-MSDU contains only MSDUs whose SA parameter values map
+        to a single TA value (see 9.3.2.2).
+
+This is important because, for example(3addr, tods set) any station
+could impersonate another STA by copying another STA address in its
+subframe SA of an AMSDU. This is done in driver by comparing the Tx peer
+object obtained from msdu ring desc with the SA from wlan or eth
+header based on decap type when tods(STA->AP) is set.
+When fromds(AP->STA) is set the DA should belong to either multicast
+address or the STA own vif address. Failing these checks we drop the msdu
+
+Signed-off-by: Sriram R <srirrama@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 102 ++++++++++++++++++++++++++++++++
+ 1 file changed, 102 insertions(+)
+
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -2559,6 +2559,104 @@ static void ath11k_dp_rx_deliver_msdu(st
+ 	return;
+ }
+ 
++/* caller needs to ensure decap should be eth or nwifi */
++static inline u8* ath11k_dp_rx_get_sa(struct sk_buff *msdu, u8 decap)
++{
++	struct ethhdr *eth;
++	struct ieee80211_hdr *hdr;
++
++	if (decap == DP_RX_DECAP_TYPE_ETHERNET2_DIX) {
++		eth = (struct ethhdr *)msdu->data;
++		return eth->h_source;
++	}
++
++	/* nwifi case */
++	hdr = (struct ieee80211_hdr *)msdu->data;
++	return ieee80211_get_SA(hdr);
++}
++
++/* caller needs to ensure decap should be eth or nwifi */
++static inline u8* ath11k_dp_rx_get_da(struct sk_buff *msdu, u8 decap)
++{
++	struct ethhdr *eth;
++	struct ieee80211_hdr *hdr;
++
++	if (decap == DP_RX_DECAP_TYPE_ETHERNET2_DIX) {
++		eth = (struct ethhdr *)msdu->data;
++		return eth->h_dest;
++	}
++
++	/* nwifi case */
++	hdr = (struct ieee80211_hdr *)msdu->data;
++	return ieee80211_get_DA(hdr);
++}
++
++/* filter msdu based on validation of address
++ * @ret true if msdu needs to be dropped, false otherwise
++ */
++static bool ath11k_dp_rx_filter_msdu(struct ath11k *ar,
++				     struct sk_buff *msdu)
++{
++	struct ath11k_skb_rxcb *rxcb = ATH11K_SKB_RXCB(msdu);
++	struct ieee80211_hdr *hdr;
++	struct ath11k_peer *peer, *sa_peer;
++	bool from_ds, to_ds;
++	u8 *da, *sa;
++	bool ret = false;
++	u8 decap;
++
++	/* below code checks if the amsdu subframe has proper SA/DA */
++
++	/* return if not amsdu */
++	if (rxcb->is_first_msdu && rxcb->is_last_msdu)
++		return false;
++
++	decap = ath11k_dp_rx_h_msdu_start_decap_type(rxcb->rx_desc);
++
++	if (decap != DP_RX_DECAP_TYPE_ETHERNET2_DIX &&
++	    decap != DP_RX_DECAP_TYPE_NATIVE_WIFI)
++		return false;
++
++	/* Check if this is a 3addr frame. else skip this filter
++	 * Eth decap assumes 3addr, nwifi we check below
++	 */
++	if (decap == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
++		hdr = (struct ieee80211_hdr *)msdu->data;
++		from_ds = ieee80211_has_fromds(hdr->frame_control);
++		to_ds = ieee80211_has_tods(hdr->frame_control);
++
++		/* check only 3addr cases here */
++		if (!(from_ds ^ to_ds))
++			return false;
++	}
++
++	spin_lock_bh(&ar->ab->base_lock);
++	peer = ath11k_peer_find_by_id(ar->ab, rxcb->peer_id);
++	if (!peer) {
++		ath11k_warn(ar->ab,
++			    "dp_rx: couldnt find peer matching rxcb->peer_id, dropping msdu");
++		spin_unlock_bh(&ar->ab->base_lock);
++		return true;
++	}
++
++	/* checking for AP implicitly means tods is set in 3addr mode */
++	if (peer->vif->type == NL80211_IFTYPE_AP) {
++		sa = ath11k_dp_rx_get_sa(msdu, decap);
++		sa_peer = ath11k_peer_find_by_addr(ar->ab, sa);
++
++		if (sa_peer != peer)
++			ret = true;
++	} else if (peer->vif->type == NL80211_IFTYPE_STATION) {
++		da = ath11k_dp_rx_get_da(msdu, decap);
++
++		if (!(is_multicast_ether_addr(da)) && (!ether_addr_equal(peer->vif->addr, da)))
++			ret = true;
++	}
++	spin_unlock_bh(&ar->ab->base_lock);
++
++	return ret;
++}
++
+ static int ath11k_dp_rx_process_msdu(struct ath11k *ar,
+ 				     struct sk_buff *msdu,
+ 				     struct sk_buff_head *msdu_list,
+@@ -2616,6 +2714,10 @@ static int ath11k_dp_rx_process_msdu(str
+ 		}
+ 	}
+ 
++	if (ath11k_dp_rx_filter_msdu(ar, msdu)) {
++		ath11k_dbg(ar->ab, ATH11K_DBG_DATA, "Filtering invalid msdu");
++		return -EINVAL;
++	}
+ 	ath11k_dp_rx_h_ppdu(ar, rx_desc, rx_status);
+ 	ath11k_dp_rx_h_mpdu(ar, msdu, rx_desc, rx_status);
+ 
