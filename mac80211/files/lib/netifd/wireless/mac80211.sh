@@ -435,12 +435,18 @@ mac80211_hostapd_setup_base() {
 
 			# supported Channel widths
 			vht160_hw=0
-			[ "$(($vht_cap & 12))" -eq 4 -a 1 -le "$vht160" ] && \
-			vht160_hw=1
-			[ "$(($vht_cap & 12))" -eq 8 -a 2 -le "$vht160" ] && \
-			vht160_hw=2
-			[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
-			[ "$vht160_hw" = 2 ] && vht_capab="$vht_capab[VHT160-80PLUS80]"
+			case "$htmode" in
+				VHT160|HE160)
+					[ "$(($vht_cap & 12))" -eq 8 -a 1 -le "$vht160" ] && \
+					vht160_hw=1
+					[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
+					;;
+				VHT80+80|HE80+80)
+					[ "$(($vht_cap & 12))" -eq 8 -a 2 -le "$vht160" ] && \
+					vht160_hw=2
+					[ "$vht160_hw" = 2 ] && vht_capab="$vht_capab[VHT160-80PLUS80]"
+					;;
+			esac
 
 			# maximum MPDU length
 			vht_max_mpdu_hw=3895
