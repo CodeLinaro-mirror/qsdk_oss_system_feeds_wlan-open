@@ -35,7 +35,11 @@ perf_setup(){
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core0
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core1
 
-		[ -d "/proc/sys/dev/nss/rps/" ] && echo 14 > /proc/sys/dev/nss/rps/hash_bitmap
+		if [ "$board" == "ap-hk10-c2" ]; then
+			[ -d "/proc/sys/dev/nss/rps/" ] && echo 15 > /proc/sys/dev/nss/rps/hash_bitmap
+		else
+			[ -d "/proc/sys/dev/nss/rps/" ] && echo 14 > /proc/sys/dev/nss/rps/hash_bitmap
+		fi
 	fi
 }
 
