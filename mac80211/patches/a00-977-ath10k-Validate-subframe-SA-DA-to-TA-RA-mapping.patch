@@ -1,0 +1,125 @@
+From 04b1faced3012c414c5433a32b54c53f251c2524 Mon Sep 17 00:00:00 2001
+From: Sriram R <srirrama@codeaurora.org>
+Date: Tue, 9 Feb 2021 09:06:04 +0530
+Subject: [PATCH] ath10k: Validate subframe SA/DA to TA/RA mapping for 3addr
+ frames
+
+As per IEEE Std 802.11-2016, 10.12 A-MSDU operation
+        An A-MSDU contains only MSDUs whose DA parameter values map
+        to a single RA value (see 9.3.2.2).
+        An A-MSDU contains only MSDUs whose SA parameter values map
+        to a single TA value (see 9.3.2.2).
+
+This is important because, for example(3addr, tods set) any station
+could impersonate another STA by copying another STA address in its
+subframe SA of an AMSDU. Though in case of from_ds(AP->STA) mac80211
+checks for matching DA to vif address or multicast, but this needs to be
+done in driver for to_ds case which receives the original OTA frame
+header as well as decapped msdu's. Failing to do so, the
+decap code copies the SA to the msdu header and passes to mac80211
+which could possibly open vulnerabilities.
+
+In order to check(to_ds case, STA->AP), the original header SA and the
+decapped msdu header SA is compared to check if they are same, else the
+msdu is dropped.
+
+Signed-off-by: Sriram R <srirrama@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath10k/htt_rx.c | 60 ++++++++++++++++++++++++++++++--
+ 1 file changed, 58 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1755,6 +1755,46 @@ static void ath10k_htt_rx_h_csum_offload
+ 	msdu->ip_summed = ath10k_htt_rx_get_csum_state(msdu);
+ }
+ 
++static bool ath10k_htt_rx_h_filter_amsdu_subframe(struct sk_buff *msdu,
++						  u8 *first_hdr)
++{
++	struct ieee80211_hdr *msdu_hdr, *orig_hdr;
++	bool from_ds, to_ds;
++	u8 *sa_orig, *sa_msdu, *da_orig, *da_msdu, *qos;
++
++	orig_hdr = (struct ieee80211_hdr *)first_hdr;
++	msdu_hdr = (struct ieee80211_hdr *)msdu->data;
++
++	from_ds = ieee80211_has_fromds(msdu_hdr->frame_control);
++	to_ds = ieee80211_has_tods(msdu_hdr->frame_control);
++
++	/* Below case considers only 3addr frames, so return for
++	 * 4 addr cases.
++	 */
++	if (!(from_ds ^ to_ds))
++		return false;
++
++	if (to_ds) {
++		sa_orig = ieee80211_get_SA(orig_hdr);
++		sa_msdu = ieee80211_get_SA(msdu_hdr);
++
++		if (ether_addr_equal(sa_orig, sa_msdu))
++			return false;
++	} else {
++		/* Similar check is not required for from_ds basically
++		 * because the STA would consume the frame only if its
++		 * DA matches vif addr or its a multicast as done
++		 * in ieee80211_accept_frame(), hence avoid duplicate code.
++		 */
++		return false;
++	}
++
++	/* dropping the msdu since the decapped SA inside subframe doesn't
++	 * match original TA in 3addr mode
++	 */
++	return true;
++}
++
+ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
+ 				 struct sk_buff_head *amsdu,
+ 				 struct ieee80211_rx_status *status,
+@@ -1777,6 +1817,8 @@ static void ath10k_htt_rx_h_mpdu(struct
+ 	bool is_decrypted;
+ 	bool is_mgmt;
+ 	u32 attention;
++	struct sk_buff *tmp;
++	bool is_amsdu = false;
+ 
+ 	if (skb_queue_empty(amsdu))
+ 		return;
+@@ -1806,7 +1848,10 @@ static void ath10k_htt_rx_h_mpdu(struct
+ 
+ 	if (ieee80211_is_data_qos(hdr->frame_control)) {
+ 		qos = ieee80211_get_qos_ctl(hdr);
+-		qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
++		if (qos[0] & IEEE80211_QOS_CTL_A_MSDU_PRESENT) {
++			is_amsdu = true;
++			qos[0] &= ~IEEE80211_QOS_CTL_A_MSDU_PRESENT;
++		}
+ 	}
+ 
+ 	/* Some attention flags are valid only in the last MSDU. */
+@@ -1874,11 +1919,23 @@ static void ath10k_htt_rx_h_mpdu(struct
+ 			status->flag |= RX_FLAG_IV_STRIPPED;
+ 	}
+ 
+-	skb_queue_walk(amsdu, msdu) {
++	skb_queue_walk_safe(amsdu, msdu, tmp) {
+ 		ath10k_htt_rx_h_csum_offload(msdu);
+ 		ath10k_htt_rx_h_undecap(ar, msdu, status, first_hdr, enctype,
+ 					is_decrypted);
+ 
++		/* Filter subframe if SA/DA decap to TA/RA happened
++		 * with incorrect SA/DA
++		 */
++		if (is_amsdu &&
++		    ath10k_htt_rx_h_filter_amsdu_subframe(msdu, first_hdr)) {
++			ath10k_dbg(ar, ATH10K_DBG_DATA,
++				   "SA/DA of amsdu subframe did not match TA/RA, dropping frame");
++			__skb_unlink(msdu, amsdu);
++			dev_kfree_skb_any(msdu);
++			continue;
++		}
++
+ 		/* Undecapping involves copying the original 802.11 header back
+ 		 * to sk_buff. If frame is protected and hardware has decrypted
+ 		 * it then remove the protected bit.
