@@ -573,6 +573,7 @@ endef
 define KernelPackage/ath11k/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
 endef
 
 $(eval $(call KernelPackage,cfg80211))

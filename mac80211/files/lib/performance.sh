@@ -22,19 +22,6 @@ perf_setup(){
 		#read the to check whether nss_offload is enabled or not if not then set 0
 		enable_nss_offload=$(cat /sys/module/ath11k/parameters/nss_offload)
 
-                if [ "$enable_nss_offload" -eq 1 ]; then
-                        /etc/init.d/qca-nss-ecm start
-			sysctl -w dev.nss.n2hcfg.n2h_queue_limit_core0=256 >/dev/null 2>/dev/null
-			sysctl -w dev.nss.n2hcfg.n2h_queue_limit_core1=256 >/dev/null 2>/dev/null
-
-                        #Experimental values below. Subject to changes after analysis
-                        # TODO : allocate mem as per platform
-                        sysctl -w dev.nss.n2hcfg.extra_pbuf_core0=9000000 >/dev/null 2>/dev/null
-                        sysctl -w dev.nss.n2hcfg.n2h_high_water_core0=67392 >/dev/null 2>/dev/null
-                        sysctl -w dev.nss.n2hcfg.n2h_wifi_pool_buf=40960 >/dev/null 2>/dev/null
-                        return;
-                fi
-
 		if [ "$enable_nss_offload" -eq 0 ]; then
 			/etc/init.d/qca-nss-ecm stop
 		fi
