@@ -34,6 +34,20 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  };
  
  struct ath11k_skb_cb {
+@@ -797,10 +798,13 @@ struct ath11k_dp_ring_bp_stats {
+ struct ath11k_soc_dp_tx_err_stats {
+ 	/* TCL Ring Descriptor unavailable */
+ 	u32 desc_na[DP_TCL_NUM_RING_MAX];
++	u32 idr_na[DP_TCL_NUM_RING_MAX];
++
+ 	/* Other failures during dp_tx due to mem allocation failure
+ 	 * idr unavailable etc.
+ 	 */
+ 	atomic_t misc_fail;
++	atomic_t max_fail;
+ };
+ 
+ struct ath11k_soc_dp_stats {
 --- a/drivers/net/wireless/ath/ath11k/dp.c
 +++ b/drivers/net/wireless/ath/ath11k/dp.c
 @@ -787,10 +787,13 @@ int ath11k_dp_service_srng(struct ath11k
@@ -80,9 +94,11 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	 */
  
 -	if (atomic_read(&ab->num_max_allowed) > DP_TX_COMP_MAX_ALLOWED) {
+-		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
+-		ret = -EINVAL;
 +	if (unlikely(atomic_read(&ab->num_max_allowed) > DP_TX_COMP_MAX_ALLOWED)) {
- 		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
- 		ret = -EINVAL;
++		atomic_inc(&ab->soc_stats.tx_err.max_fail);
++		ret = -EBUSY;
  	}
 -	ring_selector = smp_processor_id();
  
@@ -113,8 +129,8 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -		ring_selector++;
 -		goto tcl_ring_sel;
 +	if (unlikely(ret < 0)) {
-+		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
-+		return -ENOSPC;
++		ab->soc_stats.tx_err.idr_na[ti.ring_id]++;
++		return -EBUSY;
  	}
  
  	ti.desc_id = FIELD_PREP(DP_TX_DESC_ID_MAC_ID, ar->pdev_idx) |
@@ -138,7 +154,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_IP4_CKSUM_EN, 1) |
  			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP4_CKSUM_EN, 1) |
  			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP6_CKSUM_EN, 1) |
-@@ -277,47 +264,34 @@ tcl_ring_sel:
+@@ -277,46 +264,33 @@ tcl_ring_sel:
  		ti.encrypt_type = HAL_ENCRYPT_TYPE_OPEN;
  	}
  
@@ -176,8 +192,8 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		ath11k_hal_srng_access_end(ab, tcl_ring);
  		ab->soc_stats.tx_err.desc_na[ti.ring_id]++;
 -		spin_unlock_bh(&tcl_ring->lock);
- 		ret = -ENOMEM;
- 
+-		ret = -ENOMEM;
+-
 -		/* Checking for available tcl descritors in another ring in
 -		 * case of failure due to full tcl ring now, is better than
 -		 * checking this ring earlier for each pkt tx.
@@ -188,10 +204,10 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -			tcl_ring_retry = true;
 -			ring_selector++;
 -		}
--
++		ret = -EBUSY;
+ 
  		goto fail_unmap_dma;
  	}
- 
 @@ -329,8 +303,6 @@ tcl_ring_sel:
  
  	ath11k_hal_srng_access_end(ab, tcl_ring);
@@ -462,18 +478,40 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	/* Try to prefetch the next descriptor in the ring */
  	if (srng->flags & HAL_SRNG_FLAGS_CACHED) {
-@@ -844,7 +847,7 @@ void ath11k_hal_srng_access_begin(struct
+@@ -838,13 +841,27 @@ u32 *ath11k_hal_srng_src_peek(struct ath
+ 
+ void ath11k_hal_srng_access_begin(struct ath11k_base *ab, struct hal_srng *srng)
+ {
++	u32 *desc;
++
+ 	lockdep_assert_held(&srng->lock);
+ 
+-	if (srng->ring_dir == HAL_SRNG_DIR_SRC)
++	if (srng->ring_dir == HAL_SRNG_DIR_SRC) {
  		srng->u.src_ring.cached_tp =
  			*(volatile u32 *)srng->u.src_ring.tp_addr;
- 	else
+-	else
 -		srng->u.dst_ring.cached_hp = *srng->u.dst_ring.hp_addr;
++	} else {
 +		srng->u.dst_ring.cached_hp = *(volatile u32 *)srng->u.dst_ring.hp_addr;
++
++		/* Prefetch the first descriptor memory */
++		if (srng->flags & HAL_SRNG_FLAGS_CACHED) {
++			desc = ath11k_hal_srng_dst_peek(ab, srng);
++			if (likely(desc)) {
++				dma_sync_single_for_cpu(ab->dev, virt_to_phys(desc),
++							(srng->entry_size *sizeof(u32)),
++							DMA_FROM_DEVICE);
++				prefetch(desc);
++			}
++		}
++	}
  }
  
  /* Update cached ring head/tail pointers to HW. ath11k_hal_srng_access_begin()
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -5968,12 +5968,20 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -5968,13 +5968,23 @@ static void ath11k_mac_op_tx(struct ieee
  		return;
  	}
  
@@ -491,10 +529,14 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		ret = ath11k_dp_tx(ar, arvif, skb,
  				   (control->sta) ? control->sta->drv_priv : NULL);
 -	if (ret) {
+-		ath11k_warn(ar->ab, "failed to transmit frame %d\n", ret);
 +	if (unlikely(ret)) {
- 		ath11k_warn(ar->ab, "failed to transmit frame %d\n", ret);
++		if (unlikely(ret != -EBUSY))
++			ath11k_warn(ar->ab, "failed to transmit frame %d\n", ret);
++
  		ieee80211_free_txskb(ar->hw, skb);
  	}
+ 
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.h
 @@ -9,6 +9,9 @@
@@ -516,3 +558,20 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  int ath11k_dp_tx_send_reo_cmd(struct ath11k_base *ab, struct dp_rx_tid *rx_tid,
  			      enum hal_reo_cmd_type type,
  			      struct ath11k_hal_reo_cmd *cmd,
+--- a/drivers/net/wireless/ath/ath11k/debug.c
++++ b/drivers/net/wireless/ath/ath11k/debug.c
+@@ -1527,6 +1527,14 @@ static ssize_t ath11k_debug_dump_soc_dp_
+ 		len += scnprintf(buf + len, size - len, "ring%d: %u\n",
+ 				 i, soc_stats->tx_err.desc_na[i]);
+ 
++	len += scnprintf(buf + len, size - len, "\nTCL Ring idr Failures:\n");
++	for (i = 0; i < DP_TCL_NUM_RING_MAX; i++)
++		len += scnprintf(buf + len, size - len, "ring%d: %u\n",
++				 i, soc_stats->tx_err.idr_na[i]);
++
++	len += scnprintf(buf + len, size - len, "\nMax Transmit Failures: %d\n",
++			 atomic_read(&soc_stats->tx_err.max_fail));
++
+ 	len += scnprintf(buf + len, size - len,
+ 			 "\nMisc Transmit Failures: %d\n",
+ 			 atomic_read(&soc_stats->tx_err.misc_fail));
