@@ -39,7 +39,23 @@ perf_setup(){
 			/etc/init.d/qca-nss-ecm stop
 		fi
 
-		if [ "$board" != "ap-hk14" ]; then
+		meshvap=$(iw dev | grep 'type mesh point' | cut -d " " -f2)
+		if [ "$board" == "ap-hk14" ]; then
+			if [ "$meshvap" == "mesh" ]; then
+				enable_affinity_hk10
+				enable_affinity_hk_cp01_c1
+				echo 0x8D18D1 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/rx_hash
+				echo 0x8D18D1 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/rx_hash
+			else
+				enable_affinity_hk14
+			fi
+		fi
+
+		if [ "$board" == "ap-hk14" ] && [ "$meshvap" != "mesh" ]; then
+			[ -d "/sys/class/net/wlan0" ] && echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+			[ -d "/sys/class/net/wlan1" ] && echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+			[ -d "/sys/class/net/wlan2" ] && echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+		else
 			[ -d "/sys/class/net/wlan0" ] && echo e > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 			[ -d "/sys/class/net/wlan1" ] && echo e > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 			[ -d "/sys/class/net/wlan2" ] && echo e > /sys/class/net/wlan2/queues/rx-0/rps_cpus
