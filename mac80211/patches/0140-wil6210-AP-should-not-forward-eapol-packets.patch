@@ -1,0 +1,74 @@
+From aaa4083d4314a1272c588b9513ba832df2f3a919 Mon Sep 17 00:00:00 2001
+From: Ahmad Masri <amasri@codeaurora.org>
+Date: Mon, 15 Feb 2021 09:28:08 +0200
+Subject: [PATCH 1/2] wil6210: AP should not forward eapol packets
+
+In AP mode, the driver checks each received frame, in case it is
+multicast or unicast packet targeted to one of the AP clients, the
+driver does the routing in L2 level. EAPOL packet is plaintext frame
+and it should not follow the above role.
+
+When AP receives an EAPOL packet that is multicast or targeted to
+a client in the AP network, the driver should not forward this packet
+immediately in L2. EAPOL packet should be indicated to the network
+stack which will check the packet validity and will decide if to forward
+the packet to its client or not.
+
+Change-Id: I0edf339c3be5a2300e7b8168866286e71045c0d5
+Signed-off-by: Ahmad Masri <amasri@codeaurora.org>
+---
+ drivers/net/wireless/ath/wil6210/txrx.c | 5 ++++-
+ drivers/net/wireless/ath/wil6210/txrx.h | 9 ++++++++-
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/wil6210/txrx.c b/drivers/net/wireless/ath/wil6210/txrx.c
+index 280b53bbfbc8f..58f0da56bdab4 100644
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
++ * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -888,7 +889,9 @@ void wil_netif_rx_any(struct sk_buff *skb, struct net_device *ndev)
+ 		goto stats;
+ 	}
+ 
+-	if (wdev->iftype == NL80211_IFTYPE_AP && !wil->ap_isolate) {
++	if (wdev->iftype == NL80211_IFTYPE_AP && !wil->ap_isolate &&
++		   /* pass EAPOL packets to local net stack only */
++		   (wil_skb_get_protocol(skb) != htons(ETH_P_PAE))) {
+ 		if (mcast) {
+ 			/* send multicast frames both to higher layers in
+ 			 * local net stack and back to the wireless medium
+diff --git a/drivers/net/wireless/ath/wil6210/txrx.h b/drivers/net/wireless/ath/wil6210/txrx.h
+index 0d72cb6f3567e..825b8e46c6251 100644
+--- a/drivers/net/wireless/ath/wil6210/txrx.h
++++ b/drivers/net/wireless/ath/wil6210/txrx.h
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2012-2016 Qualcomm Atheros, Inc.
+- * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -561,6 +561,13 @@ static inline struct vring_rx_desc *wil_skb_rxdesc(struct sk_buff *skb)
+ 	return (void *)skb->cb;
+ }
+ 
++static inline __be16 wil_skb_get_protocol(struct sk_buff *skb)
++{
++	struct ethhdr *eth = (void *)skb->data;
++
++	return eth->h_proto;
++}
++
+ void wil_netif_rx_any(struct sk_buff *skb, struct net_device *ndev);
+ void wil_rx_reorder(struct wil6210_priv *wil, struct sk_buff *skb);
+ void wil_rx_bar(struct wil6210_priv *wil, u8 cid, u8 tid, u16 seq);
+-- 
+2.28.0
+
