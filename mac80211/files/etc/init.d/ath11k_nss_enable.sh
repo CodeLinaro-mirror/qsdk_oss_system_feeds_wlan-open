@@ -21,12 +21,16 @@ boot()
 {
 	platform=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
 	board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+	radio_bmap=$(grep -o '\bath11k.skip_radio_bmap\=\w*\b' /proc/cmdline  | cut -d '=' -f2)
+	if [ -z $radio_bmap ]; then
+		radio_bmap=0;
+	fi
         if [ "$platform" == "IPQ5018" ]; then
 		ath11k="/etc/modules.d/ath11k"
 		if [ -e $ath11k ];
 		then
 			sed -i '1d' $ath11k
-			sed -i '1s/^/ath11k nss_offload=1\n/' $ath11k
+			sed -i '1s/^/ath11k nss_offload=1 skip_radio_bmap='$radio_bmap'\n/' $ath11k
 		fi
         fi
 }
