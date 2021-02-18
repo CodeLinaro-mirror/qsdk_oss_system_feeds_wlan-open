@@ -61,10 +61,6 @@ perf_setup(){
 			[ -d "/sys/class/net/wlan2" ] && echo e > /sys/class/net/wlan2/queues/rx-0/rps_cpus
 		fi
 
-		for ifname in $(ls /sys/class/net/ | grep 'wlan' 2>/dev/null); do
-			tc qdisc replace dev $ifname root noqueue
-		done
-
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core0
 		[ -d "/proc/sys/dev/nss/n2hcfg/" ] && echo 2048 > /proc/sys/dev/nss/n2hcfg/n2h_queue_limit_core1
 
