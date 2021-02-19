@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -570,6 +570,51 @@ err_firmware_stop:
+@@ -570,6 +570,62 @@ err_firmware_stop:
  	return ret;
  }
  
@@ -30,13 +30,24 @@
 +				void *data)
 +{
 +	struct ath11k_qmi *qmi = container_of(nb, struct ath11k_qmi, ssr_nb);
++	struct ath11k_base *ab = qmi->ab;
++	struct device *dev = ab->dev;
++	bool multi_pd_arch = false;
++	const char *name;
 +
 +	if (test_bit(ATH11K_FLAG_FW_RESTART_FOR_HOST, &qmi->ab->dev_flags)) {
 +		return 0;
 +	}
-+	/* TODO: currently wcss uses "rproc" as its name, but since this might be
-+	 * changed to correspondig name, the name is not compared now. Print the stats
-+	 * only if the notification is received for the expected rproc */
++
++	/* Print the stats only if notification is received for expected PD*/
++	multi_pd_arch = of_property_read_bool(dev->of_node, "qcom,multipd_arch");
++	if (multi_pd_arch) {
++		if (of_property_read_string(dev->of_node, "qcom,userpd-subsys-name", &name))
++			return 0;
++
++		if (strcmp((char*)data, name) != 0)
++			return 0;
++	}
 +
 +	ath11k_core_dump_bp_stats(qmi->ab);
 +	ath11k_hal_dump_srng_stats(qmi->ab);
@@ -52,7 +63,7 @@
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -615,6 +660,16 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -615,6 +671,16 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
@@ -69,7 +80,7 @@
  	ath11k_hif_irq_enable(ab);
  	mutex_unlock(&ab->core_lock);
  
-@@ -864,6 +919,13 @@ void ath11k_core_deinit(struct ath11k_ba
+@@ -864,6 +930,13 @@ void ath11k_core_deinit(struct ath11k_ba
  {
  	mutex_lock(&ab->core_lock);
  
