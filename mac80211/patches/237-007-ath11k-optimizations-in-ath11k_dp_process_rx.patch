@@ -24,25 +24,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2573,8 +2573,6 @@ static void ath11k_dp_rx_h_mpdu(struct a
- 		rxcb->seq_no = ath11k_dp_rx_h_mpdu_start_seq_no(ar->ab, rx_desc);
- 	}
- 
--	rx_attention = ath11k_dp_rx_get_attention(ar->ab, rx_desc);
--
- 	spin_lock_bh(&ar->ab->base_lock);
- 	peer = ath11k_dp_rx_h_find_peer(ar->ab, msdu);
- 	if (peer) {
-@@ -2606,6 +2604,8 @@ static void ath11k_dp_rx_h_mpdu(struct a
- 	}
- 	spin_unlock_bh(&ar->ab->base_lock);
- 
-+	rx_attention = ath11k_dp_rx_get_attention(ar->ab, rx_desc);
-+
- 	err_bitmap = ath11k_dp_rx_h_attn_mpdu_err(rx_attention);
- 
- 	if (enctype != HAL_ENCRYPT_TYPE_OPEN && !err_bitmap)
-@@ -2870,6 +2870,9 @@ static int ath11k_dp_rx_process_msdu(str
+@@ -2856,6 +2856,9 @@ static int ath11k_dp_rx_process_msdu(str
  	int ret;
  	u32 hal_rx_desc_sz = ar->ab->hw_params.hal_desc_sz;
  
@@ -52,7 +34,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	last_buf = ath11k_dp_rx_get_msdu_last_buf(msdu_list, msdu);
  	if (!last_buf) {
  		ath11k_warn(ab,
-@@ -2935,10 +2938,8 @@ static int ath11k_dp_rx_process_msdu(str
+@@ -2920,10 +2923,8 @@ static int ath11k_dp_rx_process_msdu(str
  	}
  
  	ath11k_dp_rx_h_mpdu(ar, msdu, rx_desc, rx_status, fast_rx);
@@ -64,7 +46,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	ath11k_dp_rx_h_ppdu(ar, rx_desc, rx_status);
  
-@@ -2953,13 +2954,12 @@ free_out:
+@@ -2938,13 +2939,12 @@ free_out:
  static void ath11k_dp_rx_process_received_packets(struct ath11k_base *ab,
  						  struct napi_struct *napi,
  						  struct sk_buff_head *msdu_list,
@@ -79,7 +61,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	int ret;
  	bool fast_rx;
  
-@@ -2968,26 +2968,28 @@ static void ath11k_dp_rx_process_receive
+@@ -2953,26 +2953,28 @@ static void ath11k_dp_rx_process_receive
  
  	rcu_read_lock();
  
@@ -91,6 +73,11 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -			dev_kfree_skb_any(msdu);
 -			continue;
 -		}
+ 
+-		if (test_bit(ATH11K_CAC_RUNNING, &ar->dev_flags)) {
+-			dev_kfree_skb_any(msdu);
+-			continue;
+-		}
 +	ar = ab->pdevs[mac_id].ar;
 +	if (unlikely(!rcu_dereference(ab->pdevs_active[mac_id]))) {
 +		__skb_queue_purge(msdu_list);
@@ -98,10 +85,6 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +		return;
 +	}
  
--		if (test_bit(ATH11K_CAC_RUNNING, &ar->dev_flags)) {
--			dev_kfree_skb_any(msdu);
--			continue;
--		}
 +	if (unlikely(test_bit(ATH11K_CAC_RUNNING, &ar->dev_flags))) {
 +		__skb_queue_purge(msdu_list);
 +		rcu_read_unlock();
@@ -110,7 +93,6 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +
 +	while ((msdu = __skb_dequeue(msdu_list))) {
 +		rxcb = ATH11K_SKB_RXCB(msdu);
- 
  		/* Enable fast rx by default, the value will cahnge based on peer cap
  		 * and packet type */
  		fast_rx = true;
@@ -121,7 +103,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  			ath11k_dbg(ab, ATH11K_DBG_DATA,
  				   "Unable to process msdu %d", ret);
  			dev_kfree_skb_any(msdu);
-@@ -2997,8 +2999,6 @@ static void ath11k_dp_rx_process_receive
+@@ -2982,8 +2984,6 @@ static void ath11k_dp_rx_process_receive
  		/* msdu is already delivered directectly */
  		if (!fast_rx)
  			ath11k_dp_rx_deliver_msdu(ar, napi, msdu, &rx_status);
@@ -130,7 +112,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	}
  
  	rcu_read_unlock();
-@@ -3010,21 +3010,23 @@ int ath11k_dp_process_rx(struct ath11k_b
+@@ -2995,22 +2995,24 @@ int ath11k_dp_process_rx(struct ath11k_b
  	struct ath11k_dp *dp = &ab->dp;
  	struct dp_rxdma_ring *rx_ring;
  	int num_buffs_reaped[MAX_RADIOS] = {0};
@@ -153,12 +135,13 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	int i;
  
 -	__skb_queue_head_init(&msdu_list);
+ 
 +	for (i = 0; i < MAX_RADIOS; i++)
 +		__skb_queue_head_init(&msdu_list[i]);
- 
  	srng = &ab->hal.srng_list[dp->reo_dst_ring[ring_id].ring_id];
  
-@@ -3033,13 +3035,10 @@ int ath11k_dp_process_rx(struct ath11k_b
+ 	spin_lock_bh(&srng->lock);
+@@ -3018,13 +3020,9 @@ int ath11k_dp_process_rx(struct ath11k_b
  	ath11k_hal_srng_access_begin(ab, srng);
  
  try_again:
@@ -166,15 +149,15 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -		struct hal_reo_dest_ring desc = *(struct hal_reo_dest_ring *)rx_desc;
 -		enum hal_reo_dest_ring_push_reason push_reason;
 -		u32 cookie;
+-
 +	while (likely(desc = (struct hal_reo_dest_ring *)ath11k_hal_srng_dst_get_next_entry(ab, srng))) {
- 
  		cookie = FIELD_GET(BUFFER_ADDR_INFO1_SW_COOKIE,
 -				   desc.buf_addr_info.info1);
 +				   desc->buf_addr_info.info1);
  		buf_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_BUF_ID,
  				   cookie);
  		mac_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_PDEV_ID, cookie);
-@@ -3048,7 +3047,7 @@ try_again:
+@@ -3033,7 +3031,7 @@ try_again:
  		rx_ring = &ar->dp.rx_refill_buf_ring;
  		spin_lock_bh(&rx_ring->idr_lock);
  		msdu = idr_find(&rx_ring->bufs_idr, buf_id);
@@ -183,7 +166,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  			ath11k_warn(ab, "frame rx with invalid buf_id %d\n",
  				    buf_id);
  			spin_unlock_bh(&rx_ring->idr_lock);
-@@ -3064,29 +3063,28 @@ try_again:
+@@ -3049,29 +3047,28 @@ try_again:
  				 DMA_FROM_DEVICE);
  
  		num_buffs_reaped[mac_id]++;
@@ -220,9 +203,9 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -				      desc.info0);
 +				      desc->info0);
  
- 		if (ath11k_debug_is_extd_rx_stats_enabled(ar) && rxcb->peer_id) {
+ 		if (ath11k_debugfs_is_extd_rx_stats_enabled(ar) && rxcb->peer_id) {
  			rcu_read_lock();
-@@ -3102,12 +3100,17 @@ try_again:
+@@ -3087,12 +3084,17 @@ try_again:
  		}
  
  		rxcb->mac_id = mac_id;
@@ -243,7 +226,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	}
  
  	/* Hw might have updated the head pointer after we cached it.
-@@ -3116,7 +3119,7 @@ try_again:
+@@ -3101,7 +3103,7 @@ try_again:
  	 * head pointer so that we can reap complete MPDU in the current
  	 * rx processing.
  	 */
@@ -252,7 +235,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		ath11k_hal_srng_access_end(ab, srng);
  		goto try_again;
  	}
-@@ -3125,13 +3128,15 @@ try_again:
+@@ -3110,13 +3112,14 @@ try_again:
  
  	spin_unlock_bh(&srng->lock);
  
@@ -265,12 +248,11 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  			continue;
  
 +		ath11k_dp_rx_process_received_packets(ab, napi, &msdu_list[i], i);
-+
  		ar = ab->pdevs[i].ar;
  		rx_ring = &ar->dp.rx_refill_buf_ring;
  
-@@ -3139,11 +3144,8 @@ try_again:
- 					   HAL_RX_BUF_RBM_SW3_BM, GFP_ATOMIC);
+@@ -3124,11 +3127,8 @@ try_again:
+ 					   HAL_RX_BUF_RBM_SW3_BM);
  	}
  
 -	ath11k_dp_rx_process_received_packets(ab, napi, &msdu_list,

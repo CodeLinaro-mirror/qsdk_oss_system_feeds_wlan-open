@@ -22,7 +22,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -494,6 +494,11 @@ static int ath11k_ahb_ext_irq_config(str
+@@ -498,6 +498,11 @@ static int ath11k_ahb_ext_irq_config(str
  				irq_grp->irqs[num_irq++] = reo2host_status;
  
  			if (j < ab->hw_params.max_radios) {
@@ -36,13 +36,13 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  						rxdma2host_destination_ring_mac1 -
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -822,7 +822,8 @@ struct ath11k_base {
+@@ -839,6 +839,9 @@ struct ath11k_base {
  
- 	struct ath11k_dbring_cap *db_caps;
- 	u32 num_db_cap;
--
+ 	struct completion htc_suspend;
+ 
 +	u32 sw_pdev_id_map[MAX_RADIOS];
 +	u32 hw_pdev_id_map[MAX_RADIOS];
++
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
@@ -59,7 +59,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	param.base_paddr_hi	= upper_32_bits(ring->refill_srng.paddr);
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -1724,7 +1724,7 @@ static void ath11k_htt_backpressure_even
+@@ -1758,7 +1758,7 @@ static void ath11k_htt_backpressure_even
  
  		bp_stats = &ab->soc_stats.bp_stats.umac_ring_bp_stats[ring_id];
  	} else if (ring_type == HTT_BACKPRESSURE_LMAC_RING_TYPE) {
@@ -70,7 +70,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  			return;
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -773,7 +773,7 @@ int ath11k_dp_tx_htt_srng_setup(struct a
+@@ -787,7 +787,7 @@ int ath11k_dp_tx_htt_srng_setup(struct a
  	if (htt_ring_type == HTT_SW_TO_HW_RING ||
  	    htt_ring_type == HTT_HW_TO_SW_RING)
  		cmd->info0 |= FIELD_PREP(HTT_SRNG_SETUP_CMD_INFO0_PDEV_ID,
@@ -79,7 +79,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	else
  		cmd->info0 |= FIELD_PREP(HTT_SRNG_SETUP_CMD_INFO0_PDEV_ID,
  					 mac_id);
-@@ -957,7 +957,7 @@ int ath11k_dp_tx_htt_rx_filter_setup(str
+@@ -983,7 +983,7 @@ int ath11k_dp_tx_htt_rx_filter_setup(str
  	    htt_ring_type == HTT_HW_TO_SW_RING)
  		cmd->info0 |=
  			FIELD_PREP(HTT_RX_RING_SELECTION_CFG_CMD_INFO0_PDEV_ID,
@@ -120,7 +120,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  }
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -545,8 +545,9 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
+@@ -540,8 +540,9 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
  		return pdev ? pdev->ar : NULL;
  	}
  
@@ -132,7 +132,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	for (i = 0; i < ab->num_radios; i++) {
  		if (ab->fw_mode == ATH11K_FIRMWARE_MODE_FTM)
-@@ -7517,6 +7518,44 @@ err_cleanup:
+@@ -7791,6 +7792,44 @@ err_cleanup:
  	return ret;
  }
  
@@ -177,7 +177,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  int ath11k_mac_allocate(struct ath11k_base *ab)
  {
  	struct ieee80211_hw *hw;
-@@ -7557,6 +7596,8 @@ int ath11k_mac_allocate(struct ath11k_ba
+@@ -7831,6 +7870,8 @@ int ath11k_mac_allocate(struct ath11k_ba
  		ar->num_rx_chains = get_num_chains(pdev->cap.rx_chain_mask);
  
  		pdev->ar = ar;
@@ -188,7 +188,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		INIT_LIST_HEAD(&ar->ppdu_stats_info);
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -139,6 +139,8 @@ static const int ath11k_hw_mode_pri_map[
+@@ -143,6 +143,8 @@ static const int ath11k_hw_mode_pri_map[
  	PRIMAP(WMI_HOST_HW_MODE_SBS),
  	PRIMAP(WMI_HOST_HW_MODE_DBS_SBS),
  	PRIMAP(WMI_HOST_HW_MODE_DBS_OR_SBS),
@@ -197,7 +197,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	/* keep last */
  	PRIMAP(WMI_HOST_HW_MODE_MAX),
  };
-@@ -343,8 +345,8 @@ ath11k_pull_mac_phy_cap_svc_ready_ext(st
+@@ -347,8 +349,8 @@ ath11k_pull_mac_phy_cap_svc_ready_ext(st
  
  		phy_map = wmi_hw_mode_caps[hw_idx].phy_id_map;
  		while (phy_map) {
@@ -207,7 +207,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		}
  	}
  
-@@ -3091,7 +3093,7 @@ int ath11k_wmi_pdev_peer_pktlog_filter(s
+@@ -3077,7 +3079,7 @@ int ath11k_wmi_pdev_peer_pktlog_filter(s
  	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PEER_PKTLOG_FILTER_CMD) |
  			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
  
@@ -216,7 +216,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	cmd->num_mac = 1;
  	cmd->enable = enable;
  
-@@ -3253,7 +3255,7 @@ int ath11k_wmi_pdev_pktlog_enable(struct
+@@ -3239,7 +3241,7 @@ int ath11k_wmi_pdev_pktlog_enable(struct
  	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PKTLOG_ENABLE_CMD) |
  			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
  
@@ -225,7 +225,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	cmd->evlist = pktlog_filter;
  	cmd->enable = ATH11K_WMI_PKTLOG_ENABLE_FORCE;
  
-@@ -3283,7 +3285,7 @@ int ath11k_wmi_pdev_pktlog_disable(struc
+@@ -3269,7 +3271,7 @@ int ath11k_wmi_pdev_pktlog_disable(struc
  	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PKTLOG_DISABLE_CMD) |
  			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
  
@@ -234,7 +234,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	ret = ath11k_wmi_cmd_send(wmi, skb,
  				  WMI_PDEV_PKTLOG_DISABLE_CMDID);
-@@ -3996,7 +3998,8 @@ static int ath11k_wmi_tlv_dma_buf_parse(
+@@ -4324,7 +4326,8 @@ static int ath11k_wmi_tlv_dma_buf_parse(
  	case WMI_TAG_DMA_BUF_RELEASE:
  		memcpy(&parse->fixed, ptr,
  		       sizeof(struct ath11k_wmi_dma_buf_release_fixed_param));
@@ -244,7 +244,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		break;
  	case WMI_TAG_ARRAY_STRUCT:
  		if (!parse->buf_entry_done) {
-@@ -4225,20 +4228,22 @@ static int ath11k_wmi_tlv_ext_soc_hal_re
+@@ -4553,20 +4556,22 @@ static int ath11k_wmi_tlv_ext_soc_hal_re
  	phy_id_map = svc_rdy_ext->pref_hw_mode_caps.phy_id_map;
  
  	while (phy_id_map && soc->num_radios < MAX_RADIOS) {
@@ -273,7 +273,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  		/* For QCA6390, save mac_phy capability in the same pdev */
  		if (soc->hw_params.single_pdev_only)
-@@ -4337,8 +4342,9 @@ static int ath11k_wmi_tlv_dma_ring_caps(
+@@ -4665,8 +4670,9 @@ static int ath11k_wmi_tlv_dma_ring_caps(
  			goto free_dir_buff;
  		}
  
@@ -284,7 +284,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		dir_buff_caps[i].min_elem = dma_caps[i].min_elem;
  		dir_buff_caps[i].min_buf_sz = dma_caps[i].min_buf_sz;
  		dir_buff_caps[i].min_buf_align = dma_caps[i].min_buf_align;
-@@ -5974,18 +5980,25 @@ static int ath11k_reg_chan_list_event(st
+@@ -6303,18 +6309,25 @@ static int ath11k_reg_chan_list_event(st
  		goto mem_free;
  	}
  
@@ -321,7 +321,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	}
  
  	/* Avoid multiple overwrites to default regd, during core
-@@ -7206,16 +7219,32 @@ out:
+@@ -7658,16 +7671,32 @@ out:
  	dev_kfree_skb(skb);
  }
  
@@ -357,7 +357,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	memset(&conn_req, 0, sizeof(conn_req));
  	memset(&conn_resp, 0, sizeof(conn_resp));
-@@ -7226,7 +7255,10 @@ static int ath11k_connect_pdev_htc_servi
+@@ -7678,7 +7707,10 @@ static int ath11k_connect_pdev_htc_servi
  	conn_req.ep_ops.ep_tx_credits = ath11k_wmi_op_ep_tx_credits;
  
  	/* connect to control service */
@@ -414,7 +414,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	/* keep last the lowest priority */
  	WMI_HOST_HW_MODE_MAX_PRI
  };
-@@ -2769,6 +2774,7 @@ struct rx_reorder_queue_remove_params {
+@@ -2792,6 +2797,7 @@ struct rx_reorder_queue_remove_params {
  #define WMI_HOST_PDEV_ID_0   0
  #define WMI_HOST_PDEV_ID_1   1
  #define WMI_HOST_PDEV_ID_2   2
@@ -424,7 +424,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  #define WMI_PDEV_ID_1ST         1
 --- a/drivers/net/wireless/ath/ath11k/hw.h
 +++ b/drivers/net/wireless/ath/ath11k/hw.h
-@@ -169,7 +169,7 @@ struct ath11k_hw_params {
+@@ -170,7 +170,7 @@ struct ath11k_hw_params {
  };
  
  struct ath11k_hw_ops {
@@ -433,7 +433,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	void (*wmi_init_config)(struct ath11k_base *ab,
  				struct target_resource_config *config);
  	int (*mac_id_to_pdev_id)(struct ath11k_hw_params *hw, int mac_id);
-@@ -222,7 +222,7 @@ int ath11k_hw_get_mac_from_pdev_id(struc
+@@ -223,7 +223,7 @@ int ath11k_hw_get_mac_from_pdev_id(struc
  				   int pdev_idx)
  {
  	if (hw->hw_ops->get_hw_mac_from_pdev_id)

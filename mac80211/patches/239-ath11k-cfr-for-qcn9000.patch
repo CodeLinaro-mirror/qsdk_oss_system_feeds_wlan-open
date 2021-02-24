@@ -1,10 +1,10 @@
 From 2150a4cc70ae0e62bb8de8e3bca0a0a062cb66b0 Mon Sep 17 00:00:00 2001
 From: Venkateswara Naralasetty <vnaralas@codeaurora.org>
 Date: Tue, 16 Feb 2021 16:37:25 +0530
-Subject: [PATCH] ath11k: add one shot/periodic cfr capture support for qcn9000
+Subject: [PATCH] ath11k: add one shot/periodic cfr capture support for qcn9074
 
 This patch add one shot/periodic CFR capture support for
-qcn9000.
+qcn9074.
 
 Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
 ---
@@ -16,17 +16,15 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  drivers/net/wireless/ath/ath11k/hw.h          |   6 +
  6 files changed, 392 insertions(+), 42 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/cfr.c b/drivers/net/wireless/ath/ath11k/cfr.c
-index 1f8a1e5..6a7449a 100644
 --- a/drivers/net/wireless/ath/ath11k/cfr.c
 +++ b/drivers/net/wireless/ath/ath11k/cfr.c
-@@ -191,6 +191,18 @@ static int ath11k_cfr_correlate_and_relay(struct ath11k *ar,
+@@ -191,6 +191,18 @@ static int ath11k_cfr_correlate_and_rela
  					   jiffies_to_msecs(diff));
  			}
  
-+			if (ar->ab->hw_rev == ATH11K_HW_QCN9000) {
-+				if (lut->header_length > CFR_HDR_MAX_LEN_WORDS_QCN9000 ||
-+				    lut->payload_length > CFR_DATA_MAX_LEN_QCN9000) {
++			if (ar->ab->hw_rev == ATH11K_HW_QCN9074_HW10) {
++				if (lut->header_length > CFR_HDR_MAX_LEN_WORDS_QCN9074 ||
++				    lut->payload_length > CFR_DATA_MAX_LEN_QCN9074) {
 +					cfr->invalid_dma_length_cnt++;
 +					ath11k_dbg(ar->ab, ATH11K_DBG_CFR,
 +						   "Invalid hdr/payload len hdr %u payload %u\n",
@@ -39,7 +37,7 @@ index 1f8a1e5..6a7449a 100644
  			ath11k_cfr_free_pending_dbr_events(ar);
  
  			cfr->release_cnt++;
-@@ -215,6 +227,167 @@ static int ath11k_cfr_correlate_and_relay(struct ath11k *ar,
+@@ -215,6 +227,167 @@ static int ath11k_cfr_correlate_and_rela
  	}
  }
  
@@ -207,7 +205,7 @@ index 1f8a1e5..6a7449a 100644
  static int ath11k_cfr_process_data(struct ath11k *ar,
  				   struct ath11k_dbring_data *param)
  {
-@@ -274,7 +447,7 @@ static int ath11k_cfr_process_data(struct ath11k *ar,
+@@ -274,7 +447,7 @@ static int ath11k_cfr_process_data(struc
  	lut->dbr_ppdu_id = dma_hdr.phy_ppdu_id;
  	lut->dbr_tstamp = jiffies;
  
@@ -216,7 +214,7 @@ index 1f8a1e5..6a7449a 100644
  
  	header = &lut->header;
  	header->u.meta_v2.channel_bw = FIELD_GET(CFIR_DMA_HDR_INFO1_UPLOAD_PKT_BW,
-@@ -307,38 +480,6 @@ static int ath11k_cfr_process_data(struct ath11k *ar,
+@@ -307,38 +480,6 @@ static int ath11k_cfr_process_data(struc
  	return ret;
  }
  
@@ -255,7 +253,7 @@ index 1f8a1e5..6a7449a 100644
  int ath11k_process_cfr_capture_event(struct ath11k_base *ab,
  				     struct ath11k_cfr_peer_tx_param *params)
  {
-@@ -431,7 +572,7 @@ int ath11k_process_cfr_capture_event(struct ath11k_base *ab,
+@@ -431,7 +572,7 @@ int ath11k_process_cfr_capture_event(str
  	header->vendorid = VENDOR_QCA;
  	header->pltform_type = PLATFORM_TYPE_ARM;
  
@@ -264,7 +262,7 @@ index 1f8a1e5..6a7449a 100644
  
  	status = ath11k_cfr_correlate_and_relay(ar, lut,
  						ATH11K_CORRELATE_TX_EVENT);
-@@ -451,7 +592,10 @@ int ath11k_process_cfr_capture_event(struct ath11k_base *ab,
+@@ -451,7 +592,10 @@ int ath11k_process_cfr_capture_event(str
  		ath11k_dbg(ab, ATH11K_DBG_CFR,
  			   "dbr event is not yet received holding buf\n");
  	} else {
@@ -275,7 +273,7 @@ index 1f8a1e5..6a7449a 100644
  		ret = -EINVAL;
  	}
  
-@@ -758,7 +902,9 @@ static int ath11k_cfr_ring_alloc(struct ath11k *ar,
+@@ -758,7 +902,9 @@ static int ath11k_cfr_ring_alloc(struct
  	ath11k_dbring_set_cfg(ar, &cfr->rx_ring,
  			      ATH11K_CFR_NUM_RESP_PER_EVENT,
  			      ATH11K_CFR_EVENT_TIMEOUT_MS,
@@ -286,18 +284,16 @@ index 1f8a1e5..6a7449a 100644
  
  	ret = ath11k_dbring_buf_setup(ar, &cfr->rx_ring, db_cap);
  	if (ret) {
-diff --git a/drivers/net/wireless/ath/ath11k/cfr.h b/drivers/net/wireless/ath/ath11k/cfr.h
-index 3fdc839..78ccb40 100644
 --- a/drivers/net/wireless/ath/ath11k/cfr.h
 +++ b/drivers/net/wireless/ath/ath11k/cfr.h
 @@ -21,9 +21,14 @@
  #define ATH11K_CFR_END_MAGIC 0xBEAFDEAD
  
  #define ATH11K_CFR_RADIO_IPQ8074 23
-+#define ATH11K_CFR_RADIO_QCN9000 26
++#define ATH11K_CFR_RADIO_QCN9074 26
 +
-+#define CFR_HDR_MAX_LEN_WORDS_QCN9000 50
-+#define CFR_DATA_MAX_LEN_QCN9000 16384
++#define CFR_HDR_MAX_LEN_WORDS_QCN9074 50
++#define CFR_DATA_MAX_LEN_QCN9074 16384
  
  #define VENDOR_QCA 0x8cfdf0
  #define PLATFORM_TYPE_ARM 2
@@ -454,7 +450,7 @@ index 3fdc839..78ccb40 100644
 +#define MACRX_FREEZE_CC_V3_INFO0_SW_PEER_ID_VALID GENMASK(15, 15)
 +
 +/*
-+ * freeze_tlv v3 used by qcn9000
++ * freeze_tlv v3 used by qcn9074
 + */
 +struct macrx_freeze_capture_channel_v3 {
 +	u16 info0;
@@ -477,7 +473,7 @@ index 3fdc839..78ccb40 100644
  struct cfr_unassoc_pool_entry {
  	u8 peer_mac[ETH_ALEN];
  	u32 period;
-@@ -238,7 +371,6 @@ struct ath11k_dbring *ath11k_cfr_get_dbring(struct ath11k *ar);
+@@ -238,7 +371,6 @@ struct ath11k_dbring *ath11k_cfr_get_dbr
  int ath11k_process_cfr_capture_event(struct ath11k_base *ab,
  				     struct ath11k_cfr_peer_tx_param *params);
  bool peer_is_in_cfr_unassoc_pool(struct ath11k *ar, u8 *peer_mac);
@@ -485,7 +481,7 @@ index 3fdc839..78ccb40 100644
  void ath11k_cfr_lut_update_paddr(struct ath11k *ar, dma_addr_t paddr,
  				 u32 buf_id);
  void ath11k_cfr_decrement_peer_count(struct ath11k *ar,
-@@ -261,10 +393,6 @@ static inline bool peer_is_in_cfr_unassoc_pool(struct ath11k *ar, u8 *peer_mac)
+@@ -261,10 +393,6 @@ static inline bool peer_is_in_cfr_unasso
  	return false;
  }
  static inline
@@ -496,12 +492,10 @@ index 3fdc839..78ccb40 100644
  int ath11k_process_cfr_capture_event(struct ath11k_base *ab,
  				     struct ath11k_cfr_peer_tx_param *params)
  {
-diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
-index 6804a07..6bd9379 100644
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -215,6 +215,15 @@ static const struct ath11k_hw_params ath11k_hw_params[] = {
- 		.cold_boot_calib = true,
+@@ -247,6 +247,15 @@ static const struct ath11k_hw_params ath
+ 		.ce_fwlog_enable = true,
  		.fwmem_mode_change = true,
  		.is_qdss_support = true,
 +		.cfr_support = true,
@@ -511,16 +505,14 @@ index 6804a07..6bd9379 100644
 +		 * max cfr payload(16384 bytes)
 +		 */
 +		.cfr_stream_buf_size = sizeof(struct ath11k_csi_cfr_header) +
-+					(CFR_HDR_MAX_LEN_WORDS_QCN9000 *4) +
-+					CFR_DATA_MAX_LEN_QCN9000,
++					(CFR_HDR_MAX_LEN_WORDS_QCN9074 *4) +
++					CFR_DATA_MAX_LEN_QCN9074,
  	},
  	{
  		.hw_rev = ATH11K_HW_IPQ5018,
-diff --git a/drivers/net/wireless/ath/ath11k/debugfs_sta.c b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
-index c2c3711..10f6fd2 100644
 --- a/drivers/net/wireless/ath/ath11k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
-@@ -1383,7 +1383,6 @@ static ssize_t ath11k_dbg_sta_write_cfr_capture(struct file *file,
+@@ -1384,7 +1384,6 @@ static ssize_t ath11k_dbg_sta_write_cfr_
  	}
  
  	if (cfr_capture_enable > WMI_PEER_CFR_CAPTURE_ENABLE ||
@@ -528,11 +520,9 @@ index c2c3711..10f6fd2 100644
  	    cfr_capture_bw > sta->bandwidth ||
  	    cfr_capture_method > CFR_CAPURE_METHOD_NULL_FRAME_WITH_PHASE ||
  	    cfr_capture_period > WMI_PEER_CFR_PERIODICITY_MAX) {
-diff --git a/drivers/net/wireless/ath/ath11k/hw.c b/drivers/net/wireless/ath/ath11k/hw.c
-index 2b20ef2..9968474 100644
 --- a/drivers/net/wireless/ath/ath11k/hw.c
 +++ b/drivers/net/wireless/ath/ath11k/hw.c
-@@ -864,6 +864,66 @@ int ath11k_dp_rx_process_mon_rings_qcn9000(struct ath11k_base *ab, int mac_id,
+@@ -865,6 +865,66 @@ int ath11k_dp_rx_process_mon_rings_qcn90
  	return ath11k_dp_rx_process_full_monitor(ab, mac_id, napi, budget);
  }
  
@@ -568,13 +558,13 @@ index 2b20ef2..9968474 100644
 +	       sizeof(params->chain_phase));
 +}
 +
-+void ath11k_hw_qcn9000_fill_cfr_hdr_info(struct ath11k *ar,
++void ath11k_hw_qcn9074_fill_cfr_hdr_info(struct ath11k *ar,
 +					 struct ath11k_csi_cfr_header *header,
 +					 struct ath11k_cfr_peer_tx_param *params)
 +{
 +	header->cfr_metadata_version = ATH11K_CFR_META_VERSION_3;
 +	header->cfr_data_version = ATH11K_CFR_DATA_VERSION_1;
-+	header->chip_type = ATH11K_CFR_RADIO_QCN9000;
++	header->chip_type = ATH11K_CFR_RADIO_QCN9074;
 +	header->u.meta_v3.status = FIELD_GET(WMI_CFR_PEER_CAPTURE_STATUS,
 +					     params->status);
 +	header->u.meta_v3.capture_bw = params->bandwidth;
@@ -599,24 +589,22 @@ index 2b20ef2..9968474 100644
  const struct ath11k_hw_ops ipq8074_ops = {
  	.get_hw_mac_from_pdev_id = ath11k_hw_ipq8074_mac_from_pdev_id,
  	.wmi_init_config = ath11k_init_wmi_config_ipq8074,
-@@ -912,6 +972,7 @@ const struct ath11k_hw_ops ipq8074_ops = {
+@@ -963,6 +1023,7 @@ const struct ath11k_hw_ops ipq6018_ops =
  	.rx_desc_dot11_hdr_fields_valid = ath11k_hw_ipq8074_rx_desc_dot11_hdr_fields_valid,
  	.rx_desc_get_dot11_hdr = ath11k_hw_ipq8074_rx_desc_get_dot11_hdr,
  	.rx_desc_get_crypto_header = ath11k_hw_ipq8074_rx_desc_get_crypto_hdr,
 +	.fill_cfr_hdr_info = ath11k_hw_ipq8074_fill_cfr_hdr_info,
  };
  
- const struct ath11k_hw_ops ipq6018_ops = {
-@@ -1064,6 +1125,7 @@ const struct ath11k_hw_ops qcn9000_ops = {
- 	.rx_desc_dot11_hdr_fields_valid = ath11k_hw_qcn9000_rx_desc_dot11_hdr_fields_valid,
- 	.rx_desc_get_dot11_hdr = ath11k_hw_qcn9000_rx_desc_get_dot11_hdr,
- 	.rx_desc_get_crypto_header = ath11k_hw_qcn9000_rx_desc_get_crypto_hdr,
-+	.fill_cfr_hdr_info = ath11k_hw_qcn9000_fill_cfr_hdr_info,
+ const struct ath11k_hw_ops qca6390_ops = {
+@@ -1058,6 +1119,7 @@ const struct ath11k_hw_ops qcn9074_ops =
+ 	.rx_desc_dot11_hdr_fields_valid = ath11k_hw_qcn9074_rx_desc_dot11_hdr_fields_valid,
+ 	.rx_desc_get_dot11_hdr = ath11k_hw_qcn9074_rx_desc_get_dot11_hdr,
+ 	.rx_desc_get_crypto_header = ath11k_hw_qcn9074_rx_desc_get_crypto_hdr,
++	.fill_cfr_hdr_info = ath11k_hw_qcn9074_fill_cfr_hdr_info,
  };
  
- /* IPQ5018 hw ops is similar to QCN9000 except for the dest ring remap */
-diff --git a/drivers/net/wireless/ath/ath11k/hw.h b/drivers/net/wireless/ath/ath11k/hw.h
-index 2d1fec4..6e56ff6 100644
+ /* IPQ5018 hw ops is similar to QCN9074 except for the dest ring remap */
 --- a/drivers/net/wireless/ath/ath11k/hw.h
 +++ b/drivers/net/wireless/ath/ath11k/hw.h
 @@ -8,6 +8,9 @@
@@ -629,7 +617,7 @@ index 2d1fec4..6e56ff6 100644
  /* Target configuration defines */
  #ifdef CPTCFG_ATH11K_MEM_PROFILE_512M
  
-@@ -259,6 +262,9 @@ struct ath11k_hw_ops {
+@@ -260,6 +263,9 @@ struct ath11k_hw_ops {
  	void (*rx_desc_get_crypto_header)(struct hal_rx_desc *desc,
  					  u8 *crypto_hdr,
  					  enum hal_encrypt_type enctype);
@@ -639,6 +627,3 @@ index 2d1fec4..6e56ff6 100644
  };
  
  extern const struct ath11k_hw_ops ipq8074_ops;
--- 
-2.7.4
-

@@ -33,7 +33,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -267,6 +267,7 @@ struct ath11k_vif {
+@@ -275,6 +275,7 @@ struct ath11k_vif {
  	struct ath11k_mgmt_frame_stats mgmt_stats;
  #ifdef CPTCFG_ATH11K_NSS_SUPPORT
  	struct arvif_nss nss;
@@ -43,7 +43,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4327,17 +4327,28 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4321,17 +4321,28 @@ static void ath11k_sta_rc_update_wk(stru
  static void ath11k_sta_use_4addr_wk(struct work_struct *wk)
  {
  	struct ath11k *ar;
@@ -74,7 +74,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		   "setting USE_4ADDR for STA %pM\n", sta->addr);
  
  	ret = ath11k_wmi_set_peer_param(ar, sta->addr,
-@@ -4345,8 +4356,92 @@ static void ath11k_sta_use_4addr_wk(stru
+@@ -4339,8 +4350,92 @@ static void ath11k_sta_use_4addr_wk(stru
  					WMI_PEER_USE_4ADDR, 1);
  
  	if (ret)
@@ -168,15 +168,15 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  }
  
  static int ath11k_mac_inc_num_stations(struct ath11k_vif *arvif,
-@@ -4645,9 +4740,25 @@ static void ath11k_mac_op_sta_use_4addr(
-                                        struct ieee80211_sta *sta)
+@@ -4642,9 +4737,25 @@ static void ath11k_mac_op_sta_set_4addr(
+                                        bool enabled)
  {
  	struct ath11k *ar = hw->priv;
 +	struct ath11k_vif *arvif = (void *)vif->drv_priv;
  	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
 +	struct ath11k_vif *ap_arvif = NULL;
  
- 	if (!arsta->use_4addr_set) {
+ 	if (enabled && !arsta->use_4addr_set) {
 +		if (ar->ab->nss.enabled && vif->type == NL80211_IFTYPE_AP_VLAN) {
 +			/* 4addr STA is initially associated to AP vif, change
 +			 * it to AP_VLAN vif and add AP_VLAN vif to AP vifs list
@@ -194,7 +194,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ieee80211_queue_work(ar->hw, &arsta->use_4addr_wk);
  		arsta->use_4addr_set = true;
  	}
-@@ -5977,7 +6088,8 @@ static int ath11k_mac_op_add_interface(s
+@@ -6011,7 +6122,8 @@ static int ath11k_mac_op_add_interface(s
  		goto err;
  	}
  
@@ -204,7 +204,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ath11k_warn(ab, "failed to create vdev %u, reached max vdev limit %d\n",
  			    ar->num_created_vdevs, TARGET_NUM_VDEVS);
  		ret = -EBUSY;
-@@ -5990,6 +6102,25 @@ static int ath11k_mac_op_add_interface(s
+@@ -6024,6 +6136,25 @@ static int ath11k_mac_op_add_interface(s
  	arvif->vif = vif;
  
  	INIT_LIST_HEAD(&arvif->list);
@@ -230,7 +230,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	INIT_DELAYED_WORK(&arvif->connection_loss_work,
                            ath11k_mac_vif_sta_connection_loss_work);
  
-@@ -6020,6 +6151,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -6054,6 +6185,7 @@ static int ath11k_mac_op_add_interface(s
  		fallthrough;
  	case NL80211_IFTYPE_AP:
  		arvif->vdev_type = WMI_VDEV_TYPE_AP;
@@ -238,12 +238,13 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		break;
  	case NL80211_IFTYPE_MONITOR:
  		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
-@@ -6292,14 +6424,25 @@ static void ath11k_mac_op_remove_interfa
+@@ -6304,15 +6436,26 @@ static void ath11k_mac_op_remove_interfa
  {
  	struct ath11k *ar = hw->priv;
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
 +	struct ath11k_vif *ap_vlan_arvif, *tmp;
  	struct ath11k_base *ab = ar->ab;
+ 	unsigned long time_left;
  	int ret;
  	int i;
  
@@ -266,7 +267,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	ath11k_dbg(ab, ATH11K_DBG_MAC, "mac remove interface (vdev %d)\n",
  		   arvif->vdev_id);
  
-@@ -6308,6 +6451,10 @@ static void ath11k_mac_op_remove_interfa
+@@ -6321,6 +6464,10 @@ static void ath11k_mac_op_remove_interfa
  		if (ret)
  			ath11k_warn(ab, "failed to submit AP self-peer removal on vdev %d: %d\n",
  				    arvif->vdev_id, ret);
@@ -276,8 +277,8 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +			ath11k_nss_ext_vdev_delete(ap_vlan_arvif);
  	}
  
- 	ath11k_nss_vdev_delete(arvif);
-@@ -6352,7 +6499,7 @@ err_vdev_del:
+ 	reinit_completion(&ar->vdev_delete_done);
+@@ -6381,7 +6528,7 @@ err_vdev_del:
  	/* Remove TWT related files and directory */
  	debugfs_remove_recursive(arvif->debugfs_twt);
  	arvif->debugfs_twt = NULL;
@@ -288,7 +289,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -4838,6 +4838,8 @@ enum wmi_vdev_subtype {
+@@ -4833,6 +4833,8 @@ enum wmi_vdev_subtype {
  	WMI_VDEV_SUBTYPE_MESH_11S,
  };
  

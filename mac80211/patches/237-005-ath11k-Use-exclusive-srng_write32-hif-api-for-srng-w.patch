@@ -32,7 +32,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -745,6 +745,7 @@ static const struct ath11k_hif_ops ath11
+@@ -747,6 +747,7 @@ static const struct ath11k_hif_ops ath11
  	.stop = ath11k_ahb_stop,
  	.read32 = ath11k_ahb_read32,
  	.write32 = ath11k_ahb_write32,
@@ -40,7 +40,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.irq_enable = ath11k_ahb_ext_irq_enable,
  	.irq_disable = ath11k_ahb_ext_irq_disable,
  	.map_service_to_pipe = ath11k_ahb_map_service_to_pipe,
-@@ -759,6 +760,7 @@ static const struct ath11k_hif_ops ath11
+@@ -761,6 +762,7 @@ static const struct ath11k_hif_ops ath11
  	.stop = ath11k_pci_stop,
  	.read32 = ath11k_pci_read32,
  	.write32 = ath11k_pci_write32,
@@ -74,27 +74,50 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	ring_id = ath11k_hal_srng_get_ring_id(ab, type, ring_num, mac_id);
  	if (ring_id < 0)
-@@ -1071,8 +1072,9 @@ int ath11k_hal_srng_setup(struct ath11k_
+@@ -1071,16 +1072,18 @@ int ath11k_hal_srng_setup(struct ath11k_
  						   lmac_idx);
  			srng->flags |= HAL_SRNG_FLAGS_LMAC_RING;
  		} else {
-+			offset = ath11k_hif_get_window_offset(ab, reg_base);
- 			srng->u.src_ring.hp_addr =
+-			if (!ab->hw_params.supports_shadow_regs)
++			if (!ab->hw_params.supports_shadow_regs) {
++				offset = ath11k_hif_get_window_offset(ab, reg_base);
+ 				srng->u.src_ring.hp_addr =
 -				(u32 *)((unsigned long)mem + reg_base);
+-			else
 +				(u32 *)((unsigned long)mem + offset);
++			} else {
+ 				ath11k_dbg(ab, ATH11k_DBG_HAL,
+ 					   "hal type %d ring_num %d reg_base 0x%x shadow 0x%lx\n",
+ 					   type, ring_num,
+ 					   reg_base,
+ 					   (unsigned long)srng->u.src_ring.hp_addr -
+ 					   (unsigned long)ab->mem);
++			}
  		}
  	} else {
  		/* During initialization loop count in all the descriptors
-@@ -1096,9 +1098,10 @@ int ath11k_hal_srng_setup(struct ath11k_
+@@ -1104,11 +1107,12 @@ int ath11k_hal_srng_setup(struct ath11k_
  						   lmac_idx);
  			srng->flags |= HAL_SRNG_FLAGS_LMAC_RING;
  		} else {
--			srng->u.dst_ring.tp_addr =
+-			if (!ab->hw_params.supports_shadow_regs)
++			if (!ab->hw_params.supports_shadow_regs) {
++				offset = ath11k_hif_get_window_offset(ab, reg_base +
++						(HAL_REO1_RING_TP(ab) - HAL_REO1_RING_HP(ab)));
+ 				srng->u.dst_ring.tp_addr =
 -				(u32 *)((unsigned long)mem + reg_base +
-+			offset = ath11k_hif_get_window_offset(ab, reg_base +
- 					(HAL_REO1_RING_TP(ab) - HAL_REO1_RING_HP(ab)));
-+			srng->u.dst_ring.tp_addr =
-+				(u32 *)((unsigned long)mem + offset);
+-					(HAL_REO1_RING_TP(ab) - HAL_REO1_RING_HP(ab)));
+-			else
++					(u32 *)((unsigned long)mem + offset);
++			} else {
+ 				ath11k_dbg(ab, ATH11k_DBG_HAL,
+ 					   "type %d ring_num %d target_reg 0x%x shadow 0x%lx\n",
+ 					   type, ring_num,
+@@ -1116,6 +1120,7 @@ int ath11k_hal_srng_setup(struct ath11k_
+ 						       HAL_REO1_RING_HP(ab)),
+ 					   (unsigned long)srng->u.dst_ring.tp_addr -
+ 					   (unsigned long)ab->mem);
++			}
  		}
  	}
  
@@ -108,7 +131,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	void (*irq_enable)(struct ath11k_base *sc);
  	void (*irq_disable)(struct ath11k_base *sc);
  	int (*start)(struct ath11k_base *sc);
-@@ -72,6 +73,11 @@ static inline void ath11k_hif_write32(st
+@@ -104,6 +105,11 @@ static inline void ath11k_hif_write32(st
  	sc->hif.ops->write32(sc, address, data);
  }
  
@@ -122,7 +145,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  {
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -140,6 +140,13 @@ void ath11k_pci_write32(struct ath11k_ba
+@@ -164,6 +164,13 @@ void ath11k_pci_write32(struct ath11k_ba
  }
  EXPORT_SYMBOL(ath11k_pci_write32);
  
@@ -135,18 +158,18 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +
  u32 ath11k_pci_read32(struct ath11k_base *ab, u32 offset)
  {
- 	struct ath11k_pci *ab_pci = NULL;
-@@ -1012,6 +1019,7 @@ static const struct ath11k_hif_ops ath11
+ 	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
+@@ -1248,6 +1255,7 @@ static const struct ath11k_hif_ops ath11
  	.stop = ath11k_pci_stop,
  	.read32 = ath11k_pci_read32,
  	.write32 = ath11k_pci_write32,
 +	.srng_write32 = ath11k_pci_srng_write32,
  	.power_down = ath11k_pci_power_down,
  	.power_up = ath11k_pci_power_up,
- 	.irq_enable = ath11k_pci_ext_irq_enable,
+ 	.suspend = ath11k_pci_hif_suspend,
 --- a/drivers/net/wireless/ath/ath11k/pci.h
 +++ b/drivers/net/wireless/ath/ath11k/pci.h
-@@ -134,6 +134,7 @@ int ath11k_pci_get_user_msi_assignment(s
+@@ -168,6 +168,7 @@ int ath11k_pci_get_user_msi_assignment(s
  				       u32 *base_vector);
  int ath11k_pci_get_msi_irq(struct ath11k_base *ab, unsigned int vector);
  void ath11k_pci_write32(struct ath11k_base *ab, u32 offset, u32 value);

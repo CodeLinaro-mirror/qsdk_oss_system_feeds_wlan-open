@@ -46,12 +46,12 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/Makefile
 +++ b/drivers/net/wireless/ath/ath11k/Makefile
-@@ -19,7 +19,7 @@ ath11k-y += core.o \
- 	    hw.o \
+@@ -20,7 +20,7 @@ ath11k-y += core.o \
+ 	    wow.o \
  	    vendor.o
  
--ath11k-$(CPTCFG_ATH11K_DEBUGFS) += debug_htt_stats.o debugfs_sta.o
-+ath11k-$(CPTCFG_ATH11K_DEBUGFS) += debug_htt_stats.o debugfs_sta.o debug_nss.o
+-ath11k-$(CPTCFG_ATH11K_DEBUGFS) += debugfs.o debugfs_htt_stats.o debugfs_sta.o
++ath11k-$(CPTCFG_ATH11K_DEBUGFS) += debugfs.o debugfs_htt_stats.o debugfs_sta.o debug_nss.o
  ath11k-$(CPTCFG_NL80211_TESTMODE) += testmode.o
  ath11k-$(CPTCFG_ATH11K_TRACING) += trace.o
  ath11k-$(CONFIG_THERMAL) += thermal.o
@@ -1008,16 +1008,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +#endif
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -538,7 +538,7 @@ struct htt_ppdu_stats_cfg_cmd {
- } __packed;
- 
- #define HTT_PPDU_STATS_CFG_MSG_TYPE		GENMASK(7, 0)
--#define HTT_PPDU_STATS_CFG_PDEV_ID		GENMASK(16, 9)
-+#define HTT_PPDU_STATS_CFG_PDEV_ID		GENMASK(15, 8)
- #define HTT_PPDU_STATS_CFG_TLV_TYPE_BITMASK	GENMASK(31, 16)
- 
- enum htt_ppdu_stats_tag_type {
-@@ -1555,15 +1555,29 @@ struct htt_ppdu_stats_usr_cmn_array {
+@@ -1573,15 +1573,29 @@ struct htt_ppdu_stats_usr_cmn_array {
  	struct htt_tx_ppdu_stats_info tx_ppdu_info[0];
  } __packed;
  
@@ -1049,7 +1040,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #define HTT_PPDU_STATS_MAX_USERS	37
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -1344,6 +1344,68 @@ static int ath11k_htt_tlv_ppdu_stats_par
+@@ -1381,6 +1381,68 @@ static int ath11k_htt_tlv_ppdu_stats_par
  	return 0;
  }
  
@@ -1118,7 +1109,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static void
  ath11k_update_per_peer_tx_stats(struct ath11k *ar,
  				struct htt_ppdu_stats *ppdu_stats, u8 user)
-@@ -1370,6 +1432,9 @@ ath11k_update_per_peer_tx_stats(struct a
+@@ -1407,6 +1469,9 @@ ath11k_update_per_peer_tx_stats(struct a
  	if (!(usr_stats->tlv_flags & BIT(HTT_PPDU_STATS_TAG_USR_RATE)))
  		return;
  
@@ -1128,8 +1119,8 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (usr_stats->tlv_flags & BIT(HTT_PPDU_STATS_TAG_USR_COMPLTN_COMMON))
  		is_ampdu =
  			HTT_USR_CMPLTN_IS_AMPDU(usr_stats->cmpltn_cmn.flags);
-@@ -1508,6 +1573,8 @@ ath11k_update_per_peer_tx_stats(struct a
- 							    peer_stats, rate_idx);
+@@ -1544,6 +1609,8 @@ ath11k_update_per_peer_tx_stats(struct a
+ 			ath11k_debugfs_sta_add_tx_stats(arsta, peer_stats, rate_idx);
  	}
  
 +	usr_stats->rate_stats_updated = true;
@@ -1137,7 +1128,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	spin_unlock_bh(&ab->base_lock);
  	rcu_read_unlock();
  }
-@@ -1595,8 +1662,10 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
+@@ -1631,8 +1698,10 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
  	int ret = -EINVAL;
  	struct htt_ppdu_stats_info * ppdu_info = NULL;
  
@@ -1150,7 +1141,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	while (len > 0) {
  		if (len < sizeof(*tlv)) {
  			ath11k_err(ab, "htt tlv parse failure at byte %zd (%zu bytes left, %zu expected)\n",
-@@ -1625,6 +1694,66 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
+@@ -1661,6 +1730,66 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
  	return 0;
  }
  
@@ -1217,7 +1208,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static int ath11k_htt_pull_ppdu_stats(struct ath11k_base *ab,
  				      struct sk_buff *skb)
  {
-@@ -1643,6 +1772,15 @@ static int ath11k_htt_pull_ppdu_stats(st
+@@ -1679,6 +1808,15 @@ static int ath11k_htt_pull_ppdu_stats(st
  	pdev_id = FIELD_GET(HTT_T2H_PPDU_STATS_INFO_PDEV_ID, msg->info);
  	ppdu_id = msg->ppdu_id;
  
@@ -1233,7 +1224,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	rcu_read_lock();
  	ar = ath11k_mac_get_ar_by_pdev_id(ab, pdev_id);
  	if (!ar) {
-@@ -1714,6 +1852,12 @@ static int ath11k_htt_pull_ppdu_stats(st
+@@ -1750,6 +1888,12 @@ static int ath11k_htt_pull_ppdu_stats(st
  		}
  	}
  
@@ -1246,7 +1237,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	spin_unlock_bh(&ar->data_lock);
  exit:
  	rcu_read_unlock();
-@@ -3004,6 +3148,22 @@ static void ath11k_dp_rx_process_receive
+@@ -2990,6 +3134,22 @@ static void ath11k_dp_rx_process_receive
  	rcu_read_unlock();
  }
  
@@ -1271,7 +1262,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  {
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
-@@ -122,4 +122,6 @@ bool ath11k_dp_rx_h_attn_is_mcbc(struct
+@@ -124,4 +124,6 @@ bool ath11k_dp_rx_h_attn_is_mcbc(struct
  				 struct hal_rx_desc *desc);
  u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct ath11k_base *ab,
  				      struct hal_rx_desc *desc);
@@ -1280,7 +1271,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #endif /* ATH11K_DP_RX_H */
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2923,6 +2923,16 @@ static void ath11k_mac_op_nss_bss_info_c
+@@ -3034,6 +3034,16 @@ static void ath11k_mac_op_nss_bss_info_c
  			ath11k_warn(ar->ab, "failed to set ap_isolate in nss %d\n", ret);
  	}
  
@@ -1297,7 +1288,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	mutex_unlock(&ar->conf_mutex);
  }
  
-@@ -5992,7 +6002,7 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -5989,7 +5999,7 @@ static void ath11k_mac_op_tx(struct ieee
  		skb_cb->flags |= ATH11K_SKB_TX_STATUS;
  
  	if (ar->ab->nss.enabled)
@@ -1306,7 +1297,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	else
  		ret = ath11k_dp_tx(ar, arvif, skb,
  				   (control->sta) ? control->sta->drv_priv : NULL);
-@@ -8329,6 +8339,28 @@ static void ath11k_mac_op_sta_statistics
+@@ -8357,6 +8367,28 @@ static void ath11k_mac_op_sta_statistics
  	ath11k_nss_update_sta_stats(sinfo, sta, arsta);
  }
  
@@ -1335,17 +1326,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #define ATH11K_WLAN_PRIO_MAX	0x63
  #define ATH11K_WLAN_PRIO_WEIGHT	0xff
  
-@@ -8452,6 +8484,9 @@ static const struct ieee80211_ops ath11k
+@@ -8481,6 +8513,9 @@ static const struct ieee80211_ops ath11k
  #ifdef CPTCFG_ATH11K_DEBUGFS
- 	.sta_add_debugfs		= ath11k_sta_add_debugfs,
+ 	.sta_add_debugfs		= ath11k_debugfs_sta_op_add,
  #endif
 +#ifdef CPTCFG_MAC80211_MESH
 +	.config_mesh_offload_path	= ath11k_mac_op_config_mesh_offload_path,
 +#endif
  };
  
- static const struct ieee80211_iface_limit ath11k_if_limits[] = {
-@@ -8920,6 +8955,8 @@ static int __ath11k_mac_register(struct
+ static void ath11k_mac_update_ch_list(struct ath11k *ar,
+@@ -8968,6 +9003,8 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, SUPPORTS_NSS_OFFLOAD);
  		wiphy_ext_feature_set(ar->hw->wiphy,
  				      NL80211_EXT_FEATURE_VLAN_OFFLOAD);
@@ -3178,7 +3169,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  /* WIFILI Supported Target Types */
  #define ATH11K_WIFILI_TARGET_TYPE_UNKNOWN   0xFF
-@@ -62,13 +65,14 @@ struct hal_rx_mon_ppdu_info;
+@@ -57,13 +60,14 @@ struct hal_rx_mon_ppdu_info;
  /* Timeout for waiting for response from NSS on TX msg */
  #define ATH11K_NSS_MSG_TIMEOUT_MS 5000
  
@@ -3194,7 +3185,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  /* ATH11K NSS Stats */
  #define ATH11K_NSS_STATS_ENABLE 1
-@@ -138,10 +142,24 @@ struct ath11k_nss_peer {
+@@ -133,10 +137,24 @@ struct ath11k_nss_peer {
  	struct peer_stats *nss_stats;
  };
  
@@ -3219,7 +3210,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	/* Used for completion status for vdev config nss messages */
  	struct completion complete;
  	/* Keep the copy of encap type for nss */
-@@ -155,6 +173,25 @@ struct arvif_nss {
+@@ -150,6 +168,25 @@ struct arvif_nss {
  	/* Keep the copy of di_type for nss */
  	enum nss_dynamic_interface_type di_type;
  	bool created;
@@ -3245,7 +3236,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /* Structure to hold the pdev/radio related info for nss offload support */
-@@ -169,11 +206,15 @@ struct ath11k_nss {
+@@ -164,11 +201,15 @@ struct ath11k_nss {
  struct ath11k_soc_nss {
  	/* turn on/off nss offload support in ath11k */
  	bool enabled;
@@ -3261,7 +3252,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	/* Completion to nss message response */
  	struct completion complete;
  	/* Response to nss messages are stored here on msg callback
-@@ -226,6 +267,17 @@ void ath11k_nss_update_sta_rxrate(struct
+@@ -221,6 +262,17 @@ void ath11k_nss_update_sta_rxrate(struct
  int ath11k_nss_setup(struct ath11k_base *ab);
  int ath11k_nss_teardown(struct ath11k_base *ab);
  void ath11k_nss_ext_rx_stats(struct ath11k_base *ab, struct htt_rx_ring_tlv_filter *tlv_filter);
@@ -3279,7 +3270,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #else
  static inline int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
  {
-@@ -377,5 +429,30 @@ void ath11k_nss_ext_rx_stats(struct ath1
+@@ -372,5 +424,30 @@ void ath11k_nss_ext_rx_stats(struct ath1
  {
  	return;
  }
@@ -3340,8 +3331,8 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /*
-@@ -717,6 +726,11 @@ struct ieee80211_bss_conf {
- 	u32 unsol_bcast_probe_resp_interval;
+@@ -721,6 +730,11 @@ struct ieee80211_bss_conf {
+ 	bool nss_ap_isolate;
  	struct ieee80211_multiple_bssid multiple_bssid;
  	enum nl80211_beacon_tx_mode beacon_tx_mode;
 +
@@ -3352,24 +3343,25 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /**
-@@ -1138,12 +1152,16 @@ ieee80211_info_get_tx_time_est(struct ie
-  * @info: Basic tx status information
+@@ -1150,6 +1164,8 @@ ieee80211_info_get_tx_time_est(struct ie
   * @skb: Packet skb (can be NULL if not provided by the driver)
   * @rate: The TX rate that was used when sending the packet
+  * @free_list: list where processed skbs are stored to be free'd by the driver
 + * @mpdu_succ: Number of mpdus successfully transmitted
 + * @mpdu_fail: Number of mpdus failed
   */
  struct ieee80211_tx_status {
  	struct ieee80211_sta *sta;
- 	struct ieee80211_tx_info *info;
- 	struct sk_buff *skb;
- 	struct rate_info *rate;
+@@ -1161,6 +1177,8 @@ struct ieee80211_tx_status {
+ #else
+ 	struct sk_buff_head *free_list;
+ #endif
 +	u32 mpdu_succ;
 +	u32 mpdu_fail;
  };
  
  /**
-@@ -1641,12 +1659,14 @@ struct ieee80211_channel_switch {
+@@ -1661,12 +1679,14 @@ struct ieee80211_channel_switch {
   * @IEEE80211_VIF_GET_NOA_UPDATE: request to handle NOA attributes
   *	and send P2P_PS notification to the driver if NOA changed, even
   *	this is not pure P2P vif.
@@ -3383,28 +3375,28 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	IEEE80211_VIF_NSS_OFFLOAD_DEBUG_MODE	= BIT(4),
  };
  
- /**
-@@ -2472,6 +2492,7 @@ enum ieee80211_hw_flags {
- 	IEEE80211_HW_AMPDU_KEYBORDER_SUPPORT,
+ 
+@@ -2526,6 +2546,7 @@ enum ieee80211_hw_flags {
+ 	IEEE80211_HW_SUPPORTS_RX_DECAP_OFFLOAD,
  	IEEE80211_HW_SUPPORTS_NSS_OFFLOAD,
  	IEEE80211_HW_SUPPORTS_MULTI_BSSID_AP,
 +	IEEE80211_HW_SUPPORTS_MESH_NSS_OFFLOAD,
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
-@@ -3910,6 +3931,8 @@ enum ieee80211_reconfig_type {
-  * @set_tid_config: Apply TID specific configurations. This callback may sleep.
-  * @reset_tid_config: Reset TID specific configuration for the peer.
-  *	This callback may sleep.
+@@ -3971,6 +3992,8 @@ enum ieee80211_reconfig_type {
+  * @set_sar_specs: Update the SAR (TX power) settings.
+  * @sta_set_decap_offload: Called to notify the driver when a station is allowed
+  *	to use rx decapsulation offload
 + * @config_mesh_offload_path: Configure mesh path table when driver supports mesh offload.
 + *	This calback must be atomic.
   */
  struct ieee80211_ops {
  	void (*tx)(struct ieee80211_hw *hw,
-@@ -4227,6 +4250,12 @@ struct ieee80211_ops {
- 	int (*reset_tid_config)(struct ieee80211_hw *hw,
- 				struct ieee80211_vif *vif,
- 				struct ieee80211_sta *sta, u8 tids);
+@@ -4294,6 +4317,12 @@ struct ieee80211_ops {
+ 	void (*sta_set_decap_offload)(struct ieee80211_hw *hw,
+ 				      struct ieee80211_vif *vif,
+ 				      struct ieee80211_sta *sta, bool enabled);
 +#ifdef CPTCFG_MAC80211_MESH
 +	void (*config_mesh_offload_path)(struct ieee80211_hw *hw,
 +					 struct ieee80211_vif *vif,
@@ -3414,7 +3406,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /**
-@@ -6871,4 +6900,83 @@ void
+@@ -7002,4 +7031,83 @@ void
  ieeee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
  				       u64 color_bitmap);
  
@@ -3500,7 +3492,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #endif /* MAC80211_H */
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2276,6 +2276,7 @@ static int ieee80211_update_mesh_config(
+@@ -2281,6 +2281,7 @@ static int ieee80211_update_mesh_config(
  	struct mesh_config *conf;
  	struct ieee80211_sub_if_data *sdata;
  	struct ieee80211_if_mesh *ifmsh;
@@ -3508,7 +3500,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  	ifmsh = &sdata->u.mesh;
-@@ -2292,8 +2293,11 @@ static int ieee80211_update_mesh_config(
+@@ -2297,8 +2298,11 @@ static int ieee80211_update_mesh_config(
  		conf->dot11MeshMaxPeerLinks = nconf->dot11MeshMaxPeerLinks;
  	if (_chg_mesh_attr(NL80211_MESHCONF_MAX_RETRIES, mask))
  		conf->dot11MeshMaxRetries = nconf->dot11MeshMaxRetries;
@@ -3521,7 +3513,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (_chg_mesh_attr(NL80211_MESHCONF_ELEMENT_TTL, mask))
  		conf->element_ttl = nconf->element_ttl;
  	if (_chg_mesh_attr(NL80211_MESHCONF_AUTO_OPEN_PLINKS, mask)) {
-@@ -2307,8 +2311,12 @@ static int ieee80211_update_mesh_config(
+@@ -2312,8 +2316,12 @@ static int ieee80211_update_mesh_config(
  	if (_chg_mesh_attr(NL80211_MESHCONF_HWMP_MAX_PREQ_RETRIES, mask))
  		conf->dot11MeshHWMPmaxPREQretries =
  			nconf->dot11MeshHWMPmaxPREQretries;
@@ -3535,7 +3527,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (_chg_mesh_attr(NL80211_MESHCONF_MIN_DISCOVERY_TIMEOUT, mask))
  		conf->min_discovery_timeout = nconf->min_discovery_timeout;
  	if (_chg_mesh_attr(NL80211_MESHCONF_HWMP_ACTIVE_PATH_TIMEOUT, mask))
-@@ -2343,8 +2351,12 @@ static int ieee80211_update_mesh_config(
+@@ -2348,8 +2356,12 @@ static int ieee80211_update_mesh_config(
  	if (_chg_mesh_attr(NL80211_MESHCONF_HWMP_RANN_INTERVAL, mask))
  		conf->dot11MeshHWMPRannInterval =
  			nconf->dot11MeshHWMPRannInterval;
@@ -3549,7 +3541,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (_chg_mesh_attr(NL80211_MESHCONF_RSSI_THRESHOLD, mask)) {
  		/* our RSSI threshold implementation is supported only for
  		 * devices that report signal in dBm.
-@@ -2385,6 +2397,7 @@ static int ieee80211_update_mesh_config(
+@@ -2390,6 +2402,7 @@ static int ieee80211_update_mesh_config(
  		conf->dot11MeshConnectedToAuthServer =
  			nconf->dot11MeshConnectedToAuthServer;
  	ieee80211_mbss_info_change_notify(sdata, BSS_CHANGED_BEACON);
@@ -3585,8 +3577,8 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  		   sdata, fmt, ##__VA_ARGS__)
 --- a/net/mac80211/debugfs.c
 +++ b/net/mac80211/debugfs.c
-@@ -412,6 +412,7 @@ static const char *hw_flag_names[] = {
- 	FLAG(AMPDU_KEYBORDER_SUPPORT),
+@@ -410,6 +410,7 @@ static const char *hw_flag_names[] = {
+ 	FLAG(SUPPORTS_RX_DECAP_OFFLOAD),
  	FLAG(SUPPORTS_NSS_OFFLOAD),
  	FLAG(SUPPORTS_MULTI_BSSID_AP),
 +	FLAG(SUPPORTS_MESH_NSS_OFFLOAD),
@@ -3595,7 +3587,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
 --- a/net/mac80211/driver-ops.c
 +++ b/net/mac80211/driver-ops.c
-@@ -359,3 +359,23 @@ int drv_ampdu_action(struct ieee80211_lo
+@@ -347,3 +347,23 @@ int drv_ampdu_action(struct ieee80211_lo
  
  	return ret;
  }
@@ -3621,11 +3613,10 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +#endif
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -1407,4 +1407,11 @@ static inline int drv_reset_tid_config(s
- 
- 	return ret;
+@@ -1448,4 +1448,10 @@ static inline void drv_sta_set_decap_off
+ 	trace_drv_return_void(local);
  }
-+
+ 
 +#ifdef CPTCFG_MAC80211_MESH
 +void drv_config_mesh_offload_path(struct ieee80211_local *local,
 +				  struct ieee80211_sub_if_data *sdata,
@@ -3957,7 +3948,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  static void mesh_path_free_rcu(struct mesh_table *tbl, struct mesh_path *mpath);
  
-@@ -71,6 +72,37 @@ static void mesh_table_free(struct mesh_
+@@ -72,6 +73,37 @@ static void mesh_table_free(struct mesh_
  	kfree(tbl);
  }
  
@@ -3995,7 +3986,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  /**
   * mesh_path_assign_nexthop - update mesh path next hop
   *
-@@ -208,16 +240,21 @@ static void mesh_path_move_to_queue(stru
+@@ -209,16 +241,21 @@ static void mesh_path_move_to_queue(stru
  
  
  static struct mesh_path *mpath_lookup(struct mesh_table *tbl, const u8 *dst,
@@ -4018,7 +4009,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	}
  	return mpath;
  }
-@@ -234,13 +271,13 @@ static struct mesh_path *mpath_lookup(st
+@@ -235,13 +272,13 @@ static struct mesh_path *mpath_lookup(st
  struct mesh_path *
  mesh_path_lookup(struct ieee80211_sub_if_data *sdata, const u8 *dst)
  {
@@ -4034,7 +4025,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  }
  
  static struct mesh_path *
-@@ -322,6 +359,8 @@ int mesh_path_add_gate(struct mesh_path
+@@ -323,6 +360,8 @@ int mesh_path_add_gate(struct mesh_path
  
  	spin_unlock_bh(&mpath->state_lock);
  
@@ -4043,7 +4034,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	mpath_dbg(mpath->sdata,
  		  "Mesh path: Recorded new gate: %pM. %d known gates\n",
  		  mpath->dst, mpath->sdata->u.mesh.num_gates);
-@@ -348,6 +387,8 @@ static void mesh_gate_del(struct mesh_ta
+@@ -349,6 +388,8 @@ static void mesh_gate_del(struct mesh_ta
  	mpath->sdata->u.mesh.num_gates--;
  	spin_unlock_bh(&tbl->gates_lock);
  
@@ -4052,7 +4043,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	mpath_dbg(mpath->sdata,
  		  "Mesh path: Deleted gate: %pM. %d known gates\n",
  		  mpath->dst, mpath->sdata->u.mesh.num_gates);
-@@ -385,17 +426,8 @@ struct mesh_path *mesh_path_new(struct i
+@@ -386,17 +427,8 @@ struct mesh_path *mesh_path_new(struct i
  	return new_mpath;
  }
  
@@ -4072,7 +4063,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  {
  	struct mesh_table *tbl;
  	struct mesh_path *mpath, *new_mpath;
-@@ -436,8 +468,36 @@ struct mesh_path *mesh_path_add(struct i
+@@ -437,8 +469,36 @@ struct mesh_path *mesh_path_add(struct i
  	return new_mpath;
  }
  
@@ -4111,7 +4102,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  {
  	struct mesh_table *tbl;
  	struct mesh_path *new_mpath;
-@@ -473,6 +533,25 @@ int mpp_path_add(struct ieee80211_sub_if
+@@ -474,6 +534,25 @@ int mpp_path_add(struct ieee80211_sub_if
  	return ret;
  }
  
@@ -4137,7 +4128,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  /**
   * mesh_plink_broken - deactivates paths and sends perr when a link breaks
-@@ -523,11 +602,37 @@ static void mesh_path_free_rcu(struct me
+@@ -524,11 +603,37 @@ static void mesh_path_free_rcu(struct me
  	kfree_rcu(mpath, rcu);
  }
  
@@ -4176,7 +4167,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  }
  
  /**
-@@ -551,7 +656,7 @@ void mesh_path_flush_by_nexthop(struct s
+@@ -552,7 +657,7 @@ void mesh_path_flush_by_nexthop(struct s
  	spin_lock_bh(&tbl->walk_lock);
  	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
  		if (rcu_access_pointer(mpath->next_hop) == sta)
@@ -4185,7 +4176,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	}
  	spin_unlock_bh(&tbl->walk_lock);
  }
-@@ -566,19 +671,19 @@ static void mpp_flush_by_proxy(struct ie
+@@ -567,19 +672,19 @@ static void mpp_flush_by_proxy(struct ie
  	spin_lock_bh(&tbl->walk_lock);
  	hlist_for_each_entry_safe(mpath, n, &tbl->walk_head, walk_list) {
  		if (ether_addr_equal(mpath->mpp, proxy))
@@ -4208,7 +4199,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	}
  	spin_unlock_bh(&tbl->walk_lock);
  }
-@@ -593,8 +698,8 @@ static void table_flush_by_iface(struct
+@@ -594,8 +699,8 @@ static void table_flush_by_iface(struct
   */
  void mesh_path_flush_by_iface(struct ieee80211_sub_if_data *sdata)
  {
@@ -4219,7 +4210,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  }
  
  /**
-@@ -608,7 +713,7 @@ void mesh_path_flush_by_iface(struct iee
+@@ -609,7 +714,7 @@ void mesh_path_flush_by_iface(struct iee
   */
  static int table_path_del(struct mesh_table *tbl,
  			  struct ieee80211_sub_if_data *sdata,
@@ -4228,7 +4219,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  {
  	struct mesh_path *mpath;
  
-@@ -619,7 +724,7 @@ static int table_path_del(struct mesh_ta
+@@ -620,7 +725,7 @@ static int table_path_del(struct mesh_ta
  		return -ENXIO;
  	}
  
@@ -4237,7 +4228,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	spin_unlock_bh(&tbl->walk_lock);
  	return 0;
  }
-@@ -640,7 +745,7 @@ int mesh_path_del(struct ieee80211_sub_i
+@@ -641,7 +746,7 @@ int mesh_path_del(struct ieee80211_sub_i
  	/* flush relevant mpp entries first */
  	mpp_flush_by_proxy(sdata, addr);
  
@@ -4246,7 +4237,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	sdata->u.mesh.mesh_paths_generation++;
  	return err;
  }
-@@ -756,6 +861,8 @@ void mesh_path_fix_nexthop(struct mesh_p
+@@ -757,6 +862,8 @@ void mesh_path_fix_nexthop(struct mesh_p
  	/* init it at a low value - 0 start is tricky */
  	ewma_mesh_fail_avg_add(&next_hop->mesh->fail_avg, 1);
  	mesh_path_tx_pending(mpath);
@@ -4255,7 +4246,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  }
  
  int mesh_pathtbl_init(struct ieee80211_sub_if_data *sdata)
-@@ -796,7 +903,7 @@ free_path:
+@@ -794,7 +901,7 @@ free_path:
  
  static
  void mesh_path_tbl_expire(struct ieee80211_sub_if_data *sdata,
@@ -4264,7 +4255,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  {
  	struct mesh_path *mpath;
  	struct hlist_node *n;
-@@ -806,15 +913,15 @@ void mesh_path_tbl_expire(struct ieee802
+@@ -804,15 +911,15 @@ void mesh_path_tbl_expire(struct ieee802
  		if ((!(mpath->flags & MESH_PATH_RESOLVING)) &&
  		    (!(mpath->flags & MESH_PATH_FIXED)) &&
  		     time_after(jiffies, mpath->exp_time + MESH_PATH_EXPIRE))
@@ -4285,7 +4276,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  void mesh_pathtbl_unregister(struct ieee80211_sub_if_data *sdata)
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -2906,6 +2906,7 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
+@@ -2864,6 +2864,7 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
  		struct mesh_path *mppath;
  		char *proxied_addr;
  		char *mpp_addr;
@@ -4293,7 +4284,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  		if (is_multicast_ether_addr(hdr->addr1)) {
  			mpp_addr = hdr->addr3;
-@@ -2925,10 +2926,15 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
+@@ -2883,10 +2884,15 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
  			mpp_path_add(sdata, proxied_addr, mpp_addr);
  		} else {
  			spin_lock_bh(&mppath->state_lock);
@@ -4312,9 +4303,9 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	}
 --- a/drivers/net/wireless/ath/ath11k/debug.h
 +++ b/drivers/net/wireless/ath/ath11k/debug.h
-@@ -13,6 +13,7 @@
- #define ATH11K_TX_POWER_MIN_VAL	0
- #define ATH11K_DEBUG_ENABLE_MEMORY_STATS 1
+@@ -9,6 +9,7 @@
+ #include "trace.h"
+ #include "debugfs.h"
  
 +extern struct dentry *debugfs_ath11k;
  enum ath11k_debug_mask {
@@ -4322,7 +4313,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	ATH11K_DBG_WMI		= 0x00000002,
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -2534,6 +2534,9 @@ static struct sk_buff *ieee80211_build_h
+@@ -2546,6 +2546,9 @@ static struct sk_buff *ieee80211_build_h
  		info_flags |= IEEE80211_TX_CTL_REQ_TX_STATUS;
  #endif
  
@@ -4332,21 +4323,21 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	/* convert Ethernet header to proper 802.11 header (based on
  	 * operation mode) */
  	ethertype = (skb->data[12] << 8) | skb->data[13];
-@@ -2594,6 +2597,13 @@ static struct sk_buff *ieee80211_build_h
+@@ -2592,6 +2595,13 @@ static struct sk_buff *ieee80211_build_h
  		break;
  #ifdef CPTCFG_MAC80211_MESH
  	case NL80211_IFTYPE_MESH_POINT:
 +		if (ieee80211_hw_check(&local->hw, SUPPORTS_NSS_OFFLOAD) &&
 +		    (sdata->vif.driver_flags & IEEE80211_VIF_NSS_OFFLOAD_DEBUG_MODE) &&
 +		    !(is_multicast_ether_addr(skb->data))) {
-+			info->control.flags = IEEE80211_TX_CTRL_HW_80211_ENCAP;
++			info->flags = IEEE80211_TX_CTL_HW_80211_ENCAP;
 +			goto nss_mesh;
 +		}
 +
  		if (!is_multicast_ether_addr(skb->data)) {
  			struct sta_info *next_hop;
  			bool mpp_lookup = true;
-@@ -2867,13 +2877,13 @@ static struct sk_buff *ieee80211_build_h
+@@ -2865,13 +2875,13 @@ static struct sk_buff *ieee80211_build_h
  
  	skb_reset_mac_header(skb);
  
@@ -4364,15 +4355,15 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	return skb;
   free:
-@@ -3944,6 +3954,7 @@ void __ieee80211_subif_start_xmit(struct
- 	struct ieee80211_local *local = sdata->local;
+@@ -3941,6 +3951,7 @@ void __ieee80211_subif_start_xmit(struct
+ 	struct ieee80211_key *key;
  	struct sta_info *sta;
  	struct sk_buff *next;
 +	struct ieee80211_tx_info *info;
  	struct ieee80211_sub_if_data *ap_sdata;
  
  	if (unlikely(skb->len < ETH_HLEN)) {
-@@ -4037,9 +4048,13 @@ void __ieee80211_subif_start_xmit(struct
+@@ -4032,9 +4043,15 @@ void __ieee80211_subif_start_xmit(struct
  			goto out;
  		}
  
@@ -4380,8 +4371,10 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 -
 -		ieee80211_xmit(sdata, sta, skb);
 +		info = IEEE80211_SKB_CB(skb);
-+		if (info->control.flags & IEEE80211_TX_CTRL_HW_80211_ENCAP) {
-+			ieee80211_8023_xmit(sdata, dev, sta, skb);
++		if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) {
++		    	if (sta)
++				key = rcu_dereference(sta->ptk[sta->ptk_idx]);
++			ieee80211_8023_xmit(sdata, dev, sta, key, skb);
 +		} else {
 +			ieee80211_tx_stats(dev, skb->len);
 +			ieee80211_xmit(sdata, sta, skb);
