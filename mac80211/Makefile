@@ -184,7 +184,7 @@ define Download/linux-firmware
   PROTO:=$(PKG_LINUX_FIRMWARE_PROTO)
   VERSION:=$(PKG_LINUX_FIRMWARE_VERSION)
   SUBDIR:=$(PKG_LINUX_FIRMWARE_SUBDIR)
-  MIRROR_MD5SUM:=$(PKG_LINUX_FIRMWARE_MIRROR_MD5SUM)
+  MIRROR_MD5SUM:=skip
 endef
 $(eval $(call Download,linux-firmware))
 
@@ -258,7 +258,7 @@ define Download/backports
   FILE:=$(PKG_SOURCE)
   SUBDIR:=$(PKG_SUBDIR)
 endef
-$(eval $(call DownloadBackports,backports))
+$(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(eval $(call DownloadBackports,backports)))
 
 define KernelPackage/ath/config
   if PACKAGE_kmod-ath
