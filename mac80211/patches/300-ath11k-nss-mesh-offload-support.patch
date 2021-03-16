@@ -57,7 +57,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  ath11k-$(CONFIG_THERMAL) += thermal.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/debug_nss.c
-@@ -0,0 +1,343 @@
+@@ -0,0 +1,915 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -385,25 +385,597 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	.llseek = default_llseek,
 +};
 +
++static ssize_t ath11k_nss_mpath_add(struct file *file,
++				     char __user *user_buf,
++				     size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%u %hhu %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
++			&path.metric,
++			&path.hop_count,
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5],
++			&path.next_hop[0],
++			&path.next_hop[1],
++			&path.next_hop[2],
++			&path.next_hop[3],
++			&path.next_hop[4],
++			&path.next_hop[5]);
++
++	path.flags |= IEEE80211_MESH_PATH_ACTIVE | IEEE80211_MESH_PATH_RESOLVED;
++
++	if (ret != 14)
++		return -EINVAL;
++
++	/* Configure the mpath */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_ADD_MPATH,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpath ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpath_add = {
++	.open = simple_open,
++	.write = ath11k_nss_mpath_add,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_mpp_add(struct file *file,
++				   char __user *user_buf,
++				   size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
++			&path.da[0],
++			&path.da[1],
++			&path.da[2],
++			&path.da[3],
++			&path.da[4],
++			&path.da[5],
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5]);
++
++	path.flags |= IEEE80211_MESH_PATH_ACTIVE | IEEE80211_MESH_PATH_RESOLVED;
++
++	if (ret != 12)
++		return -EINVAL;
++
++	/* Configure the mpp */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_ADD_MPP,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpp ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpp_add = {
++	.open = simple_open,
++	.write = ath11k_nss_mpp_add,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_mpath_update(struct file *file,
++					char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%u %hhu %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %hhu %lu",
++			&path.metric,
++			&path.hop_count,
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5],
++			&path.next_hop[0],
++			&path.next_hop[1],
++			&path.next_hop[2],
++			&path.next_hop[3],
++			&path.next_hop[4],
++			&path.next_hop[5],
++			&path.mesh_gate,
++			&path.exp_time);
++
++
++	path.flags |= IEEE80211_MESH_PATH_ACTIVE | IEEE80211_MESH_PATH_RESOLVED;
++
++	if (ret != 16)
++		return -EINVAL;
++
++	/* Configure the mpath */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_UPDATE_MPATH,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpath ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpath_update = {
++	.open = simple_open,
++	.write = ath11k_nss_mpath_update,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_mpp_update(struct file *file,
++					char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
++			&path.da[0],
++			&path.da[1],
++			&path.da[2],
++			&path.da[3],
++			&path.da[4],
++			&path.da[5],
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5]);
++
++	path.flags |= IEEE80211_MESH_PATH_ACTIVE | IEEE80211_MESH_PATH_RESOLVED;
++
++	if (ret != 12)
++		return -EINVAL;
++
++	/* Configure the mpp */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_UPDATE_MPP,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpp ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpp_update = {
++	.open = simple_open,
++	.write = ath11k_nss_mpp_update,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++
++static ssize_t ath11k_nss_mpath_delete(struct file *file,
++					char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5]);
++
++	path.flags |= IEEE80211_MESH_PATH_DELETED;
++
++	if (ret != 6)
++		return -EINVAL;
++
++	/* Configure the mpath */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_DELETE_MPATH,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpath ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpath_del = {
++	.open = simple_open,
++	.write = ath11k_nss_mpath_delete,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_mpp_delete(struct file *file,
++					char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct ieee80211_mesh_path_offld path = {0};
++	u8 buf[128] = {0};
++	int ret;
++
++	if (!arvif->ar->ab->nss.debug_mode) {
++		ret = -EPERM;
++		return ret;
++	}
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
++			&path.da[0],
++			&path.da[1],
++			&path.da[2],
++			&path.da[3],
++			&path.da[4],
++			&path.da[5],
++			&path.mesh_da[0],
++			&path.mesh_da[1],
++			&path.mesh_da[2],
++			&path.mesh_da[3],
++			&path.mesh_da[4],
++			&path.mesh_da[5]);
++
++	path.flags |= IEEE80211_MESH_PATH_DELETED;
++
++	if (ret != 12)
++		return -EINVAL;
++
++	/* Configure the mpp */
++	ret = ath11k_nss_mesh_config_path(arvif->ar, arvif,
++			IEEE80211_MESH_PATH_OFFLD_CMD_DELETE_MPP,
++			&path);
++	if(ret) {
++		ath11k_warn(arvif->ar->ab, "failed to configure mpp ret %d\n", ret);
++		return -EINVAL;
++	}
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_mpp_del = {
++	.open = simple_open,
++	.write = ath11k_nss_mpp_delete,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++
++static ssize_t ath11k_nss_assoc_link(struct file *file,
++				     char __user *user_buf,
++				     size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	u8 buf[128] = {0};
++	int ret;
++	u32 assoc_link = 0;
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%u", &assoc_link);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	arvif->ar->ab->nss.debug_mode = true;
++	arvif->vif->driver_flags |= IEEE80211_VIF_NSS_OFFLOAD_DEBUG_MODE;
++
++	ret = ath11k_nss_assoc_link_arvif_to_ifnum(arvif, assoc_link);
++
++	return ret ? ret : count;
++
++}
++
++static const struct file_operations fops_nss_assoc_link = {
++	.open = simple_open,
++	.write = ath11k_nss_assoc_link,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_links(struct file *file,
++				  char __user *user_buf,
++				  size_t count, loff_t *ppos)
++{
++	char buf[512] = {0};
++	struct arvif_nss *nss;
++	int len = 0;
++
++	list_for_each_entry(nss, &mesh_vaps, list)
++		len += scnprintf(buf + len, sizeof(buf) - len, "link id %d\n",
++				nss->if_num);
++
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static const struct file_operations fops_nss_links = {
++	.open = simple_open,
++	.read = ath11k_nss_links,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_vap_link_id(struct file *file,
++				  char __user *user_buf,
++				  size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	struct arvif_nss *nss = &arvif->nss;
++	char buf[512] = {0};
++	int len = 0;
++
++	len = scnprintf(buf, sizeof(buf) - len, "link id %d\n",
++			nss->if_num);
++
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static const struct file_operations fops_nss_vap_link_id = {
++	.open = simple_open,
++	.read = ath11k_nss_vap_link_id,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_read_mpp_mode(struct file *file,
++				  char __user *user_buf,
++				  size_t count, loff_t *ppos)
++{
++	char buf[512] = {0};
++	int len = 0;
++
++	len = scnprintf(buf, sizeof(buf) - len, "%s\n",mpp_mode ?
++			"Host Assisted Learning" : "NSS Independent Learning");
++
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static ssize_t ath11k_nss_write_mpp_mode(struct file *file,
++				  char __user *user_buf,
++				  size_t count, loff_t *ppos)
++{
++	u8 buf[128] = {0};
++	int ret;
++	u32 mppath_mode = 0;
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++	ret = sscanf(buf, "%u", &mppath_mode);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	mpp_mode = mppath_mode;
++
++	ret = 0;
++
++	return ret ? ret : count;
++}
++
++static const struct file_operations fops_nss_mpp_mode = {
++	.open = simple_open,
++	.write = ath11k_nss_write_mpp_mode,
++	.read = ath11k_nss_read_mpp_mode,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
++static ssize_t ath11k_nss_write_excep_flags(struct file *file,
++				  char __user *user_buf,
++				  size_t count, loff_t *ppos)
++{
++	struct ath11k_vif *arvif = file->private_data;
++	u8 buf[128] = {0};
++	int ret;
++	struct nss_wifi_mesh_exception_flag_msg msg;
++	u32 flags;
++
++	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos, user_buf, count);
++	if (ret < 0)
++		return ret;
++
++	buf[ret] = '\0';
++
++	ret = sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx 0x%x",
++			&msg.dest_mac_addr[0],
++			&msg.dest_mac_addr[1],
++			&msg.dest_mac_addr[2],
++			&msg.dest_mac_addr[3],
++			&msg.dest_mac_addr[4],
++			&msg.dest_mac_addr[5],
++			&flags);
++
++	if (ret != 7)
++		return -EINVAL;
++
++	ret = ath11k_nss_mesh_exception_flags(arvif, &msg, &flags);
++
++	return ret ? ret : count;
++}
++
++static const struct file_operations fops_nss_excep_flags = {
++	.open = simple_open,
++	.write = ath11k_nss_write_excep_flags,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++
 +void ath11k_debugfs_nss_mesh_vap_create(struct ath11k_vif *arvif)
 +{
++	struct dentry *debugfs_nss_mesh_dir, *debugfs_dbg_infra;
++
++	debugfs_nss_mesh_dir = debugfs_create_dir("nss_mesh", arvif->vif->debugfs_dir);
++	debugfs_dbg_infra = debugfs_create_dir("dbg_infra", debugfs_nss_mesh_dir);
++
 +	debugfs_create_file("mesh_obj_nss_stats_sync", 0600,
-+			arvif->vif->debugfs_dir, arvif,
++			debugfs_nss_mesh_dir, arvif,
 +			&fops_nss_mesh_obj_stats_sync);
 +
 +	debugfs_create_file("dump_nss_mpath_table", 0600,
-+			arvif->vif->debugfs_dir, arvif,
++			debugfs_nss_mesh_dir, arvif,
 +			&fops_nss_dump_mpath_table);
 +
 +	debugfs_create_file("dump_nss_mpp_table", 0600,
-+			arvif->vif->debugfs_dir, arvif,
++			debugfs_nss_mesh_dir, arvif,
 +			&fops_nss_dump_mpp_table);
++
++	debugfs_create_file("mpath_add", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpath_add);
++
++	debugfs_create_file("mpath_update", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpath_update);
++
++	debugfs_create_file("mpath_del", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpath_del);
++
++	debugfs_create_file("mpp_add", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpp_add);
++
++	debugfs_create_file("mpp_update", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpp_update);
++
++	debugfs_create_file("mpp_del", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_mpp_del);
++
++	debugfs_create_file("assoc_link", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_assoc_link);
++
++	debugfs_create_file("vap_linkid", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_vap_link_id);
++
++	debugfs_create_file("excep_flags", 0200,
++			debugfs_dbg_infra, arvif,
++			&fops_nss_excep_flags);
++}
++
++void ath11k_debugfs_nss_soc_create(struct ath11k_base *ab)
++{
++	struct dentry *debugfs_dbg_infra;
++
++	debugfs_dbg_infra = debugfs_create_dir("dbg_infra", debugfs_ath11k);
++
++	debugfs_create_file("links", 0200,
++			debugfs_dbg_infra, ab,
++			&fops_nss_links);
++
++	debugfs_create_file("mpp_mode", 0600,
++			debugfs_dbg_infra, ab,
++			&fops_nss_mpp_mode);
 +}
 +
 +#endif
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/debug_nss.h
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,30 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -418,11 +990,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +#define ATH11K_NSS_MPATH_DUMP_TIMEOUT (2 * HZ)
 +
 +struct ath11k_vif;
++extern enum nss_wifi_mesh_mpp_learning_mode mpp_mode;
++extern struct list_head mesh_vaps;
 +
 +#ifdef CPTCFG_MAC80211_DEBUGFS
 +void ath11k_debugfs_nss_mesh_vap_create(struct ath11k_vif *arvif);
++void ath11k_debugfs_nss_soc_create(struct ath11k_base *ab);
 +#else
 +static inline void ath11k_debugfs_nss_mesh_vap_create(struct ath11k_vif *arvif)
++{
++}
++static inline void ath11k_debugfs_nss_soc_create(struct ath11k_base *ab)
 +{
 +}
 +#endif
@@ -728,7 +1306,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	else
  		ret = ath11k_dp_tx(ar, arvif, skb,
  				   (control->sta) ? control->sta->drv_priv : NULL);
-@@ -8331,6 +8341,23 @@ static void ath11k_mac_op_sta_statistics
+@@ -8329,6 +8339,28 @@ static void ath11k_mac_op_sta_statistics
  	ath11k_nss_update_sta_stats(sinfo, sta, arsta);
  }
  
@@ -743,6 +1321,11 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct ath11k_vif *arvif = (void *)vif->drv_priv;
 +	int ret;
 +
++	if (arvif->ar->ab->nss.debug_mode) {
++		ret = 0;
++		return;
++	}
++
 +	ret = ath11k_nss_mesh_config_path(ar, arvif, cmd, path);
 +	if (ret)
 +		ath11k_warn(ar->ab, "failed to configure path entry to mesh table %d\n", ret);
@@ -752,7 +1335,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #define ATH11K_WLAN_PRIO_MAX	0x63
  #define ATH11K_WLAN_PRIO_WEIGHT	0xff
  
-@@ -8454,6 +8481,9 @@ static const struct ieee80211_ops ath11k
+@@ -8452,6 +8484,9 @@ static const struct ieee80211_ops ath11k
  #ifdef CPTCFG_ATH11K_DEBUGFS
  	.sta_add_debugfs		= ath11k_sta_add_debugfs,
  #endif
@@ -762,7 +1345,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  static const struct ieee80211_iface_limit ath11k_if_limits[] = {
-@@ -8922,6 +8952,8 @@ static int __ath11k_mac_register(struct
+@@ -8920,6 +8955,8 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, SUPPORTS_NSS_OFFLOAD);
  		wiphy_ext_feature_set(ar->hw->wiphy,
  				      NL80211_EXT_FEATURE_VLAN_OFFLOAD);
@@ -781,7 +1364,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #include "core.h"
  #include "peer.h"
  #include "dp_tx.h"
-@@ -32,6 +33,30 @@ ath11k_nss_get_vdev_opmode(struct ath11k
+@@ -14,6 +15,9 @@
+ #include "wmi.h"
+ #include "../../../../../net/mac80211/sta_info.h"
+ 
++enum nss_wifi_mesh_mpp_learning_mode mpp_mode = NSS_WIFI_MESH_MPP_LEARNING_MODE_INDEPENDENT_NSS;
++LIST_HEAD(mesh_vaps);
++
+ /*-----------------------------ATH11K-NSS Helpers--------------------------*/
+ 
+ static enum ath11k_nss_opmode
+@@ -32,6 +36,30 @@ ath11k_nss_get_vdev_opmode(struct ath11k
  	return ATH11K_NSS_OPMODE_UNKNOWN;
  }
  
@@ -812,7 +1405,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static void ath11k_nss_wifili_stats_sync(struct ath11k_base *ab,
  					 struct nss_wifili_stats_sync_msg *wlsoc_stats)
  {
-@@ -264,6 +289,14 @@ void ath11k_nss_wifili_event_receive(str
+@@ -264,6 +292,14 @@ void ath11k_nss_wifili_event_receive(str
  
  	switch (msg_type) {
  	case NSS_WIFILI_INIT_MSG:
@@ -827,7 +1420,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	case NSS_WIFILI_PDEV_INIT_MSG:
  	case NSS_WIFILI_START_MSG:
  	case NSS_WIFILI_SOC_RESET_MSG:
-@@ -272,7 +305,6 @@ void ath11k_nss_wifili_event_receive(str
+@@ -272,7 +308,6 @@ void ath11k_nss_wifili_event_receive(str
  		ab->nss.response = response;
  		complete(&ab->nss.complete);
  		break;
@@ -835,7 +1428,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	case NSS_WIFILI_PEER_CREATE_MSG:
  		if (response != NSS_CMN_RESPONSE_EMSG)
  			break;
-@@ -747,8 +779,6 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -747,8 +782,6 @@ ath11k_nss_vdev_special_data_receive(str
  {
  	struct nss_wifi_vdev_per_packet_metadata *wifi_metadata = NULL;
  	struct nss_wifi_vdev_wds_per_packet_metadata *wds_metadata = NULL;
@@ -844,7 +1437,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	struct ath11k_vif *arvif;
  	struct ath11k_base *ab;
  	bool drop = false;
-@@ -756,24 +786,7 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -756,24 +789,7 @@ ath11k_nss_vdev_special_data_receive(str
  	int data_offs = 0;
  	int ret = 0;
  
@@ -870,58 +1463,36 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (!arvif) {
  		dev_kfree_skb_any(skb);
  		return;
-@@ -931,215 +944,1250 @@ ath11k_nss_ext_vdev_data_receive(struct
+@@ -931,218 +947,1331 @@ ath11k_nss_ext_vdev_data_receive(struct
  	ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
  }
  
 -int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
--{
++/*------Mesh offload------*/
++
++void ath11k_nss_mesh_wifili_event_receive(void *app_data,
++					  struct nss_cmn_msg *cmn_msg)
+ {
 -	struct ath11k *ar = arvif->ar;
 -	nss_tx_status_t status;
 -	int encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
 -	struct ath11k_soc_dp_stats *soc_stats = &ar->ab->soc_stats;
--
--	if(encap_type != arvif->nss.encap) {
--		ath11k_warn(ar->ab, "encap mismatch in nss tx skb encap type %d" \
--			    "vif encap type %d\n", encap_type, arvif->nss.encap);
--		goto drop;
--	}
--
--	if (encap_type == HAL_TCL_ENCAP_TYPE_ETHERNET)
--		goto send;
-+/*------Mesh offload------*/
- 
--	if (encap_type == HAL_TCL_ENCAP_TYPE_RAW)
--		ath11k_nss_tx_encap_raw(skb);
--	else
--		ath11k_nss_tx_encap_nwifi(skb);
-+void ath11k_nss_mesh_wifili_event_receive(void *app_data,
-+					  struct nss_cmn_msg *cmn_msg)
-+{
 +	struct nss_wifi_mesh_msg *msg = (struct nss_wifi_mesh_msg *)cmn_msg;
 +	struct ath11k_base *ab = app_data;
 +	u32 msg_type = msg->cm.type;
 +	enum nss_cmn_response response = msg->cm.response;
 +	u32 error =  msg->cm.error;
  
--send:
--	ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX,
--			arvif->vif->type == NL80211_IFTYPE_AP_VLAN ? "ext vdev" : "",
--			"nss tx msdu: ", skb->data, skb->len);
+-	if(encap_type != arvif->nss.encap) {
+-		ath11k_warn(ar->ab, "encap mismatch in nss tx skb encap type %d" \
+-			    "vif encap type %d\n", encap_type, arvif->nss.encap);
+-		goto drop;
 +	if (!ab)
 +		return;
- 
--	if (arvif->vif->type == NL80211_IFTYPE_AP_VLAN)
--		status = nss_wifi_ext_vdev_tx_buf(arvif->nss.ctx, skb,
--						  arvif->nss.if_num);
--	else
--		status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb,
--					      arvif->nss.if_num);
++
 +	ath11k_dbg(ab, ATH11K_DBG_NSS_MESH, "nss mesh event received %d response %d error %d\n",
 +		   msg_type, response, error);
- 
--	if (status != NSS_TX_SUCCESS)
--		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
++
 +	switch (msg_type) {
 +	case NSS_WIFI_MESH_MSG_MPATH_ADD:
 +		if (response == NSS_CMN_RESPONSE_EMSG)
@@ -968,17 +1539,19 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +				    (&msg->msg.proxy_del_msg)->dest_mac_addr,
 +				    (&msg->msg.proxy_del_msg)->mesh_dest_mac_addr);
 +		break;
++	case NSS_WIFI_MESH_MSG_EXCEPTION_FLAG:
++		if (response == NSS_CMN_RESPONSE_EMSG)
++			ath11k_warn(ab,"failed to add the exception  da %pM\n",
++				    (&msg->msg.exception_msg)->dest_mac_addr);
++		break;
 +	default:
 +		ath11k_dbg(ab, ATH11K_DBG_NSS_MESH, "unhandled event %d\n", msg_type);
 +		break;
-+	}
+ 	}
 +}
  
--	return status;
--drop:
--	atomic_inc(&soc_stats->tx_err.misc_fail);
--	WARN_ON_ONCE(1);
--	return -EINVAL;
+-	if (encap_type == HAL_TCL_ENCAP_TYPE_ETHERNET)
+-		goto send;
 +static void nss_mesh_convert_path_flags(u16 *dest, u16 *src, bool to_nss)
 +{
 +	if (to_nss) {
@@ -1000,84 +1573,110 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +		if (*src & NSS_WIFI_MESH_PATH_FLAG_FIXED)
 +			*dest |= IEEE80211_MESH_PATH_FIXED;
 +	}
- }
++}
  
--int ath11k_nss_vdev_set_cmd(struct ath11k_vif *arvif, int cmd, int val)
+-	if (encap_type == HAL_TCL_ENCAP_TYPE_RAW)
+-		ath11k_nss_tx_encap_raw(skb);
+-	else
+-		ath11k_nss_tx_encap_nwifi(skb);
 +static void ath11k_nss_mesh_mpath_refresh(struct ath11k_vif *arvif,
 +					  struct nss_wifi_mesh_msg *msg)
- {
--	struct nss_wifi_vdev_msg *vdev_msg = NULL;
--	struct nss_wifi_vdev_cmd_msg *vdev_cmd;
--	struct ath11k *ar = arvif->ar;
--	nss_tx_status_t status;
++{
 +	struct ath11k_base *ab = arvif->ar->ab;
 +	struct nss_wifi_mesh_path_refresh_msg *refresh_msg;
 +	struct ieee80211_mesh_path_offld path = {0};
 +	int ret;
  
--	if (!ar->ab->nss.enabled)
--		return 0;
+-send:
+-	ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX,
+-			arvif->vif->type == NL80211_IFTYPE_AP_VLAN ? "ext vdev" : "",
+-			"nss tx msdu: ", skb->data, skb->len);
 +	refresh_msg = &msg->msg.path_refresh_msg;
 +	ether_addr_copy(path.mesh_da, refresh_msg->dest_mac_addr);
 +	ether_addr_copy(path.next_hop, refresh_msg->next_hop_mac_addr);
  
--	/* Monitor interface is not offloaded to nss */
--	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
--		return 0;
+-	if (arvif->vif->type == NL80211_IFTYPE_AP_VLAN)
+-		status = nss_wifi_ext_vdev_tx_buf(arvif->nss.ctx, skb,
+-						  arvif->nss.if_num);
+-	else
+-		status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb,
+-					      arvif->nss.if_num);
 +	ath11k_dbg(ab, ATH11K_DBG_NSS,
 +		   "Mesh path refresh event from nss, mDA %pM next_hop %pM link_vdev %d\n",
 +		   refresh_msg->dest_mac_addr, refresh_msg->next_hop_mac_addr,
 +		   refresh_msg->link_vap_id);
  
--	vdev_msg = kzalloc(sizeof(*vdev_msg), GFP_ATOMIC);
--	if (!vdev_msg)
--		return -ENOMEM;
+-	if (status != NSS_TX_SUCCESS)
+-		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
+ 
+-	return status;
+-drop:
+-	atomic_inc(&soc_stats->tx_err.misc_fail);
+-	WARN_ON_ONCE(1);
+-	return -EINVAL;
++	if (ab->nss.debug_mode)
++		return;
++
 +	ret = ieee80211_mesh_path_offld_change_notify(arvif->vif, &path,
 +			IEEE80211_MESH_PATH_OFFLD_ACTION_MPATH_REFRESH);
 +	if (ret)
 +		ath11k_warn(ab, "failed to notify mpath refresh nss event %d\n", ret);
-+}
+ }
  
--	ATH11K_MEMORY_STATS_INC(ar->ab, malloc_size, sizeof(*vdev_msg));
+-int ath11k_nss_vdev_set_cmd(struct ath11k_vif *arvif, int cmd, int val)
 +static void ath11k_nss_mesh_path_not_found(struct ath11k_vif *arvif,
 +					   struct nss_wifi_mesh_msg *msg)
-+{
+ {
+-	struct nss_wifi_vdev_msg *vdev_msg = NULL;
+-	struct nss_wifi_vdev_cmd_msg *vdev_cmd;
+-	struct ath11k *ar = arvif->ar;
+-	nss_tx_status_t status;
+-
+-	if (!ar->ab->nss.enabled)
+-		return 0;
 +	struct ath11k_base *ab = arvif->ar->ab;
 +	struct nss_wifi_mesh_mpath_not_found_msg *err_msg;
 +	struct ieee80211_mesh_path_offld path = {0};
 +	int ret;
+ 
+-	/* Monitor interface is not offloaded to nss */
+-	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
+-		return 0;
++	err_msg = &msg->msg.mpath_not_found_msg;
++	ether_addr_copy(path.da, err_msg->dest_mac_addr);
++	if (err_msg->is_mesh_forward_path)
++		ether_addr_copy(path.ta, err_msg->transmitter_mac_addr);
+ 
+-	vdev_msg = kzalloc(sizeof(*vdev_msg), GFP_ATOMIC);
+-	if (!vdev_msg)
+-		return -ENOMEM;
++	ath11k_dbg(ab, ATH11K_DBG_NSS,
++		   "Mesh path not found event from nss, (m)DA %pM ta %pM link vap %d\n",
++		   err_msg->dest_mac_addr, err_msg->transmitter_mac_addr, err_msg->link_vap_id);
+ 
+-	ATH11K_MEMORY_STATS_INC(ar->ab, malloc_size, sizeof(*vdev_msg));
  
 -	/* TODO: Convert to function for conversion in case of many
 -	 * such commands
 -	 */
 -	if (cmd == NSS_WIFI_VDEV_SECURITY_TYPE_CMD)
 -		val = ath11k_nss_cipher_type(ar->ab, val);
-+	err_msg = &msg->msg.mpath_not_found_msg;
-+	ether_addr_copy(path.da, err_msg->dest_mac_addr);
-+	if (err_msg->is_mesh_forward_path)
-+		ether_addr_copy(path.ta, err_msg->transmitter_mac_addr);
++	if (ab->nss.debug_mode)
++		return;
  
 -	if (cmd == NSS_WIFI_VDEV_ENCAP_TYPE_CMD)
 -		arvif->nss.encap = val;
 -	else if (cmd == NSS_WIFI_VDEV_DECAP_TYPE_CMD)
 -		arvif->nss.decap = val;
-+	ath11k_dbg(ab, ATH11K_DBG_NSS,
-+		   "Mesh path not found event from nss, (m)DA %pM ta %pM link vap %d\n",
-+		   err_msg->dest_mac_addr, err_msg->transmitter_mac_addr, err_msg->link_vap_id);
++	ret = ieee80211_mesh_path_offld_change_notify(arvif->vif, &path,
++			IEEE80211_MESH_PATH_OFFLD_ACTION_PATH_NOT_FOUND);
++	if (ret)
++		ath11k_warn(ab, "failed to notify mpath not found nss event %d\n", ret);
++}
  
 -	vdev_cmd = &vdev_msg->msg.vdev_cmd;
 -	vdev_cmd->cmd = cmd;
 -	vdev_cmd->value = val;
-+	ret = ieee80211_mesh_path_offld_change_notify(arvif->vif, &path,
-+			IEEE80211_MESH_PATH_OFFLD_ACTION_PATH_NOT_FOUND);
-+	if (ret)
-+		ath11k_warn(ab, "failed to notify mpath refresh nss event %d\n", ret);
-+}
- 
--	nss_wifi_vdev_msg_init(vdev_msg, arvif->nss.if_num,
--			       NSS_WIFI_VDEV_INTERFACE_CMD_MSG,
--			       sizeof(struct nss_wifi_vdev_cmd_msg),
--			       NULL, NULL);
 +static void ath11k_nss_mesh_path_delete(struct ath11k_vif *arvif,
 +					struct nss_wifi_mesh_msg *msg)
 +{
@@ -1086,13 +1685,21 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct ieee80211_mesh_path_offld path = {0};
 +	int ret;
  
+-	nss_wifi_vdev_msg_init(vdev_msg, arvif->nss.if_num,
+-			       NSS_WIFI_VDEV_INTERFACE_CMD_MSG,
+-			       sizeof(struct nss_wifi_vdev_cmd_msg),
+-			       NULL, NULL);
++	ether_addr_copy(path.mesh_da, del_msg->mesh_dest_mac_addr);
+ 
 -	status = nss_wifi_vdev_tx_msg(ar->nss.ctx, vdev_msg);
 -	if (status != NSS_TX_SUCCESS) {
 -		ath11k_warn(ar->ab, "nss vdev set cmd failure cmd:%d val:%d",
 -			    cmd, val);
 -		goto free;
 -	}
-+	ether_addr_copy(path.mesh_da, del_msg->mesh_dest_mac_addr);
++	ath11k_dbg(ab, ATH11K_DBG_NSS,
++		   "Mesh path delete event from nss, mDA %pM vap_id %d\n",
++		   del_msg->mesh_dest_mac_addr, del_msg->link_vap_id);
  
 -	ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss vdev set cmd success cmd:%d val:%d\n",
 -		   cmd, val);
@@ -1100,10 +1707,6 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 -	ATH11K_MEMORY_STATS_DEC(ar->ab, malloc_size, sizeof(*vdev_msg));
 -	kfree(vdev_msg);
 -	return status;
-+	ath11k_dbg(ab, ATH11K_DBG_NSS,
-+		   "Mesh path delete event from nss, mDA %pM vap_id %d\n",
-+		   del_msg->mesh_dest_mac_addr, del_msg->link_vap_id);
-+
 +	ret = ieee80211_mesh_path_offld_change_notify(arvif->vif, &path,
 +			IEEE80211_MESH_PATH_OFFLD_ACTION_MPATH_DEL);
 +	if (ret)
@@ -1295,16 +1898,19 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 -		return -ENOTSUPP;
 -	}
 +	stats_msg = &msg->msg.stats_sync_msg;
-+
+ 
+-	return 0;
 +	memcpy(stats, stats_msg, sizeof(struct nss_wifi_mesh_stats_sync_msg));
 +
 +	spin_unlock_bh(&ar->data_lock);
-+}
-+
+ }
+ 
+-void ath11k_nss_vdev_free(struct ath11k_vif *arvif)
 +static int
 +ath11k_nss_mesh_process_path_table_dump_msg(struct ath11k_vif *arvif,
 +				     struct nss_wifi_mesh_msg *msg)
-+{
+ {
+-	struct ath11k_base *ab = arvif->ar->ab;
 +	struct nss_wifi_mesh_path_table_dump *mpath_dump = &msg->msg.mpath_table_dump;
 +	struct ath11k_nss_mpath_entry *entry;
 +	ssize_t len;
@@ -1353,6 +1959,27 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	arvif->nss.mpp_dump_num_entries += mpp_dump->num_entries;
 +
 +	return 0;
++}
++
++int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
++			       struct nss_wifi_mesh_exception_flag_msg *nss_msg, u32 flags)
++{
++	nss_wifi_mesh_msg_callback_t msg_cb;
++	nss_tx_status_t status;
++	int ret = 0;
++
++	nss_msg->exception = flags;
++	msg_cb = (nss_wifi_mesh_msg_callback_t)ath11k_nss_mesh_wifili_event_receive;
++
++	status = nss_wifi_meshmgr_mesh_path_exception(arvif->nss.mesh_handle, nss_msg,
++			msg_cb, arvif->ar->ab);
++
++	if (status != NSS_TX_SUCCESS) {
++		ath11k_warn(arvif->ar->ab, "failed to set the exception flags\n");
++		ret = -EINVAL;
++	}
++
++	return ret;
 +}
 +
 +static void ath11k_nss_mesh_obj_vdev_event_receive(struct net_device *dev,
@@ -1535,7 +2162,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	return ret;
 +}
 +
-+static int ath11k_to_nss_mesh_mpp_add(struct ath11k_vif *arvif,
++static int ath11k_nss_mesh_mpp_add_cmd(struct ath11k_vif *arvif,
 +			      struct ieee80211_mesh_path_offld *path)
 +{
 +	nss_wifi_mesh_msg_callback_t msg_cb;
@@ -1571,7 +2198,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	return ret;
 +}
 +
-+static int ath11k_to_nss_mesh_mpp_update(struct ath11k_vif *arvif,
++static int ath11k_nss_mesh_mpp_update_cmd(struct ath11k_vif *arvif,
 +			      struct ieee80211_mesh_path_offld *path)
 +{
 +	nss_wifi_mesh_msg_callback_t msg_cb;
@@ -1609,7 +2236,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	return ret;
 +}
 +
-+static int ath11k_to_nss_mesh_mpp_del(struct ath11k_vif *arvif,
++static int ath11k_nss_mesh_mpp_del_cmd(struct ath11k_vif *arvif,
 +			      struct ieee80211_mesh_path_offld *path)
 +{
 +	nss_wifi_mesh_msg_callback_t msg_cb;
@@ -1665,13 +2292,13 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +		ret = ath11k_nss_mesh_mpath_del(arvif, path);
 +		break;
 +	case IEEE80211_MESH_PATH_OFFLD_CMD_ADD_MPP:
-+		ret = ath11k_to_nss_mesh_mpp_add(arvif, path);
++		ret = ath11k_nss_mesh_mpp_add_cmd(arvif, path);
 +		break;
 +	case IEEE80211_MESH_PATH_OFFLD_CMD_UPDATE_MPP:
-+		ret = ath11k_to_nss_mesh_mpp_update(arvif, path);
++		ret = ath11k_nss_mesh_mpp_update_cmd(arvif, path);
 +		break;
 +	case IEEE80211_MESH_PATH_OFFLD_CMD_DELETE_MPP:
-+		ret = ath11k_to_nss_mesh_mpp_del(arvif, path);
++		ret = ath11k_nss_mesh_mpp_del_cmd(arvif, path);
 +		break;
 +	default:
 +		ath11k_warn(ar->ab, "unknown mesh path table command type %d\n", cmd);
@@ -1794,6 +2421,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +{
 +	struct ath11k_vif *arvif;
 +	struct ath11k_base *ab;
++	char dump_msg[100] = {0};
 +
 +	arvif = ath11k_nss_get_arvif_from_dev(dev);
 +	if (!arvif) {
@@ -1805,7 +2433,10 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	skb->dev = dev;
 +
-+	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "dp rx msdu from nss on mesh obj vdev: ",
++	snprintf(dump_msg, sizeof(dump_msg), "nss mesh obj vdev: link id %d ",
++		 arvif->nss.if_num);
++
++	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "dp rx msdu from nss", dump_msg,
 +			skb->data, skb->len);
 +
 +	ath11k_nss_deliver_rx(arvif->vif, skb, true, 0, napi);
@@ -1915,6 +2546,12 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +		rxcb->is_continuation = false;
 +		ath11k_dp_rx_from_nss(arvif->ar, skb, napi);
 +		break;
++	case WIFI_MESH_EXT_DATA_PKT_TYPE_EXCEPTION:
++		ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "",
++				"static exception path from nss on mesh link vdev: ",
++				skb->data, skb->len);
++		dev_kfree_skb_any(skb);
++		break;
 +	}
 +}
 +
@@ -1924,8 +2561,9 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	nss_tx_status_t status;
 +	int encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
 +	struct ath11k_soc_dp_stats *soc_stats = &ar->ab->soc_stats;
++	char dump_msg[100] = {0};
 +
-+	if(encap_type != arvif->nss.encap) {
++	if (!arvif->ar->ab->nss.debug_mode && encap_type != arvif->nss.encap) {
 +		ath11k_warn(ar->ab, "encap mismatch in nss tx skb encap type %d" \
 +			    "vif encap type %d\n", encap_type, arvif->nss.encap);
 +		goto drop;
@@ -1940,16 +2578,42 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +		ath11k_nss_tx_encap_nwifi(skb);
 +
 +send:
-+	ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX,
-+			arvif->vif->type == NL80211_IFTYPE_AP_VLAN ? "ext vdev" : "",
-+			"nss tx msdu: ", skb->data, skb->len);
-+
-+	if (arvif->vif->type == NL80211_IFTYPE_AP_VLAN)
++	if (arvif->vif->type == NL80211_IFTYPE_AP_VLAN) {
++		ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX, "ext vdev",
++				"nss tx msdu: ", skb->data, skb->len);
 +		status = nss_wifi_ext_vdev_tx_buf(arvif->nss.ctx, skb,
 +						  arvif->nss.if_num);
-+	else
-+		status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb,
-+					      arvif->nss.if_num);
++	} else {
++		if (arvif->ar->ab->nss.debug_mode) {
++			if (encap_type == HAL_TCL_ENCAP_TYPE_ETHERNET &&
++			    !is_multicast_ether_addr(skb->data)) {
++				snprintf(dump_msg, sizeof(dump_msg),
++					 "nss tx ucast msdu: %d ",
++					 arvif->nss.mesh_handle);
++				ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX, "mesh",
++						dump_msg, skb->data, skb->len);
++				status = nss_wifi_meshmgr_tx_buf(arvif->nss.mesh_handle,
++								 skb);
++			} else {
++				snprintf(dump_msg, sizeof(dump_msg),
++					 "nss tx mcast msdu: %d ",
++					 arvif->nss.if_num);
++				ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX, "mesh",
++						dump_msg, skb->data, skb->len);
++				status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb,
++							      arvif->nss.if_num);
++			}
++		} else {
++			snprintf(dump_msg, sizeof(dump_msg),
++				 "nss tx msdu: %d ",
++				 arvif->nss.if_num);
++			ath11k_dbg_dump(ar->ab, ATH11K_DBG_DP_TX, "",
++					dump_msg, skb->data, skb->len);
++			status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb,
++						      arvif->nss.if_num);
++		}
++	}
++
 +	if (status != NSS_TX_SUCCESS)
 +		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
 +
@@ -2078,6 +2742,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +static int ath11k_nss_mesh_obj_assoc_link_vap(struct ath11k_vif *arvif)
 +{
 +	struct nss_wifi_mesh_assoc_link_vap *msg;
++	struct ath11k_base *ab = arvif->ar->ab;
 +	nss_tx_status_t status;
 +	int ret;
 +
@@ -2087,9 +2752,12 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	msg->link_vap_id = arvif->nss.if_num;
 +
++	ath11k_dbg(ab, ATH11K_DBG_NSS_MESH, "nss mesh assoc link vap %d, mesh handle %d\n",
++		   arvif->nss.if_num, arvif->nss.mesh_handle);
++
 +	status = nss_wifi_meshmgr_assoc_link_vap_sync(arvif->nss.mesh_handle, msg);
 +	if (status != NSS_TX_SUCCESS) {
-+		ath11k_warn(arvif->ar->ab, "failed mesh obj vdev tx msg for assoc link vap nss_err:%d\n",
++		ath11k_warn(ab, "failed mesh obj vdev tx msg for assoc link vap nss_err:%d\n",
 +			    status);
 +		ret = -EINVAL;
 +		goto free;
@@ -2235,16 +2903,16 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +			    arvif->vif->type);
 +		return -ENOTSUPP;
 +	}
- 
- 	return 0;
- }
- 
++
++	return 0;
++}
++
 +static void ath11k_nss_mesh_vdev_free(struct ath11k_vif *arvif)
 +{
 +	struct ath11k_base *ab = arvif->ar->ab;
 +	struct ath11k_nss_mpath_entry *mpath_entry, *mpath_tmp;
 +	struct ath11k_nss_mpp_entry *mpp_entry, *mpp_tmp;
-+	struct arvif_nss *nss = &arvif->nss;
++	struct arvif_nss *nss = &arvif->nss, *nss_entry, *nss_tmp;
 +	nss_tx_status_t status;
 +
 +	list_for_each_entry_safe(mpath_entry, mpath_tmp, &nss->mpath_dump, list) {
@@ -2256,6 +2924,9 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +		list_del(&mpp_entry->list);
 +		kfree(mpp_entry);
 +	}
++
++	list_for_each_entry_safe(nss_entry, nss_tmp, &mesh_vaps, list)
++		list_del(&nss_entry->list);
 +
 +	status = nss_dynamic_interface_dealloc_node(
 +						arvif->nss.if_num,
@@ -2277,10 +2948,13 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +			   "nss mesh object vdev interface deallocated\n");
 +}
 +
- void ath11k_nss_vdev_free(struct ath11k_vif *arvif)
- {
- 	struct ath11k_base *ab = arvif->ar->ab;
-@@ -1159,6 +2207,9 @@ void ath11k_nss_vdev_free(struct ath11k_
++void ath11k_nss_vdev_free(struct ath11k_vif *arvif)
++{
++	struct ath11k_base *ab = arvif->ar->ab;
+ 	nss_tx_status_t status;
+ 
+ 	switch (arvif->vif->type) {
+@@ -1159,6 +2288,9 @@ void ath11k_nss_vdev_free(struct ath11k_
  				   "nss vdev interface deallocated\n");
  
  		return;
@@ -2290,11 +2964,62 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev dealloc\n",
  			    arvif->vif->type);
-@@ -1166,11 +2217,38 @@ void ath11k_nss_vdev_free(struct ath11k_
+@@ -1166,15 +2298,99 @@ void ath11k_nss_vdev_free(struct ath11k_
  	}
  }
  
 -static int ath11k_nss_vdev_alloc(struct ath11k_vif *arvif)
++struct arvif_nss *ath11k_nss_find_arvif_by_if_num(int if_num)
++{
++	struct arvif_nss *nss;
++
++	list_for_each_entry(nss, &mesh_vaps, list) {
++		if (if_num == nss->if_num)
++			return nss;
++	}
++	return NULL;
++}
++
++int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif, int if_num)
++{
++	struct ath11k_base *ab = arvif->ar->ab;
++	struct ath11k_vif *arvif_link;
++	struct wireless_dev *wdev;
++	struct arvif_nss *nss;
++	int ret;
++
++	wdev = ieee80211_vif_to_wdev_relaxed(arvif->vif);
++	if (!wdev) {
++		ath11k_warn(ab, "ath11k_nss: wdev is null\n");
++		return -EINVAL;
++	}
++
++	if (!wdev->netdev) {
++		ath11k_warn(ab, "ath11k_nss: netdev is null\n");
++		return -EINVAL;
++	}
++
++	nss = ath11k_nss_find_arvif_by_if_num(if_num);
++	if (!nss) {
++		ath11k_warn(ab, "ath11k_nss: unable to find if_num %d\n",if_num);
++		return -EINVAL;
++	}
++
++	arvif_link = container_of(nss, struct ath11k_vif, nss);
++
++	ath11k_dbg(ab, ATH11K_DBG_NSS_MESH,
++		   "assoc link vap ifnum %d to mesh handle of link id %d\n",
++		   arvif_link->nss.if_num, arvif->nss.if_num);
++
++	arvif_link->nss.mesh_handle = arvif->nss.mesh_handle;
++
++	ret = ath11k_nss_mesh_obj_assoc_link_vap(arvif_link);
++	if (ret)
++		ath11k_warn(ab, "failed to associate link vap to mesh vap %d\n", ret);
++
++	return 0;
++}
++
 +static int ath11k_nss_mesh_vdev_alloc(struct ath11k_vif *arvif,
 +		struct net_device *netdev)
 +{
@@ -2311,6 +3036,9 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	}
 +
 +	arvif->nss.if_num = if_num;
++
++	INIT_LIST_HEAD(&arvif->nss.list);
++	list_add_tail(&arvif->nss.list, &mesh_vaps);
 +
 +	INIT_LIST_HEAD(&arvif->nss.mpath_dump);
 +	init_completion(&arvif->nss.dump_mpath_complete);
@@ -2330,7 +3058,14 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	/* Initialize completion for verifying NSS message response */
  	init_completion(&arvif->nss.complete);
-@@ -1192,6 +2270,14 @@ static int ath11k_nss_vdev_alloc(struct
+ 
++	/* Create a mesh links read debugfs entry */
++	ath11k_debugfs_nss_soc_create(ab);
++
+ 	switch (arvif->vif->type) {
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_STATION:
+@@ -1192,6 +2408,14 @@ static int ath11k_nss_vdev_alloc(struct
  			   arvif->nss.if_num);
  
  		break;
@@ -2345,7 +3080,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev alloc\n",
  			    arvif->vif->type);
-@@ -1229,7 +2315,7 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -1229,7 +2453,7 @@ int ath11k_nss_vdev_create(struct ath11k
  		return -EINVAL;
  	}
  
@@ -2354,7 +3089,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (ret)
  		return ret;
  
-@@ -1245,6 +2331,35 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -1245,6 +2469,35 @@ int ath11k_nss_vdev_create(struct ath11k
  			goto unregister_vdev;
  
  		break;
@@ -2390,7 +3125,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ret = -ENOTSUPP;
  		goto unregister_vdev;
-@@ -1300,6 +2415,14 @@ int ath11k_nss_vdev_up(struct ath11k_vif
+@@ -1300,6 +2553,14 @@ int ath11k_nss_vdev_up(struct ath11k_vif
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
  		return 0;
  
@@ -2405,7 +3140,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	vdev_msg = kzalloc(sizeof(struct nss_wifi_vdev_msg), GFP_ATOMIC);
  	if (!vdev_msg)
  		return -ENOMEM;
-@@ -1346,6 +2469,14 @@ int ath11k_nss_vdev_down(struct ath11k_v
+@@ -1346,6 +2607,14 @@ int ath11k_nss_vdev_down(struct ath11k_v
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
  		return 0;
  
@@ -2422,15 +3157,16 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  		return -ENOMEM;
 --- a/drivers/net/wireless/ath/ath11k/nss.h
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,8 @@
  
  #include <nss_api_if.h>
  #include <nss_cmn.h>
 +#include <nss_wifi_meshmgr.h>
++#include "../../../../../net/mac80211/mesh.h"
  
  struct ath11k;
  struct ath11k_base;
-@@ -19,8 +20,9 @@ struct hal_rx_mon_ppdu_info;
+@@ -19,8 +21,9 @@ struct hal_rx_mon_ppdu_info;
  
  /* NSS DBG macro is not included as part of debug enum to avoid
   * frequent changes during upgrade*/
@@ -2442,7 +3178,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  /* WIFILI Supported Target Types */
  #define ATH11K_WIFILI_TARGET_TYPE_UNKNOWN   0xFF
-@@ -62,6 +64,7 @@ struct hal_rx_mon_ppdu_info;
+@@ -62,13 +65,14 @@ struct hal_rx_mon_ppdu_info;
  /* Timeout for waiting for response from NSS on TX msg */
  #define ATH11K_NSS_MSG_TIMEOUT_MS 5000
  
@@ -2450,7 +3186,15 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  /* Init Flags */
  #define WIFILI_NSS_CCE_DISABLED 0x1
  #define WIFILI_ADDTL_MEM_SEG_SET 0x000000002
-@@ -138,10 +141,24 @@ struct ath11k_nss_peer {
+ 
+ /* ATH11K NSS PEER Info */
+ /* Host memory allocated for peer info storage in nss */
+-#define WIFILI_NSS_PEER_BYTE_SIZE 1152
++#define WIFILI_NSS_PEER_BYTE_SIZE 2048
+ 
+ /* ATH11K NSS Stats */
+ #define ATH11K_NSS_STATS_ENABLE 1
+@@ -138,10 +142,24 @@ struct ath11k_nss_peer {
  	struct peer_stats *nss_stats;
  };
  
@@ -2475,7 +3219,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	/* Used for completion status for vdev config nss messages */
  	struct completion complete;
  	/* Keep the copy of encap type for nss */
-@@ -155,6 +172,24 @@ struct arvif_nss {
+@@ -155,6 +173,25 @@ struct arvif_nss {
  	/* Keep the copy of di_type for nss */
  	enum nss_dynamic_interface_type di_type;
  	bool created;
@@ -2488,6 +3232,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct nss_wifi_mesh_stats_sync_msg mesh_stats;
 +
 +
++	struct list_head list;
 +	struct list_head mpath_dump;
 +	/* total number of mpath entries in all of the mpath_dump list */
 +	u32 mpath_dump_num_entries;
@@ -2500,7 +3245,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /* Structure to hold the pdev/radio related info for nss offload support */
-@@ -169,6 +204,8 @@ struct ath11k_nss {
+@@ -169,11 +206,15 @@ struct ath11k_nss {
  struct ath11k_soc_nss {
  	/* turn on/off nss offload support in ath11k */
  	bool enabled;
@@ -2509,7 +3254,14 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  #ifdef CPTCFG_ATH11K_NSS_SUPPORT
  	/* soc nss ctx */
  	void* ctx;
-@@ -226,6 +263,14 @@ void ath11k_nss_update_sta_rxrate(struct
+ 	/* if_num to be used for soc related nss messages */
+ 	int if_num;
++	/* debug mode to disable the regular mesh configuration from mac80211 */
++	bool debug_mode;
+ 	/* Completion to nss message response */
+ 	struct completion complete;
+ 	/* Response to nss messages are stored here on msg callback
+@@ -226,6 +267,17 @@ void ath11k_nss_update_sta_rxrate(struct
  int ath11k_nss_setup(struct ath11k_base *ab);
  int ath11k_nss_teardown(struct ath11k_base *ab);
  void ath11k_nss_ext_rx_stats(struct ath11k_base *ab, struct htt_rx_ring_tlv_filter *tlv_filter);
@@ -2521,10 +3273,13 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +				struct ieee80211_mesh_path_offld *path);
 +#endif
 +int ath11k_nss_mesh_config_update(struct ieee80211_vif *vif, int changed);
++int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif, int if_num);
++int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
++			       struct nss_wifi_mesh_exception_flag_msg *nss_msg, u32 flags);
  #else
  static inline int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
  {
-@@ -377,5 +422,20 @@ void ath11k_nss_ext_rx_stats(struct ath1
+@@ -377,5 +429,30 @@ void ath11k_nss_ext_rx_stats(struct ath1
  {
  	return;
  }
@@ -2540,6 +3295,16 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +#endif
 +static inline int
 +ath11k_nss_mesh_config_update(struct ieee80211_vif *vif, int changed)
++{
++	return 0;
++}
++static int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif,
++						int if_num)
++{
++	return 0;
++}
++static int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
++			       struct nss_wifi_mesh_exception_flag_msg *nss_msg, u32 flags)
 +{
 +	return 0;
 +}
@@ -2604,7 +3369,22 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /**
-@@ -2472,6 +2490,7 @@ enum ieee80211_hw_flags {
+@@ -1641,12 +1659,14 @@ struct ieee80211_channel_switch {
+  * @IEEE80211_VIF_GET_NOA_UPDATE: request to handle NOA attributes
+  *	and send P2P_PS notification to the driver if NOA changed, even
+  *	this is not pure P2P vif.
++ * @IEEE80211_HW_NSS_OFFLOAD_DEBUG_MODE: It enables the debug mode of nss offload.
+  */
+ enum ieee80211_vif_flags {
+ 	IEEE80211_VIF_BEACON_FILTER		= BIT(0),
+ 	IEEE80211_VIF_SUPPORTS_CQM_RSSI		= BIT(1),
+ 	IEEE80211_VIF_SUPPORTS_UAPSD		= BIT(2),
+ 	IEEE80211_VIF_GET_NOA_UPDATE		= BIT(3),
++	IEEE80211_VIF_NSS_OFFLOAD_DEBUG_MODE	= BIT(4),
+ };
+ 
+ /**
+@@ -2472,6 +2492,7 @@ enum ieee80211_hw_flags {
  	IEEE80211_HW_AMPDU_KEYBORDER_SUPPORT,
  	IEEE80211_HW_SUPPORTS_NSS_OFFLOAD,
  	IEEE80211_HW_SUPPORTS_MULTI_BSSID_AP,
@@ -2612,7 +3392,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
-@@ -3910,6 +3929,8 @@ enum ieee80211_reconfig_type {
+@@ -3910,6 +3931,8 @@ enum ieee80211_reconfig_type {
   * @set_tid_config: Apply TID specific configurations. This callback may sleep.
   * @reset_tid_config: Reset TID specific configuration for the peer.
   *	This callback may sleep.
@@ -2621,7 +3401,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
   */
  struct ieee80211_ops {
  	void (*tx)(struct ieee80211_hw *hw,
-@@ -4227,6 +4248,12 @@ struct ieee80211_ops {
+@@ -4227,6 +4250,12 @@ struct ieee80211_ops {
  	int (*reset_tid_config)(struct ieee80211_hw *hw,
  				struct ieee80211_vif *vif,
  				struct ieee80211_sta *sta, u8 tids);
@@ -2634,7 +3414,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  };
  
  /**
-@@ -6871,4 +6898,83 @@ void
+@@ -6871,4 +6900,83 @@ void
  ieeee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
  				       u64 color_bitmap);
  
@@ -3530,3 +4310,82 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  		}
  		rcu_read_unlock();
  	}
+--- a/drivers/net/wireless/ath/ath11k/debug.h
++++ b/drivers/net/wireless/ath/ath11k/debug.h
+@@ -13,6 +13,7 @@
+ #define ATH11K_TX_POWER_MIN_VAL	0
+ #define ATH11K_DEBUG_ENABLE_MEMORY_STATS 1
+ 
++extern struct dentry *debugfs_ath11k;
+ enum ath11k_debug_mask {
+ 	ATH11K_DBG_AHB		= 0x00000001,
+ 	ATH11K_DBG_WMI		= 0x00000002,
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -2534,6 +2534,9 @@ static struct sk_buff *ieee80211_build_h
+ 		info_flags |= IEEE80211_TX_CTL_REQ_TX_STATUS;
+ #endif
+ 
++	info = IEEE80211_SKB_CB(skb);
++	memset(info, 0, sizeof(*info));
++
+ 	/* convert Ethernet header to proper 802.11 header (based on
+ 	 * operation mode) */
+ 	ethertype = (skb->data[12] << 8) | skb->data[13];
+@@ -2594,6 +2597,13 @@ static struct sk_buff *ieee80211_build_h
+ 		break;
+ #ifdef CPTCFG_MAC80211_MESH
+ 	case NL80211_IFTYPE_MESH_POINT:
++		if (ieee80211_hw_check(&local->hw, SUPPORTS_NSS_OFFLOAD) &&
++		    (sdata->vif.driver_flags & IEEE80211_VIF_NSS_OFFLOAD_DEBUG_MODE) &&
++		    !(is_multicast_ether_addr(skb->data))) {
++			info->control.flags = IEEE80211_TX_CTRL_HW_80211_ENCAP;
++			goto nss_mesh;
++		}
++
+ 		if (!is_multicast_ether_addr(skb->data)) {
+ 			struct sta_info *next_hop;
+ 			bool mpp_lookup = true;
+@@ -2867,13 +2877,13 @@ static struct sk_buff *ieee80211_build_h
+ 
+ 	skb_reset_mac_header(skb);
+ 
+-	info = IEEE80211_SKB_CB(skb);
+-	memset(info, 0, sizeof(*info));
+-
++#ifdef CPTCFG_MAC80211_MESH
++nss_mesh:
++#endif
+ 	info->flags = info_flags;
+ 	info->ack_frame_id = info_id;
+ 	info->band = band;
+-	info->control.flags = ctrl_flags;
++	info->control.flags |= ctrl_flags;
+ 
+ 	return skb;
+  free:
+@@ -3944,6 +3954,7 @@ void __ieee80211_subif_start_xmit(struct
+ 	struct ieee80211_local *local = sdata->local;
+ 	struct sta_info *sta;
+ 	struct sk_buff *next;
++	struct ieee80211_tx_info *info;
+ 	struct ieee80211_sub_if_data *ap_sdata;
+ 
+ 	if (unlikely(skb->len < ETH_HLEN)) {
+@@ -4037,9 +4048,13 @@ void __ieee80211_subif_start_xmit(struct
+ 			goto out;
+ 		}
+ 
+-		ieee80211_tx_stats(dev, skb->len);
+-
+-		ieee80211_xmit(sdata, sta, skb);
++		info = IEEE80211_SKB_CB(skb);
++		if (info->control.flags & IEEE80211_TX_CTRL_HW_80211_ENCAP) {
++			ieee80211_8023_xmit(sdata, dev, sta, skb);
++		} else {
++			ieee80211_tx_stats(dev, skb->len);
++			ieee80211_xmit(sdata, sta, skb);
++		}
+ 	}
+ 	goto out;
+  out_free:
