@@ -15,8 +15,10 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  drivers/net/wireless/ath/ath11k/qmi.h  |  3 ++-
  5 files changed, 48 insertions(+), 28 deletions(-)
 
---- a/drivers/net/wireless/ath/ath11k/ahb.c
-+++ b/drivers/net/wireless/ath/ath11k/ahb.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ahb.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/ahb.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ahb.c
 @@ -11,6 +11,7 @@
  #include "ahb.h"
  #include "debug.h"
@@ -95,8 +97,10 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  
  	return 0;
  
---- a/drivers/net/wireless/ath/ath11k/core.h
-+++ b/drivers/net/wireless/ath/ath11k/core.h
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.h
 @@ -792,6 +792,7 @@ struct ath11k_base {
  	struct ath11k_targ_cap target_caps;
  	u32 ext_service_bitmap[WMI_SERVICE_EXT_BM_SIZE];
@@ -105,8 +109,10 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  	int bd_api;
  
  	struct ath11k_hw_params hw_params;
---- a/drivers/net/wireless/ath/ath11k/pci.c
-+++ b/drivers/net/wireless/ath/ath11k/pci.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/pci.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/pci.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/pci.c
 @@ -12,6 +12,7 @@
  #include "hif.h"
  #include "mhi.h"
@@ -131,8 +137,10 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  	return 0;
  
  err_free_irq:
---- a/drivers/net/wireless/ath/ath11k/qmi.c
-+++ b/drivers/net/wireless/ath/ath11k/qmi.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/qmi.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/qmi.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/qmi.c
 @@ -8,6 +8,7 @@
  #include "qmi.h"
  #include "core.h"
@@ -141,7 +149,43 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  #include <linux/of.h>
  #include <linux/firmware.h>
  #include <linux/devcoredump.h>
-@@ -2364,9 +2365,14 @@ static int ath11k_qmi_assign_target_mem_
+@@ -2297,6 +2298,25 @@ static int ath11k_qmi_alloc_target_mem_c
+ 
+ 	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
+ 		chunk = &ab->qmi.target_mem[i];
++
++		/*
++		 * FW reloads in coldboot/FWrecovery.
++		 * in such case, no need to allocate memory for FW again.
++		 */
++		if (chunk->vaddr) {
++			if (chunk->prev_type != chunk->type ||
++			    chunk->prev_size != chunk->size) {
++				dma_free_coherent(ab->dev,
++						  ab->qmi.target_mem[i].size,
++						  ab->qmi.target_mem[i].vaddr,
++						  ab->qmi.target_mem[i].paddr);
++
++				ab->qmi.target_mem[i].vaddr = NULL;
++			} else {
++				continue;
++			}
++		}
++
+ 		chunk->vaddr = dma_alloc_coherent(ab->dev,
+ 						  chunk->size,
+ 						  &chunk->paddr,
+@@ -2316,6 +2336,9 @@ static int ath11k_qmi_alloc_target_mem_c
+ 				   chunk->type);
+ 			return -EINVAL;
+ 		}
++
++		chunk->prev_type = chunk->type;
++		chunk->prev_size = chunk->size;
+ 	}
+ 
+ 	return 0;
+@@ -2364,9 +2387,14 @@ static int ath11k_qmi_assign_target_mem_
  				ab->qmi.target_mem[idx].vaddr =
  						ioremap(ab->qmi.target_mem[idx].paddr,
  								ab->qmi.target_mem[i].size);
@@ -157,7 +201,7 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  			}
  			ab->qmi.target_mem[idx].size = ab->qmi.target_mem[i].size;
  			ab->qmi.target_mem[idx].type = ab->qmi.target_mem[i].type;
-@@ -2966,6 +2972,30 @@ int ath11k_qmi_firmware_start(struct ath
+@@ -2966,6 +2994,30 @@ int ath11k_qmi_firmware_start(struct ath
  	return 0;
  }
  
@@ -188,8 +232,19 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  static int ath11k_qmi_process_coldboot_calibration(struct ath11k_base *ab)
  {
  	int timeout;
---- a/drivers/net/wireless/ath/ath11k/qmi.h
-+++ b/drivers/net/wireless/ath/ath11k/qmi.h
+@@ -3225,7 +3277,7 @@ static void ath11k_qmi_msg_mem_request_c
+ 				    ret);
+ 			return;
+ 		}
+-	} else if (msg->mem_seg_len > 3) {
++	} else {
+ 		ret = ath11k_qmi_alloc_target_mem_chunk(ab);
+ 		if (ret) {
+ 			ath11k_warn(ab, "qmi failed to alloc target memory: %d\n",
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/qmi.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/qmi.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/qmi.h
 @@ -46,7 +46,7 @@
  #define QMI_WLANFW_MAX_DATA_SIZE_V01		6144
  #define ATH11K_FIRMWARE_MODE_OFF		4
@@ -199,7 +254,16 @@ Signed-off-by: Jaya Surya Mathavan <jmathava@codeaurora.org>
  
  struct ath11k_base;
  
-@@ -583,6 +583,7 @@ int wlfw_send_qdss_trace_config_download
+@@ -112,6 +112,8 @@ struct ath11k_qmi_event_msg {
+ struct target_mem_chunk {
+ 	u32 size;
+ 	u32 type;
++	u32 prev_size;
++	u32 prev_type;
+ 	dma_addr_t paddr;
+ 	u32 *vaddr;
+ };
+@@ -583,6 +585,7 @@ int wlfw_send_qdss_trace_config_download
  
  int ath11k_send_qdss_trace_mode_req(struct ath11k_base *ab,
  		enum wlfw_qdss_trace_mode_enum_v01 mode);
