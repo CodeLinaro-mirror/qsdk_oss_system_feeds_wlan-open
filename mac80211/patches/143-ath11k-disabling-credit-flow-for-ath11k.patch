@@ -1,6 +1,39 @@
---- a/drivers/net/wireless/ath/ath11k/ce.c
-+++ b/drivers/net/wireless/ath/ath11k/ce.c
-@@ -40,6 +40,7 @@ const struct ce_attr ath11k_host_ce_conf
+From 929e141221444868ee98f253717479e5dd333102 Mon Sep 17 00:00:00 2001
+From: Maharaja Kennadyrajan <mkenna@codeaurora.org>
+Date: Fri, 19 Mar 2021 14:45:37 +0530
+Subject: [PATCH] ath11k: register copy engine send completion callback
+
+Register send completion callback for copy engine-0 (CE0)
+for the function ath11k_htc_tx_completion_handler().
+This callback will be used for freeing the skbs allocated
+by the ath11k_htc_send() from the below functions:
+ath11k_htc_connect_service() & ath11k_htc_start().
+
+Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/ce.c   | 33 +++++++++++----
+ drivers/net/wireless/ath/ath11k/ce.h   |  3 +-
+ drivers/net/wireless/ath/ath11k/core.c |  2 +
+ drivers/net/wireless/ath/ath11k/htc.c  | 75 ++++++++++++++++++++++++----------
+ drivers/net/wireless/ath/ath11k/htc.h  |  4 ++
+ drivers/net/wireless/ath/ath11k/hw.h   |  1 +
+ drivers/net/wireless/ath/ath11k/wmi.c  | 54 +++++++++++++++++++++---
+ drivers/net/wireless/ath/ath11k/wmi.h  |  1 +
+ 8 files changed, 138 insertions(+), 35 deletions(-)
+
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ce.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/ce.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ce.c
+@@ -14,6 +14,7 @@ const struct ce_attr ath11k_host_ce_conf
+ 		.src_nentries = 16,
+ 		.src_sz_max = 2048,
+ 		.dest_nentries = 0,
++		.send_cb = ath11k_htc_tx_completion_handler,
+ 	},
+ 
+ 	/* CE1: target->host HTT + HTC control */
+@@ -40,6 +41,7 @@ const struct ce_attr ath11k_host_ce_conf
  		.src_nentries = 32,
  		.src_sz_max = 2048,
  		.dest_nentries = 0,
@@ -8,7 +41,7 @@
  	},
  
  	/* CE4: host->target HTT */
-@@ -73,6 +74,7 @@ const struct ce_attr ath11k_host_ce_conf
+@@ -73,6 +75,7 @@ const struct ce_attr ath11k_host_ce_conf
  		.src_nentries = 32,
  		.src_sz_max = 2048,
  		.dest_nentries = 0,
@@ -16,7 +49,7 @@
  	},
  
  	/* CE8: target autonomous hif_memcpy */
-@@ -89,6 +91,7 @@ const struct ce_attr ath11k_host_ce_conf
+@@ -89,6 +92,7 @@ const struct ce_attr ath11k_host_ce_conf
  		.src_nentries = 32,
  		.src_sz_max = 2048,
  		.dest_nentries = 0,
@@ -24,7 +57,7 @@
  	},
  
  	/* CE10: target->host HTT */
-@@ -489,19 +492,33 @@ err_unlock:
+@@ -489,19 +493,33 @@ err_unlock:
  	return skb;
  }
  
@@ -60,7 +93,7 @@
  }
  
  static void ath11k_ce_srng_msi_ring_params_setup(struct ath11k_base *ab, u32 ce_id,
-@@ -636,7 +653,7 @@ static int ath11k_ce_alloc_pipe(struct a
+@@ -636,7 +654,7 @@ static int ath11k_ce_alloc_pipe(struct a
  	pipe->attr_flags = attr->flags;
  
  	if (attr->src_nentries) {
@@ -69,7 +102,7 @@
  		nentries = roundup_pow_of_two(attr->src_nentries);
  		desc_sz = ath11k_hal_ce_get_desc_size(HAL_CE_DESC_SRC);
  		ring = ath11k_ce_alloc_ring(ab, nentries, desc_sz);
-@@ -667,9 +684,10 @@ static int ath11k_ce_alloc_pipe(struct a
+@@ -667,9 +685,10 @@ static int ath11k_ce_alloc_pipe(struct a
  void ath11k_ce_per_engine_service(struct ath11k_base *ab, u16 ce_id)
  {
  	struct ath11k_ce_pipe *pipe = &ab->ce.ce_pipe[ce_id];
@@ -82,7 +115,7 @@
  
  	if (pipe->recv_cb)
  		ath11k_ce_recv_process_cb(pipe);
-@@ -678,9 +696,10 @@ void ath11k_ce_per_engine_service(struct
+@@ -678,9 +697,10 @@ void ath11k_ce_per_engine_service(struct
  void ath11k_ce_poll_send_completed(struct ath11k_base *ab, u8 pipe_id)
  {
  	struct ath11k_ce_pipe *pipe = &ab->ce.ce_pipe[pipe_id];
@@ -95,8 +128,10 @@
  }
  EXPORT_SYMBOL(ath11k_ce_per_engine_service);
  
---- a/drivers/net/wireless/ath/ath11k/ce.h
-+++ b/drivers/net/wireless/ath/ath11k/ce.h
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ce.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/ce.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/ce.h
 @@ -101,6 +101,7 @@ struct ce_attr {
  	unsigned int dest_nentries;
  
@@ -114,8 +149,10 @@
  	void (*recv_cb)(struct ath11k_base *, struct sk_buff *);
  
  	struct tasklet_struct intr_tq;
---- a/drivers/net/wireless/ath/ath11k/core.c
-+++ b/drivers/net/wireless/ath/ath11k/core.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.c
 @@ -42,6 +42,7 @@ static const struct ath11k_hw_params ath
  		.max_radios = 3,
  		.bdf_addr = 0x4B0C0000,
@@ -132,8 +169,10 @@
  		.ring_mask = &ath11k_hw_ring_mask_ipq8074,
  		.internal_sleep_clock = false,
  		.regs = &ipq8074_regs,
---- a/drivers/net/wireless/ath/ath11k/htc.c
-+++ b/drivers/net/wireless/ath/ath11k/htc.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/htc.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/htc.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/htc.c
 @@ -88,8 +88,7 @@ int ath11k_htc_send(struct ath11k_htc *h
  	}
  
@@ -266,8 +305,10 @@
  
  	ath11k_dbg(ab, ATH11K_DBG_HTC, "HTC is using TX credit flow control\n");
  
---- a/drivers/net/wireless/ath/ath11k/htc.h
-+++ b/drivers/net/wireless/ath/ath11k/htc.h
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/htc.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/htc.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/htc.h
 @@ -116,6 +116,8 @@ struct ath11k_htc_conn_svc_resp {
  	u32 svc_meta_pad;
  } __packed;
@@ -285,8 +326,10 @@
 +				      struct sk_buff *skb);
  
  #endif
---- a/drivers/net/wireless/ath/ath11k/hw.h
-+++ b/drivers/net/wireless/ath/ath11k/hw.h
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/hw.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
 @@ -154,6 +154,7 @@ struct ath11k_hw_params {
  	bool htt_peer_map_v2;
  	bool tcl_0_only;
@@ -295,8 +338,10 @@
  
  	u16 interface_modes;
  	bool supports_monitor;
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/wmi.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
 @@ -270,20 +270,35 @@ int ath11k_wmi_cmd_send(struct ath11k_pd
  {
  	struct ath11k_wmi_base *wmi_sc = wmi->wmi_ab;
@@ -380,8 +425,10 @@
  
  	return 0;
  }
---- a/drivers/net/wireless/ath/ath11k/wmi.h
-+++ b/drivers/net/wireless/ath/ath11k/wmi.h
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/wmi.h
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -2487,6 +2487,7 @@ struct ath11k_pdev_wmi {
  	enum ath11k_htc_ep_id eid;
  	const struct wmi_peer_flags_map *peer_flags;
