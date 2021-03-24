@@ -57,7 +57,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  ath11k-$(CONFIG_THERMAL) += thermal.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/debug_nss.c
-@@ -0,0 +1,915 @@
+@@ -0,0 +1,939 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -80,10 +80,10 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	int i;
 +
 +	len += scnprintf(buf + len, size - len, "\nProxy path table\n");
-+	len += scnprintf(buf + len, size - len, "dest_mac_addr mesh_dest_mac flags\n");
++	len += scnprintf(buf + len, size - len, "dest_mac_addr\t\tmesh_dest_mac\t\tflags\n");
 +	list_for_each_entry_safe(entry, tmp, &nss->mpp_dump, list) {
 +		for (i = 0; i < entry->num_entries; i++)
-+			len += scnprintf(buf + len, size - len, "%pM %pM 0x%x\n",
++			len += scnprintf(buf + len, size - len, "%pM\t%pM\t0x%x\n",
 +					 entry->mpp[i].dest_mac_addr,
 +					 entry->mpp[i].mesh_dest_mac, entry->mpp[i].flags);
 +		list_del(&entry->list);
@@ -98,12 +98,20 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct ath11k_vif *arvif = inode->i_private;
 +	struct ath11k *ar = arvif->ar;
 +	unsigned long time_left;
++	struct ath11k_nss_dbg_priv_data *priv_data;
 +	int ret;
++	ssize_t size = 100;
++	char *buf;
 +
 +	reinit_completion(&arvif->nss.dump_mpp_complete);
 +
++	priv_data = kzalloc(sizeof(*priv_data), GFP_KERNEL);
++	if (!priv_data)
++		return -ENOMEM;
++
 +	mutex_lock(&ar->conf_mutex);
 +
++	priv_data->arvif = arvif;
 +	ret = ath11k_nss_dump_mpp_request(arvif);
 +	if (ret) {
 +		ath11k_warn(ar->ab, "failed to send dump mpp command %d\n", ret);
@@ -119,6 +127,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	mutex_unlock(&ar->conf_mutex);
 +
++	size += (arvif->nss.mpp_dump_num_entries * 200 + 10 * 100);
++	buf = kmalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	priv_data->buf = buf;
++
++	priv_data->len= debug_nss_fill_mpp_dump(arvif, buf, size);
++
++	file->private_data = priv_data;
++
 +	return 0;
 +
 +err_unlock:
@@ -126,39 +145,29 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	return ret;
 +}
 +
++static int ath11k_nss_dump_mpp_release(struct inode *inode, struct file *file)
++{
++	struct ath11k_nss_dbg_priv_data *priv_data = file->private_data;
++
++	kfree(priv_data->buf);
++	kfree(priv_data);
++	return 0;
++}
++
 +static ssize_t ath11k_nss_dump_mpp_read(struct file *file,
 +					char __user *user_buf,
 +					size_t count, loff_t *ppos)
 +{
-+	struct ath11k_vif *arvif = file->private_data;
++	struct ath11k_nss_dbg_priv_data *priv_data = file->private_data;
++	struct ath11k_vif *arvif = priv_data->arvif;
++	char *buf = priv_data->buf;
 +	struct ath11k *ar = arvif->ar;
-+	ssize_t size = 100;
-+	unsigned int len;
-+	char *buf;
 +	int ret;
 +
 +	mutex_lock(&ar->conf_mutex);
 +
-+	size += (sizeof(struct nss_wifi_mesh_proxy_path_dump_entry) *
-+		 arvif->nss.mpp_dump_num_entries) +
-+		(arvif->nss.mpp_dump_num_entries * 10);
-+	buf = kmalloc(size, GFP_KERNEL);
-+	if (!buf) {
-+		ret = -ENOMEM;
-+		goto err_unlock;
-+	}
++	ret = simple_read_from_buffer(user_buf, count, ppos, buf, priv_data->len);
 +
-+	len = debug_nss_fill_mpp_dump(arvif, buf, size);
-+
-+	ret = simple_read_from_buffer(user_buf, count, ppos, buf, len);
-+
-+	mutex_unlock(&ar->conf_mutex);
-+
-+	kfree(buf);
-+
-+	return ret;
-+
-+err_unlock:
 +	mutex_unlock(&ar->conf_mutex);
 +
 +	return ret;
@@ -167,6 +176,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +static const struct file_operations fops_nss_dump_mpp_table = {
 +	.open = ath11k_nss_dump_mpp_open,
 +	.read = ath11k_nss_dump_mpp_read,
++	.release = ath11k_nss_dump_mpp_release,
 +	.owner = THIS_MODULE,
 +	.llseek = default_llseek,
 +};
@@ -177,19 +187,21 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct arvif_nss *nss = &arvif->nss;
 +	struct ath11k_nss_mpath_entry *entry, *tmp;
 +	unsigned int len = 0;
++	u64 expiry_time;
 +	int i;
 +
 +	len += scnprintf(buf + len, size - len, "\nmpath table\n");
-+	len += scnprintf(buf + len, size - len, "dest_mac_addr next_hop_mac metric"
-+			"expiry_time hop_count flags link_vap_id is_msh_gate\n");
++	len += scnprintf(buf + len, size - len, "dest_mac_addr\t\tnext_hop_mac\t\tmetric\t"
++			"expiry_time\thop_count\tflags\tlink_vap_id\n");
 +	list_for_each_entry_safe(entry, tmp, &nss->mpath_dump, list) {
-+		for (i = 0; i < entry->num_entries; i++)
-+			len += scnprintf(buf + len, size - len, "%pM %pM %u %u %d 0x%x %d %d",
++		for (i = 0; i < entry->num_entries; i++) {
++			memcpy(&expiry_time, entry->mpath[i].expiry_time, sizeof(u64));
++			len += scnprintf(buf + len, size - len, "%pM\t%pM\t%u\t%llu\t\t\t%d\t0x%x\t%d\n",
 +					 entry->mpath[i].dest_mac_addr,
 +					 entry->mpath[i].next_hop_mac_addr, entry->mpath[i].metric,
-+					 entry->mpath[i].expiry_time, entry->mpath[i].hop_count,
-+					 entry->mpath[i].flags, entry->mpath[i].link_vap_id,
-+					 entry->mpath[i].is_mesh_gate);
++					 expiry_time, entry->mpath[i].hop_count,
++					 entry->mpath[i].flags, entry->mpath[i].link_vap_id);
++		}
 +		list_del(&entry->list);
 +		kfree(entry);
 +	}
@@ -202,12 +214,20 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	struct ath11k_vif *arvif = inode->i_private;
 +	struct ath11k *ar = arvif->ar;
 +	unsigned long time_left;
++	struct ath11k_nss_dbg_priv_data *priv_data;
++	ssize_t size = 200;
++	char *buf;
 +	int ret;
 +
 +	reinit_completion(&arvif->nss.dump_mpath_complete);
 +
++	priv_data = kzalloc(sizeof(*priv_data), GFP_KERNEL);
++	if (!priv_data)
++		return -ENOMEM;
++
 +	mutex_lock(&ar->conf_mutex);
 +
++	priv_data->arvif = arvif;
 +	ret = ath11k_nss_dump_mpath_request(arvif);
 +	if (ret) {
 +		ath11k_warn(ar->ab, "failed to send dump mpath command %d\n", ret);
@@ -223,6 +243,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	mutex_unlock(&ar->conf_mutex);
 +
++	size += (arvif->nss.mpath_dump_num_entries * 200 + 10 * 100);
++	buf = kmalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	priv_data->buf = buf;
++
++	priv_data->len = debug_nss_fill_mpath_dump(arvif, buf, size);
++
++	file->private_data = priv_data;
++
 +	return 0;
 +
 +err_unlock:
@@ -230,38 +261,30 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	return ret;
 +}
 +
++static int ath11k_nss_dump_mpath_release(struct inode *inode, struct file *file)
++{
++	struct ath11k_nss_dbg_priv_data *priv_data = file->private_data;
++
++	kfree(priv_data->buf);
++	kfree(priv_data);
++	return 0;
++
++}
++
 +static ssize_t ath11k_nss_dump_mpath_read(struct file *file,
 +					  char __user *user_buf,
 +					  size_t count, loff_t *ppos)
 +{
-+	struct ath11k_vif *arvif = file->private_data;
++	struct ath11k_nss_dbg_priv_data *priv_data = file->private_data;
++	struct ath11k_vif *arvif = priv_data->arvif;
++	char *buf = priv_data->buf;
 +	struct ath11k *ar = arvif->ar;
-+	unsigned int len;
-+	ssize_t size = 200;
-+	char *buf;
 +	int ret;
 +
 +	mutex_lock(&ar->conf_mutex);
 +
-+	size += (sizeof(struct nss_wifi_mesh_path_dump_entry) * arvif->nss.mpath_dump_num_entries) +
-+		(arvif->nss.mpath_dump_num_entries * 20);
-+	buf = kmalloc(size, GFP_KERNEL);
-+	if (!buf) {
-+		ret = -ENOMEM;
-+		goto err_unlock;
-+	}
++	ret = simple_read_from_buffer(user_buf, count, ppos, buf, priv_data->len);
 +
-+	len = debug_nss_fill_mpath_dump(arvif, buf, size);
-+
-+	ret = simple_read_from_buffer(user_buf, count, ppos, buf, len);
-+
-+	mutex_unlock(&ar->conf_mutex);
-+
-+	kfree(buf);
-+
-+	return ret;
-+
-+err_unlock:
 +	mutex_unlock(&ar->conf_mutex);
 +
 +	return ret;
@@ -270,6 +293,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +static const struct file_operations fops_nss_dump_mpath_table = {
 +	.open = ath11k_nss_dump_mpath_open,
 +	.read = ath11k_nss_dump_mpath_read,
++	.release = ath11k_nss_dump_mpath_release,
 +	.owner = THIS_MODULE,
 +	.llseek = default_llseek,
 +};
@@ -975,7 +999,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +#endif
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/debug_nss.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,35 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -992,6 +1016,11 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +struct ath11k_vif;
 +extern enum nss_wifi_mesh_mpp_learning_mode mpp_mode;
 +extern struct list_head mesh_vaps;
++struct ath11k_nss_dbg_priv_data {
++	struct ath11k_vif *arvif;
++	char *buf;
++	unsigned int len;
++};
 +
 +#ifdef CPTCFG_MAC80211_DEBUGFS
 +void ath11k_debugfs_nss_mesh_vap_create(struct ath11k_vif *arvif);
@@ -1921,7 +1950,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	if (!entry)
 +		return -ENOMEM;
 +
-+	memcpy(&entry->mpath, &mpath_dump->path_entry, len);
++	memcpy(entry->mpath, mpath_dump->path_entry, len);
 +	entry->num_entries = mpath_dump->num_entries;
 +
 +	list_add_tail(&entry->list, &arvif->nss.mpath_dump);
@@ -1949,7 +1978,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	if (!entry)
 +		return -ENOMEM;
 +
-+	memcpy(&entry->mpp, &mpp_dump->path_entry, len);
++	memcpy(entry->mpp, mpp_dump->path_entry, len);
 +	entry->num_entries = mpp_dump->num_entries;
 +
 +	list_add_tail(&entry->list, &arvif->nss.mpp_dump);
