@@ -125,14 +125,16 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	int i;
  
  	if (WARN_ON(ath11k_mac_vif_chan(vif, &def)))
-@@ -1853,9 +1904,33 @@ static void ath11k_peer_assoc_h_he(struc
+@@ -1853,9 +1904,35 @@ static void ath11k_peer_assoc_h_he(struc
  	}
  	arg->peer_nss = min(sta->rx_nss, max_nss);
  
 +	if (arg->peer_phymode == MODE_11AX_HE160 ||
 +	    arg->peer_phymode == MODE_11AX_HE80_80) {
-+		tx_nss_160 = ath11k_get_nss_160MHz(ar, max_nss);
++		tx_nss_160 = ath11k_get_nss_160MHz(ar, ar->num_tx_chains);
 +		rx_nss_160 = min(arg->peer_nss, tx_nss_160);
++
++		arg->peer_nss = min(sta->rx_nss, ar->num_rx_chains);
 +
 +		if (rx_nss_160) {
 +			arg->peer_bw_rxnss_override =
@@ -161,7 +163,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  }
  
  static void ath11k_peer_assoc_h_smps(struct ieee80211_sta *sta,
-@@ -2143,11 +2218,11 @@ static void ath11k_peer_assoc_prepare(st
+@@ -2143,11 +2220,11 @@ static void ath11k_peer_assoc_prepare(st
  	ath11k_peer_assoc_h_basic(ar, vif, sta, arg);
  	ath11k_peer_assoc_h_crypto(ar, vif, sta, arg);
  	ath11k_peer_assoc_h_rates(ar, vif, sta, arg);
@@ -174,7 +176,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	ath11k_peer_assoc_h_smps(sta, arg);
  
  	/* TODO: amsdu_disable req? */
-@@ -4572,11 +4647,6 @@ ath11k_create_vht_cap(struct ath11k *ar,
+@@ -4572,11 +4649,6 @@ ath11k_create_vht_cap(struct ath11k *ar,
  
  	ath11k_set_vht_txbf_cap(ar, &vht_cap.cap);
  
@@ -186,7 +188,59 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	rxmcs_map = 0;
  	txmcs_map = 0;
  	for (i = 0; i < 8; i++) {
-@@ -4843,8 +4913,6 @@ static int ath11k_mac_copy_he_cap(struct
+@@ -4778,11 +4850,12 @@ static void ath11k_mac_set_hemcsmap(stru
+ 				    struct ath11k_pdev_cap *cap,
+ 				    struct ieee80211_sta_he_cap * he_cap)
+ {
+-	u16 txmcs_map, rxmcs_map;
++	u16 txmcs_map = 0, rxmcs_map = 0;
++	u16 txmcs_map_160 = 0, rxmcs_map_160 = 0;
+ 	u32 i = 0;
++	u8 maxtxnss_160 = ath11k_get_nss_160MHz(ar, ar->num_tx_chains);
++	u8 maxrxnss_160 = ath11k_get_nss_160MHz(ar, ar->num_rx_chains);
+ 
+-	rxmcs_map = 0;
+-	txmcs_map = 0;
+ 	for (i = 0; i < 8; i++) {
+ 		if (i < ar->num_tx_chains &&
+ 		    (ar->cfg_tx_chainmask >> cap->tx_chain_mask_shift) & BIT(i))
+@@ -4795,19 +4868,31 @@ static void ath11k_mac_set_hemcsmap(stru
+ 			rxmcs_map |= IEEE80211_HE_MCS_SUPPORT_0_11 << (i * 2);
+ 		else
+ 			rxmcs_map |= IEEE80211_HE_MCS_NOT_SUPPORTED << (i * 2);
++
++		if (i < maxtxnss_160 &&
++		    (ar->cfg_tx_chainmask >> cap->tx_chain_mask_shift) & BIT(i))
++			txmcs_map_160 |= IEEE80211_HE_MCS_SUPPORT_0_11 << (i * 2);
++		else
++			txmcs_map_160 |= IEEE80211_HE_MCS_NOT_SUPPORTED << (i * 2);
++
++		if (i < maxrxnss_160 &&
++		    (ar->cfg_tx_chainmask >> cap->tx_chain_mask_shift) & BIT(i))
++			rxmcs_map_160 |= IEEE80211_HE_MCS_SUPPORT_0_11 << (i * 2);
++		else
++			rxmcs_map_160 |= IEEE80211_HE_MCS_NOT_SUPPORTED << (i * 2);
+ 	}
+ 	he_cap->he_mcs_nss_supp.rx_mcs_80 =
+ 		cpu_to_le16(rxmcs_map & 0xffff);
+ 	he_cap->he_mcs_nss_supp.tx_mcs_80 =
+ 		cpu_to_le16(txmcs_map & 0xffff);
+ 	he_cap->he_mcs_nss_supp.rx_mcs_160 =
+-		cpu_to_le16(rxmcs_map & 0xffff);
++		cpu_to_le16(rxmcs_map_160 & 0xffff);
+ 	he_cap->he_mcs_nss_supp.tx_mcs_160 =
+-		cpu_to_le16(txmcs_map & 0xffff);
++		cpu_to_le16(txmcs_map_160 & 0xffff);
+ 	he_cap->he_mcs_nss_supp.rx_mcs_80p80 =
+-		cpu_to_le16(rxmcs_map & 0xffff);
++		cpu_to_le16(rxmcs_map_160 & 0xffff);
+ 	he_cap->he_mcs_nss_supp.tx_mcs_80p80 =
+-		cpu_to_le16(txmcs_map & 0xffff);
++		cpu_to_le16(txmcs_map_160 & 0xffff);
+ }
+ 
+ static int ath11k_mac_copy_he_cap(struct ath11k *ar,
+@@ -4843,8 +4928,6 @@ static int ath11k_mac_copy_he_cap(struct
  		he_cap_elem->mac_cap_info[1] &=
  			IEEE80211_HE_MAC_CAP1_TF_MAC_PAD_DUR_MASK;
  		he_cap_elem->phy_cap_info[0] &=
@@ -195,7 +249,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  			~IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_80PLUS80_MHZ_IN_5G;
  
  		he_cap_elem->phy_cap_info[5] &=
-@@ -7655,7 +7723,9 @@ static int ath11k_mac_setup_iface_combin
+@@ -7655,7 +7738,9 @@ static int ath11k_mac_setup_iface_combin
  	combinations[0].radar_detect_widths = BIT(NL80211_CHAN_WIDTH_20_NOHT) |
  						BIT(NL80211_CHAN_WIDTH_20) |
  						BIT(NL80211_CHAN_WIDTH_40) |
@@ -206,11 +260,16 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	ar->hw->wiphy->iface_combinations = combinations;
  	ar->hw->wiphy->n_iface_combinations = 1;
-@@ -7858,6 +7928,10 @@ static int __ath11k_mac_register(struct
+@@ -7858,6 +7943,15 @@ static int __ath11k_mac_register(struct
  			ieee80211_hw_set(ar->hw, USES_RSS);
  	}
  
-+	if(cap->nss_ratio_enabled)
++	/* If supported number of NSS is less than the maximum
++	 * NSS of device, then SUPPORTS_VHT_EXT_NSS_BW capablity
++	 * needs to adevertise to upper layer
++	 */
++	if((cap->nss_ratio_enabled) &&
++	   (cap->nss_ratio_info != WMI_NSS_RATIO_1_NSS))
 +		ieee80211_hw_set(ar->hw, SUPPORTS_VHT_EXT_NSS_BW);
 +
 +
