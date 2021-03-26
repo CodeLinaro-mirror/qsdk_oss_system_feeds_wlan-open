@@ -1425,22 +1425,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static void ath11k_nss_wifili_stats_sync(struct ath11k_base *ab,
  					 struct nss_wifili_stats_sync_msg *wlsoc_stats)
  {
-@@ -264,6 +292,14 @@ void ath11k_nss_wifili_event_receive(str
+@@ -264,6 +292,9 @@ void ath11k_nss_wifili_event_receive(str
  
  	switch (msg_type) {
  	case NSS_WIFILI_INIT_MSG:
-+		/* FIXME: Enable after nss header change
-+		if (msg->msg.init.mesh_capability)
-+			ab->nss.mesh_nss_offload_enabled = true;
-+		*/
-+		ab->nss.mesh_nss_offload_enabled = true;
 +		ab->nss.response = response;
 +		complete(&ab->nss.complete);
 +		break;
  	case NSS_WIFILI_PDEV_INIT_MSG:
  	case NSS_WIFILI_START_MSG:
  	case NSS_WIFILI_SOC_RESET_MSG:
-@@ -272,7 +308,6 @@ void ath11k_nss_wifili_event_receive(str
+@@ -272,7 +303,6 @@ void ath11k_nss_wifili_event_receive(str
  		ab->nss.response = response;
  		complete(&ab->nss.complete);
  		break;
@@ -1448,7 +1443,21 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	case NSS_WIFILI_PEER_CREATE_MSG:
  		if (response != NSS_CMN_RESPONSE_EMSG)
  			break;
-@@ -432,7 +467,9 @@ ath11k_nss_wifili_ext_callback_fn(struct
+@@ -345,6 +375,13 @@ void ath11k_nss_wifili_event_receive(str
+ 		ath11k_dbg(ab, ATH11K_DBG_NSS_WDS, "nss wifili peer 4addr event received %d response %d error %d\n",
+ 			   msg_type, response, error);
+ 		break;
++	case NSS_WIFILI_SEND_MESH_CAPABILITY_INFO:
++		complete(&ab->nss.complete);
++		if (response != NSS_CMN_RESPONSE_EMSG)
++			ab->nss.mesh_nss_offload_enabled = true;
++		ath11k_dbg(ab, ATH11K_DBG_NSS_MESH, "nss wifili mesh capability response %d\n",
++			   ab->nss.mesh_nss_offload_enabled);
++		break;
+ 	default:
+ 		ath11k_dbg(ab, ATH11K_DBG_NSS, "unhandled event %d\n", msg_type);
+ 		break;
+@@ -432,7 +469,9 @@ ath11k_nss_wifili_ext_callback_fn(struct
  		ath11k_nss_process_mic_error(ab, skb);
  		break;
  	default:
@@ -1459,7 +1468,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  		break;
  	}
  }
-@@ -747,8 +784,6 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -747,8 +786,6 @@ ath11k_nss_vdev_special_data_receive(str
  {
  	struct nss_wifi_vdev_per_packet_metadata *wifi_metadata = NULL;
  	struct nss_wifi_vdev_wds_per_packet_metadata *wds_metadata = NULL;
@@ -1468,50 +1477,37 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	struct ath11k_vif *arvif;
  	struct ath11k_base *ab;
  	bool drop = false;
-@@ -756,6 +791,54 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -756,24 +793,7 @@ ath11k_nss_vdev_special_data_receive(str
  	int data_offs = 0;
  	int ret = 0;
  
+-	if (!dev) {
+-		dev_kfree_skb_any(skb);
+-		return;
+-	}
+-
+-	wdev = dev->ieee80211_ptr;
+-	if (!wdev) {
+-		dev_kfree_skb_any(skb);
+-		return;
+-	}
+-
+-	vif = wdev_to_ieee80211_vif(wdev);
+-	if (!vif) {
+-		dev_kfree_skb_any(skb);
+-		return;
+-	}
+-
+-	arvif = (struct ath11k_vif *)vif->drv_priv;
 +	arvif = ath11k_nss_get_arvif_from_dev(dev);
-+	if (!arvif) {
-+		dev_kfree_skb_any(skb);
-+		return;
-+	}
-+
-+	ab = arvif->ar->ab;
-+
-+	skb->dev = dev;
-+
-+	wifi_metadata = (struct nss_wifi_vdev_per_packet_metadata *)(skb->head +
-+			 NSS_WIFI_VDEV_PER_PACKET_METADATA_OFFSET);
-+
-+	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
-+		   "dp special data from nss: wifi_metadata->pkt_type %d",
-+		   wifi_metadata->pkt_type);
-+
-+	ret = ath11k_nss_undecap(arvif, skb, &data_offs, &eth_decap);
-+	if (ret) {
-+		ath11k_warn(ab, "error in nss rx undecap, type %d err %d\n",
-+			    arvif->nss.decap, ret);
-+		dev_kfree_skb_any(skb);
-+		return;
-+	}
-+
-+	if (eth_decap && wifi_metadata->pkt_type ==
-+	    NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_WDS_LEARN) {
-+		wds_metadata = &wifi_metadata->metadata.wds_metadata;
-+		ath11k_nss_vdev_spl_receive_ext_wdsdata(arvif, skb,
-+							wds_metadata, &drop);
-+	}
-+
-+	if (!drop)
-+		ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
-+}
-+
-+static void
-+ath11k_nss_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
-+			     __attribute__((unused)) struct napi_struct *napi)
-+{
+ 	if (!arvif) {
+ 		dev_kfree_skb_any(skb);
+ 		return;
+@@ -881,25 +901,934 @@ static void
+ ath11k_nss_ext_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
+ 				 __attribute__((unused)) struct napi_struct *napi)
+ {
+-	struct wireless_dev *wdev;
 +	struct wireless_dev *wdev;
 +	struct ieee80211_vif *vif;
 +	struct ath11k_vif *arvif;
@@ -1520,70 +1516,17 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	int data_offs = 0;
 +	int ret;
 +
- 	if (!dev) {
- 		dev_kfree_skb_any(skb);
- 		return;
-@@ -783,12 +866,15 @@ ath11k_nss_vdev_special_data_receive(str
- 
- 	skb->dev = dev;
- 
--	wifi_metadata = (struct nss_wifi_vdev_per_packet_metadata *)(skb->head +
--			 NSS_WIFI_VDEV_PER_PACKET_METADATA_OFFSET);
-+	/* log the original skb received from nss */
-+	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "dp rx msdu from nss: ",
-+			skb->data, skb->len);
- 
--	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
--		   "dp special data from nss: wifi_metadata->pkt_type %d",
--		   wifi_metadata->pkt_type);
-+	if ((vif->type == NL80211_IFTYPE_STATION && vif->use_4addr) &&
-+	     ath11k_nss_vdev_data_receive_mec_check(arvif->ar, skb)) {
++	if (!dev) {
 +		dev_kfree_skb_any(skb);
 +		return;
 +	}
- 
- 	ret = ath11k_nss_undecap(arvif, skb, &data_offs, &eth_decap);
- 	if (ret) {
-@@ -798,20 +884,20 @@ ath11k_nss_vdev_special_data_receive(str
- 		return;
- 	}
- 
--	if (eth_decap && wifi_metadata->pkt_type ==
--	    NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_WDS_LEARN) {
--		wds_metadata = &wifi_metadata->metadata.wds_metadata;
--		ath11k_nss_vdev_spl_receive_ext_wdsdata(arvif, skb,
--							wds_metadata, &drop);
--	}
-+	ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
-+}
- 
--	if (!drop)
--		ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
-+static void
-+ath11k_nss_ext_vdev_special_data_receive(struct net_device *dev,
-+					 struct sk_buff *skb,
-+					 __attribute__((unused)) struct napi_struct *napi)
-+{
-+	dev_kfree_skb_any(skb);
- }
- 
- static void
--ath11k_nss_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
--			     __attribute__((unused)) struct napi_struct *napi)
-+ath11k_nss_ext_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
-+				 __attribute__((unused)) struct napi_struct *napi)
- {
- 	struct wireless_dev *wdev;
- 	struct ieee80211_vif *vif;
-@@ -832,13 +918,835 @@ ath11k_nss_vdev_data_receive(struct net_
- 		return;
- 	}
- 
--	vif = wdev_to_ieee80211_vif(wdev);
--	if (!vif) {
--		dev_kfree_skb_any(skb);
--		return;
--	}
++
++	wdev = dev->ieee80211_ptr;
++	if (!wdev) {
++		dev_kfree_skb_any(skb);
++		return;
++	}
++
 +	vif = wdev_to_ieee80211_vif(wdev);
 +	if (!vif) {
 +		dev_kfree_skb_any(skb);
@@ -2403,8 +2346,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	return 0;
 +}
- 
--	arvif = (struct ath11k_vif *)vif->drv_priv;
++
 +static void
 +ath11k_nss_mesh_obj_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
 +				      struct napi_struct *napi)
@@ -2414,33 +2356,24 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +	char dump_msg[100] = {0};
 +
 +	arvif = ath11k_nss_get_arvif_from_dev(dev);
- 	if (!arvif) {
- 		dev_kfree_skb_any(skb);
- 		return;
-@@ -848,58 +1756,77 @@ ath11k_nss_vdev_data_receive(struct net_
- 
- 	skb->dev = dev;
- 
--	/* log the original skb received from nss */
--	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "dp rx msdu from nss: ",
++	if (!arvif) {
++		dev_kfree_skb_any(skb);
++		return;
++	}
++
++	ab = arvif->ar->ab;
++
++	skb->dev = dev;
++
 +	snprintf(dump_msg, sizeof(dump_msg), "nss mesh obj vdev: link id %d ",
 +		 arvif->nss.if_num);
 +
 +	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "dp rx msdu from nss", dump_msg,
- 			skb->data, skb->len);
- 
--	if ((vif->type == NL80211_IFTYPE_STATION && vif->use_4addr) &&
--	     ath11k_nss_vdev_data_receive_mec_check(arvif->ar, skb)) {
--		dev_kfree_skb_any(skb);
--		return;
--	}
++			skb->data, skb->len);
++
 +	ath11k_nss_deliver_rx(arvif->vif, skb, true, 0, napi);
 +}
- 
--	ret = ath11k_nss_undecap(arvif, skb, &data_offs, &eth_decap);
--	if (ret) {
--		ath11k_warn(ab, "error in nss rx undecap, type %d err %d\n",
--			    arvif->nss.decap, ret);
++
 +static void
 +ath11k_nss_mesh_obj_ext_data_callback(struct net_device *dev, struct sk_buff *skb,
 +				      __attribute__((unused)) struct napi_struct *napi)
@@ -2450,33 +2383,23 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
 +
 +	arvif = ath11k_nss_get_arvif_from_dev(dev);
 +	if (!arvif) {
- 		dev_kfree_skb_any(skb);
- 		return;
- 	}
- 
--	ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
--}
++		dev_kfree_skb_any(skb);
++		return;
++	}
++
 +	ab = arvif->ar->ab;
 +
 +	ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "msdu from nss ext_data _cb on mesh obj vdev: ",
 +			skb->data, skb->len);
- 
--static void
--ath11k_nss_ext_vdev_special_data_receive(struct net_device *dev,
--					 struct sk_buff *skb,
--					 __attribute__((unused)) struct napi_struct *napi)
--{
- 	dev_kfree_skb_any(skb);
- }
- 
- static void
--ath11k_nss_ext_vdev_data_receive(struct net_device *dev, struct sk_buff *skb,
--				 __attribute__((unused)) struct napi_struct *napi)
++
++	dev_kfree_skb_any(skb);
++}
++
++static void
 +ath11k_nss_mesh_link_vdev_data_receive(void *dev,
 +				       struct sk_buff *skb,
 +				       struct napi_struct *napi)
- {
--	struct wireless_dev *wdev;
++{
  	struct ieee80211_vif *vif;
  	struct ath11k_vif *arvif;
  	struct ath11k_base *ab;
@@ -2522,7 +2445,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	vif = wdev_to_ieee80211_vif(wdev);
  	if (!vif) {
  		dev_kfree_skb_any(skb);
-@@ -914,21 +1841,46 @@ ath11k_nss_ext_vdev_data_receive(struct
+@@ -914,21 +1843,46 @@ ath11k_nss_ext_vdev_data_receive(struct
  
  	ab = arvif->ar->ab;
  
@@ -2580,7 +2503,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  }
  
  int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
-@@ -937,8 +1889,9 @@ int ath11k_nss_tx(struct ath11k_vif *arv
+@@ -937,8 +1891,9 @@ int ath11k_nss_tx(struct ath11k_vif *arv
  	nss_tx_status_t status;
  	int encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
  	struct ath11k_soc_dp_stats *soc_stats = &ar->ab->soc_stats;
@@ -2591,7 +2514,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  		ath11k_warn(ar->ab, "encap mismatch in nss tx skb encap type %d" \
  			    "vif encap type %d\n", encap_type, arvif->nss.encap);
  		goto drop;
-@@ -953,16 +1906,41 @@ int ath11k_nss_tx(struct ath11k_vif *arv
+@@ -953,16 +1908,41 @@ int ath11k_nss_tx(struct ath11k_vif *arv
  		ath11k_nss_tx_encap_nwifi(skb);
  
  send:
@@ -2641,7 +2564,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	if (status != NSS_TX_SUCCESS)
  		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
-@@ -1046,6 +2024,9 @@ static int ath11k_nss_vdev_configure(str
+@@ -1046,6 +2026,9 @@ static int ath11k_nss_vdev_configure(str
  
  	vdev_cfg = &vdev_msg->msg.vdev_config;
  
@@ -2651,7 +2574,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	vdev_cfg->radio_ifnum = ar->nss.if_num;
  	vdev_cfg->vdev_id = arvif->vdev_id;
  
-@@ -1086,6 +2067,37 @@ free:
+@@ -1086,6 +2069,37 @@ free:
  	return ret;
  }
  
@@ -2689,7 +2612,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static void ath11k_nss_vdev_unregister(struct ath11k_vif *arvif)
  {
  	struct ath11k_base *ab = arvif->ar->ab;
-@@ -1097,6 +2109,12 @@ static void ath11k_nss_vdev_unregister(s
+@@ -1097,6 +2111,12 @@ static void ath11k_nss_vdev_unregister(s
  		ath11k_dbg(ab, ATH11K_DBG_NSS, "unregistered nss vdev %d \n",
  			   arvif->nss.if_num);
  		break;
@@ -2702,7 +2625,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev unregister\n",
  			    arvif->vif->type);
-@@ -1104,6 +2122,76 @@ static void ath11k_nss_vdev_unregister(s
+@@ -1104,6 +2124,76 @@ static void ath11k_nss_vdev_unregister(s
  	}
  }
  
@@ -2779,7 +2702,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  static int ath11k_nss_vdev_register(struct ath11k_vif *arvif,
  				    struct net_device *netdev)
  {
-@@ -1131,6 +2219,13 @@ static int ath11k_nss_vdev_register(stru
+@@ -1131,6 +2221,13 @@ static int ath11k_nss_vdev_register(stru
  			   arvif->nss.if_num);
  
  		break;
@@ -2793,7 +2716,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev register\n",
  			    arvif->vif->type);
-@@ -1140,6 +2235,47 @@ static int ath11k_nss_vdev_register(stru
+@@ -1140,6 +2237,47 @@ static int ath11k_nss_vdev_register(stru
  	return 0;
  }
  
@@ -2841,7 +2764,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  void ath11k_nss_vdev_free(struct ath11k_vif *arvif)
  {
  	struct ath11k_base *ab = arvif->ar->ab;
-@@ -1159,6 +2295,9 @@ void ath11k_nss_vdev_free(struct ath11k_
+@@ -1159,6 +2297,9 @@ void ath11k_nss_vdev_free(struct ath11k_
  				   "nss vdev interface deallocated\n");
  
  		return;
@@ -2851,7 +2774,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev dealloc\n",
  			    arvif->vif->type);
-@@ -1166,11 +2305,92 @@ void ath11k_nss_vdev_free(struct ath11k_
+@@ -1166,11 +2307,92 @@ void ath11k_nss_vdev_free(struct ath11k_
  	}
  }
  
@@ -2945,7 +2868,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  
  	/* Initialize completion for verifying NSS message response */
  	init_completion(&arvif->nss.complete);
-@@ -1192,6 +2412,14 @@ static int ath11k_nss_vdev_alloc(struct
+@@ -1192,6 +2414,14 @@ static int ath11k_nss_vdev_alloc(struct
  			   arvif->nss.if_num);
  
  		break;
@@ -2960,7 +2883,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ath11k_warn(ab, "unsupported interface type %d for nss vdev alloc\n",
  			    arvif->vif->type);
-@@ -1229,7 +2457,7 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -1229,7 +2459,7 @@ int ath11k_nss_vdev_create(struct ath11k
  		return -EINVAL;
  	}
  
@@ -2969,7 +2892,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	if (ret)
  		return ret;
  
-@@ -1245,6 +2473,35 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -1245,6 +2475,35 @@ int ath11k_nss_vdev_create(struct ath11k
  			goto unregister_vdev;
  
  		break;
@@ -3005,7 +2928,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	default:
  		ret = -ENOTSUPP;
  		goto unregister_vdev;
-@@ -1300,6 +2557,14 @@ int ath11k_nss_vdev_up(struct ath11k_vif
+@@ -1300,6 +2559,14 @@ int ath11k_nss_vdev_up(struct ath11k_vif
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
  		return 0;
  
@@ -3020,7 +2943,7 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	vdev_msg = kzalloc(sizeof(struct nss_wifi_vdev_msg), GFP_ATOMIC);
  	if (!vdev_msg)
  		return -ENOMEM;
-@@ -1346,6 +2611,14 @@ int ath11k_nss_vdev_down(struct ath11k_v
+@@ -1346,6 +2613,14 @@ int ath11k_nss_vdev_down(struct ath11k_v
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
  		return 0;
  
@@ -3035,12 +2958,68 @@ Signed-off-by: Vasanthakumar Thiagarajan <vthiagar@codeaurora.org>
  	vdev_msg = kzalloc(sizeof(struct nss_wifi_vdev_msg), GFP_ATOMIC);
  	if (!vdev_msg)
  		return -ENOMEM;
-@@ -2777,6 +4050,9 @@ static int ath11k_nss_init(struct ath11k
+@@ -2644,6 +3919,49 @@ static int ath11k_nss_get_dynamic_interf
+ 	}
+ }
+ 
++static int ath11k_nss_mesh_capability(struct ath11k_base *ab)
++{
++	struct nss_wifili_msg *wlmsg = NULL;
++	nss_wifili_msg_callback_t msg_cb;
++	nss_tx_status_t status;
++	int ret = 0;
++
++	wlmsg = kzalloc(sizeof(struct nss_wifili_msg), GFP_ATOMIC);
++	if (!wlmsg)
++		return -ENOMEM;
++
++	msg_cb = (nss_wifili_msg_callback_t)ath11k_nss_wifili_event_receive;
++
++	reinit_completion(&ab->nss.complete);
++
++	nss_cmn_msg_init(&wlmsg->cm, ab->nss.if_num,
++			 NSS_WIFILI_SEND_MESH_CAPABILITY_INFO,
++			 sizeof(struct nss_wifili_mesh_capability_info),
++			 msg_cb, NULL);
++
++	status = nss_wifili_tx_msg(ab->nss.ctx, wlmsg);
++	if (status != NSS_TX_SUCCESS) {
++		ath11k_warn(ab, "nss failed to get mesh capability msg %d\n", status);
++		ret = -EINVAL;
++		goto free;
++	}
++
++	ret = wait_for_completion_timeout(&ab->nss.complete,
++					  msecs_to_jiffies(ATH11K_NSS_MSG_TIMEOUT_MS));
++	if (!ret) {
++		ath11k_warn(ab, "timeout while waiting for mesh capability check\n");
++		ret = -ETIMEDOUT;
++		goto free;
++	}
++
++	kfree(wlmsg);
++	return 0;
++
++free:
++	kfree(wlmsg);
++	return ret;
++}
++
+ static int ath11k_nss_init(struct ath11k_base *ab)
+ {
+ 	struct nss_wifili_init_msg *wim = NULL;
+@@ -2777,6 +4095,15 @@ static int ath11k_nss_init(struct ath11k
  
  	kfree(wlmsg);
  
 +	/* Create a mesh links read debugfs entry */
 +	ath11k_debugfs_nss_soc_create(ab);
++
++	/* Check for mesh capability */
++	ret = ath11k_nss_mesh_capability(ab);
++
++	if (ret)
++		ath11k_err(ab, "Mesh offload is not enabled %d\n", ret);
 +
  	ath11k_dbg(ab, ATH11K_DBG_NSS, "NSS Init Message TX Success %p %d\n",
  		   ab->nss.ctx, ab->nss.if_num);
