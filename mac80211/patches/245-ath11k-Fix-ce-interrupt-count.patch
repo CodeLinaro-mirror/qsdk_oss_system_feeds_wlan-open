@@ -3,8 +3,12 @@ From: Anilkumar Kolli <akolli@codeaurora.org>
 Date: Wed, 10 Feb 2021 15:26:54 +0530
 Subject: [PATCH] ath11k: Fix ce interrupt count
 
-CE interrupt count is based on target_ce_count.
-Use target_ce_count to request and process ce interrupts.
+CE11 config was removed and is causing below KASAN issue.
+
+ BUG: KASAN: global-out-of-bounds in 0xffffffbffdfb035c at addr
+ffffffbffde6eeac
+ Read of size 4 by task kworker/u8:2/132
+ Address belongs to variable ath11k_core_qmi_firmware_ready+0x1b0/0x5bc [ath11k] 
 
 Fixes: c5000fe803 ("ath11k: Add ipq6018 support")
 
@@ -14,124 +18,44 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  drivers/net/wireless/ath/ath11k/pci.c | 14 +++++++-------
  2 files changed, 13 insertions(+), 13 deletions(-)
 
---- a/drivers/net/wireless/ath/ath11k/ahb.c
-+++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -176,7 +176,7 @@ static void ath11k_ahb_kill_tasklets(str
- {
- 	int i;
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.c
+@@ -76,7 +76,7 @@ static const struct ath11k_hw_params ath
+ 		.host_ce_config = ath11k_host_ce_config_ipq8074,
+ 		.ce_count = 12,
+ 		.target_ce_config = ath11k_target_ce_config_wlan_ipq8074,
+-		.target_ce_count = 11,
++		.target_ce_count = 12,
+ 		.svc_to_ce_map = ath11k_target_service_to_ce_map_wlan_ipq8074,
+ 		.svc_to_ce_map_len = 21,
+ 		.single_pdev_only = false,
+@@ -131,7 +131,7 @@ static const struct ath11k_hw_params ath
+ 		.host_ce_config = ath11k_host_ce_config_ipq8074,
+ 		.ce_count = 12,
+ 		.target_ce_config = ath11k_target_ce_config_wlan_ipq8074,
+-		.target_ce_count = 11,
++		.target_ce_count = 12,
+ 		.svc_to_ce_map = ath11k_target_service_to_ce_map_wlan_ipq6018,
+ 		.svc_to_ce_map_len = 19,
+ 		.single_pdev_only = false,
+Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/hw.c
+===================================================================
+--- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/hw.c
++++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/hw.c
+@@ -1446,6 +1446,14 @@ const struct ce_pipe_config ath11k_targe
+ 	},
  
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		struct ath11k_ce_pipe *ce_pipe = &ab->ce.ce_pipe[i];
+ 	/* CE11 Not used */
++	{
++		.pipenum = __cpu_to_le32(11),
++		.pipedir = __cpu_to_le32(0),
++		.nentries = __cpu_to_le32(0),
++		.nbytes_max = __cpu_to_le32(0),
++		.flags = __cpu_to_le32(CE_ATTR_FLAGS | CE_ATTR_DIS_INTR),
++		.reserved = __cpu_to_le32(0),
++	},
+ };
  
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
-@@ -289,7 +289,7 @@ static void ath11k_ahb_sync_ce_irqs(stru
- 	int i;
- 	int irq_idx;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 
-@@ -317,7 +317,7 @@ static void ath11k_ahb_ce_irqs_enable(st
- {
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		ath11k_ahb_ce_irq_enable(ab, i);
-@@ -328,7 +328,7 @@ static void ath11k_ahb_ce_irqs_disable(s
- {
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		ath11k_ahb_ce_irq_disable(ab, i);
-@@ -442,7 +442,7 @@ static void ath11k_ahb_free_irq(struct a
- 	int irq_idx;
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		irq_idx = ATH11K_IRQ_CE0_OFFSET + i;
-@@ -674,7 +674,7 @@ static int ath11k_ahb_config_irq(struct
- 	int ret = 0;
- 
- 	/* Configure CE irqs */
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		struct ath11k_ce_pipe *ce_pipe = &ab->ce.ce_pipe[i];
- 
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
---- a/drivers/net/wireless/ath/ath11k/pci.c
-+++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -495,7 +495,7 @@ void ath11k_pci_get_ce_msi_idx(struct at
- {
- 	u32 i, msi_data_idx;
- 
--	for (i = 0, msi_data_idx = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0, msi_data_idx = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 
-@@ -565,7 +565,7 @@ void ath11k_pci_free_irq(struct ath11k_b
- {
- 	int i, irq_idx;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		irq_idx = ATH11K_PCI_IRQ_CE0_OFFSET + i;
-@@ -596,7 +596,7 @@ static void ath11k_pci_ce_irqs_disable(s
- {
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		ath11k_pci_ce_irq_disable(ab, i);
-@@ -608,7 +608,7 @@ static void ath11k_pci_sync_ce_irqs(stru
- 	int i;
- 	int irq_idx;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 
-@@ -858,7 +858,7 @@ static int ath11k_config_msi_irq(struct
- 		return ret;
- 
- 	/* Configure CE irqs */
--	for (i = 0, msi_data_idx = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0, msi_data_idx = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 
-@@ -924,7 +924,7 @@ static void ath11k_pci_ce_irqs_enable(st
- {
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
- 			continue;
- 		ath11k_pci_ce_irq_enable(ab, i);
-@@ -1150,7 +1150,7 @@ static void ath11k_pci_kill_tasklets(str
- {
- 	int i;
- 
--	for (i = 0; i < ab->hw_params.ce_count; i++) {
-+	for (i = 0; i < ab->hw_params.target_ce_count; i++) {
- 		struct ath11k_ce_pipe *ce_pipe = &ab->ce.ce_pipe[i];
- 
- 		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
+ /* Map from service/endpoint to Copy Engine.
