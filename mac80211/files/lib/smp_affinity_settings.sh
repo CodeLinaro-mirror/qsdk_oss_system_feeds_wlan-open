@@ -179,7 +179,7 @@ enable_affinity_hk14() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	# rx ring 3 and 4 are mapped for 6G pine radio and disabled rx_hash for 2G and 5G
-	echo 0x9246db > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/rx_hash
+	echo 0x9246db > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/rx_hash
 	echo 0 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/rx_hash
 }
 enable_smp_affinity_wifi() {
