@@ -33,16 +33,6 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  drivers/net/wireless/ath/ath11k/mac.c      |  11 +
  14 files changed, 677 insertions(+), 24 deletions(-)
 
---- a/drivers/net/wireless/ath/ath11k/ahb.c
-+++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -12,6 +12,7 @@
- #include "debug.h"
- #include "hif.h"
- #include "qmi.h"
-+#include "dp_rx.h"
- #include <linux/remoteproc.h>
- 
- static const struct of_device_id ath11k_ahb_of_match[] = {
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -50,6 +50,7 @@ static const struct ath11k_hw_params ath
@@ -71,20 +61,21 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  		.internal_sleep_clock = false,
 --- a/drivers/net/wireless/ath/ath11k/dp.c
 +++ b/drivers/net/wireless/ath/ath11k/dp.c
-@@ -813,9 +813,9 @@ int ath11k_dp_service_srng(struct ath11k
+@@ -813,9 +813,10 @@ int ath11k_dp_service_srng(struct ath11k
  				if (ab->hw_params.ring_mask->rx_mon_status[grp_id] &
  					BIT(id)) {
  					work_done =
 -					ath11k_dp_rx_process_mon_rings(ab,
 -								       id,
 -								       napi, budget);
-+				ab->hw_params.hw_ops->rx_process_mon_rings(ab,
-+									   id, napi,
-+									   budget);
++						ath11k_dp_rx_process_mon_rings(ab,
++									       id,
++									       napi,
++									       budget);
  					budget -= work_done;
  					tot_work_done += work_done;
  
-@@ -1047,6 +1047,7 @@ int ath11k_dp_alloc(struct ath11k_base *
+@@ -1047,6 +1048,7 @@ int ath11k_dp_alloc(struct ath11k_base *
  
  	INIT_LIST_HEAD(&dp->reo_cmd_list);
  	INIT_LIST_HEAD(&dp->reo_cmd_cache_flush_list);
@@ -352,20 +343,23 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  		ath11k_hal_srng_src_get_next_entry(ab, srng);
  		num_buffs_reaped++;
  	}
-@@ -3437,8 +3489,10 @@ int ath11k_dp_rx_process_mon_status(stru
- 		    (pmon->mon_ppdu_status == DP_PPDU_STATUS_START)) {
- 			rx_mon_stats->status_ppdu_done++;
- 			pmon->mon_ppdu_status = DP_PPDU_STATUS_DONE;
+@@ -3432,15 +3484,6 @@ int ath11k_dp_rx_process_mon_status(stru
+ 
+ 		hal_status = ath11k_hal_rx_parse_mon_status(ab, ppdu_info, skb);
+ 
+-		if ((ar->monitor_started) &&
+-		    (hal_status == HAL_TLV_STATUS_PPDU_DONE) &&
+-		    (pmon->mon_ppdu_status == DP_PPDU_STATUS_START)) {
+-			rx_mon_stats->status_ppdu_done++;
+-			pmon->mon_ppdu_status = DP_PPDU_STATUS_DONE;
 -			ath11k_dp_rx_mon_dest_process(ar, mac_id, budget, napi);
 -			pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
-+			if (!ab->hw_params.full_monitor_mode) {
-+				ath11k_dp_rx_mon_dest_process(ar, mac_id, budget, napi);
-+				pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
-+			}
- 		}
- 
+-		}
+-
  		if (ppdu_info->peer_id == HAL_INVALID_PEERID ||
-@@ -3479,7 +3533,6 @@ int ath11k_dp_rx_process_mon_status(stru
+ 		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
+ 			dev_kfree_skb_any(skb);
+@@ -3479,7 +3522,6 @@ int ath11k_dp_rx_process_mon_status(stru
  
  		spin_unlock_bh(&ab->base_lock);
  		rcu_read_unlock();
@@ -373,7 +367,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  		dev_kfree_skb_any(skb);
  	}
  exit:
-@@ -5375,12 +5428,10 @@ static int ath11k_dp_rx_mon_deliver(stru
+@@ -5375,12 +5417,10 @@ static int ath11k_dp_rx_mon_deliver(stru
  
  	mon_skb = ath11k_dp_rx_mon_merg_msdus(ar, mac_id, head_msdu,
  					      tail_msdu, rxs);
@@ -386,7 +380,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  	rxs->flag = 0;
  	do {
  		skb_next = mon_skb->next;
-@@ -5419,12 +5470,12 @@ void ath11k_dp_rx_mon_dest_process(struc
+@@ -5419,12 +5459,12 @@ void ath11k_dp_rx_mon_dest_process(struc
  {
  	struct ath11k_pdev_dp *dp = &ar->dp;
  	struct ath11k_mon_data *pmon = (struct ath11k_mon_data *)&dp->mon_data;
@@ -400,7 +394,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  	u32	 npackets = 0;
  	u32 mpdu_rx_bufs_used;
  
-@@ -5487,6 +5538,7 @@ void ath11k_dp_rx_mon_dest_process(struc
+@@ -5487,6 +5527,7 @@ void ath11k_dp_rx_mon_dest_process(struc
  				   ppdu_id, pmon->mon_ppdu_info.ppdu_id);
  			break;
  		}
@@ -408,7 +402,23 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  		if (head_msdu && tail_msdu) {
  			ath11k_dp_rx_mon_deliver(ar, dp->mac_id, head_msdu,
  						 &pmon->mon_ppdu_info,
-@@ -5676,3 +5728,374 @@ int ath11k_dp_rx_pktlog_stop(struct ath1
+@@ -5572,10 +5613,13 @@ int ath11k_dp_rx_process_mon_rings(struc
+ 	struct ath11k *ar = ath11k_ab_to_ar(ab, mac_id);
+ 	int ret = 0;
+ 
+-	if (ar->monitor_started)
++	if (!ar->monitor_started)
++		ret = ath11k_dp_rx_process_mon_status(ab, mac_id, napi, budget);
++	else if (!ab->hw_params.full_monitor_mode)
+ 		ret = ath11k_dp_mon_process_rx(ab, mac_id, napi, budget);
+ 	else
+-		ret = ath11k_dp_rx_process_mon_status(ab, mac_id, napi, budget);
++		ret = ath11k_dp_full_mon_process_rx(ab, mac_id, napi, budget);
++
+ 	return ret;
+ }
+ 
+@@ -5676,3 +5720,368 @@ int ath11k_dp_rx_pktlog_stop(struct ath1
  
  	return 0;
  }
@@ -688,8 +698,8 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +	return work;
 +}
 +
-+int ath11k_dp_rx_process_full_monitor(struct ath11k_base *ab, int mac_id,
-+				      struct napi_struct *napi, int budget)
++int ath11k_dp_full_mon_process_rx(struct ath11k_base *ab, int mac_id,
++				  struct napi_struct *napi, int budget)
 +{
 +	struct ath11k *ar = ab->pdevs[mac_id].ar;
 +	struct ath11k_pdev_dp *dp = &ar->dp;
@@ -704,12 +714,6 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +	void *ring_entry;
 +
 +	spin_lock_bh(&pmon->mon_lock);
-+
-+	if (!ar->monitor_started) {
-+		quota = ath11k_dp_rx_process_mon_status(ab, mac_id, napi, budget);
-+		spin_unlock_bh(&pmon->mon_lock);
-+		return quota;
-+	}
 +
 +	sw_mon_entries = &pmon->sw_mon_entries;
 +	rx_mon_stats = &pmon->rx_mon_stats;
@@ -785,7 +789,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +}
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
-@@ -98,10 +98,6 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
+@@ -98,16 +98,16 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
  			   int (*iter)(struct ath11k_base *ar, u16 tag, u16 len,
  				       const void *ptr, void *data),
  			   void *data);
@@ -796,9 +800,19 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  int ath11k_dp_rx_mon_status_bufs_replenish(struct ath11k_base *ab, int mac_id,
  					   struct dp_rxdma_ring *rx_ring,
  					   int req_entries,
+ 					   enum hal_rx_buf_return_buf_manager mgr);
+ void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, int mac_id, u32 quota,
+ 				   struct napi_struct *napi);
++int ath11k_dp_rx_process_mon_rings(struct ath11k_base *ab, int mac_id,
++				   struct napi_struct *napi, int budget);
++int ath11k_dp_full_mon_process_rx(struct ath11k_base *ab, int mac_id,
++				  struct napi_struct *napi, int budget);
+ int ath11k_dp_rx_pdev_mon_detach(struct ath11k *ar);
+ int ath11k_dp_rx_pdev_mon_attach(struct ath11k *ar);
+ int ath11k_peer_rx_frag_setup(struct ath11k *ar, const u8 *peer_mac, int vdev_id);
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -1014,6 +1014,46 @@ int ath11k_dp_tx_htt_h2t_ppdu_stats_req(
+@@ -1015,6 +1015,46 @@ int ath11k_dp_tx_htt_h2t_ppdu_stats_req(
  	return 0;
  }
  
@@ -845,7 +859,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  int ath11k_dp_tx_htt_rx_filter_setup(struct ath11k_base *ab, u32 ring_id,
  				     int mac_id, enum hal_ring_type ring_type,
  				     int rx_buf_size,
-@@ -1131,6 +1171,15 @@ int ath11k_dp_tx_htt_monitor_mode_ring_c
+@@ -1132,6 +1172,15 @@ int ath11k_dp_tx_htt_monitor_mode_ring_c
  	struct htt_rx_ring_tlv_filter tlv_filter = {0};
  	int ret = 0, ring_id = 0, i;
  
@@ -984,59 +998,6 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  enum hal_rx_mon_status
  ath11k_hal_rx_parse_mon_status(struct ath11k_base *ab,
  			       struct hal_rx_mon_ppdu_info *ppdu_info,
---- a/drivers/net/wireless/ath/ath11k/hw.c
-+++ b/drivers/net/wireless/ath/ath11k/hw.c
-@@ -591,6 +591,18 @@ static u32 ath11k_get_reo_dest_remap_con
- 	return ring_hash_map;
- }
- 
-+int ath11k_dp_rx_process_mon_rings_ipq8074(struct ath11k_base *ab, int mac_id,
-+					   struct napi_struct *napi, int budget)
-+{
-+	return ath11k_dp_rx_process_mon_status(ab, mac_id, napi, budget);
-+}
-+
-+int ath11k_dp_rx_process_mon_rings_qcn9074(struct ath11k_base *ab, int mac_id,
-+					   struct napi_struct *napi, int budget)
-+{
-+	return ath11k_dp_rx_process_full_monitor(ab, mac_id, napi, budget);
-+}
-+
- const struct ath11k_hw_ops ipq8074_ops = {
- 	.get_hw_mac_from_pdev_id = ath11k_hw_ipq8074_mac_from_pdev_id,
- 	.wmi_init_config = ath11k_init_wmi_config_ipq8074,
-@@ -628,6 +640,7 @@ const struct ath11k_hw_ops ipq8074_ops =
- 	.rx_desc_mpdu_start_addr2 = ath11k_hw_ipq8074_rx_desc_mpdu_start_addr2,
- 	.set_rx_fragmentation_dst_ring = ath11k_hw_ipq8074_set_rx_fragmentation_dst_ring,
- 	.get_reo_dest_remap_config = ath11k_get_reo_dest_remap_config_default,
-+	.rx_process_mon_rings = ath11k_dp_rx_process_mon_rings_ipq8074,
- };
- 
- const struct ath11k_hw_ops ipq6018_ops = {
-@@ -667,6 +680,7 @@ const struct ath11k_hw_ops ipq6018_ops =
- 	.rx_desc_mpdu_start_addr2 = ath11k_hw_ipq8074_rx_desc_mpdu_start_addr2,
- 	.set_rx_fragmentation_dst_ring = ath11k_hw_ipq8074_set_rx_fragmentation_dst_ring,
- 	.get_reo_dest_remap_config = ath11k_get_reo_dest_remap_config_default,
-+	.rx_process_mon_rings = ath11k_dp_rx_process_mon_rings_ipq8074,
- };
- 
- const struct ath11k_hw_ops qca6390_ops = {
-@@ -744,6 +758,7 @@ const struct ath11k_hw_ops qcn9074_ops =
- 	.rx_desc_get_msdu_payload = ath11k_hw_qcn9074_rx_desc_get_msdu_payload,
- 	.set_rx_fragmentation_dst_ring = ath11k_hw_ipq8074_set_rx_fragmentation_dst_ring,
- 	.get_reo_dest_remap_config = ath11k_get_reo_dest_remap_config_default,
-+	.rx_process_mon_rings = ath11k_dp_rx_process_mon_rings_qcn9074,
- };
- 
- /* IPQ5018 hw ops is similar to QCN9074 except for the dest ring remap */
-@@ -784,6 +799,7 @@ const struct ath11k_hw_ops ipq5018_ops =
- 	.rx_desc_get_msdu_payload = ath11k_hw_qcn9074_rx_desc_get_msdu_payload,
- 	.set_rx_fragmentation_dst_ring = ath11k_hw_ipq5018_set_rx_fragmentation_dst_ring,
- 	.get_reo_dest_remap_config = ath11k_get_reo_dest_remap_config_5018,
-+	.rx_process_mon_rings = ath11k_dp_rx_process_mon_rings_ipq8074,
-  };
- 
- #define ATH11K_TX_RING_MASK_0 0x1
 --- a/drivers/net/wireless/ath/ath11k/hw.h
 +++ b/drivers/net/wireless/ath/ath11k/hw.h
 @@ -126,6 +126,7 @@ enum ath11k_bus {
@@ -1055,24 +1016,3 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  
  	u16 interface_modes;
  	bool supports_monitor;
-@@ -230,6 +232,8 @@ struct ath11k_hw_ops {
- 	u8* (*rx_desc_mpdu_start_addr2)(struct hal_rx_desc *desc);
- 	void (*set_rx_fragmentation_dst_ring)(struct ath11k_base *ab);
- 	u32 (*get_reo_dest_remap_config)(void);
-+	int (*rx_process_mon_rings)(struct ath11k_base *ab, int mac_id,
-+				    struct napi_struct *napi, int budget);
- };
- 
- extern const struct ath11k_hw_ops ipq8074_ops;
-@@ -358,4 +362,11 @@ extern const struct ath11k_hw_regs qca63
- extern const struct ath11k_hw_regs qcn9074_regs;
- extern const struct ath11k_hw_regs ipq5018_regs;
- 
-+int ath11k_dp_rx_process_mon_rings(struct ath11k_base *ab, int mac_id,
-+				   struct napi_struct *napi, int budget);
-+int ath11k_dp_rx_process_full_monitor(struct ath11k_base *ab, int mac_id,
-+				      struct napi_struct *napi, int budget);
-+int ath11k_dp_rx_process_mon_status(struct ath11k_base *ab, int mac_id,
-+				    struct napi_struct *napi, int budget);
-+
- #endif
