@@ -54,9 +54,10 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  						    ATH11K_AST_TYPE_WDS);
 -				ath11k_nss_add_wds_peer(ar, ta_peer, src_mac,
 -							ATH11K_AST_TYPE_WDS);
+-			} else {
 +				if (!ta_peer->nss.ext_vdev_up)
 +					ieee80211_rx_nss_notify_4addr(dev, ta_peer->addr);
- 			} else {
++			} else if (ast_entry->type == ATH11K_AST_TYPE_WDS) {
  				ath11k_peer_update_ast(ar, ta_peer, ast_entry);
  				ath11k_nss_update_wds_peer(ar, ta_peer, src_mac);
  			}
@@ -204,22 +205,23 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  {
  	struct nss_wifi_vdev_msg *vdev_msg = NULL;
  	struct ath11k *ar = arvif->ar;
-+	struct ath11k_vif *ap_vlan_arvif;
++	struct ath11k_vif *ap_vlan_arvif, *tmp;
  	nss_tx_status_t status;
  	int ret = 0;
  
-@@ -1285,6 +1365,10 @@ int ath11k_nss_vdev_down(struct ath11k_v
+@@ -1285,6 +1365,11 @@ int ath11k_nss_vdev_down(struct ath11k_v
  	}
  
  	ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss vdev down tx msg success\n");
 +
 +	if (arvif->vif->type == NL80211_IFTYPE_AP)
-+		list_for_each_entry(ap_vlan_arvif, &arvif->ap_vlan_arvifs, list)
++		list_for_each_entry_safe(ap_vlan_arvif, tmp, &arvif->ap_vlan_arvifs,
++                                         list)
 +			ath11k_nss_ext_vdev_down(ap_vlan_arvif);
  free:
  	ATH11K_MEMORY_STATS_DEC(ar->ab, malloc_size,
  				sizeof(struct nss_wifi_vdev_msg));
-@@ -1292,6 +1376,346 @@ free:
+@@ -1292,6 +1377,346 @@ free:
  	return ret;
  }
  
@@ -566,6 +568,70 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  /*----------------------------Peer Setup/Config -----------------------------*/
  
  int ath11k_nss_set_peer_sec_type(struct ath11k *ar,
+@@ -1351,21 +1776,18 @@ free:
+ 	return status;
+ }
+ 
+-void ath11k_nss_update_sta_stats(struct station_info *sinfo,
+-				 struct ieee80211_sta *sta,
+-				 struct ath11k_sta *arsta)
++void ath11k_nss_update_sta_stats(struct ath11k_vif *arvif,
++				 struct station_info *sinfo,
++				 struct ieee80211_sta *sta)
+ {
+ 	struct sta_info *stainfo;
+ 	struct ath11k_peer *peer;
+ 	int tid_idx;
+-	struct ath11k *ar = arsta->arvif->ar;
++	struct ath11k *ar = arvif->ar;
+ 	struct ath11k_base *ab = ar->ab;
+ 
+-	if (!ab->nss.enabled)
+-		return;
+-
+ 	spin_lock_bh(&ab->base_lock);
+-	peer = ath11k_peer_find_by_addr(arsta->arvif->ar->ab, sta->addr);
++	peer = ath11k_peer_find_by_addr(ab, sta->addr);
+ 	if (!peer) {
+ 		ath11k_dbg(ab, ATH11K_DBG_NSS, "unable to find peer %pM\n",
+ 					sta->addr);
+@@ -1451,12 +1873,12 @@ exit:
+ void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
+ 				  struct ath11k_peer *peer)
+ {
+-	struct ath11k_sta *arsta = (struct ath11k_sta *)peer->sta->drv_priv;
+ 	u16 ath11k_hal_rx_legacy_rates[] =
+ 	{ 10, 20, 55, 60, 90, 110, 120, 180, 240, 360, 480, 540 };
+ 	u16 rate = 0;
+ 	u16 num_msdu;
+-	struct ath11k *ar = arsta->arvif->ar;
++	struct ath11k_vif *arvif = ath11k_vif_to_arvif(peer->vif);
++	struct ath11k *ar = arvif->ar;
+ 	struct ath11k_base *ab = ar->ab;
+ 
+ 	if (!ab->nss.enabled)
+@@ -1706,8 +2128,8 @@ int ath11k_nss_add_wds_peer(struct ath11
+ 	}
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
+-		   "nss add wds peer success peer mac:%pM dest mac:%pM peer_id:%d\n",
+-		   wds_peer_msg->peer_mac, wds_peer_msg->dest_mac, wds_peer_msg->peer_id);
++		   "nss add wds peer success pdev:%d peer mac:%pM dest mac:%pM peer_id:%d\n",
++		   wds_peer_msg->pdev_id, wds_peer_msg->peer_mac, wds_peer_msg->dest_mac, wds_peer_msg->peer_id);
+ 
+ msg_free:
+ 	kfree(wlmsg);
+@@ -1751,8 +2173,8 @@ int ath11k_nss_update_wds_peer(struct at
+ 	}
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
+-		   "nss update wds peer success peer mac:%pM dest mac:%pM peer_id:%d\n",
+-		   wds_peer_msg->peer_mac, wds_peer_msg->dest_mac, wds_peer_msg->peer_id);
++		   "nss update wds peer success pdev:%d peer mac:%pM dest mac:%pM peer_id:%d\n",
++		   wds_peer_msg->pdev_id, wds_peer_msg->peer_mac, wds_peer_msg->dest_mac, wds_peer_msg->peer_id);
+ 
+ msg_free:
+ 	kfree(wlmsg);
 --- a/drivers/net/wireless/ath/ath11k/nss.h
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
 @@ -129,6 +129,7 @@ enum ath11k_nss_peer_sec_type {
@@ -576,7 +642,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	struct peer_stats *nss_stats;
  };
  
-@@ -142,6 +143,10 @@ struct arvif_nss {
+@@ -142,6 +143,12 @@ struct arvif_nss {
  	int encap;
  	/* Keep the copy of decap type for nss */
  	int decap;
@@ -584,10 +650,12 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	void* ctx;
 +	/* Parent AP vif stored in case of AP_VLAN vif */
 +	struct ath11k_vif *ap_vif;
++	/* WDS cfg should be done only once for ext vdev */
++	bool wds_cfg_done;
  	bool created;
  };
  
-@@ -191,6 +196,16 @@ int ath11k_nss_map_wds_peer(struct ath11
+@@ -191,11 +198,21 @@ int ath11k_nss_map_wds_peer(struct ath11
  			    u8 *dest_mac, enum ath11k_ast_entry_type type);
  int ath11k_nss_del_wds_peer(struct ath11k *ar, struct ath11k_peer *peer,
  			    u8 *dest_mac);
@@ -603,8 +671,29 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +void ath11k_nss_ext_vdev_delete(struct ath11k_vif *arvif);
  int ath11k_nss_set_peer_sec_type(struct ath11k *ar, struct ath11k_peer *peer,
  				 struct ieee80211_key_conf *key_conf);
- void ath11k_nss_update_sta_stats(struct station_info *sinfo,
-@@ -244,6 +259,11 @@ static inline int ath11k_nss_vdev_down(s
+-void ath11k_nss_update_sta_stats(struct station_info *sinfo,
+-				 struct ieee80211_sta *sta,
+-				 struct ath11k_sta *arsta);
++void ath11k_nss_update_sta_stats(struct ath11k_vif *arvif,
++				 struct station_info *sinfo,
++				 struct ieee80211_sta *sta);
+ void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
+ 				  struct ath11k_peer *peer);
+ int ath11k_nss_setup(struct ath11k_base *ab);
+@@ -221,9 +238,9 @@ static inline void ath11k_nss_vdev_delet
+ {
+ }
+ 
+-static inline void ath11k_nss_update_sta_stats(struct station_info *sinfo,
+-					       struct ieee80211_sta *sta,
+-					       struct ath11k_sta *arsta)
++static inline void ath11k_nss_update_sta_stats(struct ath11k_vif *arvif,
++					       struct station_info *sinfo,
++					       struct ieee80211_sta *sta)
+ {
+ 	return;
+ }
+@@ -244,6 +261,11 @@ static inline int ath11k_nss_vdev_down(s
  	return 0;
  }
  
@@ -616,7 +705,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static inline int ath11k_nss_peer_delete(struct ath11k_base *ab, u8 *addr)
  {
  	return 0;
-@@ -277,6 +297,43 @@ static inline int ath11k_nss_del_wds_pee
+@@ -277,6 +299,43 @@ static inline int ath11k_nss_del_wds_pee
  {
  	return 0;
  }
