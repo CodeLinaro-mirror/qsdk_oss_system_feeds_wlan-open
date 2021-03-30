@@ -20,11 +20,9 @@ Signed-off-by: John Crispin <john@phrozen.org>
  net/mac80211/tx.c          |  24 ++--
  5 files changed, 278 insertions(+), 18 deletions(-)
 
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index bf39030b4993..92c17055fc81 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -1690,6 +1690,10 @@ enum ieee80211_vif_flags {
+@@ -1735,6 +1735,10 @@ enum ieee80211_offload_flags {
   * @multiple_bssid.parent: a non-transmitted bssid has a transmitted parent.
   * @multiple_bssid.list: linked list for tracking parent - child relations.
   * @multiple_bssid.non_transmitted: Is this a non-transmitted bssi
@@ -35,7 +33,7 @@ index bf39030b4993..92c17055fc81 100644
   */
  struct ieee80211_vif {
  	enum nl80211_iftype type;
-@@ -1723,6 +1727,9 @@ struct ieee80211_vif {
+@@ -1768,6 +1772,9 @@ struct ieee80211_vif {
  		bool non_transmitted;
  	} multiple_bssid;
  
@@ -45,11 +43,10 @@ index bf39030b4993..92c17055fc81 100644
  	/* must be last */
  	u8 drv_priv[] __aligned(sizeof(void *));
  };
-@@ -4984,6 +4991,16 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif);
-  */
+@@ -5080,6 +5087,16 @@ void ieee80211_csa_finish(struct ieee802
  bool ieee80211_beacon_cntdwn_is_complete(struct ieee80211_vif *vif);
  
-+/**
+ /**
 + * ieee80211_color_change_finish - notify mac80211 about color change
 + * @vif: &struct ieee80211_vif pointer from the add_interface callback.
 + *
@@ -59,12 +56,13 @@ index bf39030b4993..92c17055fc81 100644
 + */
 +void ieee80211_color_change_finish(struct ieee80211_vif *vif);
 +
- /**
++/**
   * ieee80211_proberesp_get - retrieve a Probe Response template
   * @hw: pointer obtained from ieee80211_alloc_hw().
-@@ -6726,4 +6743,16 @@ struct sk_buff *
- ieee80211_get_unsol_bcast_probe_resp_tmpl(struct ieee80211_hw *hw,
- 					  struct ieee80211_vif *vif);
+  * @vif: &struct ieee80211_vif pointer from the add_interface callback.
+@@ -6857,4 +6874,16 @@ void ieee80211_update_muedca_params(stru
+ 				    struct ieee80211_mu_edca_param_set
+ 				    *params, gfp_t gfp);
  
 +/**
 + * ieeee80211_obss_color_collision_notify notify userland about a BSS color
@@ -79,11 +77,9 @@ index bf39030b4993..92c17055fc81 100644
 +				       u64 color_bitmap);
 +
  #endif /* MAC80211_H */
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 6c6a9fb7b6ec..363ceeff0f6e 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -861,7 +861,8 @@ static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
+@@ -862,7 +862,8 @@ static int ieee80211_set_monitor_channel
  
  static int ieee80211_set_probe_resp(struct ieee80211_sub_if_data *sdata,
  				    const u8 *resp, size_t resp_len,
@@ -93,7 +89,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  {
  	struct probe_resp *new, *old;
  
-@@ -881,6 +882,8 @@ static int ieee80211_set_probe_resp(struct ieee80211_sub_if_data *sdata,
+@@ -882,6 +883,8 @@ static int ieee80211_set_probe_resp(stru
  		memcpy(new->cntdwn_counter_offsets, csa->counter_offsets_presp,
  		       csa->n_counter_offsets_presp *
  		       sizeof(new->cntdwn_counter_offsets[0]));
@@ -102,7 +98,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  
  	rcu_assign_pointer(sdata->u.ap.probe_resp, new);
  	if (old)
-@@ -1016,7 +1019,8 @@ static u8 *ieee80211_copy_multiple_bssid_beacon(u8 *offset,
+@@ -1018,7 +1021,8 @@ static u8 *ieee80211_copy_multiple_bssid
  
  static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
  				   struct cfg80211_beacon_data *params,
@@ -112,7 +108,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  {
  	struct beacon_data *new, *old;
  	int new_head_len, new_tail_len, new_multiple_bssid_len;
-@@ -1088,6 +1092,11 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -1090,6 +1094,11 @@ static int ieee80211_assign_beacon(struc
  		       sizeof(new->cntdwn_counter_offsets[0]));
  	}
  
@@ -124,7 +120,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  	/* copy in head */
  	if (params->head)
  		memcpy(new->head, params->head, new_head_len);
-@@ -1102,7 +1111,7 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -1104,7 +1113,7 @@ static int ieee80211_assign_beacon(struc
  			memcpy(new->tail, old->tail, new_tail_len);
  
  	err = ieee80211_set_probe_resp(sdata, params->probe_resp,
@@ -133,16 +129,16 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  	if (err < 0) {
  		kfree(new);
  		return err;
-@@ -1261,7 +1270,7 @@ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
- 		}
- 	}
+@@ -1266,7 +1275,7 @@ static int ieee80211_start_ap(struct wip
+ 	if (ieee80211_hw_check(&local->hw, HAS_RATE_CONTROL))
+ 		sdata->vif.bss_conf.beacon_tx_rate = params->beacon_rate;
  
 -	err = ieee80211_assign_beacon(sdata, &params->beacon, NULL);
 +	err = ieee80211_assign_beacon(sdata, &params->beacon, NULL, NULL);
- 	if (err < 0) {
- 		ieee80211_vif_release_channel(sdata);
- 		return err;
-@@ -1299,17 +1308,17 @@ static int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
+ 	if (err < 0)
+ 		goto error;
+ 	changed |= err;
+@@ -1305,17 +1314,17 @@ static int ieee80211_change_beacon(struc
  	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  	sdata_assert_lock(sdata);
  
@@ -163,7 +159,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  	if (err < 0)
  		return err;
  	ieee80211_bss_info_change_notify(sdata, err);
-@@ -3228,7 +3237,7 @@ static int ieee80211_set_after_csa_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -3223,7 +3232,7 @@ static int ieee80211_set_after_csa_beaco
  	switch (sdata->vif.type) {
  	case NL80211_IFTYPE_AP:
  		err = ieee80211_assign_beacon(sdata, sdata->u.ap.next_beacon,
@@ -172,7 +168,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  		kfree(sdata->u.ap.next_beacon);
  		sdata->u.ap.next_beacon = NULL;
  
-@@ -3394,7 +3403,7 @@ static int ieee80211_set_csa_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -3389,7 +3398,7 @@ static int ieee80211_set_csa_beacon(stru
  		csa.n_counter_offsets_presp = params->n_counter_offsets_presp;
  		csa.count = params->count;
  
@@ -181,7 +177,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  		if (err < 0) {
  			kfree(sdata->u.ap.next_beacon);
  			return err;
-@@ -3482,6 +3491,14 @@ static int ieee80211_set_csa_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -3478,6 +3487,14 @@ static int ieee80211_set_csa_beacon(stru
  	return 0;
  }
  
@@ -196,7 +192,7 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  static int
  __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
  			   struct cfg80211_csa_settings *params)
-@@ -3550,6 +3567,10 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
+@@ -3546,6 +3563,10 @@ __ieee80211_channel_switch(struct wiphy
  		goto out;
  	}
  
@@ -207,8 +203,8 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  	err = ieee80211_set_csa_beacon(sdata, params, &changed);
  	if (err) {
  		ieee80211_vif_unreserve_chanctx(sdata);
-@@ -4190,6 +4211,194 @@ static int ieee80211_reset_tid_config(struct wiphy *wiphy,
- 	return ret;
+@@ -4197,6 +4218,194 @@ static int ieee80211_set_sar_specs(struc
+ 	return local->ops->set_sar_specs(&local->hw, sar);
  }
  
 +static int ieee80211_set_after_color_change_beacon(struct ieee80211_sub_if_data *sdata,
@@ -402,17 +398,15 @@ index 6c6a9fb7b6ec..363ceeff0f6e 100644
  const struct cfg80211_ops mac80211_config_ops = {
  	.add_virtual_intf = ieee80211_add_iface,
  	.del_virtual_intf = ieee80211_del_iface,
-@@ -4295,4 +4504,5 @@ const struct cfg80211_ops mac80211_config_ops = {
- 	.reset_tid_config = ieee80211_reset_tid_config,
+@@ -4302,4 +4511,5 @@ const struct cfg80211_ops mac80211_confi
+ 	.set_sar_specs = ieee80211_set_sar_specs,
  	.set_fils_discovery = ieee80211_set_fils_discovery,
  	.set_unsol_bcast_probe_resp = ieee80211_set_unsol_bcast_probe_resp,
 +	.color_change = ieee80211_color_change,
  };
-diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
-index 49806681bf77..a0eb3d37bebb 100644
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -256,6 +256,13 @@ struct ieee80211_csa_settings {
+@@ -260,6 +260,13 @@ struct ieee80211_csa_settings {
  	u8 count;
  };
  
@@ -426,7 +420,7 @@ index 49806681bf77..a0eb3d37bebb 100644
  struct beacon_data {
  	u8 *head, *tail;
  	int head_len, tail_len;
-@@ -940,6 +947,8 @@ struct ieee80211_sub_if_data {
+@@ -942,6 +949,8 @@ struct ieee80211_sub_if_data {
  	bool csa_block_tx; /* write-protected by sdata_lock and local->mtx */
  	struct cfg80211_chan_def csa_chandef;
  
@@ -435,7 +429,7 @@ index 49806681bf77..a0eb3d37bebb 100644
  	struct list_head assigned_chanctx_list; /* protected by chanctx_mtx */
  	struct list_head reserved_chanctx_list; /* protected by chanctx_mtx */
  
-@@ -1761,6 +1770,9 @@ void ieee80211_csa_finalize_work(struct work_struct *work);
+@@ -1761,6 +1770,9 @@ void ieee80211_csa_finalize_work(struct
  int ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
  			     struct cfg80211_csa_settings *params);
  
@@ -445,11 +439,9 @@ index 49806681bf77..a0eb3d37bebb 100644
  /* interface handling */
  #define MAC80211_SUPPORTED_FEATURES_TX	(NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM | \
  					 NETIF_F_HW_CSUM | NETIF_F_SG | \
-diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
-index cb40787f7f86..7199972c7cd3 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -960,6 +960,8 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
+@@ -486,6 +486,8 @@ static void ieee80211_do_stop(struct iee
  				   GFP_KERNEL);
  	}
  
@@ -458,7 +450,7 @@ index cb40787f7f86..7199972c7cd3 100644
  	/* APs need special treatment */
  	if (sdata->vif.type == NL80211_IFTYPE_AP) {
  		struct ieee80211_sub_if_data *vlan, *tmpsdata;
-@@ -1618,6 +1620,7 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
+@@ -1647,6 +1649,7 @@ static void ieee80211_setup_sdata(struct
  	INIT_WORK(&sdata->work, ieee80211_iface_work);
  	INIT_WORK(&sdata->recalc_smps, ieee80211_recalc_smps_work);
  	INIT_WORK(&sdata->csa_finalize_work, ieee80211_csa_finalize_work);
@@ -466,11 +458,9 @@ index cb40787f7f86..7199972c7cd3 100644
  	INIT_LIST_HEAD(&sdata->assigned_chanctx_list);
  	INIT_LIST_HEAD(&sdata->reserved_chanctx_list);
  
-diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
-index 3b65e3a94c3a..cf5082c04eca 100644
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -4597,11 +4597,12 @@ static int ieee80211_beacon_add_tim(struct ieee80211_sub_if_data *sdata,
+@@ -4590,11 +4590,12 @@ static int ieee80211_beacon_add_tim(stru
  static void ieee80211_set_beacon_cntdwn(struct ieee80211_sub_if_data *sdata,
  					struct beacon_data *beacon)
  {
@@ -484,7 +474,7 @@ index 3b65e3a94c3a..cf5082c04eca 100644
  
  	switch (sdata->vif.type) {
  	case NL80211_IFTYPE_AP:
-@@ -4621,21 +4622,25 @@ static void ieee80211_set_beacon_cntdwn(struct ieee80211_sub_if_data *sdata,
+@@ -4614,21 +4615,25 @@ static void ieee80211_set_beacon_cntdwn(
  	}
  
  	rcu_read_lock();
@@ -518,7 +508,7 @@ index 3b65e3a94c3a..cf5082c04eca 100644
  	}
  	rcu_read_unlock();
  }
-@@ -4864,6 +4869,7 @@ __ieee80211_beacon_get(struct ieee80211_hw *hw,
+@@ -4857,6 +4862,7 @@ __ieee80211_beacon_get(struct ieee80211_
  			if (offs) {
  				offs->tim_offset = beacon->head_len;
  				offs->tim_length = skb->len - beacon->head_len;
@@ -526,6 +516,3 @@ index 3b65e3a94c3a..cf5082c04eca 100644
  
  				/* for AP the csa offsets are from tail */
  				csa_off_base = skb->len;
--- 
-2.25.0
-

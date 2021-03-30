@@ -22,16 +22,16 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  drivers/net/wireless/ath/ath11k/ce.c    | 30 +++++++++++
  drivers/net/wireless/ath/ath11k/ce.h    | 25 +++++++++
  drivers/net/wireless/ath/ath11k/core.h  |  1 +
- drivers/net/wireless/ath/ath11k/debug.c | 89 +++++++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath11k/debugfs.c | 89 +++++++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath11k/hal.c   | 24 +++++++--
  drivers/net/wireless/ath/ath11k/pci.c   | 12 +++++
  7 files changed, 189 insertions(+), 3 deletions(-)
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -458,8 +458,16 @@ static void ath11k_ahb_ce_tasklet(unsign
+@@ -456,8 +456,16 @@ static void ath11k_ahb_ce_tasklet(struct
  {
- 	struct ath11k_ce_pipe *ce_pipe = (struct ath11k_ce_pipe *)data;
+ 	struct ath11k_ce_pipe *ce_pipe = from_tasklet(ce_pipe, t, intr_tq);
  
 +	if (ce_pipe->ab->ce_latency_stats_enable)
 +		ce_pipe->tasklet_ts.exec_entry_ts = ktime_get_boottime();
@@ -46,7 +46,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	ath11k_ahb_ce_irq_enable(ce_pipe->ab, ce_pipe->pipe_num);
  }
  
-@@ -474,6 +482,9 @@ static irqreturn_t ath11k_ahb_ce_interru
+@@ -472,6 +480,9 @@ static irqreturn_t ath11k_ahb_ce_interru
  
  	tasklet_schedule(&ce_pipe->intr_tq);
  
@@ -58,7 +58,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/ce.c
 +++ b/drivers/net/wireless/ath/ath11k/ce.c
-@@ -970,6 +970,8 @@ int ath11k_ce_alloc_pipes(struct ath11k_
+@@ -1049,6 +1049,8 @@ int ath11k_ce_alloc_pipes(struct ath11k_
  	int ret;
  	const struct ce_attr *attr;
  
@@ -67,7 +67,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	spin_lock_init(&ab->ce.ce_lock);
  
  	for (i = 0; i < ab->hw_params.ce_count; i++) {
-@@ -1018,3 +1020,30 @@ int ath11k_ce_get_attr_flags(struct ath1
+@@ -1097,3 +1099,30 @@ int ath11k_ce_get_attr_flags(struct ath1
  	return ab->hw_params.host_ce_config[ce_id].flags;
  }
  EXPORT_SYMBOL(ath11k_ce_get_attr_flags);
@@ -145,26 +145,27 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  };
  
  struct ath11k_ce {
-@@ -194,4 +218,5 @@ void ath11k_ce_poll_send_completed(struc
- int ath11k_ce_map_service_to_pipe(struct ath11k_base *ab, u16 service_id,
- 				  u8 *ul_pipe, u8 *dl_pipe);
- int ath11k_ce_attr_attach(struct ath11k_base *ab);
+@@ -198,5 +222,5 @@ int ath11k_ce_attr_attach(struct ath11k_
+ void ath11k_ce_get_shadow_config(struct ath11k_base *ab,
+ 				 u32 **shadow_cfg, u32 *shadow_cfg_len);
+ void ath11k_ce_stop_shadow_timers(struct ath11k_base *ab);
+-
 +void ce_update_tasklet_time_duration_stats(struct ath11k_ce_pipe *ce_pipe);
  #endif
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -879,6 +879,7 @@ struct ath11k_base {
- 	u32 hw_pdev_id_map[MAX_RADIOS];
+@@ -934,6 +934,7 @@ struct ath11k_base {
+ 
  	bool fw_recovery_support;
  	bool ce_remap;
 +	bool ce_latency_stats_enable;
  	u32 ce_remap_base_addr;
  	atomic_t num_max_allowed;
- 	int userpd_id;
---- a/drivers/net/wireless/ath/ath11k/debug.c
-+++ b/drivers/net/wireless/ath/ath11k/debug.c
-@@ -1473,6 +1473,93 @@ static const struct file_operations fops
-        .open = simple_open,
+ 	struct ath11k_num_vdevs_peers *num_vdevs_peers;
+--- a/drivers/net/wireless/ath/ath11k/debugfs.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs.c
+@@ -1581,6 +1581,93 @@ static const struct file_operations fops
+ 	.llseek = default_llseek,
  };
  
 +static ssize_t ath11k_write_ce_latency_stats(struct file *file,
@@ -254,10 +255,10 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
 +	.read = ath11k_read_ce_latency_stats,
 +};
 +
- int ath11k_debug_pdev_create(struct ath11k_base *ab)
+ int ath11k_debugfs_pdev_create(struct ath11k_base *ab)
  {
  	if (test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
-@@ -1490,6 +1577,8 @@ int ath11k_debug_pdev_create(struct ath1
+@@ -1598,6 +1685,8 @@ int ath11k_debugfs_pdev_create(struct at
  	debugfs_create_file("set_fw_recovery", 0600, ab->debugfs_soc, ab,
  			    &fops_fw_recovery);
  
@@ -268,7 +269,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  }
 --- a/drivers/net/wireless/ath/ath11k/hal.c
 +++ b/drivers/net/wireless/ath/ath11k/hal.c
-@@ -1152,7 +1152,11 @@ void ath11k_hal_dump_srng_stats(struct a
+@@ -1289,7 +1289,11 @@ void ath11k_hal_dump_srng_stats(struct a
  	struct hal_srng *srng;
  	struct ath11k_ext_irq_grp *irq_grp;
  	struct ath11k_ce_pipe *ce_pipe;
@@ -281,7 +282,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  
  	ath11k_err(ab, "Last interrupt received for each CE:\n");
  	for (i = 0; i < ab->hw_params.ce_count; i++) {
-@@ -1161,9 +1165,23 @@ void ath11k_hal_dump_srng_stats(struct a
+@@ -1298,9 +1302,23 @@ void ath11k_hal_dump_srng_stats(struct a
  		if (ath11k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
  			continue;
  
@@ -309,9 +310,9 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	ath11k_err(ab, "\nLast interrupt received for each group:\n");
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -457,8 +457,16 @@ static void ath11k_pci_ce_tasklet(unsign
+@@ -614,8 +614,16 @@ static void ath11k_pci_ce_tasklet(struct
  {
- 	struct ath11k_ce_pipe *ce_pipe = (struct ath11k_ce_pipe *)data;
+ 	struct ath11k_ce_pipe *ce_pipe = from_tasklet(ce_pipe, t, intr_tq);
  
 +	if (ce_pipe->ab->ce_latency_stats_enable)
 +		ce_pipe->tasklet_ts.exec_entry_ts = ktime_get_boottime();
@@ -326,7 +327,7 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@codeaurora.org>
  	ath11k_pci_ce_irq_enable(ce_pipe->ab, ce_pipe->pipe_num);
  }
  
-@@ -470,8 +478,12 @@ static irqreturn_t ath11k_pci_ce_interru
+@@ -627,8 +635,12 @@ static irqreturn_t ath11k_pci_ce_interru
  	ce_pipe->timestamp = jiffies;
  
  	ath11k_pci_ce_irq_disable(ce_pipe->ab, ce_pipe->pipe_num);
