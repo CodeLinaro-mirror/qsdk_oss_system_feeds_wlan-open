@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2341 @@
+@@ -0,0 +1,2352 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -288,6 +288,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		peer->nss.nss_stats = NULL;
 +	}
 +
++	complete(&peer->nss.complete);
 +	spin_unlock_bh(&ab->base_lock);
 +
 +	ath11k_dbg(ab, ATH11K_DBG_NSS, "nss peer %d mem freed\n", peer_id);
@@ -1356,6 +1357,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +			 sizeof(struct nss_wifili_peer_msg),
 +			 msg_cb, NULL);
 +
++	reinit_completion(&peer->nss.complete);
++
 +	status = nss_wifili_tx_msg(ab->nss.ctx, wlmsg);
 +	if (status != NSS_TX_SUCCESS) {
 +		ath11k_warn(ab, "nss send peer delete msg tx error %d\n", status);
@@ -1368,15 +1371,20 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		ret = 0;
 +	}
 +
-+	kfree(wlmsg);
-+	if (peer->nss.nss_stats) {
-+		kfree(peer->nss.nss_stats);
-+		peer->nss.nss_stats = NULL;
-+	}
-+
 +	spin_unlock_bh(&ab->base_lock);
 +
-+	return ret;
++	kfree(wlmsg);
++
++	/* No need to return failure or free up here, since the msg was tx succesfully
++	 * the peer delete response would be received from NSS which will free up
++	 * the allocated memory
++	 */
++	ret = wait_for_completion_timeout(&peer->nss.complete,
++					  msecs_to_jiffies(ATH11K_NSS_MSG_TIMEOUT_MS));
++	if (!ret)
++		ath11k_warn(ab, "timeout while waiting for nss peer delete msg response\n");
++
++	return 0;
 +
 +free_peer:
 +	dma_unmap_single(ab->dev, peer->nss.paddr,
@@ -1414,6 +1422,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	ether_addr_copy(peer_msg->peer_mac_addr, peer->addr);
 +
 +	peer->nss.vaddr = kzalloc(WIFILI_NSS_PEER_BYTE_SIZE, GFP_ATOMIC);
++
++	/* Initialize completion for verifying Peer NSS message response */
++	init_completion(&peer->nss.complete);
 +
 +	if (!peer->nss.vaddr) {
 +		ath11k_warn(ab, "failed to allocate memory for nss peer info\n");
@@ -2391,7 +2402,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,268 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -2521,6 +2532,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	uint32_t *vaddr;
 +	dma_addr_t paddr;
 +	struct peer_stats *nss_stats;
++	struct completion complete;
 +};
 +
 +/* Structure to hold the vif related info for nss offload support */
