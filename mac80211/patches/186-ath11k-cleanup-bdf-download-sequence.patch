@@ -93,7 +93,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  		.data_type	= QMI_EOTI,
  		.array_type	= NO_ARRAY,
  		.tlv_type	= QMI_COMMON_TLV_TYPE,
-@@ -2234,102 +2307,83 @@ static int ath11k_qmi_request_target_cap
+@@ -2236,102 +2309,83 @@ static int ath11k_qmi_request_target_cap
  		    ab->qmi.target.fw_build_timestamp,
  		    ab->qmi.target.fw_build_id);
  
@@ -244,7 +244,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  
  		ret = qmi_send_request(&ab->qmi.handle, NULL, &txn,
  				       QMI_WLANFW_BDF_DOWNLOAD_REQ_V01,
-@@ -2337,112 +2391,103 @@ static int ath11k_qmi_load_bdf_fixed_add
+@@ -2339,112 +2393,112 @@ static int ath11k_qmi_load_bdf_fixed_add
  				       qmi_wlanfw_bdf_download_req_msg_v01_ei, req);
  		if (ret < 0) {
  			qmi_txn_cancel(&txn);
@@ -301,6 +301,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 -		return -ENOMEM;
 -	memset(&resp, 0, sizeof(resp));
 +	u32 fw_size, file_type;
++	u8 *tmp;
 +	int ret = 0;
  
  	memset(&bd, 0, sizeof(bd));
@@ -315,9 +316,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  
 -	temp = bd.data;
 -	remaining = bd.len;
-+	fw_size = bd.len;
-+	fw_size = min_t(u32, ab->hw_params.fw.board_size, bd.len);
- 
+-
 -	while (remaining) {
 -		req->valid = 1;
 -		req->file_id_valid = 1;
@@ -340,6 +339,14 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 -		}
 -
 -		memcpy(req->data, temp, req->data_len);
++	fw_size = bd.len;
++	fw_size = min_t(u32, ab->hw_params.fw.board_size, bd.len);
+ 
+-		ret = qmi_txn_init(&ab->qmi.handle, &txn,
+-				   qmi_wlanfw_bdf_download_resp_msg_v01_ei,
+-				   &resp);
+-		if (ret < 0)
+-			goto out_qmi_bdf;
 +	file_type = ATH11K_QMI_FILE_TYPE_BDF_GOLDEN;
 +	ret = ath11k_qmi_load_file_target_mem(ab, bd.data, fw_size, file_type);
 +	if (ret < 0) {
@@ -347,11 +354,14 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +		goto out;
 +	}
  
--		ret = qmi_txn_init(&ab->qmi.handle, &txn,
--				   qmi_wlanfw_bdf_download_resp_msg_v01_ei,
--				   &resp);
--		if (ret < 0)
+-		ret = qmi_send_request(&ab->qmi.handle, NULL, &txn,
+-				       QMI_WLANFW_BDF_DOWNLOAD_REQ_V01,
+-				       QMI_WLANFW_BDF_DOWNLOAD_REQ_MSG_V01_MAX_LEN,
+-				       qmi_wlanfw_bdf_download_req_msg_v01_ei, req);
+-		if (ret < 0) {
+-			qmi_txn_cancel(&txn);
 -			goto out_qmi_bdf;
+-		}
 +    /* Load caldata */
 +    if(ab->bus_params.fixed_bdf_addr) {
 +        snprintf(filename, sizeof(filename),
@@ -363,15 +373,14 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +             ab->qmi.service_ins_id - (NODE_ID_BASE - 1),
 +             ATH11K_QMI_DEF_CAL_FILE_SUFFIX);
 +    }
- 
--		ret = qmi_send_request(&ab->qmi.handle, NULL, &txn,
--				       QMI_WLANFW_BDF_DOWNLOAD_REQ_V01,
--				       QMI_WLANFW_BDF_DOWNLOAD_REQ_MSG_V01_MAX_LEN,
--				       qmi_wlanfw_bdf_download_req_msg_v01_ei, req);
--		if (ret < 0) {
--			qmi_txn_cancel(&txn);
--			goto out_qmi_bdf;
--		}
++
++	if (ab->qmi.target.eeprom_read_timeout) {
++		file_type = ATH11K_QMI_FILE_TYPE_EEPROM;
++		tmp = filename;
++		fw_size = ATH11K_QMI_MAX_BDF_FILE_NAME_SIZE;
++		goto send_qmi_req;
++	}
++
 +	file_type = ATH11K_QMI_FILE_TYPE_CALDATA;
 +	fw_entry = ath11k_core_firmware_request(ab, filename);
 +	if (IS_ERR(fw_entry)) {
@@ -386,8 +395,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 -		if (ret < 0)
 -			goto out_qmi_bdf;
 +	fw_size = min_t(u32, ab->hw_params.fw.board_size, fw_entry->size);
-+	if (ab->qmi.target.eeprom_read_timeout)
-+		file_type = ATH11K_QMI_FILE_TYPE_EEPROM;
++	tmp = fw_entry->data;
  
 -		if (resp.resp.result != QMI_RESULT_SUCCESS_V01) {
 -			ath11k_warn(ab, "qmi BDF download failed, result: %d, err: %d\n",
@@ -398,7 +406,8 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 -		remaining -= req->data_len;
 -		temp += req->data_len;
 -		req->seg_id++;
-+	ret = ath11k_qmi_load_file_target_mem(ab, fw_entry->data, fw_size, file_type);
++send_qmi_req:
++	ret = ath11k_qmi_load_file_target_mem(ab, tmp, fw_size, file_type);
 +	if (ret < 0) {
 +		ath11k_warn(ab, "qmi failed to load caldata\n");
 +		goto out_qmi_cal;
@@ -409,7 +418,8 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
 +	ath11k_info(ab, "qmi caldata downloaded: type: %u\n", file_type);
  
 +out_qmi_cal:
-+	release_firmware(fw_entry);
++	if (file_type == ATH11K_QMI_FILE_TYPE_CALDATA)
++		release_firmware(fw_entry);
  out:
 -	kfree(req);
 -	return ret;
@@ -420,7 +430,7 @@ Signed-off-by: Anilkumar Kolli <akolli@codeaurora.org>
  }
  
  static int ath11k_qmi_m3_load(struct ath11k_base *ab)
-@@ -2822,10 +2867,7 @@ static void ath11k_qmi_event_load_bdf(st
+@@ -2824,10 +2878,7 @@ static void ath11k_qmi_event_load_bdf(st
  		return;
  	}
  
