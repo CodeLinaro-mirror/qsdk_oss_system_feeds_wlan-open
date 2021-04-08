@@ -12,7 +12,7 @@ PKG_KERNEL_VERSION:=b157d2276
 PKG_KERNEL_SOURCE_URL:=https://source.codeaurora.org/quic/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
-PKG_VERSION:=20210222
+PKG_VERSION:=20210222_001
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -238,7 +238,8 @@ define DownloadBackports
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
 	git revert --no-edit db3bdcb9 && \
 	git revert --no-edit c8ffcd122 && git revert --no-edit 48a54f6bc && \
-	git revert --no-edit b55379e34 && git revert --no-edit e908435e4)
+	git revert --no-edit b55379e34 && git revert --no-edit e908435e4 && \
+	git revert --no-edit 36b0cefe9)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
