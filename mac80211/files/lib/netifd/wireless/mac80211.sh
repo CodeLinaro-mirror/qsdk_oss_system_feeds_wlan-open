@@ -1296,7 +1296,7 @@ drv_mac80211_setup() {
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
-		htmode band multiple_bssid
+		htmode band multiple_bssid noscan
 
 	json_get_values basic_rate_list basic_rate
 	json_select ..
