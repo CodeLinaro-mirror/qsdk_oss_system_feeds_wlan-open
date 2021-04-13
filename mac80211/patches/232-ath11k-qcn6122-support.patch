@@ -184,10 +184,10 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +};
 +
 +static const struct ath11k_hif_ops ath11k_internal_pci_hif_ops = {
-+	.start = ath11k_pci_start,
++	.start = ath11k_ipci_start,
 +	.stop = ath11k_pci_stop,
-+	.read32 = ath11k_pci_read32,
-+	.write32 = ath11k_pci_write32,
++	.read32 = ath11k_ipci_read32,
++	.write32 = ath11k_ipci_write32,
 +	.power_down = ath11k_ahb_power_down,
 +	.power_up = ath11k_ahb_power_up,
 +	.irq_enable = ath11k_pci_ext_irq_enable,
@@ -824,15 +824,45 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  {
          u32 window_start;
  
-@@ -145,6 +124,7 @@ static inline u32 ath11k_pci_get_window_
+@@ -145,6 +124,37 @@ static inline u32 ath11k_pci_get_window_
          }
          return offset;
  }
 +EXPORT_SYMBOL(ath11k_pci_get_window_offset);
++
++void ath11k_ipci_write32(struct ath11k_base *ab, u32 offset, u32 value)
++{
++	u32 window_start;
++
++	if (offset < WINDOW_START) {
++		iowrite32(value, ab->mem  + offset);
++	} else {
++		window_start = ath11k_pci_get_window_start(ab, offset);
++		iowrite32(value, ab->mem + window_start +
++			  (offset & WINDOW_RANGE_MASK));
++	}
++}
++EXPORT_SYMBOL(ath11k_ipci_write32);
++
++u32 ath11k_ipci_read32(struct ath11k_base *ab, u32 offset)
++{
++	u32 val, window_start;
++
++	if (offset < WINDOW_START) {
++		val = ioread32(ab->mem + offset);
++	} else {
++		window_start = ath11k_pci_get_window_start(ab, offset);
++		val = ioread32(ab->mem + window_start +
++			       (offset & WINDOW_RANGE_MASK));
++	}
++
++	return val;
++}
++EXPORT_SYMBOL(ath11k_ipci_read32);
  
  void ath11k_pci_write32(struct ath11k_base *ab, u32 offset, u32 value)
  {
-@@ -155,7 +135,7 @@ void ath11k_pci_write32(struct ath11k_ba
+@@ -155,7 +165,7 @@ void ath11k_pci_write32(struct ath11k_ba
  	 * need to wakeup MHI to access.
  	 */
  	if (test_bit(ATH11K_PCI_FLAG_INIT_DONE, &ab_pci->flags) &&
@@ -841,7 +871,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  		mhi_device_get_sync(ab_pci->mhi_ctrl->mhi_dev);
  
  	if (offset < WINDOW_START) {
-@@ -168,7 +148,7 @@ void ath11k_pci_write32(struct ath11k_ba
+@@ -168,7 +178,7 @@ void ath11k_pci_write32(struct ath11k_ba
  
  		if (window_start == WINDOW_START) {
  			spin_lock_bh(&ab_pci->window_lock);
@@ -850,7 +880,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  			iowrite32(value, ab->mem + window_start +
  				  (offset & WINDOW_RANGE_MASK));
  			spin_unlock_bh(&ab_pci->window_lock);
-@@ -179,9 +159,10 @@ void ath11k_pci_write32(struct ath11k_ba
+@@ -179,9 +189,10 @@ void ath11k_pci_write32(struct ath11k_ba
  	}
  
  	if (test_bit(ATH11K_PCI_FLAG_INIT_DONE, &ab_pci->flags) &&
@@ -862,7 +892,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  u32 ath11k_pci_read32(struct ath11k_base *ab, u32 offset)
  {
-@@ -192,7 +173,7 @@ u32 ath11k_pci_read32(struct ath11k_base
+@@ -192,7 +203,7 @@ u32 ath11k_pci_read32(struct ath11k_base
  	 * need to wakeup MHI to access.
  	 */
  	if (test_bit(ATH11K_PCI_FLAG_INIT_DONE, &ab_pci->flags) &&
@@ -871,7 +901,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  		mhi_device_get_sync(ab_pci->mhi_ctrl->mhi_dev);
  
  	if (offset < WINDOW_START) {
-@@ -205,7 +186,7 @@ u32 ath11k_pci_read32(struct ath11k_base
+@@ -205,7 +216,7 @@ u32 ath11k_pci_read32(struct ath11k_base
  
  		if (window_start == WINDOW_START) {
  			spin_lock_bh(&ab_pci->window_lock);
@@ -880,7 +910,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  			val = ioread32(ab->mem + window_start +
  				       (offset & WINDOW_RANGE_MASK));
  			spin_unlock_bh(&ab_pci->window_lock);
-@@ -216,11 +197,12 @@ u32 ath11k_pci_read32(struct ath11k_base
+@@ -216,11 +227,12 @@ u32 ath11k_pci_read32(struct ath11k_base
  	}
  
  	if (test_bit(ATH11K_PCI_FLAG_INIT_DONE, &ab_pci->flags) &&
@@ -894,7 +924,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static void ath11k_pci_soc_global_reset(struct ath11k_base *ab)
  {
-@@ -415,15 +397,35 @@ static void ath11k_pci_sw_reset(struct a
+@@ -415,15 +427,35 @@ static void ath11k_pci_sw_reset(struct a
  	ath11k_pci_clear_dbg_registers(ab);
  }
  
@@ -902,7 +932,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +#define MAX_MSI_IRQS            32
 +
 +int ath11k_pci_get_qgic_msi_irq(struct ath11k_base *ab, unsigned int vector)
-+{
+ {
 +	struct qgic2_msi *qgic2_msi = ab->ipci.qgic2_msi;
 +
 +	if (!qgic2_msi) {
@@ -919,7 +949,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +EXPORT_SYMBOL(ath11k_pci_get_qgic_msi_irq);
 +
 +int ath11k_pci_get_msi_irq(struct ath11k_base *ab, unsigned int vector)
- {
++{
 +	struct device *dev = ab->dev;
  	struct pci_dev *pci_dev = to_pci_dev(dev);
  
@@ -933,7 +963,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  {
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  	struct pci_dev *pci_dev = to_pci_dev(ab->dev);
-@@ -439,19 +441,33 @@ static void ath11k_pci_get_msi_address(s
+@@ -439,19 +471,33 @@ static void ath11k_pci_get_msi_address(s
  	}
  }
  
@@ -971,7 +1001,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  			*base_vector = msi_config->users[idx].base_vector;
  
  			ath11k_dbg(ab, ATH11K_DBG_PCI, "Assign MSI to user: %s, num_vectors: %d, user_base_data: %u, base_vector: %u\n",
-@@ -467,8 +483,8 @@ int ath11k_pci_get_user_msi_assignment(s
+@@ -467,8 +513,8 @@ int ath11k_pci_get_user_msi_assignment(s
  	return -EINVAL;
  }
  
@@ -982,7 +1012,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  {
  	u32 i, msi_data_idx;
  
-@@ -483,17 +499,34 @@ static void ath11k_pci_get_ce_msi_idx(st
+@@ -483,18 +529,35 @@ static void ath11k_pci_get_ce_msi_idx(st
  	}
  	*msi_idx = msi_data_idx;
  }
@@ -999,11 +1029,11 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 -	return ath11k_pci_get_user_msi_assignment(ab_pci, user_name,
 +	return ath11k_pci_get_user_msi_assignment(ab, ab_pci->msi_config,
 +						  ab_pci->msi_ep_base_data, user_name,
-+						  num_vectors, user_base_data,
-+						  base_vector);
+ 						  num_vectors, user_base_data,
+ 						  base_vector);
 +
-+}
-+
+ }
+ 
 +int ath11k_get_user_qgic_msi_assignment(struct ath11k_base *ab, char *user_name,
 +					int *num_vectors, u32 *user_base_data,
 +					u32 *base_vector)
@@ -1013,14 +1043,15 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +
 +	return ath11k_pci_get_user_msi_assignment(ab, msi_cfg,
 +						  qgic2_msi->msi_gicm_base, user_name,
- 						  num_vectors, user_base_data,
- 						  base_vector);
- }
++						  num_vectors, user_base_data,
++						  base_vector);
++}
 +EXPORT_SYMBOL(ath11k_get_user_qgic_msi_assignment);
- 
++
  const char *dp_irq_name[ATH11K_MAX_PCI_DOMAINS + 1][ATH11K_EXT_IRQ_GRP_NUM_MAX] = {
  	{
-@@ -521,7 +554,7 @@ static void ath11k_pci_free_ext_irq(stru
+ 		ATH11K_PCI_DP_IRQS_NAME(0)
+@@ -521,7 +584,7 @@ static void ath11k_pci_free_ext_irq(stru
  	}
  }
  
@@ -1029,7 +1060,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  {
  	int i, irq_idx;
  
-@@ -534,6 +567,7 @@ static void ath11k_pci_free_irq(struct a
+@@ -534,6 +597,7 @@ static void ath11k_pci_free_irq(struct a
  
  	ath11k_pci_free_ext_irq(ab);
  }
@@ -1037,7 +1068,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static void ath11k_pci_ce_irq_enable(struct ath11k_base *ab, u16 ce_id)
  {
-@@ -628,7 +662,7 @@ static void ath11k_pci_ext_grp_enable(st
+@@ -628,7 +692,7 @@ static void ath11k_pci_ext_grp_enable(st
  		enable_irq(irq_grp->ab->irq_num[irq_grp->irqs[i]]);
  }
  
@@ -1046,7 +1077,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  {
  	int i;
  
-@@ -639,6 +673,7 @@ static void ath11k_pci_ext_irq_enable(st
+@@ -639,6 +703,7 @@ static void ath11k_pci_ext_irq_enable(st
  		ath11k_pci_ext_grp_enable(irq_grp);
  	}
  }
@@ -1054,7 +1085,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static void ath11k_pci_sync_ext_irqs(struct ath11k_base *ab)
  {
-@@ -654,11 +689,12 @@ static void ath11k_pci_sync_ext_irqs(str
+@@ -654,11 +719,12 @@ static void ath11k_pci_sync_ext_irqs(str
  	}
  }
  
@@ -1068,7 +1099,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static int ath11k_pci_ext_grp_napi_poll(struct napi_struct *napi, int budget)
  {
-@@ -696,20 +732,34 @@ static irqreturn_t ath11k_pci_ext_interr
+@@ -696,20 +762,34 @@ static irqreturn_t ath11k_pci_ext_interr
  	return IRQ_HANDLED;
  }
  
@@ -1111,7 +1142,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  						 &base_vector);
  	if (ret < 0)
  		return ret;
-@@ -746,7 +796,7 @@ static int ath11k_pci_ext_irq_config(str
+@@ -746,7 +826,7 @@ static int ath11k_pci_ext_irq_config(str
  		for (j = 0; j < irq_grp->num_irq; j++) {
  			int irq_idx = irq_grp->irqs[j];
  			int vector = (i % num_vectors) + base_vector;
@@ -1120,7 +1151,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  			ab->irq_num[irq_idx] = irq;
  
-@@ -770,21 +820,19 @@ static int ath11k_pci_ext_irq_config(str
+@@ -770,21 +850,19 @@ static int ath11k_pci_ext_irq_config(str
  	return 0;
  }
  
@@ -1136,19 +1167,19 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 -	int irq, i, ret, irq_idx;
 -	struct ath11k_pci *ar_pci = ath11k_pci_priv(ab);
 -	u8 domain_id = pci_domain_nr(ar_pci->pdev->bus);
--
--	if (domain_id > ATH11K_MAX_PCI_DOMAINS)
--		domain_id = ATH11K_MAX_PCI_DOMAINS;
 +	int irq, i, ret = 0, irq_idx;
 +	u8 domain_id;
  
+-	if (domain_id > ATH11K_MAX_PCI_DOMAINS)
+-		domain_id = ATH11K_MAX_PCI_DOMAINS;
+-
 -	ret = ath11k_pci_get_user_msi_assignment(ath11k_pci_priv(ab),
 +	domain_id = ath11k_pci_get_domain_id(ab);
 +	ret = ath11k_pci_get_user_msi_assignment(ab, msi_config, msi_ep_base_data,
  						 "CE", &msi_data_count,
  						 &msi_data_start, &msi_irq_start);
  	if (ret)
-@@ -796,7 +844,7 @@ static int ath11k_pci_config_irq(struct
+@@ -796,7 +874,7 @@ static int ath11k_pci_config_irq(struct
  			continue;
  
  		msi_data = (msi_data_idx % msi_data_count) + msi_irq_start;
@@ -1157,7 +1188,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  		ce_pipe = &ab->ce.ce_pipe[i];
  
  		irq_idx = ATH11K_PCI_IRQ_CE0_OFFSET + i;
-@@ -818,13 +866,22 @@ static int ath11k_pci_config_irq(struct
+@@ -818,13 +896,22 @@ static int ath11k_pci_config_irq(struct
  		ath11k_pci_ce_irq_disable(ab, i);
  	}
  
@@ -1181,7 +1212,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  static void ath11k_pci_init_qmi_ce_config(struct ath11k_base *ab)
  {
  	struct ath11k_qmi_ce_cfg *cfg = &ab->qmi.ce_cfg;
-@@ -1034,7 +1091,7 @@ static int ath11k_pci_power_up(struct at
+@@ -1034,7 +1121,7 @@ static int ath11k_pci_power_up(struct at
  	}
  
  	if (ab->bus_params.static_window_map)
@@ -1190,7 +1221,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  	return 0;
  }
-@@ -1091,13 +1148,14 @@ static void ath11k_pci_ce_irq_disable_sy
+@@ -1091,13 +1178,23 @@ static void ath11k_pci_ce_irq_disable_sy
  	ath11k_pci_kill_tasklets(ab);
  }
  
@@ -1203,11 +1234,20 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +EXPORT_SYMBOL(ath11k_pci_stop);
  
 -static int ath11k_pci_start(struct ath11k_base *ab)
++int ath11k_ipci_start(struct ath11k_base *ab)
++{
++	ath11k_pci_ce_irqs_enable(ab);
++	ath11k_ce_rx_post_buf(ab);
++
++	return 0;
++}
++EXPORT_SYMBOL(ath11k_ipci_start);
++
 +int ath11k_pci_start(struct ath11k_base *ab)
  {
  	struct ath11k_pci *ab_pci = ath11k_pci_priv(ab);
  
-@@ -1110,6 +1168,7 @@ static int ath11k_pci_start(struct ath11
+@@ -1110,6 +1207,7 @@ static int ath11k_pci_start(struct ath11
  
  	return 0;
  }
@@ -1215,7 +1255,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static void ath11k_pci_hif_ce_irq_enable(struct ath11k_base *ab)
  {
-@@ -1121,7 +1180,14 @@ static void ath11k_pci_hif_ce_irq_disabl
+@@ -1121,7 +1219,14 @@ static void ath11k_pci_hif_ce_irq_disabl
  	ath11k_pci_ce_irq_disable_sync(ab);
  }
  
@@ -1231,7 +1271,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  					  u8 *ul_pipe, u8 *dl_pipe)
  {
  	const struct service_to_pipe *entry;
-@@ -1163,6 +1229,7 @@ static int ath11k_pci_map_service_to_pip
+@@ -1163,6 +1268,7 @@ static int ath11k_pci_map_service_to_pip
  
  	return 0;
  }
@@ -1239,7 +1279,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  static const struct ath11k_hif_ops ath11k_pci_hif_ops = {
  	.start = ath11k_pci_start,
-@@ -1182,8 +1249,23 @@ static const struct ath11k_hif_ops ath11
+@@ -1182,8 +1288,23 @@ static const struct ath11k_hif_ops ath11
  	.ce_irq_disable = ath11k_pci_hif_ce_irq_disable,
  	.get_window_offset = ath11k_pci_get_window_offset,
  	.get_ce_msi_idx = ath11k_pci_get_ce_msi_idx,
@@ -1263,7 +1303,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  static int ath11k_pci_probe(struct pci_dev *pdev,
  			    const struct pci_device_id *pci_dev)
  {
-@@ -1246,10 +1328,10 @@ static int ath11k_pci_probe(struct pci_d
+@@ -1246,10 +1367,10 @@ static int ath11k_pci_probe(struct pci_d
  			ret = -EOPNOTSUPP;
  			goto err_pci_free_region;
  		}
@@ -1276,7 +1316,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  		ab->bus_params.static_window_map = true;
  		ab->hw_rev = ATH11K_HW_QCN9074_HW10;
  		ab->enable_cold_boot_cal = ath11k_cold_boot_cal;
-@@ -1304,7 +1386,7 @@ static int ath11k_pci_probe(struct pci_d
+@@ -1304,7 +1425,7 @@ static int ath11k_pci_probe(struct pci_d
  	return 0;
  
  err_free_irq:
@@ -1285,7 +1325,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  
  err_ce_free:
  	ath11k_ce_free_pipes(ab);
-@@ -1347,7 +1429,7 @@ static void ath11k_pci_remove(struct pci
+@@ -1347,7 +1468,7 @@ static void ath11k_pci_remove(struct pci
  qmi_fail:
  	ath11k_mhi_unregister(ab_pci);
  
@@ -1339,7 +1379,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
  struct ath11k_pci {
  	struct pci_dev *pdev;
  	struct ath11k_base *ab;
-@@ -125,11 +161,31 @@ static inline struct ath11k_pci *ath11k_
+@@ -125,11 +161,34 @@ static inline struct ath11k_pci *ath11k_
  	return (struct ath11k_pci *)ab->drv_priv;
  }
  
@@ -1373,6 +1413,9 @@ Signed-off-by: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 +void ath11k_pci_config_static_window(struct ath11k_base *ab);
 +void ath11k_pci_free_irq(struct ath11k_base *ab);
 +int ath11k_pci_get_qgic_msi_irq(struct ath11k_base *ab, unsigned int vector);
++int ath11k_ipci_start(struct ath11k_base *ab);
++void ath11k_ipci_write32(struct ath11k_base *ab, u32 offset, u32 value);
++u32 ath11k_ipci_read32(struct ath11k_base *ab, u32 offset);
  #endif
 --- a/drivers/net/wireless/ath/ath11k/qmi.c
 +++ b/drivers/net/wireless/ath/ath11k/qmi.c
