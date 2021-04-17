@@ -49,7 +49,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -1149,13 +1149,15 @@ struct htt_t2h_peer_map_event {
+@@ -1149,13 +1149,16 @@ struct htt_t2h_peer_map_event {
  #define HTT_T2H_PEER_UNMAP_INFO_PEER_ID	HTT_T2H_PEER_MAP_INFO_PEER_ID
  #define HTT_T2H_PEER_UNMAP_INFO1_MAC_ADDR_H16 \
  					HTT_T2H_PEER_MAP_INFO1_MAC_ADDR_H16
@@ -57,13 +57,14 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 -#define HTT_T2H_PEER_MAP_INFO1_NEXT_HOP_S HTT_T2H_PEER_MAP_INFO2_NEXT_HOP_S
 +#define HTT_T2H_PEER_UNMAP_INFO1_NEXT_HOP_M HTT_T2H_PEER_MAP_INFO2_NEXT_HOP_M
 +#define HTT_T2H_PEER_UNMAP_INFO1_NEXT_HOP_S HTT_T2H_PEER_MAP_INFO2_NEXT_HOP_S
-+#define HTT_T2H_PEER_UNMAP_INFO2_WDS_FREE_COUNT	GENMASK(15, 0)
++#define HTT_T2H_PEER_UNMAP_INFO3_WDS_FREE_COUNT	GENMASK(15, 0)
  
  struct htt_t2h_peer_unmap_event {
  	u32 info;
  	u32 mac_addr_l32;
  	u32 info1;
 +	u32 info2;
++	u32 info3;
  } __packed;
  
  struct htt_resp_msg {
@@ -100,8 +101,8 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +				    resp->peer_unmap_ev.info);
 +		is_wds = FIELD_GET(HTT_T2H_PEER_UNMAP_INFO1_NEXT_HOP_M,
 +				   resp->peer_unmap_ev.info1);
-+		free_wds_count = FIELD_GET(HTT_T2H_PEER_UNMAP_INFO2_WDS_FREE_COUNT,
-+					   resp->peer_unmap_ev.info2);
++		free_wds_count = FIELD_GET(HTT_T2H_PEER_UNMAP_INFO3_WDS_FREE_COUNT,
++					   resp->peer_unmap_ev.info3);
 +		ath11k_peer_unmap_v2_event(ab, peer_id, is_wds, free_wds_count);
 +		break;
  	case HTT_T2H_MSG_TYPE_PPDU_STATS_IND:
@@ -120,7 +121,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	default:
 --- a/drivers/net/wireless/ath/ath11k/peer.c
 +++ b/drivers/net/wireless/ath/ath11k/peer.c
-@@ -108,6 +108,283 @@ struct ath11k_peer *ath11k_peer_find_by_
+@@ -108,6 +108,285 @@ struct ath11k_peer *ath11k_peer_find_by_
  	return NULL;
  }
  
@@ -387,7 +388,9 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +
 +	list_for_each_entry_safe(ast_entry, tmp, &peer->ast_entry_list,
 +				 ase_list) {
-+		ast_deleted_count++;
++		if ((ast_entry->type == ATH11K_AST_TYPE_WDS) ||
++		    (ast_entry->type == ATH11K_AST_TYPE_MEC))
++			ast_deleted_count++;
 +		ath11k_peer_del_ast(ar, ast_entry);
 +	}
 +
@@ -404,7 +407,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  void ath11k_peer_unmap_event(struct ath11k_base *ab, u16 peer_id)
  {
  	struct ath11k_peer *peer;
-@@ -132,6 +409,49 @@ exit:
+@@ -132,6 +411,49 @@ exit:
  	spin_unlock_bh(&ab->base_lock);
  }
  
@@ -454,7 +457,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  void ath11k_peer_map_event(struct ath11k_base *ab, u8 vdev_id, u16 peer_id,
  			   u8 *mac_addr, u16 ast_hash, u16 hw_peer_id)
  {
-@@ -162,6 +482,51 @@ exit:
+@@ -162,6 +484,51 @@ exit:
  	spin_unlock_bh(&ab->base_lock);
  }
  
@@ -506,7 +509,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static int ath11k_wait_for_peer_common(struct ath11k_base *ab, int vdev_id,
  				       const u8 *addr, bool expect_mapped)
  {
-@@ -186,19 +551,29 @@ static int ath11k_wait_for_peer_common(s
+@@ -186,19 +553,29 @@ static int ath11k_wait_for_peer_common(s
  
  void ath11k_peer_cleanup(struct ath11k *ar, u32 vdev_id)
  {
@@ -538,7 +541,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		list_del(&peer->list);
  		kfree(peer);
  		ar->num_peers--;
-@@ -270,6 +645,7 @@ int ath11k_peer_create(struct ath11k *ar
+@@ -270,6 +647,7 @@ int ath11k_peer_create(struct ath11k *ar
  		       struct ieee80211_sta *sta, struct peer_create_params *param)
  {
  	struct ath11k_peer *peer;
@@ -546,7 +549,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -337,7 +713,14 @@ int ath11k_peer_create(struct ath11k *ar
+@@ -337,7 +715,14 @@ int ath11k_peer_create(struct ath11k *ar
  
  	peer->sec_type = HAL_ENCRYPT_TYPE_OPEN;
  	peer->sec_type_grp = HAL_ENCRYPT_TYPE_OPEN;
