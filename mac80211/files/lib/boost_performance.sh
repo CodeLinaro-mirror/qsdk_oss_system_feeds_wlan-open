@@ -26,14 +26,14 @@ boost_performance() {
 		case "$board" in
 			ap-hk10-c2)
 				#case for rdp413
-				echo 1 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/stats_disable
-				echo 1 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0001\:01\:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0001\:01\:00.0/stats_disable
 
-				echo 0 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/ce_latency_stats
-				echo 0 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0001\:01\:00.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0001\:01\:00.0/ce_latency_stats
 
-				echo 0 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/trace_qdss
-				echo 0 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0001\:01\:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0001\:01\:00.0/trace_qdss
 
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
