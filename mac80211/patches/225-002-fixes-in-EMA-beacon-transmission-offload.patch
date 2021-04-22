@@ -1,4 +1,4 @@
-From 2dbc06fa2a666790a1e6df61b9f223d411a0921a Mon Sep 17 00:00:00 2001
+From 910f0cd7bcb20eacc0bd5c9a6982032589f68024 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <alokad@codeaurora.org>
 Date: Fri, 23 Oct 2020 17:02:06 -0700
 Subject: [PATCH] ath11k: Fixes in EMA beacon transmission offload
@@ -32,15 +32,16 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
 ---
  drivers/net/wireless/ath/ath11k/hw.c  |  4 ++
  drivers/net/wireless/ath/ath11k/hw.h  |  1 +
- drivers/net/wireless/ath/ath11k/mac.c | 68 +++++++++++++++------------
- drivers/net/wireless/ath/ath11k/wmi.c | 21 +++------
- include/net/cfg80211.h                | 16 +++++++
- include/uapi/linux/nl80211.h          | 37 +++++++++++++++
- net/mac80211/cfg.c                    | 49 +++++++++++++++++--
+ drivers/net/wireless/ath/ath11k/mac.c | 68 ++++++++++++++-----------
+ drivers/net/wireless/ath/ath11k/wmi.c | 21 +++-----
+ include/net/cfg80211.h                | 16 ++++++
+ include/uapi/linux/nl80211.h          | 37 ++++++++++++++
+ net/mac80211/cfg.c                    | 72 +++++++++++++++++++++++----
  net/mac80211/ieee80211_i.h            |  1 +
- net/mac80211/tx.c                     | 34 +++++++++++---
- net/wireless/nl80211.c                | 34 ++++++++++++++
- 10 files changed, 211 insertions(+), 54 deletions(-)
+ net/mac80211/iface.c                  |  5 +-
+ net/mac80211/tx.c                     | 34 ++++++++++---
+ net/wireless/nl80211.c                | 34 +++++++++++++
+ 11 files changed, 232 insertions(+), 61 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath11k/hw.c b/drivers/net/wireless/ath/ath11k/hw.c
 index 6599b13019dc..5f9163f8fb36 100644
@@ -70,7 +71,7 @@ index af279265fd06..17623e55a0c8 100644
  #define ATH11K_HW_MAX_QUEUES		4
  #define ATH11K_QUEUE_LEN		4096
 diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index cc91efef6a1a..39b1b8effd48 100644
+index 8127a370dc50..480b83cdf320 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
 @@ -1097,7 +1097,6 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
@@ -96,7 +97,7 @@ index cc91efef6a1a..39b1b8effd48 100644
  
  	ieee80211_beacon_free_ema_list(&bcns);
  
-@@ -5765,20 +5761,26 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
+@@ -5758,20 +5754,26 @@ ath11k_mac_setup_vdev_create_params(struct ath11k_vif *arvif,
  	params->subtype = arvif->vdev_subtype;
  	params->pdev_id = pdev->pdev_id;
  	params->vdevid_trans = 0;
@@ -136,7 +137,7 @@ index cc91efef6a1a..39b1b8effd48 100644
  
  	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
  		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
-@@ -6411,21 +6413,27 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
+@@ -6402,21 +6404,27 @@ ath11k_mac_vdev_start_restart(struct ath11k_vif *arvif,
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
@@ -334,10 +335,43 @@ index 59d08ac26aa0..f1c1e6ca9d9c 100644
   * enum nl80211_sae_pwe_mechanism - The mechanism(s) allowed for SAE PWE
   *	derivation. Applicable only when WPA3-Personal SAE authentication is
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index a9fc81c2c2b5..739ec93d37aa 100644
+index a9fc81c2c2b5..3e2f7f95f6a5 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -1018,6 +1018,27 @@ static u8 *ieee80211_copy_multiple_bssid_beacon(u8 *offset,
+@@ -175,19 +175,26 @@ static struct wireless_dev *ieee80211_add_iface(struct wiphy *wiphy,
+ static int ieee80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
+ {
+ 	struct ieee80211_sub_if_data *sdata;
++	struct ieee80211_local *local;
+ 
+ 	sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
++	local = sdata->local;
+ 	if (sdata && sdata->vif.type == NL80211_IFTYPE_AP) {
+ 		if (sdata->vif.multiple_bssid.flags & IEEE80211_VIF_MBSS_TRANSMITTING) {
+-			struct ieee80211_sub_if_data *child;
+-
+-			rcu_read_lock();
+-			list_for_each_entry_rcu(child, &sdata->local->interfaces, list)
+-				if (child->vif.multiple_bssid.parent == &sdata->vif)
++			struct ieee80211_sub_if_data *child, *tmp;
++
++			wiphy_unlock(local->hw.wiphy);
++			mutex_lock(&local->iflist_mtx);
++			list_for_each_entry_safe(child, tmp,
++						 &local->interfaces, list)
++				if ((child->vif.multiple_bssid.parent == &sdata->vif) &&
++				    ieee80211_sdata_running(child))
+ 					dev_close(child->wdev.netdev);
+-			rcu_read_unlock();
++			mutex_unlock(&local->iflist_mtx);
++			wiphy_lock(local->hw.wiphy);
+ 		} else {
+ 			sdata->vif.multiple_bssid.parent = NULL;
++			sdata->vif.multiple_bssid.flags = 0;
+ 		}
+ 	}
+ 
+@@ -1018,6 +1025,27 @@ static u8 *ieee80211_copy_multiple_bssid_beacon(u8 *offset,
  	return offset;
  }
  
@@ -365,7 +399,7 @@ index a9fc81c2c2b5..739ec93d37aa 100644
  static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
  				   struct cfg80211_beacon_data *params,
  				   const struct ieee80211_csa_settings *csa,
-@@ -1030,6 +1051,7 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -1030,6 +1058,7 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
          struct ieee80211_he_operation *he_oper = NULL;
  	int size, err;
  	u32 changed = BSS_CHANGED_BEACON;
@@ -373,7 +407,7 @@ index a9fc81c2c2b5..739ec93d37aa 100644
  
  	old = sdata_dereference(sdata->u.ap.beacon, sdata);
  
-@@ -1059,7 +1081,11 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -1059,7 +1088,11 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
  		new_multiple_bssid_len =
  			ieee80211_get_multiple_bssid_beacon_len(&old->multiple_bssid);
  
@@ -386,7 +420,7 @@ index a9fc81c2c2b5..739ec93d37aa 100644
  
  	new = kzalloc(size, GFP_KERNEL);
  	if (!new)
-@@ -1088,6 +1114,14 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
+@@ -1088,6 +1121,14 @@ static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
  						     &new->multiple_bssid,
  						     &old->multiple_bssid);
  
@@ -401,24 +435,28 @@ index a9fc81c2c2b5..739ec93d37aa 100644
  	if (csa) {
  		new->cntdwn_current_counter = csa->count;
  		memcpy(new->cntdwn_counter_offsets, csa->counter_offsets_beacon,
-@@ -3243,6 +3277,16 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif)
+@@ -3243,6 +3284,20 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif)
  {
  	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
  
 +	if (sdata->vif.multiple_bssid.flags & IEEE80211_VIF_MBSS_TRANSMITTING) {
-+		struct ieee80211_sub_if_data *child;
-+		rcu_read_lock();
-+		list_for_each_entry_rcu(child, &sdata->local->interfaces, list)
-+			if (child->vif.multiple_bssid.parent == &sdata->vif)
++		struct ieee80211_sub_if_data *child, *tmp;
++		wiphy_unlock(sdata->local->hw.wiphy);
++		mutex_lock(&sdata->local->iflist_mtx);
++		list_for_each_entry_safe(child, tmp,
++					 &sdata->local->interfaces, list)
++			if (child->vif.multiple_bssid.parent == &sdata->vif &&
++			    ieee80211_sdata_running(child))
 +				ieee80211_queue_work(&child->local->hw,
 +						     &child->csa_finalize_work);
-+		rcu_read_unlock();
++		mutex_unlock(&sdata->local->iflist_mtx);
++		wiphy_lock(sdata->local->hw.wiphy);
 +	}
 +
  	ieee80211_queue_work(&sdata->local->hw,
  			     &sdata->csa_finalize_work);
  }
-@@ -3548,9 +3592,6 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
+@@ -3548,9 +3603,6 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
  	if (sdata->vif.csa_active)
  		return -EBUSY;
  
@@ -439,6 +477,23 @@ index afeee649a48e..0653bb11a759 100644
 +	struct cfg80211_rnr_data rnr;
  	struct rcu_head rcu_head;
  };
+ 
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index ea35cb691221..84bc4ee7cd2b 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -383,8 +383,11 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
+ 	/* make sure the parent is already down */
+ 	if (sdata->vif.type == NL80211_IFTYPE_AP &&
+ 	    sdata->vif.multiple_bssid.parent &&
+-	    ieee80211_sdata_running(vif_to_sdata(sdata->vif.multiple_bssid.parent)))
++	    ieee80211_sdata_running(vif_to_sdata(sdata->vif.multiple_bssid.parent))) {
++		wiphy_unlock(sdata->local->hw.wiphy);
+ 		dev_close(vif_to_sdata(sdata->vif.multiple_bssid.parent)->wdev.netdev);
++		wiphy_lock(sdata->local->hw.wiphy);
++	}
+ 
+ 	clear_bit(SDATA_STATE_RUNNING, &sdata->state);
  
 diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
 index 81e634ed8170..87742a1b0c61 100644
@@ -514,10 +569,10 @@ index 81e634ed8170..87742a1b0c61 100644
  
  			if (beacon->tail)
 diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 9c9148e4d61f..add7f9ee0f0c 100644
+index bb305306af1f..abd8b2c1772a 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -440,6 +440,13 @@ sar_policy[NL80211_SAR_ATTR_MAX + 1] = {
+@@ -443,6 +443,13 @@ sar_policy[NL80211_SAR_ATTR_MAX + 1] = {
  	[NL80211_SAR_ATTR_SPECS] = NLA_POLICY_NESTED_ARRAY(sar_specs_policy),
  };
  
@@ -531,7 +586,7 @@ index 9c9148e4d61f..add7f9ee0f0c 100644
  static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
  	[0] = { .strict_start_type = NL80211_ATTR_HE_OBSS_PD },
  	[NL80211_ATTR_WIPHY] = { .type = NLA_U32 },
-@@ -786,6 +793,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+@@ -789,6 +796,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COUNT] = { .type = NLA_U8 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COLOR] = { .type = NLA_U8 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_IES] = NLA_POLICY_NESTED(nl80211_policy),
@@ -539,7 +594,7 @@ index 9c9148e4d61f..add7f9ee0f0c 100644
  };
  
  /* policy for the key attributes */
-@@ -5096,6 +5104,32 @@ static int nl80211_parse_beacon(struct cfg80211_registered_device *rdev,
+@@ -5099,6 +5107,32 @@ static int nl80211_parse_beacon(struct cfg80211_registered_device *rdev,
  	else
  		bcn->bss_color_info = 0;
  
@@ -573,5 +628,5 @@ index 9c9148e4d61f..add7f9ee0f0c 100644
  }
  
 -- 
-2.25.0
+2.31.1
 
