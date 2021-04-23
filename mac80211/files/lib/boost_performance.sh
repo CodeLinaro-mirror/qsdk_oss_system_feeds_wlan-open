@@ -44,6 +44,58 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 				;;
+			ap-hk14)
+				#case for rdp419
+				echo 1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/ce_latency_stats
+
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/trace_qdss
+
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+
+				echo 0 > /proc/sys/dev/nss/clock/auto_scale
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				;;
+			ap-oak03)
+				#case for rdp393
+				echo 1 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/stats_disable
+				echo 0 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/trace_qdss
+
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+
+				echo 0 > /proc/sys/dev/nss/clock/auto_scale
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				;;
+			ap-cp01-c1)
+				#case for rdp352
+				echo 1 > /sys/kernel/debug/ath11k/ipq6018\ hw1.0/stats_disable
+				echo 0 > /sys/kernel/debug/ath11k/ipq6018\ hw1.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/ipq6018\ hw1.0/trace_qdss
+
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+
+				echo 0 > /proc/sys/dev/nss/clock/auto_scale
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				;;
 			*)
 				#no settings
 				;;
