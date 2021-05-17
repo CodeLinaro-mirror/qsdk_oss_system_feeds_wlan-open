@@ -44,7 +44,7 @@ endef
 define KernelPackage/cfg80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=cfg80211 - wireless configuration API
-  DEPENDS+= +iw +kmod-crypto-core +kmod-crypto-manager +wireless-regdb
+  DEPENDS+= +iw +LINUX_4_4:kmod-crypto-core +kmod-crypto-manager +wireless-regdb
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
 	$(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
@@ -68,8 +68,9 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
-  DEPENDS+= @TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
-	+kmod-crypto-arc4 +kmod-crypto-aes +kmod-cfg80211 +hostapd-common +kmod-qca-nss-drv-wifi-meshmgr
+  DEPENDS+= @TARGET_ipq50xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
+	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
+	+kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
 	CONFIG_AVERAGE=y
@@ -249,7 +250,8 @@ define DownloadBackports
 	git revert --no-edit b35b2767 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
-	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
+	(cd $(TMP_DIR)/dl ; if [ -z "$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR))" ]; then $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)); else : ; fi; \
+	$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)) )
 	mv $(TMP_DIR)/dl/$(FILE) $(DL_DIR)
 	rm -rf $(TMP_DIR)/dl
 endef
@@ -456,11 +458,14 @@ config-$(CONFIG_PACKAGE_WIL6210_NSS_SUPPORT) += WIL6210_NSS_SUPPORT
 config-$(CONFIG_PACKAGE_kmod-ath9k) += ATH9K_CHANNEL_CONTEXT
 config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_ALG \
 					ATH10K_AHB ATH10K_SPECTRAL
-config-$(CONFIG_PACKAGE_kmod-ath11k) += ATH11K_SPECTRAL ATH11K_CFR
+config-$(CONFIG_PACKAGE_kmod-ath11k) += ATH11K_SPECTRAL
 
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH11K_MEM_PROFILE_512M
 endif
+
+config-$(CONFIG_TARGET_ipq_ipq50xx) += ATH11K_MEM_PROFILE_512M
+config-$(CONFIG_TARGET_ipq_ipq50xx_64) += ATH11K_MEM_PROFILE_512M
 
 config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS
 
@@ -551,8 +556,6 @@ define KernelPackage/cfg80211/install
 	$(INSTALL_BIN) ./files/lib/netifd/wireless/mac80211.sh $(1)/lib/netifd/wireless
 	$(INSTALL_BIN) ./files/lib/performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
-	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
-	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/ath11k-coredump.sh $(1)/etc/hotplug.d/devcoredump
 endef
 
@@ -573,9 +576,6 @@ define KernelPackage/ath10k/install
 endef
 
 define KernelPackage/ath11k/install
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
 endef
 
 $(eval $(call KernelPackage,cfg80211))
