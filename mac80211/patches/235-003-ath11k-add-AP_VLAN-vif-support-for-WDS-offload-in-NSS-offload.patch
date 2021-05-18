@@ -43,7 +43,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4274,26 +4274,128 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4274,26 +4274,130 @@ static void ath11k_sta_rc_update_wk(stru
  static void ath11k_sta_use_4addr_wk(struct work_struct *wk)
  {
  	struct ath11k *ar;
@@ -112,6 +112,10 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +		goto ext_vdev_delete;
 +	}
 +
++	ap_vlan_arvif->nss.wds_cfg_done = true;
++
++skip_nss_ext:
++
 +	ret = ath11k_nss_ext_vdev_cfg_wds_peer(ap_vlan_arvif,
 +					       wds_addr, wds_peer_id);
 +	if (ret) {
@@ -135,9 +139,6 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +		goto ext_vdev_delete;
 +	}
 +
-+	ap_vlan_arvif->nss.wds_cfg_done = true;
-+
-+skip_nss_ext:
 +	spin_lock_bh(&ab->base_lock);
 +	wds_peer->nss.ext_vdev_up = true;
 +	spin_unlock_bh(&ab->base_lock);
@@ -173,10 +174,11 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	spin_lock_bh(&ar->data_lock);
 +	list_del(&ap_vlan_arvif->list);
 +	spin_unlock_bh(&ar->data_lock);
++	ap_vlan_arvif->nss.added = false;
  }
  
  static int ath11k_mac_inc_num_stations(struct ath11k_vif *arvif,
-@@ -4594,9 +4696,25 @@ static void ath11k_mac_op_sta_set_4addr(
+@@ -4594,9 +4698,32 @@ static void ath11k_mac_op_sta_set_4addr(
                                         bool enabled)
  {
  	struct ath11k *ar = hw->priv;
@@ -192,9 +194,16 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +			ap_arvif = arsta->arvif;
 +			arvif->nss.ap_vif = ap_arvif;
 +
-+			spin_lock_bh(&ar->data_lock);
-+			list_add(&arvif->list, &ap_arvif->ap_vlan_arvifs);
-+			spin_unlock_bh(&ar->data_lock);
++			/* Check if the vlan arvif object was already present in the
++			 * list. We can receive this path multiple times for the same
++			 * vlan vif for different sta objects
++			 */
++			if (!arvif->nss.added) {
++				spin_lock_bh(&ar->data_lock);
++				list_add(&arvif->list, &ap_arvif->ap_vlan_arvifs);
++				spin_unlock_bh(&ar->data_lock);
++				arvif->nss.added = true;
++			}
 +
 +			arsta->arvif = arvif;
 +		}
@@ -202,7 +211,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ieee80211_queue_work(ar->hw, &arsta->use_4addr_wk);
  		arsta->use_4addr_set = true;
  	}
-@@ -5914,6 +6032,9 @@ static void ath11k_mac_op_update_vif_off
+@@ -5914,6 +6041,9 @@ static void ath11k_mac_op_update_vif_off
  	u32 param_id, param_value;
  	int ret;
  
@@ -212,7 +221,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	ret = ath11k_nss_vdev_create(arvif);
  	if(ret) {
  		ath11k_warn(ab, "failed to create nss vdev %d\n", ret);
-@@ -5984,7 +6105,8 @@ static int ath11k_mac_op_add_interface(s
+@@ -5984,7 +6114,8 @@ static int ath11k_mac_op_add_interface(s
  		goto err;
  	}
  
@@ -222,7 +231,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ath11k_warn(ab, "failed to create vdev %u, reached max vdev limit %d\n",
  			    ar->num_created_vdevs, TARGET_NUM_VDEVS);
  		ret = -EBUSY;
-@@ -5997,6 +6119,28 @@ static int ath11k_mac_op_add_interface(s
+@@ -5997,6 +6128,28 @@ static int ath11k_mac_op_add_interface(s
  	arvif->vif = vif;
  
  	INIT_LIST_HEAD(&arvif->list);
@@ -251,7 +260,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	INIT_DELAYED_WORK(&arvif->connection_loss_work,
                            ath11k_mac_vif_sta_connection_loss_work);
  
-@@ -6026,6 +6170,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -6026,6 +6179,7 @@ static int ath11k_mac_op_add_interface(s
  		fallthrough;
  	case NL80211_IFTYPE_AP:
  		arvif->vdev_type = WMI_VDEV_TYPE_AP;
@@ -259,7 +268,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		break;
  	case NL80211_IFTYPE_MONITOR:
  		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
-@@ -6249,15 +6394,26 @@ static void ath11k_mac_op_remove_interfa
+@@ -6249,15 +6403,32 @@ static void ath11k_mac_op_remove_interfa
  {
  	struct ath11k *ar = hw->priv;
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
@@ -276,6 +285,12 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	if (vif->type == NL80211_IFTYPE_AP_VLAN) {
 +		ath11k_nss_ext_vdev_delete(arvif);
 +
++		/* In case the vlan vif never got added into the ap vlan arvifs
++		 * list, avoid removal here
++		 */
++		if (!arvif->nss.added)
++			goto unlock;
++
 +		spin_lock_bh(&ar->data_lock);
 +		list_del(&arvif->list);
 +		spin_unlock_bh(&ar->data_lock);
@@ -288,7 +303,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	ath11k_dbg(ab, ATH11K_DBG_MAC, "mac remove interface (vdev %d)\n",
  		   arvif->vdev_id);
  
-@@ -6266,6 +6422,14 @@ static void ath11k_mac_op_remove_interfa
+@@ -6266,6 +6437,14 @@ static void ath11k_mac_op_remove_interfa
  		if (ret)
  			ath11k_warn(ab, "failed to submit AP self-peer removal on vdev %d: %d\n",
  				    arvif->vdev_id, ret);
@@ -303,7 +318,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	}
  
  	reinit_completion(&ar->vdev_delete_done);
-@@ -6326,7 +6490,7 @@ err_vdev_del:
+@@ -6326,7 +6505,7 @@ err_vdev_del:
  	/* Remove TWT related files and directory */
  	debugfs_remove_recursive(arvif->debugfs_twt);
  	arvif->debugfs_twt = NULL;
@@ -312,7 +327,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	mutex_unlock(&ar->conf_mutex);
  }
  
-@@ -6391,16 +6555,17 @@ static int ath11k_mac_op_ampdu_action(st
+@@ -6391,16 +6570,17 @@ static int ath11k_mac_op_ampdu_action(st
  				      struct ieee80211_ampdu_params *params)
  {
  	struct ath11k *ar = hw->priv;
@@ -332,7 +347,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		break;
  	case IEEE80211_AMPDU_TX_START:
  	case IEEE80211_AMPDU_TX_STOP_CONT:
-@@ -7897,6 +8062,7 @@ static void ath11k_mac_op_sta_statistics
+@@ -7897,6 +8077,7 @@ static void ath11k_mac_op_sta_statistics
  					 struct station_info *sinfo)
  {
  	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
@@ -340,7 +355,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  	sinfo->rx_duration = arsta->rx_duration;
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
-@@ -7924,7 +8090,8 @@ static void ath11k_mac_op_sta_statistics
+@@ -7924,7 +8105,8 @@ static void ath11k_mac_op_sta_statistics
  	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
  
