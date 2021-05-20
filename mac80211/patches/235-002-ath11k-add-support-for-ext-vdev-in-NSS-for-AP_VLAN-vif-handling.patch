@@ -221,7 +221,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  free:
  	ATH11K_MEMORY_STATS_DEC(ar->ab, malloc_size,
  				sizeof(struct nss_wifi_vdev_msg));
-@@ -1255,6 +1340,346 @@ free:
+@@ -1255,6 +1340,352 @@ free:
  	return ret;
  }
  
@@ -512,6 +512,9 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	if (arvif->vif->type != NL80211_IFTYPE_AP_VLAN)
 +		return -EINVAL;
 +
++	if (arvif->nss.ext_vdev_up)
++		return 0;
++
 +	ext_vdev_msg = kzalloc(sizeof(struct nss_wifi_vdev_msg), GFP_ATOMIC);
 +	if (!ext_vdev_msg)
 +		return -ENOMEM;
@@ -527,6 +530,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	}
 +
 +	ath11k_dbg(ar->ab, ATH11K_DBG_NSS_WDS, "nss ext vdev up tx msg success\n");
++	arvif->nss.ext_vdev_up = true;
 +free:
 +	kfree(ext_vdev_msg);
 +	return ret;
@@ -560,6 +564,8 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	}
 +
 +	ath11k_dbg(ar->ab, ATH11K_DBG_NSS_WDS, "nss ext vdev down tx msg success\n");
++
++	arvif->nss.ext_vdev_up = false;
 +free:
 +	kfree(ext_vdev_msg);
 +	return ret;
@@ -568,7 +574,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  /*----------------------------Peer Setup/Config -----------------------------*/
  
  int ath11k_nss_set_peer_sec_type(struct ath11k *ar,
-@@ -1314,23 +1739,22 @@ free:
+@@ -1314,23 +1745,22 @@ free:
  	return status;
  }
  
@@ -599,7 +605,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  					sta->addr);
  		goto exit;
  	}
-@@ -1401,12 +1825,12 @@ exit:
+@@ -1401,12 +1831,12 @@ exit:
  void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
  				  struct ath11k_peer *peer)
  {
@@ -614,7 +620,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	struct ath11k_base *ab = ar->ab;
  
  	if (!ab->nss.enabled)
-@@ -1664,8 +2088,8 @@ int ath11k_nss_add_wds_peer(struct ath11
+@@ -1664,8 +2094,8 @@ int ath11k_nss_add_wds_peer(struct ath11
  	}
  
  	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
@@ -625,7 +631,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  msg_free:
  	kfree(wlmsg);
-@@ -1709,8 +2133,8 @@ int ath11k_nss_update_wds_peer(struct at
+@@ -1709,8 +2139,8 @@ int ath11k_nss_update_wds_peer(struct at
  	}
  
  	ath11k_dbg(ab, ATH11K_DBG_NSS_WDS,
@@ -646,7 +652,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	struct peer_stats *nss_stats;
  	struct completion complete;
  };
-@@ -141,6 +142,12 @@ struct arvif_nss {
+@@ -141,6 +142,16 @@ struct arvif_nss {
  	int encap;
  	/* Keep the copy of decap type for nss */
  	int decap;
@@ -654,12 +660,16 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +	void* ctx;
 +	/* Parent AP vif stored in case of AP_VLAN vif */
 +	struct ath11k_vif *ap_vif;
++	/* Flag to notify if vlan arvif object is added to arvif list*/
++	bool added;
++	/* Flag to notify if ext vdev is up/down */
++	bool ext_vdev_up;
 +	/* WDS cfg should be done only once for ext vdev */
 +	bool wds_cfg_done;
  	bool created;
  };
  
-@@ -194,11 +201,21 @@ int ath11k_nss_map_wds_peer(struct ath11
+@@ -194,11 +205,21 @@ int ath11k_nss_map_wds_peer(struct ath11
  			    u8 *dest_mac, enum ath11k_ast_entry_type type);
  int ath11k_nss_del_wds_peer(struct ath11k *ar, struct ath11k_peer *peer,
  			    u8 *dest_mac);
@@ -684,7 +694,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
  				  struct ath11k_peer *peer);
  int ath11k_nss_setup(struct ath11k_base *ab);
-@@ -224,9 +241,9 @@ static inline void ath11k_nss_vdev_delet
+@@ -224,9 +245,9 @@ static inline void ath11k_nss_vdev_delet
  {
  }
  
@@ -697,7 +707,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  {
  	return;
  }
-@@ -247,6 +264,11 @@ static inline int ath11k_nss_vdev_down(s
+@@ -247,6 +268,11 @@ static inline int ath11k_nss_vdev_down(s
  	return 0;
  }
  
@@ -709,7 +719,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static inline int ath11k_nss_peer_delete(struct ath11k_base *ab, u8 *addr)
  {
  	return 0;
-@@ -280,6 +302,43 @@ static inline int ath11k_nss_peer_create
+@@ -280,6 +306,43 @@ static inline int ath11k_nss_peer_create
  {
  	return 0;
  }
