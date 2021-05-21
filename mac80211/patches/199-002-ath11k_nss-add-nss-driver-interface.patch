@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2298 @@
+@@ -0,0 +1,2342 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -316,6 +316,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	case NSS_WIFILI_PEER_SECURITY_TYPE_MSG:
 +		if (response == NSS_CMN_RESPONSE_EMSG)
 +			ath11k_warn(ab, "peer securty config failed\n");
++
++		break;
++	case NSS_WIFILI_PEER_UPDATE_AUTH_FLAG:
++		if (response == NSS_CMN_RESPONSE_EMSG)
++			ath11k_warn(ab, "peer authorize config failed\n");
 +
 +		break;
 +	case NSS_WIFILI_STATS_MSG:
@@ -1115,6 +1120,45 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +	ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss peer id %d security cfg complete\n",
 +		   peer->peer_id);
++free:
++	kfree(wlmsg);
++	return status;
++}
++
++int ath11k_nss_set_peer_authorize(struct ath11k *ar, u16 peer_id)
++{
++	struct nss_wifili_peer_update_auth_flag *auth_msg;
++	nss_wifili_msg_callback_t msg_cb;
++	struct nss_wifili_msg *wlmsg;
++	nss_tx_status_t status;
++
++	if (!ar->ab->nss.enabled)
++		return 0;
++
++	wlmsg = kzalloc(sizeof(struct nss_wifili_msg), GFP_ATOMIC);
++	if (!wlmsg)
++		return -ENOMEM;
++
++	auth_msg = &wlmsg->msg.peer_auth;
++	auth_msg->peer_id = peer_id;
++	auth_msg->auth_flag = 1;
++
++	msg_cb = (nss_wifili_msg_callback_t)ath11k_nss_wifili_event_receive;
++
++	nss_cmn_msg_init(&wlmsg->cm, ar->ab->nss.if_num,
++			 NSS_WIFILI_PEER_UPDATE_AUTH_FLAG,
++			 sizeof(struct nss_wifili_peer_update_auth_flag),
++			 msg_cb, NULL);
++
++	status = nss_wifili_tx_msg(ar->nss.ctx, wlmsg);
++	if (status != NSS_TX_SUCCESS) {
++		ath11k_warn(ar->ab, "nss peer %d auth cfg fail %d\n",
++			    peer_id, status);
++		goto free;
++	}
++
++	ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss peer id %d auth cfg complete\n",
++		   peer_id);
 +free:
 +	kfree(wlmsg);
 +	return status;
@@ -2348,7 +2392,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,286 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -2531,6 +2575,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +int ath11k_nss_vdev_up(struct ath11k_vif *arvif);
 +int ath11k_nss_vdev_down(struct ath11k_vif *arvif);
 +int ath11k_nss_peer_delete(struct ath11k_base *ab, u8 *addr);
++int ath11k_nss_set_peer_authorize(struct ath11k *ar, u16 peer_id);
 +int ath11k_nss_peer_create(struct ath11k_base *ab, struct ath11k_peer *peer);
 +void ath11k_nss_peer_stats_enable(struct ath11k *ar);
 +void ath11k_nss_peer_stats_disable(struct ath11k *ar);
@@ -2556,6 +2601,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 +
 +static inline int ath11k_nss_vdev_create(struct ath11k_vif *arvif)
++{
++	return 0;
++}
++
++static inline int ath11k_nss_set_peer_authorize(struct ath11k *ar, u16 peer_id)
 +{
 +	return 0;
 +}
