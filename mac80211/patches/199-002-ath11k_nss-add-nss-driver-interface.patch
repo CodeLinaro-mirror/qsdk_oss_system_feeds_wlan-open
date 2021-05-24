@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2342 @@
+@@ -0,0 +1,2355 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -124,6 +124,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	struct ath11k_peer *peer;
 +	struct nss_wifili_peer_ctrl_stats *pstats = NULL;
 +	int i, j;
++	u64 tx_packets, tx_bytes, tx_dropped = 0;
++	u64 rx_packets, rx_bytes, rx_dropped;
 +
 +	if (!ab->nss.stats_enabled)
 +		return;
@@ -155,21 +157,32 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +			peer->nss.nss_stats->last_rx = jiffies;
 +		}
 +
-+		peer->nss.nss_stats->tx_packets += pstats->tx.tx_mcast_cnt +
++		tx_packets = pstats->tx.tx_mcast_cnt +
 +			pstats->tx.tx_ucast_cnt +
 +			pstats->tx.tx_bcast_cnt;
-+		peer->nss.nss_stats->tx_bytes += pstats->tx.tx_mcast_bytes +
++		peer->nss.nss_stats->tx_packets += tx_packets;
++		tx_bytes = pstats->tx.tx_mcast_bytes +
 +			pstats->tx.tx_ucast_bytes +
 +			pstats->tx.tx_bcast_bytes;
++		peer->nss.nss_stats->tx_bytes += tx_bytes;
 +		peer->nss.nss_stats->tx_retries += pstats->tx.retries;
 +
 +		for (j = 0; j < NSS_WIFILI_TQM_RR_MAX; j++)
-+			peer->nss.nss_stats->tx_failed += pstats->tx.dropped.drop_stats[j];
++			tx_dropped += pstats->tx.dropped.drop_stats[j];
 +
-+		peer->nss.nss_stats->rx_packets += pstats->rx.rx_recvd;
-+		peer->nss.nss_stats->rx_bytes += pstats->rx.rx_recvd_bytes;
-+		peer->nss.nss_stats->rx_dropped += pstats->rx.err.mic_err +
++		peer->nss.nss_stats->tx_failed += tx_dropped;
++
++		ATH11K_NSS_TXRX_NETDEV_STATS(tx, peer->vif, tx_bytes, tx_packets);
++
++		rx_packets = pstats->rx.rx_recvd;
++		peer->nss.nss_stats->rx_packets += rx_packets;
++		rx_bytes = pstats->rx.rx_recvd_bytes;
++		peer->nss.nss_stats->rx_bytes += rx_bytes;
++		rx_dropped = pstats->rx.err.mic_err +
 +			pstats->rx.err.decrypt_err;
++		peer->nss.nss_stats->rx_dropped += rx_dropped;
++
++		ATH11K_NSS_TXRX_NETDEV_STATS(rx, peer->vif, rx_bytes, rx_packets);
 +
 +		spin_unlock_bh(&ab->base_lock);
 +		rcu_read_unlock();
@@ -2392,7 +2405,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,300 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -2477,6 +2490,20 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +#define ATH11K_NSS_MAX_NUMBER_OF_PAGE 96
 +
 +#define NSS_TX_TID_MAX 8
++
++#define ATH11K_NSS_TXRX_NETDEV_STATS(txrx, vif, len, pkt_count) \
++do {	\
++	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);	\
++	struct pcpu_sw_netstats *tstats;	\
++	\
++	if (!wdev)	\
++		break;	\
++	tstats = this_cpu_ptr(netdev_tstats(wdev->netdev));	\
++	u64_stats_update_begin(&tstats->syncp);	\
++	tstats->txrx ## _packets += pkt_count;	\
++	tstats->txrx ## _bytes += len;	\
++	u64_stats_update_end(&tstats->syncp);	\
++} while (0)
 +
 +enum ath11k_nss_opmode {
 +	ATH11K_NSS_OPMODE_UNKNOWN,
