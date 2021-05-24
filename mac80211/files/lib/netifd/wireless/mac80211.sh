@@ -922,7 +922,9 @@ mac80211_prepare_vif() {
 				mac80211_iw_interface_add "$phy" "$ifname" __ap || return
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
 			}
-			ap_ifname=$ifname
+
+			[ -n "$ap_ifname" ] || ap_ifname=$ifname
+
 			if [ $hwmode = "11ad" ]; then
 				set_wifi_up $vif $ifname
 			fi
