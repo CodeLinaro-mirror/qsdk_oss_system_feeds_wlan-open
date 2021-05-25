@@ -1,0 +1,760 @@
+From 7e208b3e3741879766f4a46078876ca612cd9a68 Mon Sep 17 00:00:00 2001
+From: Tamizh Chelvam <tamizhr@codeaurora.org>
+Date: Thu, 27 May 2021 17:21:59 +0530
+Subject: [PATCH 1/2] ath11k: Fix NSS offload related compilation error
+
+Fix NSS offload related compilation fix by
+making the NSS offload related changes under
+a compilation flag as  NSS offload support yet to be
+added in this branch.
+
+Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
+---
+ drivers/net/wireless/ath/ath11k/ahb.c    |  2 +-
+ drivers/net/wireless/ath/ath11k/core.c   |  9 +++--
+ drivers/net/wireless/ath/ath11k/core.h   |  4 --
+ drivers/net/wireless/ath/ath11k/dp.c     |  8 ++--
+ drivers/net/wireless/ath/ath11k/dp_rx.c  |  8 ++--
+ drivers/net/wireless/ath/ath11k/hal_rx.c |  2 +-
+ drivers/net/wireless/ath/ath11k/hw.c     |  4 +-
+ drivers/net/wireless/ath/ath11k/mac.c    | 36 ++++++++++--------
+ drivers/net/wireless/ath/ath11k/nss.c    | 22 +++++++++++
+ drivers/net/wireless/ath/ath11k/nss.h    | 63 ++++++++++++++++++--------------
+ drivers/net/wireless/ath/ath11k/pci.c    |  2 +-
+ drivers/net/wireless/ath/ath11k/peer.c   | 16 ++++----
+ drivers/net/wireless/ath/ath11k/peer.h   |  4 --
+ drivers/net/wireless/ath/ath11k/wmi.c    |  2 +-
+ include/linux/ath9k_platform.h           |  6 +++
+ local-symbols                            |  1 -
+ net/mac80211/util.c                      |  1 +
+ 17 files changed, 111 insertions(+), 79 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/ahb.c b/drivers/net/wireless/ath/ath11k/ahb.c
+index 6c20c01..6236e5d 100644
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -530,7 +530,7 @@ static int ath11k_ahb_ext_irq_config(struct ath11k_base *ab)
+ 	/* TCL Completion, REO Dest, ERR, Exception and h2rxdma rings are offloaded
+ 	 * to nss when its enabled, hence don't enable these interrupts
+ 	 */
+-	nss_offload = ab->nss.enabled;
++	nss_offload = ath11k_nss_offload_enabled(ab);
+ 
+ 	for (i = 0; i < ATH11K_EXT_IRQ_GRP_NUM_MAX; i++) {
+ 		struct ath11k_ext_irq_grp *irq_grp = &ab->ext_irq_grp[i];
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 7691859..2344308 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -904,7 +904,7 @@ static void ath11k_core_pdev_destroy(struct ath11k_base *ab)
+ 	ath11k_mac_unregister(ab);
+ 
+ 	ath11k_nss_teardown(ab);
+-	ab->nss.enabled = false;
++	ath11k_nss_set_enabled(ab, false);
+ 
+ 	ath11k_hif_irq_disable(ab);
+ 	ath11k_dp_pdev_free(ab);
+@@ -1178,7 +1178,7 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
+ 	mutex_lock(&ab->core_lock);
+ 
+ 	ath11k_nss_teardown(ab);
+-	ab->nss.enabled = false;
++	ath11k_nss_set_enabled(ab, false);
+ 
+ #ifdef CONFIG_QCOM_QMI_HELPERS
+ 	/* Unregister the ssr notifier as we are not interested
+@@ -1399,10 +1399,11 @@ int ath11k_core_pre_init(struct ath11k_base *ab)
+ 		ath11k_err(ab, "failed to get hw params: %d\n", ret);
+ 		return ret;
+ 	}
+-	ab->nss.enabled = nss_offload;
++
++	ath11k_nss_set_enabled(ab, nss_offload);
+ 	ab->enable_memory_stats = ATH11K_DEBUG_ENABLE_MEMORY_STATS;
+ 
+-	if (ab->nss.enabled && ab->hw_params.max_tx_ring > DP_TCL_NUM_RING_MAX)
++	if (ath11k_nss_offload_enabled(ab) && ab->hw_params.max_tx_ring > DP_TCL_NUM_RING_MAX)
+ 		ab->hw_params.max_tx_ring = DP_TCL_NUM_RING_MAX;
+ 
+ 	return 0;
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 827b8b4..e3cab8d 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -292,13 +292,11 @@ struct ath11k_vif {
+ 	/* protected by conf_mutex */
+ 	struct list_head mac_filters;
+ 	u32 mac_filter_count;
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 	struct arvif_nss nss;
+ 	struct list_head ap_vlan_arvifs;
+ 	/* VLAN keyidx map required for Dynamic VLAN */
+ 	u16 *vlan_keyid_map;
+ 	DECLARE_BITMAP(free_groupidx_map, ATH11K_GROUP_KEYS_NUM_MAX);
+-#endif
+ };
+ 
+ struct ath11k_vif_iter {
+@@ -601,10 +599,8 @@ struct ath11k {
+ 	struct ieee80211_hw *hw;
+ 	struct ieee80211_ops *ops;
+ 	struct ath11k_pdev_wmi *wmi;
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 	struct ath11k_nss nss;
+ 	struct ath11k_peer *bss_peer;
+-#endif
+ 	struct ath11k_pdev_dp dp;
+ 	u8 mac_addr[ETH_ALEN];
+ 	u32 ht_cap_info;
+diff --git a/drivers/net/wireless/ath/ath11k/dp.c b/drivers/net/wireless/ath/ath11k/dp.c
+index 2f47970..4b14c75 100644
+--- a/drivers/net/wireless/ath/ath11k/dp.c
++++ b/drivers/net/wireless/ath/ath11k/dp.c
+@@ -48,7 +48,7 @@ int ath11k_dp_peer_setup(struct ath11k *ar, int vdev_id, const u8 *addr)
+ 	bool rx_hash_enable = DP_RX_HASH_ENABLE;
+ 
+ 	/* RX Hash based steering is disabled for NSS Offload */
+-	if (ar->ab->nss.enabled || !ab->rx_hash)
++	if (ath11k_nss_offload_enabled(ab) || !ab->rx_hash)
+ 		rx_hash_enable = DP_RX_HASH_DISABLE;
+ 
+ 	/* NOTE: reo_dest ring id starts from 1 unlike mac_id which starts from 0 */
+@@ -136,7 +136,7 @@ static int ath11k_dp_srng_calculate_msi_group(struct ath11k_base *ab,
+ {
+ 	const u8 *grp_mask;
+ 
+-	if (ab->nss.enabled) {
++	if (ath11k_nss_offload_enabled(ab)) {
+ 		switch (type) {
+ 		case HAL_REO_STATUS:
+ 		case HAL_RXDMA_MONITOR_STATUS:
+@@ -262,7 +262,7 @@ int ath11k_dp_srng_setup(struct ath11k_base *ab, struct dp_srng *ring,
+ 		cached = false;
+ 	}
+ 
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		cached = false;
+ 
+ 	ring->size = (num_entries * entry_sz) + HAL_RING_BASE_ALIGN - 1;
+@@ -812,7 +812,7 @@ int ath11k_dp_service_srng(struct ath11k_base *ab,
+ 	bool nss_offload;
+ 
+ 	/* Processing of offloaded rings are not required */
+-	nss_offload = ab->nss.enabled;
++	nss_offload = ath11k_nss_offload_enabled(ab);
+ 
+ 	if (!nss_offload && ab->hw_params.ring_mask->tx[grp_id]) {
+ 		i = __fls(ab->hw_params.ring_mask->tx[grp_id]);
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 45d4e34..a57fb5e 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -542,7 +542,7 @@ static int ath11k_dp_rxdma_pdev_buf_setup(struct ath11k *ar)
+ 	int i;
+ 
+ 	/* RXDMA BUF ring is offloaded to NSS */
+-	if (!ar->ab->nss.enabled)
++	if (!ath11k_nss_offload_enabled(ab))
+ 		ath11k_dp_rxdma_ring_buf_setup(ar, rx_ring, HAL_RXDMA_BUF);
+ 
+ 	if (ar->ab->hw_params.rxdma1_enable) {
+@@ -1391,7 +1391,7 @@ static void ath11k_dp_ppdu_stats_flush_tlv_parse(struct ath11k_base *ab,
+ 	struct ath11k_peer *peer = NULL;
+ 	struct ieee80211_tx_status status;
+ 
+-	if (!ab->nss.mesh_nss_offload_enabled)
++	if (!ath11k_nss_mesh_offload_enabled(ab))
+ 		return;
+ 
+ 	rcu_read_lock();
+@@ -1746,7 +1746,7 @@ ath11k_dp_rx_ppdu_stats_update_tx_comp_status(struct ath11k *ar,
+ 
+ 	lockdep_assert_held(&ar->data_lock);
+ 
+-	if (!ar->ab->nss.mesh_nss_offload_enabled)
++	if (!ath11k_nss_mesh_offload_enabled(ar->ab))
+ 		return;
+ 
+ 	ath11k_htt_update_ppdu_stats(ar, &ppdu_info->ppdu_stats);
+@@ -5235,7 +5235,7 @@ static int ath11k_dp_rxdma_ring_sel_config(struct ath11k *ar)
+ 
+ 	ath11k_dp_get_rx_header_offset(ar->ab, &tlv_filter);
+ 
+-	if (!ar->ab->nss.enabled)
++	if (!ath11k_nss_offload_enabled(ab))
+ 		ret = ath11k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, dp->mac_id,
+ 						       HAL_RXDMA_BUF,
+ 						       DP_RXDMA_REFILL_RING_SIZE,
+diff --git a/drivers/net/wireless/ath/ath11k/hal_rx.c b/drivers/net/wireless/ath/ath11k/hal_rx.c
+index c376fe8..8c64ee4 100644
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
+@@ -831,7 +831,7 @@ void ath11k_hal_reo_hw_setup(struct ath11k_base *ab, u32 ring_hash_map)
+ 			   HAL_DEFAULT_REO_TIMEOUT_USEC);
+ 
+ 	/* REO Dest ring setup is not required in NSS offload case */
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		return;
+ 
+ 	ath11k_hal_reo_hash_setup(ab, ring_hash_map);
+diff --git a/drivers/net/wireless/ath/ath11k/hw.c b/drivers/net/wireless/ath/ath11k/hw.c
+index 6842985..0ac20f6 100644
+--- a/drivers/net/wireless/ath/ath11k/hw.c
++++ b/drivers/net/wireless/ath/ath11k/hw.c
+@@ -349,7 +349,7 @@ static void ath11k_hw_ipq8074_set_rx_fragmentation_dst_ring(struct ath11k_base *
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+ 	u32 val;
+ 
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		frag_dst_ring = HAL_SRNG_REO_ALTERNATE_SELECT;
+ 
+ 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_GEN_ENABLE);
+@@ -685,7 +685,7 @@ static void ath11k_hw_ipq5018_set_rx_fragmentation_dst_ring(struct ath11k_base *
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+ 	u32 val;
+ 
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		frag_dst_ring = HAL_SRNG_REO_ALTERNATE_SELECT;
+ 
+ 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_GEN_ENABLE);
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 60475ad..4880fe9 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -3017,6 +3017,9 @@ static void ath11k_mac_op_nss_bss_info_changed(struct ieee80211_hw *hw,
+ 
+ 	mutex_lock(&ar->conf_mutex);
+ 
++	if (ath11k_nss_offload_enabled(ar->ab))
++		return;
++
+ 	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "Setting ap_isolate %d to NSS\n",
+ 		   arvif->vif->bss_conf.nss_ap_isolate);
+ 	if (changed & BSS_CHANGED_NSS_AP_ISOLATE) {
+@@ -3857,7 +3860,7 @@ static int ath11k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+ 
+ 	key->hw_key_idx = key->keyidx;
+ 
+-	if (ab->nss.enabled && vif->type == NL80211_IFTYPE_AP_VLAN) {
++	if (ath11k_nss_offload_enabled(ab) && vif->type == NL80211_IFTYPE_AP_VLAN) {
+ 		ap_vlan_arvif = arvif;
+ 		if (arsta) {
+ 			ap_vlan_arvif->nss.ap_vif = arsta->arvif;
+@@ -3912,7 +3915,7 @@ static int ath11k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+ 	}
+ 
+ 	/* VLAN ID is updated non-zero only for AP_VLAN vif */
+-	if (key->vlan_id && !(key->flags & IEEE80211_KEY_FLAG_PAIRWISE) &&
++	if (ath11k_nss_offload_enabled(ab) && key->vlan_id && !(key->flags & IEEE80211_KEY_FLAG_PAIRWISE) &&
+ 	    ap_vlan_arvif) {
+ 		if (arvif->vlan_keyid_map)
+ 			key->hw_key_idx = arvif->vlan_keyid_map[key->vlan_id];
+@@ -3995,7 +3998,7 @@ static int ath11k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+ 			peer->sec_type_grp = ath11k_dp_tx_get_encrypt_type(key->cipher);
+ 		}
+ 		/* storing group key idx which will be used during rekey */
+-		if (key->vlan_id)
++		if (ath11k_nss_offload_enabled(ab) && key->vlan_id)
+ 			arvif->vlan_keyid_map[key->vlan_id] = key->hw_key_idx;
+ 	} else if (peer && cmd == DISABLE_KEY) {
+ 		peer->keys[key->keyidx] = NULL;
+@@ -4003,7 +4006,7 @@ static int ath11k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+ 			peer->ucast_keyidx = 0;
+ 		else
+ 			peer->mcast_keyidx = 0;
+-		if (key->vlan_id)
++		if (ath11k_nss_offload_enabled(ab) && key->vlan_id)
+ 			arvif->vlan_keyid_map[key->vlan_id] = 0;
+ 	} else if (!peer) {
+ 		/* impossible unless FW goes crazy */
+@@ -4496,7 +4499,7 @@ static void ath11k_sta_use_4addr_wk(struct work_struct *wk)
+ 	peer_dbg_info = ath11k_mac_sta_level_info(arvif, sta);
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+-	if (ab->nss.enabled && arvif->vif->type == NL80211_IFTYPE_AP_VLAN) {
++	if (ath11k_nss_offload_enabled(ab) && arvif->vif->type == NL80211_IFTYPE_AP_VLAN) {
+ 		ap_vlan_arvif = arsta->arvif;
+ 		arvif = ap_vlan_arvif->nss.ap_vif;
+ 	}
+@@ -4513,7 +4516,7 @@ static void ath11k_sta_use_4addr_wk(struct work_struct *wk)
+ 		ath11k_warn(ab, "failed to set 4addr for STA %pM: %d\n",
+ 			    sta->addr, ret);
+ 
+-	if (!ab->nss.enabled || arvif->vif->type != NL80211_IFTYPE_AP_VLAN)
++	if (!ath11k_nss_offload_enabled(ab) || arvif->vif->type != NL80211_IFTYPE_AP_VLAN)
+ 		return;
+ 
+ 	vif = ap_vlan_arvif->vif;
+@@ -4884,7 +4887,7 @@ static int ath11k_mac_op_sta_state(struct ieee80211_hw *hw,
+ 			if (ret)
+ 				ath11k_warn(ar->ab, "Unable to authorize peer (%pM) vdev %d: %d\n",
+ 					    sta->addr, arvif->vdev_id, ret);
+-		} else if (ar->ab->nss.enabled &&
++		} else if (ath11k_nss_offload_enabled(ar->ab) &&
+ 			   vif->type == NL80211_IFTYPE_AP_VLAN &&
+ 			   !arsta->use_4addr_set) {
+ 			ret = ath11k_mac_cfg_dyn_vlan(ar->ab, arvif, sta);
+@@ -4971,7 +4974,7 @@ static void ath11k_mac_op_sta_set_4addr(struct ieee80211_hw *hw,
+ 	struct ath11k_vif *ap_arvif = NULL;
+ 
+ 	if (enabled && !arsta->use_4addr_set) {
+-		if (ar->ab->nss.enabled && vif->type == NL80211_IFTYPE_AP_VLAN) {
++		if (ath11k_nss_offload_enabled(ar->ab) && vif->type == NL80211_IFTYPE_AP_VLAN) {
+ 			/* 4addr STA is initially associated to AP vif, change
+ 			 * it to AP_VLAN vif and add AP_VLAN vif to AP vifs list
+ 			 */
+@@ -6011,7 +6014,7 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 			spin_unlock_bh(&ar->data_lock);
+ 		}
+ 		return;
+-	} else if (ar->ab->nss.enabled &&
++	} else if (ath11k_nss_offload_enabled(ar->ab) &&
+ 		   ieee80211_is_qos_nullfunc(hdr->frame_control) &&
+ 		   test_bit(WMI_TLV_SERVICE_QOS_NULL_FRAME_TX_OVER_WMI,
+ 			    ar->ab->wmi_ab.svc_map)) {
+@@ -6035,7 +6038,7 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 	    ar->monitor_vdev_created)
+ 		skb_cb->flags |= ATH11K_SKB_TX_STATUS;
+ 
+-	if (ar->ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ar->ab))
+ 		ret = ath11k_nss_tx(arvif, skb);
+ 	else
+ 		ret = ath11k_dp_tx(ar, arvif, skb,
+@@ -6419,7 +6422,7 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 	INIT_LIST_HEAD(&arvif->list);
+ 
+ 	if ((vif->type == NL80211_IFTYPE_AP_VLAN ||
+-	     vif->type == NL80211_IFTYPE_STATION) && ab->nss.enabled) {
++	     vif->type == NL80211_IFTYPE_STATION) && ath11k_nss_offload_enabled(ab)) {
+ 		if (ath11k_frame_mode == ATH11K_HW_TXRX_ETHERNET &&
+ 		    (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)) {
+ 			vif->offload_flags |= IEEE80211_OFFLOAD_ENCAP_4ADDR;
+@@ -8385,6 +8388,7 @@ static void ath11k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ {
+ 	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
+ 	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
++	struct ath11k *ar = hw->priv;
+ 
+ 	sinfo->rx_duration = arsta->rx_duration;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
+@@ -8412,7 +8416,7 @@ static void ath11k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ 	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
+ 
+-	if (arvif->ar->ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ar->ab))
+ 		ath11k_nss_update_sta_stats(arvif, sinfo, sta);
+ }
+ 
+@@ -8427,7 +8431,7 @@ ath11k_mac_op_config_mesh_offload_path(struct ieee80211_hw *hw,
+ 	struct ath11k_vif *arvif = (void *)vif->drv_priv;
+ 	int ret;
+ 
+-	if (arvif->ar->ab->nss.debug_mode) {
++	if (ath11k_nss_debug_mode(arvif)) {
+ 		ret = 0;
+ 		return;
+ 	}
+@@ -8969,7 +8973,7 @@ static int __ath11k_mac_register(struct ath11k *ar)
+ 		ieee80211_hw_set(ar->hw, TX_AMPDU_SETUP_IN_HW);
+ 		ieee80211_hw_set(ar->hw, SUPPORTS_REORDERING_BUFFER);
+ 		ieee80211_hw_set(ar->hw, SUPPORTS_AMSDU_IN_AMPDU);
+-		if(!ab->nss.enabled)
++		if(!ath11k_nss_offload_enabled(ab))
+ 			ieee80211_hw_set(ar->hw, USES_RSS);
+ 	}
+ 
+@@ -9057,11 +9061,11 @@ static int __ath11k_mac_register(struct ath11k *ar)
+ 		ieee80211_hw_set(ar->hw, SUPPORT_FAST_XMIT);
+ 	}
+ 
+-	if (ab->nss.enabled) {
++	if (ath11k_nss_offload_enabled(ar->ab)) {
+ 		ieee80211_hw_set(ar->hw, SUPPORTS_NSS_OFFLOAD);
+ 		wiphy_ext_feature_set(ar->hw->wiphy,
+ 				      NL80211_EXT_FEATURE_VLAN_OFFLOAD);
+-		if (ab->nss.mesh_nss_offload_enabled)
++		if (ath11k_nss_mesh_offload_enabled(ab))
+ 			ieee80211_hw_set(ar->hw, SUPPORTS_MESH_NSS_OFFLOAD);
+ 	}
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/nss.c b/drivers/net/wireless/ath/ath11k/nss.c
+index 8e6b14c..3abe4b5 100644
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -2,6 +2,7 @@
+ /*
+  * Copyright (c) 2020 The Linux Foundation. All rights reserved.
+  */
++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 
+ #include "mac.h"
+ #include "nss.h"
+@@ -1948,6 +1949,26 @@ ath11k_nss_mesh_link_vdev_special_data_receive(void *dev,
+ 	}
+ }
+ 
++bool ath11k_nss_mesh_offload_enabled(struct ath11k_base *ab)
++{
++	ab->nss.mesh_nss_offload_enabled;
++}
++
++bool ath11k_nss_offload_enabled(struct ath11k_base *ab)
++{
++	return ab->nss.enabled;
++}
++
++void ath11k_nss_set_enabled(struct ath11k_base *ab, bool enable)
++{
++	ab->nss.enabled = enable;
++}
++
++bool ath11k_nss_debug_mode(struct ath11k_vif *arvif)
++{
++	return arvif->ar->ab->nss.debug_mode;
++}
++
+ int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
+ {
+ 	struct ath11k *ar = arvif->ar;
+@@ -4711,3 +4732,4 @@ pdev_deinit:
+ fail:
+ 	return ret;
+ }
++#endif
+diff --git a/drivers/net/wireless/ath/ath11k/nss.h b/drivers/net/wireless/ath/ath11k/nss.h
+index 359bcf9..9bd6248 100644
+--- a/drivers/net/wireless/ath/ath11k/nss.h
++++ b/drivers/net/wireless/ath/ath11k/nss.h
+@@ -6,9 +6,11 @@
+ #ifndef ATH11K_NSS_H
+ #define ATH11K_NSS_H
+ 
++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ #include <nss_api_if.h>
+ #include <nss_cmn.h>
+ #include <nss_wifi_meshmgr.h>
++#endif
+ #include "../../../../../net/mac80211/mesh.h"
+ 
+ struct ath11k;
+@@ -158,7 +160,9 @@ struct arvif_nss {
+ 	/* dynamic ifnum allocated by nss driver for vif */
+ 	int if_num;
+ 	/* mesh handle for mesh obj vap */
++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 	nss_wifi_mesh_handle_t mesh_handle;
++#endif
+ 	/* Used for completion status for vdev config nss messages */
+ 	struct completion complete;
+ 	/* Keep the copy of encap type for nss */
+@@ -275,13 +279,17 @@ int ath11k_nss_dump_mpp_request(struct ath11k_vif *arvif);
+ int ath11k_nss_mesh_config_path(struct ath11k *ar, struct ath11k_vif *arvif,
+ 				enum ieee80211_mesh_path_offld_cmd cmd,
+ 				struct ieee80211_mesh_path_offld *path);
++bool ath11k_nss_mesh_offload_enabled(struct ath11k_base *ab);
++bool ath11k_nss_debug_mode(struct ath11k_vif *arvif);
++int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
++			       struct nss_wifi_mesh_exception_flag_msg *nss_msg);
+ #endif
+ int ath11k_nss_mesh_config_update(struct ieee80211_vif *vif, int changed);
+ int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif, int if_num);
+-int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
+-			       struct nss_wifi_mesh_exception_flag_msg *nss_msg);
+ int ath11k_nss_exc_rate_config(struct ath11k_vif *arvif,
+ 					struct nss_wifi_mesh_rate_limit_config *nss_exc_cfg);
++bool ath11k_nss_offload_enabled(struct ath11k_base *ab);
++void ath11k_nss_set_enabled(struct ath11k_base *ab, bool enable);
+ #else
+ static inline int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb)
+ {
+@@ -309,7 +317,7 @@ static inline void ath11k_nss_update_sta_stats(struct ath11k_vif *arvif,
+ 	return;
+ }
+ 
+-static void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
++static inline void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
+ 					 struct ath11k_peer *peer)
+ {
+ 	return;
+@@ -325,11 +333,6 @@ static inline int ath11k_nss_vdev_down(struct ath11k_vif *arvif)
+ 	return 0;
+ }
+ 
+-static inline int ath11k_nss_vdev_delete(struct ath11k_vif *arvif)
+-{
+-	return 0;
+-}
+-
+ static inline int ath11k_nss_peer_delete(struct ath11k_base *ab, u8 *addr)
+ {
+ 	return 0;
+@@ -340,24 +343,12 @@ static inline int ath11k_nss_peer_create(struct ath11k_base *ab, struct ath11k_p
+ 	return 0;
+ }
+ 
+-static inline int ath11k_nss_add_wds_peer(struct ath11k *ar, struct ath11k_peer *peer,
+-					  u8 *dest_mac, enum ath11k_ast_entry_type type)
+-{
+-	return 0;
+-}
+-
+ static inline int ath11k_nss_update_wds_peer(struct ath11k *ar, struct ath11k_peer *peer,
+ 					     u8 *dest_mac)
+ {
+ 	return 0;
+ }
+ 
+-static inline int ath11k_nss_map_wds_peer(struct ath11k *ar, struct ath11k_peer *peer,
+-					  u8 *dest_mac, enum ath11k_ast_entry_type type)
+-{
+-	return 0;
+-}
+-
+ static inline int ath11k_nss_del_wds_peer(struct ath11k_vif *arvif, struct ath11k_peer *peer,
+ 			    u8 *dest_mac)
+ {
+@@ -429,7 +420,7 @@ static inline int ath11k_nss_teardown(struct ath11k_base *ab)
+ 	return 0;
+ }
+ 
+-void ath11k_nss_ext_rx_stats(struct ath11k_base *ab, struct htt_rx_ring_tlv_filter *tlv_filter)
++static inline void ath11k_nss_ext_rx_stats(struct ath11k_base *ab, struct htt_rx_ring_tlv_filter *tlv_filter)
+ {
+ 	return;
+ }
+@@ -442,26 +433,44 @@ ath11k_nss_mesh_config_path(struct ath11k *ar, struct ath11k_vif *arvif,
+ {
+ 	return 0;
+ }
++static inline bool ath11k_nss_mesh_offload_enabled(struct ath11k_base *ab)
++{
++	return false;
++}
++static inline bool ath11k_nss_debug_mode(struct ath11k_vif *arvif)
++{
++	return false;
++}
++static inline int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
++			       struct nss_wifi_mesh_exception_flag_msg *nss_msg)
++{
++	return 0;
++}
+ #endif
+ static inline int
+ ath11k_nss_mesh_config_update(struct ieee80211_vif *vif, int changed)
+ {
+ 	return 0;
+ }
+-static int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif,
++static inline int ath11k_nss_assoc_link_arvif_to_ifnum(struct ath11k_vif *arvif,
+ 						int if_num)
+ {
+ 	return 0;
+ }
+-static int ath11k_nss_mesh_exception_flags(struct ath11k_vif *arvif,
+-			       struct nss_wifi_mesh_exception_flag_msg *nss_msg)
++static inline int ath11k_nss_exc_rate_config(struct ath11k_vif *arvif,
++					struct nss_wifi_mesh_rate_limit_config *nss_exc_cfg)
+ {
+ 	return 0;
+ }
+-int ath11k_nss_exc_rate_config(struct ath11k_vif *arvif,
+-					struct nss_wifi_mesh_rate_limit_config *nss_exc_cfg)
++static inline bool ath11k_nss_offload_enabled(struct ath11k_base *ab)
++{
++	return false;
++}
++static inline void ath11k_nss_set_enabled(struct ath11k_base *ab, bool enable)
++{
++}
++static inline void ath11k_nss_ext_vdev_delete(struct ath11k_vif *ar_vif)
+ {
+-	return 0;
+ }
+ #endif /* CPTCFG_ATH11K_NSS_SUPPORT */
+ #endif
+diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
+index 494888e..cf618cc 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -826,7 +826,7 @@ static int ath11k_pci_ext_irq_config(struct ath11k_base *ab,
+ 			       ath11k_pci_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
+ 
+ 		/* tcl, reo, rx_err, wbm release, rxdma rings are offloaded to nss. */
+-		if (ab->nss.enabled && !(ab->hw_params.ring_mask->reo_status[i] ||
++		if (ath11k_nss_offload_enabled(ab) && !(ab->hw_params.ring_mask->reo_status[i] ||
+ 		    ab->hw_params.ring_mask->rx_mon_status[i]))
+ 			continue;
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/peer.c b/drivers/net/wireless/ath/ath11k/peer.c
+index af562f1..64e62be 100644
+--- a/drivers/net/wireless/ath/ath11k/peer.c
++++ b/drivers/net/wireless/ath/ath11k/peer.c
+@@ -108,6 +108,7 @@ struct ath11k_peer *ath11k_peer_find_by_ast(struct ath11k_base *ab,
+ 	return NULL;
+ }
+ 
++#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ struct ath11k_ast_entry *ath11k_peer_ast_find_by_peer(struct ath11k_base *ab,
+ 						      struct ath11k_peer *peer,
+ 						      u8* addr)
+@@ -403,6 +404,7 @@ void ath11k_peer_ast_cleanup(struct ath11k *ar, struct ath11k_peer *peer,
+ 				   ast_deleted_count, peer->addr, free_wds_count);
+ 	}
+ }
++#endif
+ 
+ void ath11k_peer_unmap_event(struct ath11k_base *ab, u16 peer_id)
+ {
+@@ -454,13 +456,11 @@ void ath11k_peer_unmap_v2_event(struct ath11k_base *ab, u16 peer_id, bool is_wds
+ 	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "htt peer unmap vdev %d peer %pM id %d is_wds %d free_wds_count %d\n",
+ 		   peer->vdev_id, peer->addr, peer_id, is_wds, free_wds_count);
+ 
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		ath11k_peer_ast_cleanup(ar, peer, is_wds, free_wds_count);
+ 
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 	if (ar->bss_peer && ether_addr_equal(ar->bss_peer->addr, peer->addr))
+ 		ar->bss_peer = NULL;
+-#endif
+ free_peer:
+ 	rcu_read_unlock();
+ 	list_del(&peer->list);
+@@ -490,7 +490,7 @@ void ath11k_peer_map_event(struct ath11k_base *ab, u8 vdev_id, u16 peer_id,
+ 		ether_addr_copy(peer->addr, mac_addr);
+ 		list_add(&peer->list, &ab->peers);
+ 		wake_up(&ab->peer_mapping_wq);
+-		if (ab->nss.enabled)
++		if (ath11k_nss_offload_enabled(ab))
+ 			ath11k_nss_peer_create(ab, peer);
+ 	}
+ 
+@@ -525,7 +525,7 @@ void ath11k_peer_map_v2_event(struct ath11k_base *ab, u8 vdev_id, u16 peer_id,
+ 		list_add(&peer->list, &ab->peers);
+ 		INIT_LIST_HEAD(&peer->ast_entry_list);
+ 		wake_up(&ab->peer_mapping_wq);
+-		if (ab->nss.enabled && ar) {
++		if (ath11k_nss_offload_enabled(ab) && ar) {
+ 			ath11k_nss_peer_create(ab, peer);
+ 			ath11k_peer_add_ast(ar, peer, mac_addr,
+ 					    ATH11K_AST_TYPE_STATIC);
+@@ -535,7 +535,7 @@ void ath11k_peer_map_v2_event(struct ath11k_base *ab, u8 vdev_id, u16 peer_id,
+ 	if (is_wds)
+ 		peer = ath11k_peer_find_by_id(ab, peer_id);
+ 
+-	if (ab->nss.enabled && ar)
++	if (ath11k_nss_offload_enabled(ab) && ar)
+ 		ath11k_peer_map_ast(ar, peer, mac_addr, hw_peer_id, ast_hash);
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "htt peer map vdev %d peer %pM id %d is_wds %d\n",
+@@ -738,12 +738,10 @@ int ath11k_peer_create(struct ath11k *ar, struct ath11k_vif *arvif,
+ 	peer->sec_type_grp = HAL_ENCRYPT_TYPE_OPEN;
+ 	peer->vif = vif;
+ 
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+-	if (vif->type == NL80211_IFTYPE_STATION && ar->ab->nss.enabled)
++	if (vif->type == NL80211_IFTYPE_STATION && ath11k_nss_offload_enabled(ar->ab))
+ 		ar->bss_peer = peer;
+ 	else
+ 		ar->bss_peer = NULL;
+-#endif
+ 	if (sta) {
+ 		arsta = (struct ath11k_sta *)sta->drv_priv;
+ 		ath11k_dp_sta_tx_attach(arsta, peer->peer_id);
+diff --git a/drivers/net/wireless/ath/ath11k/peer.h b/drivers/net/wireless/ath/ath11k/peer.h
+index 331b8b4..0fab832 100644
+--- a/drivers/net/wireless/ath/ath11k/peer.h
++++ b/drivers/net/wireless/ath/ath11k/peer.h
+@@ -17,7 +17,6 @@ struct ppdu_user_delayba {
+ 	u32 resp_rate_flags;
+ };
+ 
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ enum ath11k_ast_entry_type {
+ 	ATH11K_AST_TYPE_NONE, /* static ast entry for connected peer */
+ 	ATH11K_AST_TYPE_STATIC, /* static ast entry for connected peer */
+@@ -59,7 +58,6 @@ struct ath11k_ast_entry {
+ 	void *cookie;
+ 	struct list_head ase_list;
+ };
+-#endif
+ 
+ struct ath11k_peer {
+ 	struct list_head list;
+@@ -71,11 +69,9 @@ struct ath11k_peer {
+ 	u16 ast_hash;
+ 	u8 pdev_idx;
+ 	u16 hw_peer_id;
+-#ifdef CPTCFG_ATH11K_NSS_SUPPORT
+ 	struct ath11k_nss_peer nss;
+ 	struct ath11k_ast_entry *self_ast_entry;
+ 	struct list_head ast_entry_list;
+-#endif
+ 
+ 	/* protected by ab->data_lock */
+ 	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
+index 0b1602a..a83edea 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -4561,7 +4561,7 @@ int ath11k_wmi_cmd_init(struct ath11k_base *ab)
+ 	if (test_bit(WMI_TLV_SERVICE_REG_CC_EXT_EVENT_SUPPORT, ab->wmi_ab.svc_map))
+ 		config.is_reg_cc_ext_event_supported = 1;
+ 
+-	if (ab->nss.enabled)
++	if (ath11k_nss_offload_enabled(ab))
+ 		config.max_num_group_keys = ATH11K_GROUP_KEYS_NUM_MAX;
+ 
+ 	ab->hw_params.hw_ops->wmi_init_config(ab, &config);
+diff --git a/include/linux/ath9k_platform.h b/include/linux/ath9k_platform.h
+index 57d8177..f1f2ad4 100644
+--- a/include/linux/ath9k_platform.h
++++ b/include/linux/ath9k_platform.h
+@@ -49,6 +49,12 @@ struct ath9k_platform_data {
+ 
+ 	int num_leds;
+ 	const struct gpio_led *leds;
++
++	unsigned num_btns;
++	const struct gpio_keys_button *btns;
++	unsigned btn_poll_interval;
++
++	bool ubnt_hsr;
+ };
+ 
+ #endif /* _LINUX_ATH9K_PLATFORM_H */
+diff --git a/local-symbols b/local-symbols
+index 20eecc8..60c28e8 100644
+--- a/local-symbols
++++ b/local-symbols
+@@ -133,7 +133,6 @@ ATH10K_DFS_CERTIFIED=
+ ATH11K=
+ ATH11K_AHB=
+ ATH11K_PCI=
+-ATH11K_NSS_SUPPORT=
+ ATH11K_MEM_PROFILE_512M=
+ ATH11K_DEBUG=
+ ATH11K_DEBUGFS=
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index 56f490b..27b63e2 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -3169,6 +3169,7 @@ u8 *ieee80211_ie_build_he_oper(u8 *pos, struct cfg80211_chan_def *chandef)
+ 		else
+ 			he_6ghz_op->ccfs0 += 8;
+ 		/* fallthrough; */
++		break;
+ 	case NL80211_CHAN_WIDTH_80P80:
+ 		he_6ghz_op->control =
+ 			IEEE80211_HE_6GHZ_OPER_CTRL_CHANWIDTH_160MHZ;
+-- 
+2.7.4
+
