@@ -139,6 +139,8 @@ hostapd_adjust_config() {
 		#echo "STA associated in No HT mode, downgrading AP as well" > /dev/ttyMSM0
 		hostapd_cli -i $ap_intf set ieee80211ac 0 2> /dev/null
 		hostapd_cli -i $ap_intf set ieee80211n 0 2> /dev/null
+		# Set HT capab without HT40+/- config to set secondary channel 0
+		hostapd_ht20_mode
 		hostapd_cli -i $ap_intf set ieee80211ax 0 2> /dev/null
 
 	 elif [ $wifi_gen == 6 ]; then
@@ -245,12 +247,23 @@ do
 			sleep 4
 			#echo "Hostapd state: $(hostapd_cli status 2> /dev/null | grep state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
+			# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
 			if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+				hostapd_cli -i $ap_intf disable
+				sleep 1
+				hostapd_cli -i $ap_intf enable
+				sleep 4
+			fi
+
+			if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+				echo "REPEATER AP failed bring-up, exiting" > /dev/ttyMSM0
 				echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 				date >> /tmp/apsta_debug.log
 				hostapd_cli -i $ap_intf status >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
+				wpa_cli -i $sta_intf list_n >> /tmp/apsta_debug.log
+				wpa_cli -i $sta_intf all_bss >> /tmp/apsta_debug.log
 				date >> /tmp/apsta_debug.log
 				wifi down
 				exit
