@@ -1,0 +1,68 @@
+From 856c4d914dadb2bb4ce8fae8e2bc69dafb74234a Mon Sep 17 00:00:00 2001
+From: Wen Gong <wgong@codeaurora.org>
+Date: Tue, 9 Feb 2021 19:58:18 +0800
+Subject: [PATCH] mac80211: discard EAPOL frames which source address is not
+ bssid for STATION
+
+Sometimes it has EAPOL frames with invalid source address from attack
+point, it will indicate to upper stack. This fixs CVE-2020-26139.
+
+This patch is to drop the EAPOL frames if the source address is not
+same with the bssid of AP.
+
+Tested-on: QCA6174 hw3.2 PCI WLAN.RM.4.4.1-00110-QCARMSWP-1
+
+Change-Id: I1c1ef115361e700a5a6c3a76ede5a4f9771db699
+Signed-off-by: Wen Gong <wgong@codeaurora.org>
+---
+ net/mac80211/rx.c | 23 ++++++++++++++++++-----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index 1edb756..d844bcf 100644
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -2226,15 +2226,27 @@ static bool ieee80211_frame_allowed(struct ieee80211_rx_data *rx, __le16 fc)
+ 	static const u8 pae_group_addr[ETH_ALEN] __aligned(2)
+ 		= { 0x01, 0x80, 0xC2, 0x00, 0x00, 0x03 };
+ 	struct ethhdr *ehdr = (struct ethhdr *) rx->skb->data;
++	struct ieee80211_sub_if_data *sdata = rx->sdata;
++	struct ieee80211_sta *sta;
+ 
+ 	/*
+ 	 * Allow EAPOL frames to us/the PAE group address regardless
+-	 * of whether the frame was encrypted or not.
++	 * of whether the frame was encrypted or not, and always disallow
++	 * all other destination addresses for them.
+ 	 */
+-	if (ehdr->h_proto == rx->sdata->control_port_protocol &&
+-	    (ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
+-	     ether_addr_equal(ehdr->h_dest, pae_group_addr)))
+-		return true;
++	if (unlikely(ehdr->h_proto == rx->sdata->control_port_protocol)) {
++		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
++			sta = ieee80211_find_sta_by_ifaddr(&sdata->local->hw,
++							ehdr->h_source,
++							NULL);
++			return sta &&
++				(ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
++				 ether_addr_equal(ehdr->h_dest, pae_group_addr));
++		} else {
++			return ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
++				ether_addr_equal(ehdr->h_dest, pae_group_addr);
++		}
++	}
+ 
+ 	if (ieee80211_802_1x_port_control(rx) ||
+ 	    ieee80211_drop_unencrypted(rx, fc))
+@@ -2274,6 +2286,7 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
+ 	if ((sdata->vif.type == NL80211_IFTYPE_AP ||
+ 	     sdata->vif.type == NL80211_IFTYPE_AP_VLAN) &&
+ 	    !(sdata->flags & IEEE80211_SDATA_DONT_BRIDGE_PACKETS) &&
++	    ehdr->h_proto != rx->sdata->control_port_protocol &&
+ 	    (sdata->vif.type != NL80211_IFTYPE_AP_VLAN || !sdata->u.vlan.sta)) {
+ 		if (is_multicast_ether_addr(ehdr->h_dest)) {
+ 			/*
+-- 
+2.7.4
+
