@@ -31,7 +31,7 @@ perf_setup(){
 			if [ "$meshvap" == "mesh" ]; then
 				enable_affinity_hk10
 				enable_affinity_hk_cp01_c1
-				echo 0x8D18D1 > /sys/kernel/debug/ath11k/qcn9000\ hw1.0_0000\:01\:00.0/rx_hash
+				echo 0x8D18D1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0000\:01\:00.0/rx_hash
 				echo 0x8D18D1 > /sys/kernel/debug/ath11k/ipq8074\ hw2.0/rx_hash
 			else
 				enable_affinity_hk14
