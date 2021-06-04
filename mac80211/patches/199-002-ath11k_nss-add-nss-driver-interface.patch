@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2355 @@
+@@ -0,0 +1,2370 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -237,7 +237,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	struct ieee80211_hdr *hdr = (void *)skb->data;
 +	u32 cipher;
 +
-+	if (!ieee80211_has_protected(hdr->frame_control))
++	if (!ieee80211_has_protected(hdr->frame_control) || !info->control.hw_key)
 +		return;
 +
 +	/* Include length for MIC */
@@ -258,13 +258,13 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	peer = ath11k_peer_find_by_id(ab, peer_id);
 +	if (!peer) {
 +		spin_unlock_bh(&ab->base_lock);
-+		ath11k_warn(ab, "ath11k_nss: unable to free peer mem%d\n",
++		ath11k_warn(ab, "ath11k_nss: unable to free peer mem, peer_id:%d\n",
 +			    peer_id);
 +		return;
 +	}
 +
 +	dma_unmap_single(ab->dev, peer->nss.paddr,
-+			 WIFILI_NSS_PEER_BYTE_SIZE, DMA_TO_DEVICE);
++			 WIFILI_NSS_PEER_BYTE_SIZE, DMA_FROM_DEVICE);
 +
 +	kfree(peer->nss.vaddr);
 +	if (peer->nss.nss_stats) {
@@ -497,7 +497,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	}
 +
 +	if (ieee80211_data_to_8023_exthdr(skb, NULL, vif->addr, vif->type,
-+					  data_offs - hdr_len)) {
++					  data_offs - hdr_len, false)) {
 +		dev_kfree_skb_any(skb);
 +		return -EINVAL;
 +	}
@@ -694,8 +694,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +	status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb, arvif->nss.if_num);
 +
-+	if (status != NSS_TX_SUCCESS)
-+		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
++	if (status != NSS_TX_SUCCESS) {
++		ath11k_dbg(ar->ab, (ATH11K_DBG_NSS | ATH11K_DBG_DP_TX),
++			   "nss tx failure: %d\n", status);
++		atomic_inc(&soc_stats->tx_err.nss_tx_fail);
++	}
 +
 +	return status;
 +drop:
@@ -1342,6 +1345,13 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		return -EINVAL;
 +	}
 +
++	if (!peer->nss.vaddr) {
++		ath11k_warn(ab, "peer already deleted or peer create failed %pM\n",
++			    addr);
++		spin_unlock_bh(&ab->base_lock);
++		return -EINVAL;
++	}
++
 +	wlmsg = kzalloc(sizeof(struct nss_wifili_msg), GFP_ATOMIC);
 +	if (!wlmsg) {
 +		ath11k_warn(ab, "nss send peer delete msg alloc failure\n");
@@ -1365,7 +1375,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +	status = nss_wifili_tx_msg(ab->nss.ctx, wlmsg);
 +	if (status != NSS_TX_SUCCESS) {
-+		ath11k_warn(ab, "nss send peer delete msg tx error %d\n", status);
++		ath11k_warn(ab, "nss send peer (%pM) delete msg tx error %d\n",
++			    addr, status);
 +		ret = -EINVAL;
 +		kfree(wlmsg);
 +		goto free_peer;
@@ -1392,7 +1403,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +free_peer:
 +	dma_unmap_single(ab->dev, peer->nss.paddr,
-+		 WIFILI_NSS_PEER_BYTE_SIZE, DMA_TO_DEVICE);
++		 WIFILI_NSS_PEER_BYTE_SIZE, DMA_FROM_DEVICE);
 +	kfree(peer->nss.vaddr);
 +	if (peer->nss.nss_stats) {
 +		kfree(peer->nss.nss_stats);
@@ -1411,7 +1422,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	int ret;
 +
 +	if (!ab->nss.enabled)
-+		return 0;
++		return -ENOTSUPP;
 +
 +	wlmsg = kzalloc(sizeof(struct nss_wifili_msg), GFP_ATOMIC);
 +	if (!wlmsg)
@@ -1460,7 +1471,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	status = nss_wifili_tx_msg(ab->nss.ctx, wlmsg);
 +	if (status != NSS_TX_SUCCESS) {
 +		ret = -EINVAL;
-+		ath11k_warn(ab, "nss send peer create msg tx error\n");
++		ath11k_warn(ab, "nss send peer (%pM) create msg tx error\n",
++			    peer->addr);
 +		goto peer_mem_free;
 +	}
 +
@@ -1471,14 +1483,17 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		   peer_msg->hw_ast_idx, peer_msg->tx_ast_hash);
 +
 +	peer->nss.nss_stats = kzalloc(sizeof(*peer->nss.nss_stats), GFP_ATOMIC);
-+	if (!peer->nss.nss_stats)
++	if (!peer->nss.nss_stats) {
++		ret = -ENOMEM;
 +		ath11k_warn(ab, "Unable to create nss stats memory\n");
++		goto peer_mem_free;
++	}
 +
 +	goto msg_free;
 +
 +peer_mem_free:
 +	dma_unmap_single(ab->dev, peer->nss.paddr,
-+			 WIFILI_NSS_PEER_BYTE_SIZE, DMA_TO_DEVICE);
++			 WIFILI_NSS_PEER_BYTE_SIZE, DMA_FROM_DEVICE);
 +	kfree(peer->nss.vaddr);
 +msg_free:
 +	kfree(wlmsg);
