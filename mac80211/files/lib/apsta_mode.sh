@@ -123,8 +123,9 @@ hostapd_adjust_config() {
 	sta_channel=$(iw $sta_intf info 2> /dev/null | grep channel | cut -d' ' -f 2)
 	sta_width=$(wpa_cli -i $sta_intf signal_poll 2> /dev/null | grep WIDTH | cut -d'=' -f 2 | grep MHz | cut -d' ' -f 1)
 	wifi_gen=$(wpa_cli -i $sta_intf status 2> /dev/null | grep wifi_generation | cut -d'=' -f 2)
+	ieee80211ac=$(wpa_cli -i $sta_intf status 2> /dev/null | grep ieee80211ac | cut -d'=' -f 2)
 
-	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz" > /dev/ttyMSM0
+	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac" > /dev/ttyMSM0
 	hostapd_cli -i $ap_intf set channel $sta_channel 2> /dev/null
 	if [ $sta_channel -ge 36 ]; then
 		hostapd_cli -i $ap_intf set hw_mode a 2> /dev/null
@@ -156,35 +157,42 @@ hostapd_adjust_config() {
 
                 hostapd_vht_he_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel"
 
-                #echo "New he_oper_chwidth is $ap_vht_he_oper_chwidth, he_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                #echo "New he_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
 
                 hostapd_cli -i $ap_intf set he_oper_chwidth $ap_vht_he_oper_chwidth
-                hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
-
-                if [ $sta_channel -ge 36 ]; then
-                        hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/null
-                        hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
-                        hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
-                        hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
-		else
-			hostapd_cli -i $ap_intf set ieee80211ac 0 2> /dev/null
-                        hostapd_cli -i $ap_intf set ieee80211n 0 2> /dev/null
+                if [ $sta_width = "20" ]; then
+                        #echo "he_oper_centr_freq_seg0_idx is 0" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx 0
+                else
+                        #echo "he_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
                 fi
+
+                #echo "Set 802.11n, ac & ax to 1" > /dev/ttyMSM0
+                hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/null
+                hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
+                hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
+                #echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
 
                 if [ $sta_width = "20" ]; then
                         #echo "Setting HE20 mode to AP" > /dev/ttyMSM0
+                        #echo "vht_oper_centr_freq_seg0_idx is 0" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx 0
                         hostapd_ht20_mode
                 else
+                        #echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
                         hostapd_ht40_mode "$sta_channel"
                 fi
 
-	elif [ $wifi_gen == 5 ]; then
+	elif [ $wifi_gen == 5 -o $ieee80211ac == 1 ]; then
 		#echo "STA associated in VHT$sta_width mode, applying same config to AP" > /dev/ttyMSM0
 		local ap_vht_he_oper_chwidth
 		local ap_vht_he_oper_centr_freq_seg0_idx
 
 		hostapd_vht_he_oper_chwidth "$sta_width"
 
+		#echo "Set 802.11n & ac to 1" > /dev/ttyMSM0
 		hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/null
 		hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
 		hostapd_cli -i $ap_intf set ieee80211ax 0 2> /dev/null
@@ -193,14 +201,17 @@ hostapd_adjust_config() {
 
 		hostapd_vht_he_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel"
 
-		#echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth, vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+		#echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
 		hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
-		hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
 
 		if [ $sta_width = "20" ]; then
                         #echo "Setting VHT20 mode to AP" > /dev/ttyMSM0
+                        #echo "vht_oper_centr_freq_seg0_idx is 0" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx 0
                         hostapd_ht20_mode
                 else
+                        #echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                        hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
                         hostapd_ht40_mode "$sta_channel"
                 fi
 	else
