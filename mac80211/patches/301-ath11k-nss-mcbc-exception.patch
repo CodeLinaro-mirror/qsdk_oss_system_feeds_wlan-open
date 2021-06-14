@@ -16,7 +16,7 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
 
 --- a/drivers/net/wireless/ath/ath11k/nss.c
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -788,6 +788,7 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -769,6 +769,7 @@ ath11k_nss_vdev_special_data_receive(str
  	struct nss_wifi_vdev_wds_per_packet_metadata *wds_metadata = NULL;
  	struct ath11k_vif *arvif;
  	struct ath11k_base *ab;
@@ -24,7 +24,7 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  	bool drop = false;
  	bool eth_decap = false;
  	int data_offs = 0;
-@@ -818,15 +819,31 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -799,15 +800,32 @@ ath11k_nss_vdev_special_data_receive(str
  		return;
  	}
  
@@ -52,6 +52,7 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
 +		rxcb->rx_desc = (struct hal_rx_desc *)skb->head;
 +		rxcb->is_first_msdu = rxcb->is_last_msdu = true;
 +		rxcb->is_continuation = false;
++		rxcb->is_mcbc = true;
 +		ath11k_dp_rx_from_nss(arvif->ar, skb, napi);
 +	break;
  
@@ -64,7 +65,15 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  }
  
  static void
-@@ -2468,8 +2485,15 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -1953,6 +1971,7 @@ ath11k_nss_mesh_link_vdev_special_data_r
+ 		rxcb->rx_desc = (struct hal_rx_desc *)skb->head;
+ 		rxcb->is_first_msdu = rxcb->is_last_msdu = true;
+ 		rxcb->is_continuation = false;
++		rxcb->is_mcbc = true;
+ 		ath11k_dp_rx_from_nss(arvif->ar, skb, napi);
+ 		break;
+ 	case NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_MESH:
+@@ -2568,8 +2587,15 @@ int ath11k_nss_vdev_create(struct ath11k
  		goto free_vdev;
  
  	switch (arvif->vif->type) {
@@ -83,9 +92,9 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  			goto unregister_vdev;
 --- a/drivers/net/wireless/ath/ath11k/nss.h
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -90,6 +90,9 @@ struct hal_rx_mon_ppdu_info;
+@@ -106,6 +106,9 @@ do {	\
  
- #define NSS_TX_TID_MAX 8
+ #define ATH11K_MPP_EXPIRY_TIMER_INTERVAL_MS	60 * HZ
  
 +/* Enables the MCBC exception in NSS fw, 1 = enable */
 +#define ATH11K_NSS_ENABLE_MCBC_EXC	1
@@ -93,3 +102,18 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  enum ath11k_nss_opmode {
  	ATH11K_NSS_OPMODE_UNKNOWN,
  	ATH11K_NSS_OPMODE_AP,
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -2711,7 +2711,11 @@ static void ath11k_dp_rx_h_mpdu(struct a
+ 
+ 	/* PN for multicast packets will be checked in mac80211 */
+ 	rxcb = ATH11K_SKB_RXCB(msdu);
+-	rxcb->is_mcbc = fill_crypto_hdr = ath11k_dp_rx_h_attn_is_mcbc(ar->ab, rx_desc);
++
++	if (!ar->ab->nss.enabled)
++		rxcb->is_mcbc = ath11k_dp_rx_h_attn_is_mcbc(ar->ab, rx_desc);
++
++	fill_crypto_hdr = rxcb->is_mcbc;
+ 
+ 	if (rxcb->is_mcbc) {
+ 		rxcb->peer_id = ath11k_dp_rx_h_mpdu_start_peer_id(ar->ab, rx_desc);
