@@ -1,21 +1,21 @@
-From 22925f2ff5bdaa6940b8e357cf9d6430b64b46c4 Mon Sep 17 00:00:00 2001
+From 2024b9b5967004fe2aabc842127d549f617c8c8e Mon Sep 17 00:00:00 2001
 From: Hari Chandrakanthan <haric@codeaurora.org>
-Date: Tue, 25 May 2021 10:22:34 +0530
+Date: Sat, 12 Jun 2021 17:54:43 +0530
 Subject: [PATCH] mac80211 : support to dump continuous tx fail count in mesh
 
 Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
 ---
  include/net/cfg80211.h       |  5 +++
  include/uapi/linux/nl80211.h |  6 ++++
- net/mac80211/debugfs_sta.c   | 44 ++++++++++++++++++++++++
+ net/mac80211/debugfs_sta.c   | 49 +++++++++++++++++++++++++++
  net/mac80211/mesh_hwmp.c     | 80 ++++++++++++++++++++++++++++++++++++++++++--
  net/mac80211/mesh_pathtbl.c  | 11 ++++++
  net/mac80211/sta_info.h      | 10 ++++++
  net/wireless/nl80211.c       | 22 ++++++++++++
- 7 files changed, 175 insertions(+), 3 deletions(-)
+ 7 files changed, 180 insertions(+), 3 deletions(-)
 
 diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
-index f2f4f74..4e4c3bd 100644
+index 6639498..27edf3f 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -7550,6 +7550,11 @@ void cfg80211_cqm_pktloss_notify(struct net_device *dev,
@@ -55,10 +55,10 @@ index 74ff51c..8f72ca3 100644
  	/* keep last */
  	__NL80211_ATTR_CQM_AFTER_LAST,
 diff --git a/net/mac80211/debugfs_sta.c b/net/mac80211/debugfs_sta.c
-index 9da69aa..ec1f223 100644
+index 9da69aa..777323b 100644
 --- a/net/mac80211/debugfs_sta.c
 +++ b/net/mac80211/debugfs_sta.c
-@@ -508,6 +508,47 @@ static ssize_t sta_ht_capa_read(struct file *file, char __user *userbuf,
+@@ -508,6 +508,52 @@ static ssize_t sta_ht_capa_read(struct file *file, char __user *userbuf,
  }
  STA_OPS(ht_capa);
  
@@ -68,6 +68,11 @@ index 9da69aa..ec1f223 100644
 +	struct sta_info *sta = file->private_data;
 +	char buf[12 * MAX_TX_FAIL_CNT], *p = buf;
 +	int i;
++
++	if(!sta->mesh) {
++		p += scnprintf(p, sizeof(buf) + buf - p, "tx_fail_cnt is supported only for mesh\n");
++		return simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
++	}
 +
 +	for (i = 0; i < MAX_TX_FAIL_CNT; i++) {
 +		if (!sta->mesh->tx_fail_cnt[i])
@@ -88,7 +93,7 @@ index 9da69aa..ec1f223 100644
 +
 +	ret = kstrtou8_from_user(userbuf, count, 0, &val);
 +
-+	if (ret || val > 2)
++	if (!sta->mesh || ret || val > 2)
 +		return -EINVAL;
 +
 +	if (val != MESH_RESET_TX_FAIL_COUNT) {
@@ -106,7 +111,7 @@ index 9da69aa..ec1f223 100644
  static ssize_t sta_vht_capa_read(struct file *file, char __user *userbuf,
  				 size_t count, loff_t *ppos)
  {
-@@ -1196,6 +1237,9 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
+@@ -1196,6 +1242,9 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
  	DEBUGFS_ADD(reset_mac80211_rx_pkts_flow);
  	DEBUGFS_ADD(mac80211_tx_pkts_flow);
  	DEBUGFS_ADD(mac80211_rx_pkts_flow);
@@ -117,7 +122,7 @@ index 9da69aa..ec1f223 100644
  	DEBUGFS_ADD_COUNTER(rx_duplicates, rx_stats.num_duplicates);
  	DEBUGFS_ADD_COUNTER(rx_fragments, rx_stats.fragments);
 diff --git a/net/mac80211/mesh_hwmp.c b/net/mac80211/mesh_hwmp.c
-index 75edfee..743d5dc 100644
+index 75edfee..b5c2363 100644
 --- a/net/mac80211/mesh_hwmp.c
 +++ b/net/mac80211/mesh_hwmp.c
 @@ -71,6 +71,9 @@ static inline u16 u16_field_get(const u8 *preq_elem, int offset, bool ae)
@@ -174,7 +179,7 @@ index 75edfee..743d5dc 100644
 +		if (!sta->mesh->tx_fail_cnt[i])
 +			continue;
 +
-+		sdata_info(sta->sdata, "%d : %u", i,
++		sdata_info(sta->sdata, "%d : %u\n", i,
 +			   sta->mesh->tx_fail_cnt[i]);
 +	}
 +
@@ -256,10 +261,10 @@ index 75edfee..743d5dc 100644
  
  	return process ? new_metric : 0;
 diff --git a/net/mac80211/mesh_pathtbl.c b/net/mac80211/mesh_pathtbl.c
-index ba1d726..5151061 100644
+index 67b394d..b1733fd 100644
 --- a/net/mac80211/mesh_pathtbl.c
 +++ b/net/mac80211/mesh_pathtbl.c
-@@ -568,6 +568,7 @@ void mesh_plink_broken(struct sta_info *sta)
+@@ -591,6 +591,7 @@ void mesh_plink_broken(struct sta_info *sta)
  	struct mesh_table *tbl = sdata->u.mesh.mesh_paths;
  	static const u8 bcast[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
  	struct mesh_path *mpath;
@@ -267,7 +272,7 @@ index ba1d726..5151061 100644
  
  	rcu_read_lock();
  	hlist_for_each_entry_rcu(mpath, &tbl->walk_head, walk_list) {
-@@ -582,9 +583,19 @@ void mesh_plink_broken(struct sta_info *sta)
+@@ -605,9 +606,19 @@ void mesh_plink_broken(struct sta_info *sta)
  				sdata->u.mesh.mshcfg.element_ttl,
  				mpath->dst, mpath->sn,
  				WLAN_REASON_MESH_PATH_DEST_UNREACHABLE, bcast);
@@ -288,7 +293,7 @@ index ba1d726..5151061 100644
  
  static void mesh_path_free_rcu(struct mesh_table *tbl,
 diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
-index 01deec7..6ff6a58 100644
+index 2e2122e..c3bd5a0 100644
 --- a/net/mac80211/sta_info.h
 +++ b/net/mac80211/sta_info.h
 @@ -123,6 +123,10 @@ enum ieee80211_sta_info_flags {
@@ -302,7 +307,7 @@ index 01deec7..6ff6a58 100644
  DECLARE_EWMA(avg_signal, 10, 8)
  enum ieee80211_agg_stop_reason {
  	AGG_STOP_DECLINED,
-@@ -419,6 +423,10 @@ struct mesh_sta {
+@@ -423,6 +427,10 @@ struct mesh_sta {
  	struct ewma_mesh_fail_avg fail_avg;
  	/* moving average of tx bitrate */
  	struct ewma_mesh_tx_rate_avg tx_rate_avg;
@@ -313,7 +318,7 @@ index 01deec7..6ff6a58 100644
  };
  
  DECLARE_EWMA(signal, 10, 8)
-@@ -830,6 +838,8 @@ u8 sta_info_tx_streams(struct sta_info *sta);
+@@ -834,6 +842,8 @@ u8 sta_info_tx_streams(struct sta_info *sta);
  void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta);
  void ieee80211_sta_ps_deliver_poll_response(struct sta_info *sta);
  void ieee80211_sta_ps_deliver_uapsd(struct sta_info *sta);
