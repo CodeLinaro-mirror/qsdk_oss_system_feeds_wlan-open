@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2367 @@
+@@ -0,0 +1,2388 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -237,7 +237,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	struct ieee80211_hdr *hdr = (void *)skb->data;
 +	u32 cipher;
 +
-+	if (!ieee80211_has_protected(hdr->frame_control))
++	if (!ieee80211_has_protected(hdr->frame_control) || !info->control.hw_key)
 +		return;
 +
 +	/* Include length for MIC */
@@ -497,7 +497,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	}
 +
 +	if (ieee80211_data_to_8023_exthdr(skb, NULL, vif->addr, vif->type,
-+					  data_offs - hdr_len)) {
++					  data_offs - hdr_len, false)) {
 +		dev_kfree_skb_any(skb);
 +		return -EINVAL;
 +	}
@@ -694,8 +694,11 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
 +	status = nss_wifi_vdev_tx_buf(arvif->ar->nss.ctx, skb, arvif->nss.if_num);
 +
-+	if (status != NSS_TX_SUCCESS)
-+		ath11k_dbg(ar->ab, ATH11K_DBG_NSS, "nss tx failure\n");
++	if (status != NSS_TX_SUCCESS) {
++		ath11k_dbg(ar->ab, (ATH11K_DBG_NSS | ATH11K_DBG_DP_TX),
++			   "nss tx failure: %d\n", status);
++		atomic_inc(&soc_stats->tx_err.nss_tx_fail);
++	}
 +
 +	return status;
 +drop:
@@ -1294,18 +1297,36 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		peer->nss.nss_stats->rxrate.legacy = rate;
 +		break;
 +	case WMI_RATE_PREAMBLE_HT:
++		if (ppdu_info->mcs > ATH11K_HT_MCS_MAX) {
++			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
++				    "Received invalid mcs in HT mode %d\n",
++				     ppdu_info->mcs);
++			return;
++		}
 +		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs + 8 * (ppdu_info->nss - 1);
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_MCS;
 +		if (ppdu_info->gi)
 +			peer->nss.nss_stats->rxrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
 +		break;
 +	case WMI_RATE_PREAMBLE_VHT:
++		if (ppdu_info->mcs > ATH11K_VHT_MCS_MAX) {
++			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
++				    "Received invalid mcs in VHT mode %d\n",
++				     ppdu_info->mcs);
++			return;
++		}
 +		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs;
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_VHT_MCS;
 +		if (ppdu_info->gi)
 +			peer->nss.nss_stats->rxrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
 +		break;
 +	case WMI_RATE_PREAMBLE_HE:
++		if (ppdu_info->mcs > ATH11K_HE_MCS_MAX) {
++			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
++				    "Received invalid mcs in HE mode %d\n",
++				    ppdu_info->mcs);
++			return;
++		}
 +		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs;
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_HE_MCS;
 +		peer->nss.nss_stats->rxrate.he_dcm = ppdu_info->dcm;
