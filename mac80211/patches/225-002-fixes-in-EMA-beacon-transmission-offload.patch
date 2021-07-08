@@ -204,7 +204,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  }
  
  void ath11k_mac_bcn_tx_event(struct ath11k_vif *arvif)
-@@ -5787,20 +5850,26 @@ ath11k_mac_setup_vdev_create_params(stru
+@@ -5775,20 +5838,26 @@ ath11k_mac_setup_vdev_create_params(stru
  	params->subtype = arvif->vdev_subtype;
  	params->pdev_id = pdev->pdev_id;
  	params->vdevid_trans = 0;
@@ -244,7 +244,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  
  	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
  		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
-@@ -6431,21 +6500,27 @@ ath11k_mac_vdev_start_restart(struct ath
+@@ -6419,21 +6488,27 @@ ath11k_mac_vdev_start_restart(struct ath
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
@@ -285,7 +285,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  	ath11k_dbg(ab, ATH11K_DBG_MAC,
  		   "mac vdev %d start center_freq %d phymode %s\n",
  		   arg.vdev_id, arg.channel.freq,
-@@ -6661,6 +6736,8 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -6649,6 +6724,8 @@ ath11k_mac_update_vif_chan(struct ath11k
  		params.vdev_id = arvif->vdev_id,
  		params.bssid = arvif->bssid,
  		params.aid = arvif->aid,
@@ -446,7 +446,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
   *	used.
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -175,19 +175,24 @@ static struct wireless_dev *ieee80211_ad
+@@ -175,19 +175,26 @@ static struct wireless_dev *ieee80211_ad
  static int ieee80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
  {
  	struct ieee80211_sub_if_data *sdata;
@@ -462,6 +462,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
 -			rcu_read_lock();
 -			list_for_each_entry_rcu(child, &sdata->local->interfaces, list)
 -				if (child->vif.multiple_bssid.parent == &sdata->vif)
++			wiphy_unlock(local->hw.wiphy);
 +			mutex_lock(&local->iflist_mtx);
 +			list_for_each_entry_safe(child, tmp,
 +						 &local->interfaces, list)
@@ -470,13 +471,14 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  					dev_close(child->wdev.netdev);
 -			rcu_read_unlock();
 +			mutex_unlock(&local->iflist_mtx);
++			wiphy_lock(local->hw.wiphy);
  		} else {
  			sdata->vif.multiple_bssid.parent = NULL;
 +			sdata->vif.multiple_bssid.flags = 0;
  		}
  	}
  
-@@ -1018,6 +1023,27 @@ static u8 *ieee80211_copy_multiple_bssid
+@@ -1018,6 +1025,27 @@ static u8 *ieee80211_copy_multiple_bssid
  	return offset;
  }
  
@@ -504,7 +506,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  static int ieee80211_assign_beacon(struct ieee80211_sub_if_data *sdata,
  				   struct cfg80211_beacon_data *params,
  				   const struct ieee80211_csa_settings *csa,
-@@ -1030,6 +1056,7 @@ static int ieee80211_assign_beacon(struc
+@@ -1030,6 +1058,7 @@ static int ieee80211_assign_beacon(struc
          struct ieee80211_he_operation *he_oper = NULL;
  	int size, err;
  	u32 changed = BSS_CHANGED_BEACON;
@@ -512,7 +514,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  
  	old = sdata_dereference(sdata->u.ap.beacon, sdata);
  
-@@ -1059,7 +1086,11 @@ static int ieee80211_assign_beacon(struc
+@@ -1059,7 +1088,11 @@ static int ieee80211_assign_beacon(struc
  		new_multiple_bssid_len =
  			ieee80211_get_multiple_bssid_beacon_len(&old->multiple_bssid);
  
@@ -525,7 +527,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  
  	new = kzalloc(size, GFP_KERNEL);
  	if (!new)
-@@ -1088,6 +1119,14 @@ static int ieee80211_assign_beacon(struc
+@@ -1088,6 +1121,14 @@ static int ieee80211_assign_beacon(struc
  						     &new->multiple_bssid,
  						     &old->multiple_bssid);
  
@@ -540,12 +542,13 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  	if (csa) {
  		new->cntdwn_current_counter = csa->count;
  		memcpy(new->cntdwn_counter_offsets, csa->counter_offsets_beacon,
-@@ -3241,6 +3280,18 @@ void ieee80211_csa_finish(struct ieee802
+@@ -3241,6 +3282,20 @@ void ieee80211_csa_finish(struct ieee802
  {
  	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
  
 +	if (sdata->vif.multiple_bssid.flags & IEEE80211_VIF_MBSS_TRANSMITTING) {
 +		struct ieee80211_sub_if_data *child, *tmp;
++		wiphy_unlock(sdata->local->hw.wiphy);
 +		mutex_lock(&sdata->local->iflist_mtx);
 +		list_for_each_entry_safe(child, tmp,
 +					 &sdata->local->interfaces, list)
@@ -554,12 +557,13 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
 +				ieee80211_queue_work(&child->local->hw,
 +						     &child->csa_finalize_work);
 +		mutex_unlock(&sdata->local->iflist_mtx);
++		wiphy_lock(sdata->local->hw.wiphy);
 +	}
 +
  	ieee80211_queue_work(&sdata->local->hw,
  			     &sdata->csa_finalize_work);
  }
-@@ -3546,9 +3597,6 @@ __ieee80211_channel_switch(struct wiphy
+@@ -3546,9 +3601,6 @@ __ieee80211_channel_switch(struct wiphy
  	if (sdata->vif.csa_active)
  		return -EBUSY;
  
@@ -578,6 +582,21 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
 +	struct cfg80211_rnr_data rnr;
  	struct rcu_head rcu_head;
  };
+ 
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -383,8 +383,11 @@ static void ieee80211_do_stop(struct iee
+ 	/* make sure the parent is already down */
+ 	if (sdata->vif.type == NL80211_IFTYPE_AP &&
+ 	    sdata->vif.multiple_bssid.parent &&
+-	    ieee80211_sdata_running(vif_to_sdata(sdata->vif.multiple_bssid.parent)))
++	    ieee80211_sdata_running(vif_to_sdata(sdata->vif.multiple_bssid.parent))) {
++		wiphy_unlock(sdata->local->hw.wiphy);
+ 		dev_close(vif_to_sdata(sdata->vif.multiple_bssid.parent)->wdev.netdev);
++		wiphy_lock(sdata->local->hw.wiphy);
++	}
+ 
+ 	clear_bit(SDATA_STATE_RUNNING, &sdata->state);
  
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
@@ -652,7 +671,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  			if (beacon->tail)
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -423,6 +423,13 @@ sar_policy[NL80211_SAR_ATTR_MAX + 1] = {
+@@ -443,6 +443,13 @@ sar_policy[NL80211_SAR_ATTR_MAX + 1] = {
  	[NL80211_SAR_ATTR_SPECS] = NLA_POLICY_NESTED_ARRAY(sar_specs_policy),
  };
  
@@ -666,7 +685,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
  	[0] = { .strict_start_type = NL80211_ATTR_HE_OBSS_PD },
  	[NL80211_ATTR_WIPHY] = { .type = NLA_U32 },
-@@ -769,6 +776,7 @@ static const struct nla_policy nl80211_p
+@@ -789,6 +796,7 @@ static const struct nla_policy nl80211_p
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COUNT] = { .type = NLA_U8 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_COLOR] = { .type = NLA_U8 },
  	[NL80211_ATTR_COLOR_CHANGE_ANNOUNCEMENT_IES] = NLA_POLICY_NESTED(nl80211_policy),
@@ -674,7 +693,7 @@ Signed-off-by: Aloka Dixit <alokad@codeaurora.org>
  };
  
  /* policy for the key attributes */
-@@ -5017,6 +5025,32 @@ static int nl80211_parse_beacon(struct c
+@@ -5104,6 +5112,32 @@ static int nl80211_parse_beacon(struct c
  	else
  		bcn->bss_color_info = 0;
  
