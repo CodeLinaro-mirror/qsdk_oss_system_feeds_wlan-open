@@ -466,6 +466,10 @@ ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH11K_MEM_PROFILE_512M
 endif
 
+ifeq ($(CONFIG_LINUX_4_4),y)
+config-y += ATH11K_NSS_SUPPORT
+endif
+
 config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS
 
 MAKE_OPTS:= -C "$(PKG_BUILD_DIR)" \
@@ -520,10 +524,6 @@ ifneq ($(CONFIG_PACKAGE_kmod-cfg80211)$(CONFIG_PACKAGE_kmod-lib80211),)
 	+$(MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
  endef
 endif
-
-define Build/Configure
-	cmp $(PKG_BUILD_DIR)/include/linux/ath9k_platform.h $(LINUX_DIR)/include/linux/ath9k_platform.h
-endef
 
 define Build/Compile
 	$(SH_FUNC) var2file "$(call shvar,mac80211_config)" $(PKG_BUILD_DIR)/.config
