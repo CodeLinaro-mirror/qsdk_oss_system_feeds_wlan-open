@@ -48,16 +48,16 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static inline enum wme_ac ath11k_tid_to_ac(u32 tid)
  {
  	return (((tid == 0) || (tid == 3)) ? WME_AC_BE :
-@@ -279,6 +284,9 @@ struct ath11k_vif {
- #ifdef CPTCFG_ATH11K_NSS_SUPPORT
+@@ -278,6 +283,9 @@ struct ath11k_vif {
+ 	struct ath11k_mgmt_frame_stats mgmt_stats;
  	struct arvif_nss nss;
  	struct list_head ap_vlan_arvifs;
 +	/* VLAN keyidx map required for Dynamic VLAN */
 +	u16 *vlan_keyid_map;
 +	DECLARE_BITMAP(free_groupidx_map, ATH11K_GROUP_KEYS_NUM_MAX);
- #endif
  };
  
+ struct ath11k_vif_iter {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
 @@ -561,6 +561,33 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
@@ -300,7 +300,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	mutex_unlock(&ar->conf_mutex);
  	return ret;
  }
-@@ -4634,6 +4784,33 @@ exit:
+@@ -4639,6 +4789,33 @@ exit:
  	return ret;
  }
  
@@ -334,7 +334,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static int ath11k_mac_op_sta_state(struct ieee80211_hw *hw,
  				   struct ieee80211_vif *vif,
  				   struct ieee80211_sta *sta,
-@@ -4710,15 +4887,23 @@ static int ath11k_mac_op_sta_state(struc
+@@ -4715,15 +4892,23 @@ static int ath11k_mac_op_sta_state(struc
  			ath11k_warn(ar->ab, "Failed to associate station: %pM\n",
  				    sta->addr);
  	} else if (old_state == IEEE80211_STA_ASSOC &&
@@ -367,7 +367,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTH &&
  		   (vif->type == NL80211_IFTYPE_AP ||
-@@ -6253,6 +6438,20 @@ static int ath11k_mac_op_add_interface(s
+@@ -6268,6 +6453,20 @@ static int ath11k_mac_op_add_interface(s
  	arvif->vdev_id = bit;
  	arvif->vdev_subtype = WMI_VDEV_SUBTYPE_NONE;
  
@@ -388,7 +388,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
  	case NL80211_IFTYPE_STATION:
-@@ -6285,14 +6484,14 @@ static int ath11k_mac_op_add_interface(s
+@@ -6300,14 +6499,14 @@ static int ath11k_mac_op_add_interface(s
  	ret = ath11k_mac_setup_vdev_create_params(arvif, &vdev_param);
  	if (ret) {
  		ath11k_warn(ab, "failed to prepare vdev %d\n", ret);
@@ -405,7 +405,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	}
  	ar->num_created_vdevs++;
  	ath11k_dbg(ab, ATH11K_DBG_MAC, "vdev %pM created, vdev_id %d\n",
-@@ -6444,13 +6643,13 @@ err_peer_del:
+@@ -6453,13 +6652,13 @@ err_peer_del:
  		if (ret) {
  			ath11k_warn(ar->ab, "failed to delete peer vdev_id %d addr %pM\n",
  				    arvif->vdev_id, vif->addr);
@@ -421,7 +421,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  		ar->num_peers--;
  	}
-@@ -6465,6 +6664,8 @@ err_vdev_del:
+@@ -6474,6 +6673,8 @@ err_vdev_del:
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
  
@@ -430,7 +430,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  err:
  	mutex_unlock(&ar->conf_mutex);
  
-@@ -6568,6 +6769,7 @@ err_vdev_del:
+@@ -6577,6 +6778,7 @@ err_vdev_del:
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
  
@@ -438,7 +438,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	ath11k_peer_cleanup(ar, arvif->vdev_id);
  
  	idr_for_each(&ar->txmgmt_idr,
-@@ -8808,8 +9010,11 @@ static int __ath11k_mac_register(struct
+@@ -8820,8 +9022,11 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, SUPPORT_FAST_XMIT);
  	}
  
@@ -453,7 +453,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	if (ret) {
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -1941,6 +1941,7 @@ int ath11k_wmi_vdev_install_key(struct a
+@@ -1979,6 +1979,7 @@ int ath11k_wmi_vdev_install_key(struct a
  	cmd->key_len = arg->key_len;
  	cmd->key_txmic_len = arg->key_txmic_len;
  	cmd->key_rxmic_len = arg->key_rxmic_len;
@@ -461,7 +461,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  	if (arg->key_rsc_counter)
  		memcpy(&cmd->key_rsc_counter, &arg->key_rsc_counter,
-@@ -4281,6 +4282,7 @@ ath11k_wmi_copy_resource_config(struct w
+@@ -4319,6 +4320,7 @@ ath11k_wmi_copy_resource_config(struct w
  	wmi_cfg->twt_ap_sta_count = tg_cfg->twt_ap_sta_count;
  	wmi_cfg->ema_max_vap_cnt = tg_cfg->ema_max_vap_cnt;
  	wmi_cfg->ema_max_profile_period = tg_cfg->ema_max_profile_period;
@@ -469,7 +469,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  }
  
  static int ath11k_init_cmd_send(struct ath11k_pdev_wmi *wmi,
-@@ -4501,6 +4503,9 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
+@@ -4539,6 +4541,9 @@ int ath11k_wmi_cmd_init(struct ath11k_ba
  	config.ema_max_profile_period = TARGET_EMA_MAX_PROFILE_PERIOD;
  	config.beacon_tx_offload_max_vdev += config.ema_max_vap_cnt;
  
@@ -481,7 +481,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	memcpy(&wmi_sc->wlan_resource_config, &config, sizeof(config));
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -3738,6 +3738,7 @@ struct wmi_vdev_install_key_arg {
+@@ -3769,6 +3769,7 @@ struct wmi_vdev_install_key_arg {
  	u32 vdev_id;
  	const u8 *macaddr;
  	u32 key_idx;
@@ -489,7 +489,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	u32 key_flags;
  	u32 key_cipher;
  	u32 key_len;
-@@ -5898,6 +5899,7 @@ struct target_resource_config {
+@@ -5929,6 +5930,7 @@ struct target_resource_config {
  	u32 bpf_instruction_size;
  	u32 max_bssid_rx_filters;
  	u32 use_pdev_id;
