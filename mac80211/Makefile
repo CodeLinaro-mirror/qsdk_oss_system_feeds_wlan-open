@@ -44,7 +44,7 @@ endef
 define KernelPackage/cfg80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=cfg80211 - wireless configuration API
-  DEPENDS+= +iw +kmod-crypto-core +kmod-crypto-manager +wireless-regdb
+  DEPENDS+= +iw +LINUX_4_4:kmod-crypto-core +kmod-crypto-manager +wireless-regdb
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
 	$(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
@@ -68,8 +68,9 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
-  DEPENDS+= @TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
-	+kmod-crypto-arc4 +kmod-crypto-aes +kmod-cfg80211 +hostapd-common +kmod-qca-nss-drv-wifi-meshmgr
+  DEPENDS+= @TARGET_ipq50xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
+	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
+	+LINUX_4_4:kmod-qca-nss-drv-wifi-meshmgr +kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
 	CONFIG_AVERAGE=y
@@ -253,7 +254,12 @@ define DownloadBackports
 	git revert --no-edit b35b2767 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
+ifeq ($(CONFIG_LINUX_4_4),y)
 	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
+else
+	(cd $(TMP_DIR)/dl ; if [ -z "$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR))" ]; then $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)); else : ; fi; \
+	$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)) )
+endif
 	mv $(TMP_DIR)/dl/$(FILE) $(DL_DIR)
 	rm -rf $(TMP_DIR)/dl
 endef
@@ -549,6 +555,9 @@ endef
 
 define KernelPackage/cfg80211/install
 	$(INSTALL_DIR) $(1)/lib/wifi
+ifeq ($(CONFIG_LINUX_5_4),y)
+	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/ieee80211
+endif
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/devcoredump
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
 	$(INSTALL_DATA) ./files/lib/wifi/mac80211.sh $(1)/lib/wifi
@@ -558,6 +567,9 @@ define KernelPackage/cfg80211/install
 	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/ath11k-coredump.sh $(1)/etc/hotplug.d/devcoredump
+ifeq ($(CONFIG_LINUX_5_4),y)
+	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
+endif
 endef
 
 define KernelPackage/ath9k-htc/install
@@ -578,8 +590,10 @@ endef
 
 define KernelPackage/ath11k/install
 	$(INSTALL_DIR) $(1)/etc/init.d
+ifeq ($(CONFIG_LINUX_4_4),y)
 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
+endif
 endef
 
 $(eval $(call KernelPackage,cfg80211))
