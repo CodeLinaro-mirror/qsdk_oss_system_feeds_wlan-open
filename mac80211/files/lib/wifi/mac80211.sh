@@ -190,6 +190,11 @@ EOF
 	devidx=$(($devidx + 1))
 	done
 }
+
+config_mac80211() {
+	detect_mac80211
+}
+
 # This start_lbd is to check the dual band availability and
 # make sure that dual bands (2.4G and 5G) available before
 # starting lbd init script.
