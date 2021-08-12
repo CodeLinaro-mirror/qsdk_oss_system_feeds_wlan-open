@@ -68,7 +68,7 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
-  DEPENDS+= @TARGET_ipq50xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
+  DEPENDS+= @TARGET_ipq95xx||TARGET_ipq50xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
 	+LINUX_4_4:kmod-qca-nss-drv-wifi-meshmgr +kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
@@ -362,7 +362,8 @@ define KernelPackage/ath11k
   URL:=http://wireless.kernel.org/en/users/Drivers/ath11k
   DEPENDS+= +kmod-ath +TARGET_ipq_ipq807x:kmod-qrtr_mproc +TARGET_ipq_ipq807x_64:kmod-qrtr_mproc \
 	+TARGET_ipq_ipq60xx:kmod-qrtr_mproc +TARGET_ipq_ipq60xx_64:kmod-qrtr_mproc \
-	+TARGET_ipq_ipq50xx:kmod-qrtr_mproc +TARGET_ipq_ipq50xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
+	+TARGET_ipq_ipq50xx:kmod-qrtr_mproc +TARGET_ipq_ipq50xx_64:kmod-qrtr_mproc \
+	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT 
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko \
