@@ -253,6 +253,11 @@ do
 		#echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), starting AP" > /dev/ttyMSM0
 		wpa_cli -i $sta_intf signal_poll
 		sta_chan=$(iw $sta_intf info 2> /dev/null | grep channel | cut -d' ' -f 2)
+
+		# workaround for sending 4addr packet to AP from repeater after association
+		ip_addr="$(ifconfig | grep -A 1 'br-lan' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
+		arping "$ip_addr" -U -I br-lan -D -c 5
+
 		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ]; then
 			hostapd_adjust_config
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
