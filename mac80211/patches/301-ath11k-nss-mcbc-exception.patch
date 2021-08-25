@@ -54,8 +54,11 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  			break;
  		case NSS_WIFI_VDEV_WDS_TYPE_MEC:
  			ath11k_nss_mec_handler(ar, (u8 *)(skb->data));
-@@ -769,7 +765,7 @@ ath11k_nss_vdev_special_data_receive(str
+@@ -767,12 +763,14 @@ ath11k_nss_vdev_special_data_receive(str
+ {
+ 	struct nss_wifi_vdev_per_packet_metadata *wifi_metadata = NULL;
  	struct nss_wifi_vdev_wds_per_packet_metadata *wds_metadata = NULL;
++	struct nss_wifi_vdev_addr4_data_metadata *addr4_metadata = NULL;
  	struct ath11k_vif *arvif;
  	struct ath11k_base *ab;
 -	bool drop = false;
@@ -63,7 +66,11 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  	bool eth_decap = false;
  	int data_offs = 0;
  	int ret = 0;
-@@ -804,15 +800,31 @@ ath11k_nss_vdev_special_data_receive(str
++	struct ath11k_peer *ta_peer = NULL;
+ 
+ 	arvif = ath11k_nss_get_arvif_from_dev(dev);
+ 	if (!arvif) {
+@@ -804,15 +802,50 @@ ath11k_nss_vdev_special_data_receive(str
  		return;
  	}
  
@@ -93,9 +100,28 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
 +		rxcb->is_mcbc = true;
 +		ath11k_dp_rx_from_nss(arvif->ar, skb, napi);
 +	break;
++	case NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_4ADDR:
++		if (eth_decap) {
++			addr4_metadata = &wifi_metadata->metadata.addr4_metadata;
++
++			spin_lock_bh(&ab->base_lock);
++			ta_peer = ath11k_peer_find_by_id(ab, addr4_metadata->peer_id);
++			if (!ta_peer) {
++				spin_unlock_bh(&ab->base_lock);
++				dev_kfree_skb_any(skb);
++				return;
++			}
  
 -	if (!drop)
 -		ath11k_nss_deliver_rx(arvif->vif, skb, eth_decap, data_offs, napi);
++			ath11k_dbg(ab, ATH11K_DBG_NSS_WDS, "4addr exception ta_peer %pM\n",
++				   ta_peer->addr);
++			if (!ta_peer->nss.ext_vdev_up && addr4_metadata->addr4_valid)
++			    ieee80211_rx_nss_notify_4addr(dev, ta_peer->addr);
++			spin_unlock_bh(&ab->base_lock);
++		}
++		dev_kfree_skb_any(skb);
++	break;
 +	default:
 +		ath11k_warn(ab, "unsupported pkt_type %d from nss\n", wifi_metadata->pkt_type);
 +		dev_kfree_skb_any(skb);
@@ -103,7 +129,7 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  }
  
  static void
-@@ -2001,6 +2013,7 @@ ath11k_nss_mesh_link_vdev_special_data_r
+@@ -2001,6 +2034,7 @@ ath11k_nss_mesh_link_vdev_special_data_r
  		rxcb->rx_desc = (struct hal_rx_desc *)skb->head;
  		rxcb->is_first_msdu = rxcb->is_last_msdu = true;
  		rxcb->is_continuation = false;
@@ -111,7 +137,7 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  		ath11k_dp_rx_from_nss(arvif->ar, skb, napi);
  		break;
  	case NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_MESH:
-@@ -2125,6 +2138,8 @@ int ath11k_nss_vdev_set_cmd(struct ath11
+@@ -2125,6 +2159,8 @@ int ath11k_nss_vdev_set_cmd(struct ath11
  	case ATH11K_NSS_WIFI_VDEV_CFG_WDS_BACKHAUL_CMD:
  		cmd = NSS_WIFI_VDEV_CFG_WDS_BACKHAUL_CMD;
  		break;
@@ -120,12 +146,16 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
  	default:
  		return -EINVAL;
  	}
-@@ -2638,8 +2653,16 @@ int ath11k_nss_vdev_create(struct ath11k
+@@ -2638,12 +2674,31 @@ int ath11k_nss_vdev_create(struct ath11k
  		goto free_vdev;
  
  	switch (arvif->vif->type) {
 -	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_STATION:
+ 		ret = ath11k_nss_vdev_configure(arvif);
+ 		if (ret)
+ 			goto unregister_vdev;
+ 
 +		ret = ath11k_nss_vdev_set_cmd(arvif,
 +					      ATH11K_NSS_WIFI_VDEV_CFG_MCBC_EXC_TO_HOST_CMD,
 +					      ATH11K_NSS_ENABLE_MCBC_EXC);
@@ -133,12 +163,23 @@ Change-Id: I4a6ac67a1c2cf3ab7a219d0953907191606a5e70
 +			ath11k_err(ab, "failed to set MCBC in nss %d\n", ret);
 +			goto unregister_vdev;
 +		}
-+		fallthrough;
++		break;
 +	case NL80211_IFTYPE_AP:
- 		ret = ath11k_nss_vdev_configure(arvif);
- 		if (ret)
- 			goto unregister_vdev;
-@@ -2665,7 +2688,7 @@ int ath11k_nss_vdev_create(struct ath11k
++		ret = ath11k_nss_vdev_configure(arvif);
++		if (ret)
++			goto unregister_vdev;
++
++		ret = ath11k_nss_vdev_set_cmd(arvif,
++					      ATH11K_NSS_WIFI_VDEV_CFG_WDS_BACKHAUL_CMD,
++					      true);
++		if (ret) {
++			ath11k_warn(ab, "failed to cfg wds backhaul in nss %d\n", ret);
++			goto unregister_vdev;
++		}
+ 		break;
+ 	case NL80211_IFTYPE_MESH_POINT:
+ 		ret = ath11k_nss_mesh_alloc_register(arvif, wdev->netdev);
+@@ -2665,7 +2720,7 @@ int ath11k_nss_vdev_create(struct ath11k
  		}
  
  		ret = ath11k_nss_vdev_set_cmd(arvif,
