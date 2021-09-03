@@ -119,7 +119,7 @@ drv_mac80211_init_iface_config() {
 
 	config_add_string 'macaddr:macaddr' ifname
 
-	config_add_boolean wds extsta powersave
+	config_add_boolean ftm_responder wds extsta powersave
 	config_add_int maxassoc
 	config_add_int max_listen_int
 	config_add_int dtim_period start_disabled
@@ -640,13 +640,15 @@ mac80211_hostapd_setup_bss() {
 	}
 
 	hostapd_set_bss_options hostapd_cfg "$vif" || return 1
-	json_get_vars wds dtim_period max_listen_int start_disabled
+	json_get_vars ftm_responder wds dtim_period max_listen_int start_disabled
 	json_get_vars fils_discovery:0 unsol_bcast_presp:0
 
 	set_default wds 0
+	set_default ftm_responder 0
 	set_default start_disabled 0
 
 	[ "$wds" -gt 0 ] && append hostapd_cfg "wds_sta=1" "$N"
+	[ "$ftm_responder" -gt 0 ] && append hostapd_cfg "ftm_responder=1" "$N"
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
 	config_load fst && {
