@@ -146,31 +146,6 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/h
  
  }
  
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/hw.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
-@@ -106,6 +106,20 @@ struct ath11k_cfr_peer_tx_param;
- #define ATH11K_M3_FILE			"m3.bin"
- #define NODE_ID_BASE 0x27
- 
-+/* GPIO pins and functions used for smart antenna */
-+#define WLAN_GPIOPIN_ANTCHAIN0          2
-+#define WLAN_GPIOPIN_ANTCHAIN1          3
-+#define WLAN_GPIOPIN_ANTCHAIN2          4
-+
-+#define WLAN_GPIOFUNC_ANTCHAIN0         5
-+#define WLAN_GPIOFUNC_ANTCHAIN1         WLAN_GPIOFUNC_ANTCHAIN0
-+#define WLAN_GPIOFUNC_ANTCHAIN2         WLAN_GPIOFUNC_ANTCHAIN0
-+
-+#define WLAN_GPIOPIN_ANT_SERIAL_STROBE  2
-+#define WLAN_GPIOPIN_ANT_SERIAL_DATA    3
-+
-+#define WLAN_GPIOFUNC_ANT_SERIAL_STROBE 5
-+
- enum ath11k_hw_rate_cck {
- 	ATH11K_HW_RATE_CCK_LP_11M = 0,
- 	ATH11K_HW_RATE_CCK_LP_5_5M,
 Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/mac.c
 ===================================================================
 --- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/mac.c
@@ -184,15 +159,10 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  {
  	int num_chains = 0;
  
-@@ -5160,9 +5160,17 @@ static int ath11k_mac_op_sta_state(struc
- 		    vif->type == NL80211_IFTYPE_MESH_POINT ||
- 		    vif->type == NL80211_IFTYPE_ADHOC)) {
- 		ret = ath11k_station_assoc(ar, vif, sta, false);
--		if (ret)
-+		if (ret) {
+@@ -5163,6 +5163,13 @@ static int ath11k_mac_op_sta_state(struc
+ 		if (ret)
  			ath11k_warn(ar->ab, "Failed to associate station: %pM\n",
  				    sta->addr);
-+		}
 +
 +		if (vif->type == NL80211_IFTYPE_AP &&
 +		    ath11k_smart_ant_enabled(ar)) {
@@ -203,7 +173,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTHORIZED) {
  		spin_lock_bh(&ar->ab->base_lock);
-@@ -5202,6 +5210,8 @@ static int ath11k_mac_op_sta_state(struc
+@@ -5202,6 +5209,8 @@ static int ath11k_mac_op_sta_state(struc
  		   (vif->type == NL80211_IFTYPE_AP ||
  		    vif->type == NL80211_IFTYPE_MESH_POINT ||
  		    vif->type == NL80211_IFTYPE_ADHOC)) {
@@ -212,7 +182,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  		ret = ath11k_station_disassoc(ar, vif, sta);
  		if (ret)
  			ath11k_warn(ar->ab, "Failed to disassociate station: %pM\n",
-@@ -7583,6 +7593,8 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -7583,6 +7592,8 @@ ath11k_mac_update_vif_chan(struct ath11k
  	 * should be available for the channel switch now.
  	 */
  
@@ -221,7 +191,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	/* TODO: Update ar->rx_channel */
  
  	for (i = 0; i < n_vifs; i++) {
-@@ -7798,6 +7810,21 @@ ath11k_mac_op_assign_vif_chanctx(struct
+@@ -7798,6 +7809,21 @@ ath11k_mac_op_assign_vif_chanctx(struct
  		goto out;
  	}
  
@@ -354,10 +324,10 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
  }
  
  static int ath11k_init_cmd_send(struct ath11k_pdev_wmi *wmi,
-@@ -9778,6 +9781,164 @@ static void ath11k_wmi_parse_cfr_capture
- 		ath11k_dbg(ab, ATH11K_DBG_CFR,
+@@ -9779,6 +9782,165 @@ static void ath11k_wmi_parse_cfr_capture
  			   "failed to process cfr cpature ret = %d\n", ret);
  }
+ 
 +static int ath11k_wmi_peer_ratecode_subtlv_parser(struct ath11k_base *ab,
 +						  u16 tag, u16 len,
 +						  const void *ptr, void *data)
@@ -516,10 +486,11 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
 +
 +	return;
 +}
- 
++
  static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  {
-@@ -9943,6 +10104,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	struct wmi_cmd_hdr *cmd_hdr;
+@@ -9943,6 +10105,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_ANI_OFDM_LEVEL_EVENTID:
  		ath11k_wmi_event_ani_ofdm_level(ab, skb);
  		break;
@@ -529,7 +500,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
  	/* TODO: Add remaining events */
  	default:
  		ath11k_dbg(ab, ATH11K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -10267,3 +10431,358 @@ int ath11k_wmi_wow_enable(struct ath11k
+@@ -10267,3 +10432,358 @@ int ath11k_wmi_wow_enable(struct ath11k
  
  	return ath11k_wmi_cmd_send(ar->wmi, skb, WMI_WOW_ENABLE_CMDID);
  }
@@ -1149,7 +1120,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +void ath11k_smart_ant_alg_sta_disconnect(struct ath11k *ar,
 +					 struct ieee80211_sta *sta)
 +{
-+	struct ath11k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
++	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
 +
 +	if (!ath11k_smart_ant_enabled(ar) || !arsta->smart_ant_sta)
 +		return;
