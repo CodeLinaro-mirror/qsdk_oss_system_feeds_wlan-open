@@ -1409,6 +1409,7 @@ drv_mac80211_setup() {
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
 			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
+			echo "$!" >> /tmp/apsta_mode.pid
 		}
 	fi
 
@@ -1430,6 +1431,12 @@ list_phy_interfaces() {
 }
 
 drv_mac80211_teardown() {
+	# kill apsta_mode.sh if running in background
+	[ -f "/tmp/apsta_mode.pid" ] && {
+		kill -9 $(cat /tmp/apsta_mode.pid)
+		rm /tmp/apsta_mode.pid
+	}
+
 	wireless_process_kill_all
 
 	json_select data

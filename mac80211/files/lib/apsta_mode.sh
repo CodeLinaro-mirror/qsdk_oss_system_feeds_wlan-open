@@ -294,4 +294,5 @@ do
 			fi
 		fi
 	fi
+	usleep 100000
 done &
