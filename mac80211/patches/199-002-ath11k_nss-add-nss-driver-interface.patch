@@ -47,7 +47,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  ath11k_ahb-y += ahb.o
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.c
-@@ -0,0 +1,2389 @@
+@@ -0,0 +1,2395 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -1265,13 +1265,15 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 +
 +void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
-+				  struct ath11k_peer *peer)
++				  struct ath11k_peer *peer,
++				  struct hal_rx_user_status *user_stats)
 +{
 +	struct ath11k_sta *arsta = (struct ath11k_sta *)peer->sta->drv_priv;
 +	u16 ath11k_hal_rx_legacy_rates[] =
 +	{ 10, 20, 55, 60, 90, 110, 120, 180, 240, 360, 480, 540 };
 +	u16 rate = 0;
-+	u16 num_msdu;
++	u32 preamble_type;
++	u8 mcs, nss;
 +	struct ath11k *ar = arsta->arvif->ar;
 +	struct ath11k_base *ab = ar->ab;
 +
@@ -1281,15 +1283,25 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	if (!peer->nss.nss_stats)
 +		return;
 +
-+        if ((ppdu_info->preamble_type == WMI_RATE_PREAMBLE_CCK ||
-+                ppdu_info->preamble_type == WMI_RATE_PREAMBLE_OFDM) &&
++	if (user_stats) {
++		mcs = user_stats->mcs;
++		nss = user_stats->nss;
++		preamble_type = user_stats->preamble_type;
++	} else {
++		mcs = ppdu_info->mcs;
++		nss = ppdu_info->nss;
++		preamble_type = ppdu_info->preamble_type;
++	}
++
++        if ((preamble_type == WMI_RATE_PREAMBLE_CCK ||
++                preamble_type == WMI_RATE_PREAMBLE_OFDM) &&
 +                (ppdu_info->rate < ATH11K_LEGACY_NUM)) {
 +		rate = ath11k_hal_rx_legacy_rates[ppdu_info->rate];
 +	}
 +
 +	memset(&peer->nss.nss_stats->rxrate, 0, sizeof(peer->nss.nss_stats->rxrate));
 +
-+	switch (ppdu_info->preamble_type) {
++	switch (preamble_type) {
 +	case WMI_RATE_PREAMBLE_OFDM:
 +		peer->nss.nss_stats->rxrate.legacy = rate;
 +		break;
@@ -1297,37 +1309,34 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		peer->nss.nss_stats->rxrate.legacy = rate;
 +		break;
 +	case WMI_RATE_PREAMBLE_HT:
-+		if (ppdu_info->mcs > ATH11K_HT_MCS_MAX) {
++		if (mcs >= ATH11K_HT_MCS_NUM) {
 +			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
-+				    "Received invalid mcs in HT mode %d\n",
-+				     ppdu_info->mcs);
++				    "Received invalid mcs in HT mode %d\n", mcs);
 +			return;
 +		}
-+		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs + 8 * (ppdu_info->nss - 1);
++		peer->nss.nss_stats->rxrate.mcs = mcs;
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_MCS;
 +		if (ppdu_info->gi)
 +			peer->nss.nss_stats->rxrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
 +		break;
 +	case WMI_RATE_PREAMBLE_VHT:
-+		if (ppdu_info->mcs > ATH11K_VHT_MCS_MAX) {
++		if (mcs > ATH11K_VHT_MCS_MAX) {
 +			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
-+				    "Received invalid mcs in VHT mode %d\n",
-+				     ppdu_info->mcs);
++				    "Received invalid mcs in VHT mode %d\n", mcs);
 +			return;
 +		}
-+		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs;
++		peer->nss.nss_stats->rxrate.mcs = mcs;
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_VHT_MCS;
 +		if (ppdu_info->gi)
 +			peer->nss.nss_stats->rxrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
 +		break;
 +	case WMI_RATE_PREAMBLE_HE:
-+		if (ppdu_info->mcs > ATH11K_HE_MCS_MAX) {
++		if (mcs > ATH11K_HE_MCS_MAX) {
 +			ath11k_dbg(ar->ab, ATH11K_DBG_NSS,
-+				    "Received invalid mcs in HE mode %d\n",
-+				    ppdu_info->mcs);
++				    "Received invalid mcs in HE mode %d\n", mcs);
 +			return;
 +		}
-+		peer->nss.nss_stats->rxrate.mcs = ppdu_info->mcs;
++		peer->nss.nss_stats->rxrate.mcs = mcs;
 +		peer->nss.nss_stats->rxrate.flags = RATE_INFO_FLAGS_HE_MCS;
 +		peer->nss.nss_stats->rxrate.he_dcm = ppdu_info->dcm;
 +		peer->nss.nss_stats->rxrate.he_gi = ath11k_he_gi_to_nl80211_he_gi(ppdu_info->gi);
@@ -1335,11 +1344,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		break;
 +	}
 +
-+	peer->nss.nss_stats->rxrate.nss = ppdu_info->nss;
++	peer->nss.nss_stats->rxrate.nss = nss;
 +	peer->nss.nss_stats->rxrate.bw = ath11k_mac_bw_to_mac80211_bw(ppdu_info->bw);
-+
-+	num_msdu = ppdu_info->tcp_msdu_count + ppdu_info->tcp_ack_msdu_count +
-+				ppdu_info->udp_msdu_count + ppdu_info->other_msdu_count;
 +}
 +
 +int ath11k_nss_peer_delete(struct ath11k_base *ab, u8 *addr)
@@ -2439,7 +2445,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,304 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -2459,6 +2465,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +struct ath11k_peer;
 +struct ath11k_sta;
 +struct hal_rx_mon_ppdu_info;
++struct hal_rx_user_status;
 +
 +/* NSS DBG macro is not included as part of debug enum to avoid
 + * frequent changes during upgrade*/
@@ -2646,7 +2653,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +				 struct ieee80211_sta *sta,
 +				 struct ath11k_sta *arsta);
 +void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
-+				  struct ath11k_peer *peer);
++				  struct ath11k_peer *peer,
++				  struct hal_rx_user_status *user_stats);
 +int ath11k_nss_setup(struct ath11k_base *ab);
 +int ath11k_nss_teardown(struct ath11k_base *ab);
 +void ath11k_nss_ext_rx_stats(struct ath11k_base *ab, struct htt_rx_ring_tlv_filter *tlv_filter);
@@ -2683,7 +2691,8 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +}
 +
 +static inline void ath11k_nss_update_sta_rxrate(struct hal_rx_mon_ppdu_info *ppdu_info,
-+						struct ath11k_peer *peer)
++						struct ath11k_peer *peer,
++						struct hal_rx_user_status *user_stats)
 +{
 +	return;
 +}

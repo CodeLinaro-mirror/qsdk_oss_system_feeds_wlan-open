@@ -415,7 +415,33 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  				       enum hal_encrypt_type enctype)
  {
  	switch (enctype) {
-@@ -3429,7 +3432,7 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -3074,6 +3077,13 @@ static void ath11k_dp_rx_update_user_sta
+ 	arsta = (struct ath11k_sta *)peer->sta->drv_priv;
+ 	rx_stats = arsta->rx_stats;
+ 
++	if (ar->ab->nss.enabled)
++		ath11k_nss_update_sta_rxrate(ppdu_info, peer, user_stats);
++
++	/* we've updated rate stats dont update dp rx stats if not enabled */
++	if (!ath11k_debugfs_is_extd_rx_stats_enabled(ar))
++		return;
++
+ 	if (!rx_stats)
+ 		return;
+ 
+@@ -3150,8 +3160,10 @@ static void ath11k_dp_rx_update_peer_mu_
+ {
+ 	u32 num_users, i;
+ 
+-	if (!ath11k_debugfs_is_extd_rx_stats_enabled(ar))
++	if (!ar->ab->nss.enabled &&
++	    !ath11k_debugfs_is_extd_rx_stats_enabled(ar)) {
+ 		return;
++	}
+ 
+ 	num_users = ppdu_info->num_users;
+ 	if (num_users > HAL_MAX_UL_MU_USERS)
+@@ -3429,7 +3441,7 @@ int ath11k_dp_rx_process_mon_status(stru
  	struct sk_buff_head skb_list;
  	struct hal_rx_mon_ppdu_info *ppdu_info;
  	struct ath11k_peer *peer;
@@ -424,15 +450,14 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	int num_buffs_reaped = 0;
  	u32 rx_buf_sz;
  	u16 log_type = 0;
-@@ -3509,6 +3512,8 @@ int ath11k_dp_rx_process_mon_status(stru
- 			ath11k_rx_stats_buf_pktlog_process(ar, skb->data, log_type, rx_buf_sz);
- 		}
- 
-+		ath11k_nss_update_sta_rxrate(ppdu_info, peer);
-+
- 		spin_unlock_bh(&ab->base_lock);
- 		rcu_read_unlock();
- 
+@@ -3498,6 +3510,7 @@ int ath11k_dp_rx_process_mon_status(stru
+ 		if (ppdu_info->reception_type == HAL_RX_RECEPTION_TYPE_SU) {
+ 			arsta = (struct ath11k_sta *)peer->sta->drv_priv;
+ 			ath11k_dp_rx_update_peer_su_stats(arsta, ppdu_info);
++			ath11k_nss_update_sta_rxrate(ppdu_info, peer, NULL);
+ 		} else if ((ppdu_info->fc_valid) &&
+ 			   (ppdu_info->ast_index != HAL_AST_IDX_INVALID)) {
+ 			ath11k_dp_rx_mon_process_ulofdma(ppdu_info);
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
 @@ -146,4 +146,16 @@ int ath11k_peer_rx_frag_setup(struct ath
@@ -1017,7 +1042,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	/* TODO: Convert to function for conversion in case of many
  	 * such commands
  	 */
-@@ -1228,6 +1246,9 @@ void ath11k_nss_update_sta_rxrate(struct
+@@ -1230,6 +1248,9 @@ void ath11k_nss_update_sta_rxrate(struct
  	if (!ab->nss.enabled)
  		return;
  
@@ -1029,7 +1054,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/nss.h
 +++ b/drivers/net/wireless/ath/ath11k/nss.h
-@@ -99,6 +99,13 @@ do {	\
+@@ -100,6 +100,13 @@ do {	\
  	u64_stats_update_end(&tstats->syncp);	\
  } while (0)
  
@@ -1043,7 +1068,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  enum ath11k_nss_opmode {
  	ATH11K_NSS_OPMODE_UNKNOWN,
  	ATH11K_NSS_OPMODE_AP,
-@@ -188,7 +195,8 @@ struct ath11k_soc_nss {
+@@ -189,7 +196,8 @@ struct ath11k_soc_nss {
  
  #ifdef CPTCFG_ATH11K_NSS_SUPPORT
  int ath11k_nss_tx(struct ath11k_vif *arvif, struct sk_buff *skb);
@@ -1053,7 +1078,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  int ath11k_nss_vdev_create(struct ath11k_vif *arvif);
  void ath11k_nss_vdev_delete(struct ath11k_vif *arvif);
  int ath11k_nss_vdev_up(struct ath11k_vif *arvif);
-@@ -214,7 +222,8 @@ static inline int ath11k_nss_tx(struct a
+@@ -216,7 +224,8 @@ static inline int ath11k_nss_tx(struct a
  	return 0;
  }
  
