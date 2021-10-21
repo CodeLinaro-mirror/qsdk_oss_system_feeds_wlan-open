@@ -1,6 +1,14 @@
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -30,6 +30,8 @@ module_param_named(frame_mode, ath11k_fr
+@@ -8,6 +8,7 @@
+ #include <linux/remoteproc.h>
+ #include <linux/firmware.h>
+ #include <linux/of.h>
++#include <linux/of_platform.h>
+ #include "core.h"
+ #include "dp_tx.h"
+ #include "dp_rx.h"
+@@ -30,6 +31,8 @@ module_param_named(frame_mode, ath11k_fr
  MODULE_PARM_DESC(frame_mode,
  		 "Datapath frame mode (0: raw, 1: native wifi (default), 2: ethernet)");
  
@@ -9,7 +17,7 @@
  static const struct ath11k_hw_params ath11k_hw_params[] = {
  	{
  		.hw_rev = ATH11K_HW_IPQ8074,
-@@ -803,6 +805,62 @@ err_firmware_stop:
+@@ -803,6 +806,89 @@ err_firmware_stop:
  	return ret;
  }
  
@@ -34,7 +42,7 @@
 +
 +#ifdef CONFIG_QCOM_QMI_HELPERS
 +
-+/* Print the driver stats and crash the system on receving this notification */
++/* Print the driver stats and crash the system on receiving this notification */
 +int ath11k_core_ssr_notifier_cb(struct notifier_block *nb, unsigned long event,
 +				void *data)
 +{
@@ -42,7 +50,13 @@
 +	struct ath11k_base *ab = qmi->ab;
 +	struct device *dev = ab->dev;
 +	bool multi_pd_arch = false;
++#if LINUX_VERSION_IS_LESS(5, 4, 0)
 +	const char *name;
++#else
++	phandle rproc_phandle;
++	struct device_node *rproc_node = NULL;
++	struct platform_device *pdev = NULL;
++#endif
 +
 +	if (test_bit(ATH11K_FLAG_FW_RESTART_FOR_HOST, &qmi->ab->dev_flags)) {
 +		return 0;
@@ -51,11 +65,32 @@
 +	/* Print the stats only if notification is received for expected PD*/
 +	multi_pd_arch = of_property_read_bool(dev->of_node, "qcom,multipd_arch");
 +	if (multi_pd_arch) {
++#if LINUX_VERSION_IS_LESS(5, 4, 0)
 +		if (of_property_read_string(dev->of_node, "qcom,userpd-subsys-name", &name))
 +			return 0;
 +
 +		if (strcmp((char*)data, name) != 0)
 +			return 0;
++#else
++		if (of_property_read_u32(dev->of_node, "qcom,rproc",
++					 &rproc_phandle))
++			return 0;
++		rproc_node = of_find_node_by_phandle(rproc_phandle);
++		if (!rproc_node) {
++			ath11k_warn(ab, "ssr notification failed to get rproc_node\n");
++			return 0;
++		}
++		pdev = of_find_device_by_node(rproc_node);
++		if (!pdev) {
++			ath11k_warn(ab, "Failed to get pdev from device node\n");
++			return 0;
++		}
++		if (strcmp((char *)data, pdev->name) != 0) {
++			ath11k_warn(ab, "SSR notification mismatch %s  pdev name:%s\n",
++				    (char *)data, pdev->name);
++			return 0;
++		}
++#endif
 +	}
 +
 +	ath11k_core_dump_bp_stats(qmi->ab);
@@ -72,7 +107,7 @@
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -848,6 +906,16 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -848,6 +934,16 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
@@ -89,7 +124,7 @@
  	ath11k_hif_irq_enable(ab);
  	mutex_unlock(&ab->core_lock);
  
-@@ -1061,6 +1129,13 @@ void ath11k_core_deinit(struct ath11k_ba
+@@ -1061,6 +1157,13 @@ void ath11k_core_deinit(struct ath11k_ba
  {
  	mutex_lock(&ab->core_lock);
  
@@ -103,7 +138,7 @@
  	ath11k_core_pdev_destroy(ab);
  	ath11k_core_stop(ab);
  
-@@ -1083,6 +1158,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1083,6 +1186,8 @@ struct ath11k_base *ath11k_core_alloc(st
  				      const struct ath11k_bus_params *bus_params)
  {
  	struct ath11k_base *ab;
@@ -112,7 +147,7 @@
  
  	ab = kzalloc(sizeof(*ab) + priv_size, GFP_KERNEL);
  	if (!ab)
-@@ -1109,6 +1186,10 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1109,6 +1214,10 @@ struct ath11k_base *ath11k_core_alloc(st
  	ab->dev = dev;
  	ab->bus_params = *bus_params;
  	ab->hif.bus = bus;
