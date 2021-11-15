@@ -30,7 +30,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/c
 ===================================================================
 --- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.h
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/core.h
-@@ -561,6 +561,7 @@ struct ath11k_debug {
+@@ -587,6 +587,7 @@ struct ath11k_debug {
  	u32 wmi_ctrl_path_stats_tagid;
  	struct ath11k_db_module_debug *module_debug[WMI_DIRECT_BUF_MAX];
  	bool disable_dynamic_bw;
@@ -42,7 +42,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 ===================================================================
 --- /dev/null
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/debug_smart_ant.c
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,367 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2015, 2021 The Linux Foundation. All rights reserved.
@@ -101,6 +101,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +		return count;
 +
 +	mutex_lock(&ar->conf_mutex);
++	ar->smart_ant_info.enabled = enable;
 +	if (enable) {
 +		ret = ath11k_wmi_pdev_enable_smart_ant(ar,
 +						       &ar->smart_ant_info);
@@ -112,7 +113,6 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +		if (ret)
 +			goto exit;
 +	}
-+	ar->smart_ant_info.enabled = enable;
 +
 +	ath11k_dbg(ar->ab, ATH11K_DBG_SMART_ANT, "Smart antenna %s\n",
 +		   enable ? "enabled" : "disabled");
@@ -130,6 +130,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	.owner = THIS_MODULE,
 +	.llseek = default_llseek,
 +};
++
++#define ATH11K_SA_TX_ANT_MIN_LEN 20
 +
 +static ssize_t ath11k_write_sa_tx_ant(struct file *file,
 +				      const char __user *ubuf,
@@ -151,6 +153,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	if (copy_from_user(buf, ubuf, len))
 +		return -EFAULT;
 +
++	if (len < ATH11K_SA_TX_ANT_MIN_LEN)
++		return -EINVAL;
++
 +	buf[len] = '\0';
 +	sptr = buf;
 +	for (i = 0; i < ETH_ALEN - 1; i++) {
@@ -168,7 +173,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	if (kstrtou8(token, 16, &mac_addr[i]))
 +		return -EINVAL;
 +
-+	if (kstrtou32(sptr, 0, &txant))
++	if (kstrtou32(sptr, 16, &txant))
 +		return -EINVAL;
 +
 +	if (txant > ((1 << ar->ab->target_caps.num_rf_chains) - 1)) {
@@ -269,6 +274,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	.llseek = default_llseek,
 +};
 +
++#define ATH11K_SA_TRAIN_INFO_MIN_LEN 24
++
 +static ssize_t ath11k_write_sa_train_info(struct file *file,
 +					  const char __user *ubuf,
 +					  size_t count, loff_t *ppos)
@@ -289,6 +296,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	len = min(count, sizeof(buf) - 1);
 +	if (copy_from_user(buf, ubuf, len))
 +		return -EFAULT;
++
++	if (len < ATH11K_SA_TRAIN_INFO_MIN_LEN)
++		return -EINVAL;
 +
 +	buf[len] = '\0';
 +	sptr = buf;
@@ -311,13 +321,14 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 +	token = strsep(&sptr, " ");
 +	if (!token)
 +		return -EINVAL;
-+	if (kstrtou32(token, 16, &params.rate_array[0]))
++	if (kstrtou32(token, 0, &params.rate_array[0]))
 +		return -EINVAL;
 +
 +	token = strsep(&sptr, " ");
 +	if (!token)
 +		return -EINVAL;
-+	if (kstrtou32(token, 0, &params.antenna_array[0]))
++
++	if (kstrtou32(token, 16, &params.antenna_array[0]))
 +		return -EINVAL;
 +
 +	if (kstrtou32(sptr, 0, &params.numpkts))
@@ -415,7 +426,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
 ===================================================================
 --- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -235,6 +235,7 @@ void ath11k_debugfs_unregister(struct at
+@@ -239,6 +239,7 @@ void ath11k_debugfs_unregister(struct at
  void ath11k_debugfs_fw_stats_process(struct ath11k_base *ab, struct sk_buff *skb);
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
@@ -423,7 +434,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  ssize_t ath11k_debugfs_dump_soc_ring_bp_stats(struct ath11k_base *ab,
  					    char *buf, int size);
  void ath11k_dbring_add_debug_entry(struct ath11k *ar,
-@@ -371,6 +372,9 @@ ath11k_dbring_add_debug_entry(struct ath
+@@ -375,6 +376,9 @@ ath11k_dbring_add_debug_entry(struct ath
  			      struct hal_srng *srng)
  {
  }
