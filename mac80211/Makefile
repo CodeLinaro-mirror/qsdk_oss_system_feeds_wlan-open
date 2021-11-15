@@ -70,7 +70,7 @@ define KernelPackage/mac80211
   TITLE:=Linux 802.11 Wireless Networking Stack
   DEPENDS+= @TARGET_ipq95xx||TARGET_ipq50xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
-	+!TARGET_ipq95xx:kmod-qca-nss-drv-wifi-meshmgr +!TARGET_ipq95xx:kmod-qca-nss-drv
+	+kmod-qca-nss-drv-wifi-meshmgr +kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
 	CONFIG_AVERAGE=y
@@ -469,9 +469,7 @@ ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH11K_MEM_PROFILE_512M
 endif
 
-ifneq ($(CONFIG_TARGET_ipq95xx), y)
 config-y += ATH11K_NSS_SUPPORT
-endif
 
 config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS
 
