@@ -258,7 +258,10 @@ do
 		ip_addr="$(ifconfig | grep -A 1 'br-lan' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
 		arping "$ip_addr" -U -I br-lan -D -c 5
 
-		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ]; then
+		# DFS Channel check is applicable only for 5 GHz
+		wifi_band=$(wpa_cli -i $sta_intf status 2> /dev/null | grep wifi_generation | cut -d'=' -f 2)
+
+		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_band == 6 ]; then
 			hostapd_adjust_config
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
 			hostapd_cli -i $ap_intf status 2> /dev/null
