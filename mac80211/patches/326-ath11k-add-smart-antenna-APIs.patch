@@ -229,7 +229,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 ===================================================================
 --- /dev/null
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/smart_ant.h
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,88 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2015, 2021 The Linux Foundation. All rights reserved.
@@ -302,6 +302,21 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +{
 +	return ath11k_smart_ant_alg_enable(arvif);
 +}
++
++/* This API is to process tx feedback information such as tx rate
++ * PER, rssi and antennas used for tx. Based on feedback stats a
++ * a better antenna combination can be chosen for tx.
++ * Better tx antenna can be configured using ath11k_wmi_peer_set_smart_tx_ant().
++ * When needed this API can also request for feedback on packets with particular
++ * antenna at a particular rate.
++ */
++static inline void
++ath11k_smart_ant_proc_tx_feedback(struct ath11k_base *ab, u32 *data,
++				  u16 peer_id)
++{
++	ath11k_smart_ant_alg_proc_tx_feedback(ab, data, peer_id);
++}
++
 +#endif
 Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
 ===================================================================
@@ -1016,7 +1031,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 ===================================================================
 --- /dev/null
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/smart_ant_api.c
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,342 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2015, 2021 The Linux Foundation. All rights reserved.
@@ -1297,11 +1312,73 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +
 +	return 0;
 +}
++
++static void ath11k_smart_ant_dbg_feedback(struct ath11k_base *ab,
++					  struct ath11k_smart_ant_tx_feedback *fb)
++{
++	ath11k_dbg(ab, ATH11K_DBG_SMART_ANT,
++		   "Tx feedback npkts: %d nbad: %d tx_antenna[0]: %d tx_antenna[1]: %d "
++		   "train pkt: %s goodput: %d rate_maxphy: [0x%x|0x%x|0x%x|0x%x] "
++		   "RSSI: [%d %d %d]\n",
++		   fb->npackets, fb->nbad, fb->tx_antenna[0], fb->tx_antenna[0],
++		   fb->is_trainpkt ? "True" : "False", fb->goodput, fb->ratemaxphy[0],
++		   fb->ratemaxphy[1], fb->ratemaxphy[2], fb->ratemaxphy[3], fb->rssi[0],
++		   fb->rssi[1], fb->rssi[2]);
++}
++
++static void ath11k_smart_ant_tx_fb_fill(struct ath11k_base *ab, u32 *data,
++					struct ath11k_smart_ant_tx_feedback *fb)
++{
++	int i;
++
++	fb->npackets = TXFD_MS(data, ATH11K_SMART_ANT_NPKTS);
++	fb->nbad = fb->npackets - TXFD_MS(data, ATH11K_SMART_ANT_NSUCC);
++
++	for (i = 0; i < ATH11K_SMART_ANT_MAX_SA_RSSI_CHAINS; i++)
++		fb->rssi[i] = data[ATH11K_SMART_ANT_RSSI + i];
++
++	fb->tx_antenna[0] = TXFD_MS(data, ATH11K_SMART_ANT_TX_ANT);
++	fb->is_trainpkt = TXFD_MS(data, ATH11K_SMART_ANT_IS_TRAIN_PKT);
++	if (fb->is_trainpkt)
++		fb->goodput = TXFD_MS(data, ATH11K_SMART_ANT_TRAIN_PKTS);
++
++	for (i = 0; i < ATH11K_SMART_ANT_MAX_RATE_COUNTERS; i++)
++		fb->ratemaxphy[i] = TXFD_MS(data, ATH11K_SMART_ANT_MAX_RATE);
++
++	ath11k_smart_ant_dbg_feedback(ab, fb);
++}
++
++void ath11k_smart_ant_alg_proc_tx_feedback(struct ath11k_base *ab, u32 *data,
++					   u16 peer_id)
++{
++	struct ath11k_sta *arsta;
++	struct ath11k_peer *peer = NULL;
++	struct ath11k_smart_ant_tx_feedback tx_feedback;
++
++	rcu_read_lock();
++	spin_lock_bh(&ab->base_lock);
++	peer = ath11k_peer_find_by_id(ab, peer_id);
++	if(peer && peer->sta) {
++		arsta = (struct ath11k_sta *)peer->sta->drv_priv;
++
++		if (!arsta->smart_ant_sta)
++			goto exit;
++
++		memset(&tx_feedback, 0, sizeof(tx_feedback));
++		ath11k_dbg(ab, ATH11K_DBG_SMART_ANT, "Tx feedback from sta: %pM\n",
++			   peer->addr);
++		ath11k_smart_ant_tx_fb_fill(ab, data, &tx_feedback);
++
++	}
++exit:
++	spin_unlock_bh(&ab->base_lock);
++	rcu_read_unlock();
++}
 Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/smart_ant_api.h
 ===================================================================
 --- /dev/null
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/smart_ant_api.h
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,343 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2015, 2021 The Linux Foundation. All rights reserved.
@@ -1374,11 +1451,45 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +#define ATH11K_SMART_ANT_MAX_HT_RATE_WORDS      48
 +#define ATH11K_SMART_ANT_MAX_RATES              44
 +#define ATH11K_SMART_ANT_RSSI_SAMPLE            10
++#define ATH11K_SMART_ANT_MAX_RETRY		8
++#define ATH11K_SMART_ANT_MAX_SA_RSSI_CHAINS	8
++#define ATH11K_SMART_ANT_MAX_RATE_COUNTERS	4
++
++#define ATH11K_SMART_ANT_MAX_COMB_FB		2
 +
 +#define ATH11K_SMART_ANT_TX_FEEDBACK_CONFIG_DEFAULT 0xe4
 +
 +/* Max number of antenna combinations 2 ^ max_supported_ant */
 +#define ATH11K_SMART_ANT_COMB_MAX               16
++
++#define ATH11K_SMART_ANT_NPKTS		3
++#define ATH11K_SMART_ANT_NPKTS_M	0xffff
++#define ATH11K_SMART_ANT_NPKTS_S	0
++
++#define ATH11K_SMART_ANT_NSUCC		3
++#define ATH11K_SMART_ANT_NSUCC_M	0xffff0000
++#define ATH11K_SMART_ANT_NSUCC_S	16
++
++#define ATH11K_SMART_ANT_RSSI		5
++
++#define ATH11K_SMART_ANT_TX_ANT		5
++#define ATH11K_SMART_ANT_TX_ANT_M	0xffffffff
++#define ATH11K_SMART_ANT_TX_ANT_S	0
++
++#define ATH11K_SMART_ANT_IS_TRAIN_PKT	6
++#define ATH11K_SMART_ANT_IS_TRAIN_PKT_M	0x10000
++#define ATH11K_SMART_ANT_IS_TRAIN_PKT_S	16
++
++#define ATH11K_SMART_ANT_TRAIN_PKTS	6
++#define ATH11K_SMART_ANT_TRAIN_PKTS_M	0xffff
++#define ATH11K_SMART_ANT_TRAIN_PKTS_S	0
++
++#define ATH11K_SMART_ANT_MAX_RATE	7
++#define ATH11K_SMART_ANT_MAX_RATE_M	0xffffffff
++#define ATH11K_SMART_ANT_MAX_RATE_S	0
++
++#define TXFD_MS(data, info) \
++		((data[info] & info## _M) >> info## _S)
 +
 +enum ath11k_smart_ant_bw {
 +	ATH11K_SMART_ANT_BW_20,
@@ -1462,6 +1573,29 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +	u32 rt_count[WMI_RATE_COUNT_MAX];
 +};
 +
++struct ath11k_smart_ant_comb_fb {
++	u8 nbad;
++	u8 npkts;
++	u8 bw;
++	u8 rate;
++};
++
++struct ath11k_smart_ant_tx_feedback {
++	u16 npackets;
++	u16 nbad;
++	u16 nshort_retries[ATH11K_SMART_ANT_MAX_RETRY];
++	u16 nlong_retries[ATH11K_SMART_ANT_MAX_RETRY];
++	u32 tx_antenna[ATH11K_SMART_ANT_MAX_RATE_SERIES];
++	u32 rssi[ATH11K_SMART_ANT_MAX_SA_RSSI_CHAINS];
++	u32 rate_mcs[ATH11K_SMART_ANT_MAX_RATE_SERIES];
++	u8 rate_index;
++	u8 is_trainpkt;
++	u16 ratemaxphy[ATH11K_SMART_ANT_MAX_RATE_COUNTERS];
++	u32 goodput;
++	u8 num_comb_feedback;
++	struct ath11k_smart_ant_comb_fb comb_fb[ATH11K_SMART_ANT_MAX_COMB_FB];
++};
++
 +struct ath11k_smart_ant_sta {
 +	struct ath11k *ar;
 +	u8 mac_addr[ETH_ALEN];
@@ -1475,6 +1609,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +	struct ath11k_peer_rate_code_list_cap rate_cap;
 +	struct ath11k_smart_ant_train_info train_info;
 +	struct ath11k_smart_ant_train_data train_data;
++	struct ath11k_smart_ant_tx_feedback tx_feedback;
 +};
 +
 +/**
@@ -1544,6 +1679,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +				     struct ieee80211_sta *sta);
 +void ath11k_smart_ant_alg_sta_disconnect(struct ath11k *ar,
 +					 struct ieee80211_sta *sta);
++void ath11k_smart_ant_alg_proc_tx_feedback(struct ath11k_base *ab, u32 *data,
++					   u16 peer_id);
 +#else
 +static inline
 +int ath11k_smart_ant_alg_enable(struct ath11k_vif *arvif)
@@ -1576,5 +1713,85 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +{
 +}
 +
++static inline
++void ath11k_smart_ant_alg_proc_tx_feedback(struct ath11k_base *ab,
++					   u32 *data,
++					   u16 peer_id)
++{
++}
++
 +#endif /* CPTCFG_ATH11K_SMART_ANT_ALG */
 +#endif /* _SMART_ANT_ALG_ */
+Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp.h
+===================================================================
+--- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/dp.h
++++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp.h
+@@ -1529,6 +1529,9 @@ enum  htt_ppdu_stats_usr_compln_status {
+ #define HTT_USR_CMPLTN_SHORT_RETRY(_val) \
+ 	    FIELD_GET(HTT_PPDU_STATS_USR_CMPLTN_CMN_FLAGS_SHORT_RETRY_M, _val)
+ 
++#define HTT_STATS_NUM_SUPPORTED_BW_SMART_ANTENNA 4
++#define HTT_STATS_MAX_CHAINS 8
++
+ struct htt_ppdu_stats_usr_cmpltn_cmn {
+ 	u8 status;
+ 	u8 tid_num;
+@@ -1537,7 +1540,29 @@ struct htt_ppdu_stats_usr_cmpltn_cmn {
+ 	u32 ack_rssi;
+ 	u16 mpdu_tried;
+ 	u16 mpdu_success;
+-	u32 flags; /* %HTT_PPDU_STATS_USR_CMPLTN_CMN_FLAGS_LONG_RETRIES*/
++	/* %HTT_PPDU_STATS_USR_CMPLTN_CMN_FLAGS_LONG_RETRIES
++	 * BIT [3 : 0] - long retries
++	 * BIT [7 : 4] - short_retries
++	 * BIT [8 : 8] - is_ampdu
++	 * BIT [12 : 9] - resp_type
++	 * BIT [15 : 13] - mprot_type
++	 * BIT [16 : 16] - rts_success
++	 * BIT [17 : 17] - rts_failure
++	 * BIT [18 : 18] - pream_punc_tx
++	 * BIT [31 : 19] - reserved0
++	 */
++	u32 flags;
++	u32 chain_rssi[HTT_STATS_MAX_CHAINS];
++	u32 tx_antenna_mask;
++	/* For SmartAntenna: Holds number of pending training packets during training. */
++	u16 pending_training_pkts;
++	/* BIT [0 : 0] - is_training: This flag indicates if peer is under training.
++	 * BIT [15 : 1] - reserved1:
++	 */
++	u16 is_training;
++	u32 max_rates[HTT_STATS_NUM_SUPPORTED_BW_SMART_ANTENNA];
++	u32 current_rate_per;
++	u32 sw_rts;
+ } __packed;
+ 
+ #define HTT_PPDU_STATS_ACK_BA_INFO_NUM_MPDU_M	GENMASK(8, 0)
+@@ -1559,7 +1584,6 @@ struct htt_ppdu_stats_usr_cmpltn_ack_ba_
+ #define HTT_PPDU_STATS_USR_CMN_FLAG_DELAYBA	BIT(14)
+ #define HTT_PPDU_STATS_USR_CMN_HDR_SW_PEERID	GENMASK(31, 16)
+ #define HTT_PPDU_STATS_USR_CMN_CTL_FRM_CTRL	GENMASK(15, 0)
+-#define HTT_STATS_MAX_CHAINS 8
+ #define HTT_PPDU_STATS_USER_CMN_TLV_TX_PWR_CHAINS_PER_U32 4
+ #define HTT_PPDU_STATS_USER_CMN_TX_PWR_ARR_SIZE HTT_STATS_MAX_CHAINS / \
+ 						HTT_PPDU_STATS_USER_CMN_TLV_TX_PWR_CHAINS_PER_U32
+Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.c
+===================================================================
+--- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -9,6 +9,7 @@
+ #include <crypto/hash.h>
+ #include "core.h"
+ #include "debug.h"
++#include "smart_ant.h"
+ #include "debugfs_htt_stats.h"
+ #include "debugfs_sta.h"
+ #include "hal_desc.h"
+@@ -1388,6 +1389,7 @@ static int ath11k_htt_tlv_ppdu_stats_par
+ 		memcpy((void *)&user_stats->cmpltn_cmn, ptr,
+ 		       sizeof(struct htt_ppdu_stats_usr_cmpltn_cmn));
+ 		user_stats->tlv_flags |= BIT(tag);
++		ath11k_smart_ant_proc_tx_feedback(ab, ptr, peer_id);
+ 		break;
+ 	case HTT_PPDU_STATS_TAG_USR_COMPLTN_ACK_BA_STATUS:
+ 		if (len <
