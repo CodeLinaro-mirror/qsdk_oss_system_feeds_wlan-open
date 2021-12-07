@@ -515,10 +515,24 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
  	/* TODO: Add remaining events */
  	default:
  		ath11k_dbg(ab, ATH11K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -10267,3 +10432,362 @@ int ath11k_wmi_wow_enable(struct ath11k
+@@ -10267,3 +10432,393 @@ int ath11k_wmi_wow_enable(struct ath11k
  
  	return ath11k_wmi_cmd_send(ar->wmi, skb, WMI_WOW_ENABLE_CMDID);
  }
++
++void
++ath11k_wmi_sa_set_gpio_param(struct ath11k *ar,
++			     struct smart_ant_enable_params *params)
++{
++	params->gpio_pin[0] = ATH11K_SMART_ANT_PIN0;
++	params->gpio_func[0] = ATH11K_SMART_ANT_FUNC0;
++	params->gpio_pin[1] = ATH11K_SMART_ANT_PIN1;
++	params->gpio_func[1] = ATH11K_SMART_ANT_FUNC1;
++	params->gpio_pin[2] = 0;
++	params->gpio_func[2] = 0;
++	params->gpio_pin[3] = 0;
++	params->gpio_func[3] = 0;
++}
 +
 +int ath11k_wmi_pdev_set_rx_ant(struct ath11k *ar, u32 rx_antenna)
 +{
@@ -822,6 +836,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
 +	struct wmi_pdev_set_smart_ant_cmd *cmd;
 +	struct wmi_pdev_smart_ant_gpio_handle_cmd *gpio_param;
 +	struct wmi_tlv *tlv;
++	struct smart_ant_enable_params *params = NULL;
 +	struct sk_buff *skb;
 +	void *ptr;
 +	int i;
@@ -833,6 +848,13 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
 +	skb = ath11k_wmi_alloc_skb(wmi->wmi_ab, len);
 +	if (!skb)
 +		return -ENOMEM;
++
++	params = kzalloc(sizeof(struct smart_ant_enable_params),
++			 GFP_ATOMIC);
++	if (!params)
++		return -ENOMEM;
++
++	ath11k_wmi_sa_set_gpio_param(ar, params);
 +
 +	ptr = skb->data;
 +
@@ -861,11 +883,18 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
 +		gpio_param->tlv_header = FIELD_PREP(WMI_TLV_TAG,
 +						    WMI_TAG_PDEV_SMART_ANT_GPIO_HANDLE) |
 +					 FIELD_PREP(WMI_TLV_LEN, len - TLV_HDR_SIZE);
-+
-+		/* Set the gpio pin and func values to 0 for ath11k chipsets. */
-+
-+		gpio_param->gpio_pin = 0;
-+		gpio_param->gpio_func = 0;
++		if (info->mode == WMI_SMART_ANT_MODE_SERIAL) {
++			if (i < WMI_SMART_ANT_MAX_SERIAL_ANTENNA) {
++				gpio_param->gpio_pin = params->gpio_pin[i];
++				gpio_param->gpio_func = params->gpio_func[i];
++			} else {
++				gpio_param->gpio_pin = 0;
++				gpio_param->gpio_func = 0;
++			}
++		} else if (info->mode == WMI_SMART_ANT_MODE_PARALLEL) {
++			gpio_param->gpio_pin = params->gpio_pin[i];
++			gpio_param->gpio_func = params->gpio_func[i];
++		}
 +		gpio_param->pdev_id = ar->pdev->pdev_id;
 +		gpio_param++;
 +	}
@@ -876,6 +905,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
 +			    "failed to send WMI_PDEV_SMART_ANT_ENABLE_CMDID\n");
 +		dev_kfree_skb(skb);
 +	}
++
++	kfree(params);
 +	return ret;
 +}
 Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
@@ -1378,7 +1409,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 ===================================================================
 --- /dev/null
 +++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/smart_ant_api.h
-@@ -0,0 +1,343 @@
+@@ -0,0 +1,348 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2015, 2021 The Linux Foundation. All rights reserved.
@@ -1461,6 +1492,11 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/s
 +
 +/* Max number of antenna combinations 2 ^ max_supported_ant */
 +#define ATH11K_SMART_ANT_COMB_MAX               16
++
++#define ATH11K_SMART_ANT_PIN0	14
++#define ATH11K_SMART_ANT_PIN1	15
++#define ATH11K_SMART_ANT_FUNC0	5
++#define ATH11K_SMART_ANT_FUNC1	5
 +
 +#define ATH11K_SMART_ANT_NPKTS		3
 +#define ATH11K_SMART_ANT_NPKTS_M	0xffff
