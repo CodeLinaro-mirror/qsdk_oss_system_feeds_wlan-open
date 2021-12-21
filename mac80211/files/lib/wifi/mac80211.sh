@@ -277,6 +277,11 @@ post_mac80211() {
 		echo 5 > /sys/bus/coresight/devices/coresight-funnel-mm/funnel_ctrl
 		echo 6 > /sys/bus/coresight/devices/coresight-funnel-in0/funnel_ctrl
 		echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
+	elif [ "$chipset" == "IPQ9574" ]; then
+                echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
+                echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
+                echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
+                echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
 	fi
 
 	return 0
