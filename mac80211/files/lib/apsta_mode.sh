@@ -206,6 +206,25 @@ hostapd_adjust_config() {
                 #echo "he_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
                 hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
 
+		# VHT Operations is not applicable for 6GHz interface
+		if [ $wifi_6gband == false ]; then
+			#echo "Interface in Wifi 6 gen, but its not a 6GHz interface" > /dev/ttyMSM0
+			#echo "Set 802.11n, ac to 1" > /dev/ttyMSM0
+			hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/nul
+			hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
+			hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
+
+			#echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
+			#echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+			hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
+
+			if [ $sta_width = "20" ]; then
+				#echo "Setting HE20 mode to AP" > /dev/ttyMSM0
+				hostapd_ht20_mode
+			else
+				hostapd_ht40_mode "$sta_channel"
+			fi
+		fi
 	elif [ $wifi_gen == 5 -o $ieee80211ac == 1 ]; then
 		#echo "STA associated in VHT$sta_width mode, applying same config to AP" > /dev/ttyMSM0
 		local ap_vht_he_oper_chwidth
@@ -249,6 +268,15 @@ hostapd_adjust_config() {
 	fi
 }
 
+hostapd_is_6ghz_band() {
+	local freq=$1
+	if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
+		echo true
+	else
+		echo false
+	fi
+}
+
 #echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
 while true;
@@ -275,10 +303,12 @@ do
 		ip_addr="$(ifconfig | grep -A 1 'br-lan' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
 		arping "$ip_addr" -U -I br-lan -D -c 5
 
-		# DFS Channel check is applicable only for 5 GHz
-		wifi_band=$(wpa_cli -i $sta_intf status 2> /dev/null | grep wifi_generation | cut -d'=' -f 2)
+		# DFS Channel check is applicable only for 5 GHz interface
+		local sta_freq=$(wpa_cli -i $sta_intf status 2> /dev/null | grep freq | cut -d'=' -f 2)
+		wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
+		#echo "Is 6GHz interface: $wifi_6gband" > /dev/ttyMSM0
 
-		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_band == 6 ]; then
+		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_6gband == true ]; then
 			hostapd_adjust_config
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
 			hostapd_cli -i $ap_intf status 2> /dev/null
