@@ -82,6 +82,17 @@ check_mac80211_device() {
 }
 
 detect_mac80211() {
+	if [ $(cat /sys/bus/coresight/devices/coresight-stm/enable) -eq 0 ]
+	then
+		chipset=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
+		board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+		if [ "$chipset" == "IPQ9574" ]; then
+			echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
+			echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
+			echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
+			echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
+		fi
+	fi
 	devidx=0
 
 	config_load wireless
