@@ -21,11 +21,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  drivers/net/wireless/ath/ath11k/wmi.c     |  49 ++++++++++++-
  6 files changed, 229 insertions(+), 95 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
-index 46150df..26dd34d 100644
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -531,6 +531,55 @@ static const struct ath11k_num_vdevs_peers ath11k_vdevs_peers[] = {
+@@ -531,6 +531,55 @@ static const struct ath11k_num_vdevs_pee
  	},
  };
  
@@ -81,8 +79,6 @@ index 46150df..26dd34d 100644
  int ath11k_core_suspend(struct ath11k_base *ab)
  {
  	int ret;
-diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
-index 618d4b8..b6a2dc8 100644
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
 @@ -636,8 +636,6 @@ struct ath11k_debug {
@@ -94,10 +90,10 @@ index 618d4b8..b6a2dc8 100644
  	u32 extd_rx_stats;
  	u32 pktlog_filter;
  	u32 pktlog_mode;
-@@ -873,6 +871,11 @@ struct ath11k {
- 	struct ath11k_smart_ant_info smart_ant_info;
- 	struct ath11k_rx_buf_id rx_buf_id;
- 	u32 rx_antenna;
+@@ -878,6 +876,11 @@ struct ath11k {
+ 	struct cfg80211_chan_def awgn_chandef;
+ 	u32 chan_bw_interference_bitmap;
+ 	bool awgn_intf_handling_in_prog;
 +
 +	/* fw pdev_stats can be requested by get_txpower mac ops too */
 +	struct list_head fw_stats_pdevs;
@@ -106,7 +102,7 @@ index 618d4b8..b6a2dc8 100644
  };
  
  struct ath11k_band_cap {
-@@ -1329,6 +1332,12 @@ enum ath11k_fw_recovery_option {
+@@ -1330,6 +1333,12 @@ enum ath11k_fw_recovery_option {
  	ATH11K_FW_RECOVERY_ENABLE_SSR_ONLY,
  };
  
@@ -119,11 +115,9 @@ index 618d4b8..b6a2dc8 100644
  extern bool ath11k_enable_smart_antenna;
  
  static inline bool ath11k_smart_ant_enabled(struct ath11k *ar)
-diff --git a/drivers/net/wireless/ath/ath11k/debugfs.c b/drivers/net/wireless/ath/ath11k/debugfs.c
-index 9b05194..8b0190d 100644
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -803,86 +803,29 @@ void ath11k_debug_aggr_size_config_init(struct ath11k_vif *arvif)
+@@ -803,86 +803,29 @@ void ath11k_debug_aggr_size_config_init(
  						     &fops_amsdu_aggr_size);
  }
  
@@ -219,7 +213,7 @@ index 9b05194..8b0190d 100644
  		}
  		/* FW sends all the active VDEV stats irrespective of PDEV,
  		 * hence limit until the count of all VDEVs started
-@@ -895,43 +838,34 @@ void ath11k_debugfs_fw_stats_process(struct ath11k_base *ab, struct sk_buff *skb
+@@ -895,43 +838,34 @@ void ath11k_debugfs_fw_stats_process(str
  
  		is_end = ((++num_vdev) == total_vdevs_started);
  
@@ -271,7 +265,7 @@ index 9b05194..8b0190d 100644
  }
  
  static int ath11k_debugfs_fw_stats_request(struct ath11k *ar,
-@@ -952,7 +886,7 @@ static int ath11k_debugfs_fw_stats_request(struct ath11k *ar,
+@@ -952,7 +886,7 @@ static int ath11k_debugfs_fw_stats_reque
  
  	ath11k_debugfs_fw_stats_reset(ar);
  
@@ -280,7 +274,7 @@ index 9b05194..8b0190d 100644
  
  	ret = ath11k_wmi_send_stats_request_cmd(ar, req_param);
  
-@@ -963,7 +897,7 @@ static int ath11k_debugfs_fw_stats_request(struct ath11k *ar,
+@@ -963,7 +897,7 @@ static int ath11k_debugfs_fw_stats_reque
  	}
  
  	time_left =
@@ -289,7 +283,7 @@ index 9b05194..8b0190d 100644
  				    1 * HZ);
  	if (!time_left)
  		return -ETIMEDOUT;
-@@ -973,7 +907,7 @@ static int ath11k_debugfs_fw_stats_request(struct ath11k *ar,
+@@ -973,7 +907,7 @@ static int ath11k_debugfs_fw_stats_reque
  			break;
  
  		spin_lock_bh(&ar->data_lock);
@@ -298,7 +292,7 @@ index 9b05194..8b0190d 100644
  			spin_unlock_bh(&ar->data_lock);
  			break;
  		}
-@@ -2230,11 +2164,12 @@ void ath11k_debugfs_fw_stats_init(struct ath11k *ar)
+@@ -2231,11 +2165,12 @@ void ath11k_debugfs_fw_stats_init(struct
  	debugfs_create_file("beacon_stats", 0600, fwstats_dir, ar,
  			    &fops_bcn_stats);
  
@@ -313,11 +307,9 @@ index 9b05194..8b0190d 100644
  }
  
  static ssize_t ath11k_write_pktlog_filter(struct file *file,
-diff --git a/drivers/net/wireless/ath/ath11k/debugfs.h b/drivers/net/wireless/ath/ath11k/debugfs.h
-index 27324b3..fa14adb 100644
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -239,7 +239,7 @@ int ath11k_debugfs_pdev_create(struct ath11k_base *ab);
+@@ -239,7 +239,7 @@ int ath11k_debugfs_pdev_create(struct at
  void ath11k_debugfs_pdev_destroy(struct ath11k_base *ab);
  int ath11k_debugfs_register(struct ath11k *ar);
  void ath11k_debugfs_unregister(struct ath11k *ar);
@@ -326,7 +318,7 @@ index 27324b3..fa14adb 100644
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
  void ath11k_smart_ant_debugfs_init(struct ath11k *ar);
-@@ -334,8 +334,8 @@ static inline void ath11k_debugfs_unregister(struct ath11k *ar)
+@@ -334,8 +334,8 @@ static inline void ath11k_debugfs_unregi
  {
  }
  
@@ -337,11 +329,9 @@ index 27324b3..fa14adb 100644
  {
  }
  
-diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index c706286..87bb471 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -10618,6 +10618,96 @@ out:
+@@ -10625,6 +10625,96 @@ out:
  	return ret;
  }
  
@@ -438,7 +428,7 @@ index c706286..87bb471 100644
  static const struct ieee80211_ops ath11k_ops = {
  	.tx				= ath11k_mac_op_tx,
  	.start                          = ath11k_mac_op_start,
-@@ -10663,6 +10753,7 @@ static const struct ieee80211_ops ath11k_ops = {
+@@ -10670,6 +10760,7 @@ static const struct ieee80211_ops ath11k
  #ifdef CPTCFG_MAC80211_MESH
  	.config_mesh_offload_path	= ath11k_mac_op_config_mesh_offload_path,
  #endif
@@ -446,7 +436,7 @@ index c706286..87bb471 100644
  };
  
  static void ath11k_mac_update_ch_list(struct ath11k *ar,
-@@ -11273,6 +11364,11 @@ static int __ath11k_mac_register(struct ath11k *ar)
+@@ -11280,6 +11371,11 @@ static int __ath11k_mac_register(struct
  		goto err_unregister_hw;
  	}
  
@@ -458,11 +448,9 @@ index c706286..87bb471 100644
  	ret = ath11k_debugfs_register(ar);
  	if (ret) {
  		ath11k_err(ar->ab, "debugfs registration failed: %d\n", ret);
-diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index 97ce92f..ffb3baf 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -7418,7 +7418,7 @@ void ath11k_wmi_fw_stats_fill(struct ath11k *ar,
+@@ -7418,7 +7418,7 @@ void ath11k_wmi_fw_stats_fill(struct ath
  	spin_lock_bh(&ar->data_lock);
  
  	if (stats_id == WMI_REQUEST_PDEV_STAT) {
@@ -471,7 +459,7 @@ index 97ce92f..ffb3baf 100644
  						struct ath11k_fw_stats_pdev, list);
  		if (!pdev) {
  			ath11k_warn(ar->ab, "failed to get pdev stats\n");
-@@ -8763,7 +8763,52 @@ static void ath11k_peer_assoc_conf_event(struct ath11k_base *ab, struct sk_buff
+@@ -8763,7 +8763,52 @@ static void ath11k_peer_assoc_conf_event
  
  static void ath11k_update_stats_event(struct ath11k_base *ab, struct sk_buff *skb)
  {
@@ -525,6 +513,3 @@ index 97ce92f..ffb3baf 100644
  }
  
  /* PDEV_CTL_FAILSAFE_CHECK_EVENT is received from FW when the frequency scanned
--- 
-2.7.4
-
