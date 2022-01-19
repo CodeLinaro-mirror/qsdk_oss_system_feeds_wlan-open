@@ -590,12 +590,11 @@ mac80211_hostapd_setup_base() {
 				multiple_bssid=1
 				ema=1
 			fi
-			append base_cfg "he_co_locate=1" "$N"
 		fi
 
 		if [ "$has_ap" -gt 1 ]; then
-			[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "multiple_bssid=1" "$N"
-			[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema_beacon=1" "$N"
+			[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "mbssid=1" "$N"
+			[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
 		fi
 	fi
 
