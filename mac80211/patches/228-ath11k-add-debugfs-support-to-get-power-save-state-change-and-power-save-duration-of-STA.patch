@@ -61,11 +61,9 @@ Signed-off-by: Nishant Pandey <nishpand@codeaurora.org>
  drivers/net/wireless/ath/ath11k/wmi.h         |  21 +++
  7 files changed, 462 insertions(+)
 
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.h
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.h
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.h
-@@ -424,6 +424,12 @@ struct ath11k_sta {
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -447,6 +447,12 @@ struct ath11k_sta {
  	struct ath11k_nss_sta_stats *nss_stats;
  #endif
  	u16 tcl_metadata;
@@ -78,10 +76,10 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.
  };
  
  #define ATH11K_MIN_5G_FREQ 4150
-@@ -680,6 +686,11 @@ struct ath11k {
-	u8 ftm_msgref;
-	int ap_ps_enabled;
-	enum ath11k_ap_ps_state ap_ps_state;
+@@ -700,6 +706,11 @@ struct ath11k {
+ 	u8 ftm_msgref;
+ 	int ap_ps_enabled;
+ 	enum ath11k_ap_ps_state ap_ps_state;
 +
 +	/* protected by conf_mutex */
 +	u8 ps_state_enable;
@@ -90,11 +88,9 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/core.
  };
  
  struct ath11k_band_cap {
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debugfs.c
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/debugfs.c
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -1782,6 +1782,207 @@ static const struct file_operations fops
+--- a/drivers/net/wireless/ath/ath11k/debugfs.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs.c
+@@ -1784,6 +1784,207 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -302,7 +298,7 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debug
  static ssize_t ath11k_dump_mgmt_stats(struct file *file, char __user *ubuf,
  				      size_t count, loff_t *ppos)
  {
-@@ -2651,6 +2852,20 @@ int ath11k_debugfs_register(struct ath11
+@@ -2722,6 +2923,20 @@ int ath11k_debugfs_register(struct ath11
  			    ar->debug.debugfs_pdev, ar,
  			    &fops_dump_mgmt_stats);
  
@@ -323,10 +319,8 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debug
  	if (ar->hw->wiphy->bands[NL80211_BAND_5GHZ]) {
  		debugfs_create_file("dfs_simulate_radar", 0200,
  				    ar->debug.debugfs_pdev, ar,
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debugfs_sta.c
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/debugfs_sta.c
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debugfs_sta.c
+--- a/drivers/net/wireless/ath/ath11k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
 @@ -1096,11 +1096,117 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
@@ -445,23 +439,19 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/debug
  	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar))
  		debugfs_create_file("tx_stats", 0400, dir, sta,
  				    &fops_tx_stats);
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/mac.c
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/mac.c
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4382,6 +4382,7 @@ static int ath11k_mac_op_sta_state(struc
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -4733,6 +4733,7 @@ static int ath11k_mac_op_sta_state(struc
  	    new_state == IEEE80211_STA_NONE) {
  		memset(arsta, 0, sizeof(*arsta));
  		arsta->arvif = arvif;
 +		arsta->peer_ps_state = WMI_PEER_PS_STATE_DISABLED;
  		INIT_WORK(&arsta->update_wk, ath11k_sta_rc_update_wk);
- 		INIT_WORK(&arsta->use_4addr_wk, ath11k_sta_use_4addr_wk);
+ 		INIT_WORK(&arsta->set_4addr_wk, ath11k_sta_set_4addr_wk);
  
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/trace.h
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/trace.h
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/trace.h
-@@ -51,6 +51,31 @@ TRACE_EVENT(ath11k_htt_pktlog,
+--- a/drivers/net/wireless/ath/ath11k/trace.h
++++ b/drivers/net/wireless/ath/ath11k/trace.h
+@@ -63,6 +63,31 @@ TRACE_EVENT(ath11k_htt_pktlog,
  	 )
  );
  
@@ -493,13 +483,11 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/trace
  TRACE_EVENT(ath11k_htt_ppdu_stats,
  	    TP_PROTO(struct ath11k *ar, const void *data, size_t len),
  
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/wmi.c
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -8379,6 +8379,96 @@ static void ath11k_bcn_tx_status_event(s
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -8531,6 +8531,96 @@ static void ath11k_bcn_tx_status_event(s
+ 	ath11k_mac_bcn_tx_event(arvif);
  }
- 
  
 +void
 +ath11k_wmi_event_peer_sta_ps_state_chg(struct ath11k_base *ab, struct sk_buff *skb)
@@ -594,7 +582,7 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
  static void ath11k_wmi_wds_peer_event(struct ath11k_base *ab,
  				      struct sk_buff *skb)
  {
-@@ -8552,6 +8642,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -8707,6 +8797,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_MUEDCA_PARAMS_CONFIG_EVENTID:
  		ath11k_wmi_pdev_update_muedca_params_status_event(ab, skb);
  		break;
@@ -604,11 +592,45 @@ Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.c
  	case WMI_DIAG_EVENTID:
  		ath11k_wmi_diag_event(ab, skb);
  		break;
-Index: backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
-===================================================================
---- backports-20210222-4.4.60-b157d2276.orig/drivers/net/wireless/ath/ath11k/wmi.h
-+++ backports-20210222-4.4.60-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -5792,6 +5792,33 @@ struct wmi_qos_null_tx_cmd {
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -2099,6 +2099,35 @@ enum wmi_tlv_service {
+ 	WMI_TLV_SERVICE_PER_PEER_HTT_STATS_RESET = 213,
+ 	WMI_TLV_SERVICE_FREQINFO_IN_METADATA = 219,
+ 	WMI_TLV_SERVICE_EXT2_MSG = 220,
++	WMI_TLV_SERVICE_WPA3_SAE_ROAM_SUPPORT = 221,
++	WMI_TLV_SERVICE_WPA3_OWE_ROAM_SUPPORT = 222,
++	WMI_TLV_SERVICE_AUDIO_AGGR = 223,
++	WMI_TLV_SERVICE_6GHZ_SUPPORT = 224,
++	WMI_TLV_SERVICE_QMI_STATS_SUPPORT = 225,
++	WMI_TLV_SERVICE_CFR_CAPTURE_FILTER_SUPPORT = 226,
++	WMI_TLV_SERVICE_STA_BSS_MAX_IDLE_TIME = 227,
++	WMI_TLV_SERVICE_BIP_CIPHER_SUPPORT = 228,
++	WMI_TLV_SERVICE_BW_165MHZ_SUPPORT = 229,
++	WMI_TLV_SERVICE_BW_RESTRICTED_80P80_SUPPORT = WMI_TLV_SERVICE_BW_165MHZ_SUPPORT,
++	WMI_TLV_SERVICE_NAN_NDI_SAP_SAP_SCC_SUPPORT = 230,
++	WMI_TLV_SERVICE_NAN_VDEV_SUPPORT = 231,
++	WMI_TLV_SERVICE_AUDIO_SYNC_SUPPORT = 232,
++	WMI_TLV_SERVICE_DUAL_STA_ROAM_SUPPORT = 233,
++	WMI_TLV_SERVICE_PEER_CREATE_CONF = 234,
++	WMI_TLV_SERVICE_MULTIPLE_VDEV_RESTART_RESPONSE_SUPPORT = 235,
++	WMI_TLV_SERVICE_ROAM_SCAN_CHANNEL_LIST_TO_HOST_SUPPORT = 236,
++	WMI_TLV_SERVICE_PEER_DELETE_NO_PEER_FLUSH_TIDS_CMD = 237,
++	WMI_TLV_SERVICE_NSS_RATIO_TO_HOST_SUPPORT = 238,
++	WMI_TLV_SERVICE_WPA3_SUITEB_ROAM_SUPPORT = 239,
++	WMI_TLV_SERVICE_PERIODIC_FRAME_INJECT_SUPPORT = 240,
++	WMI_TLV_SERVICE_NDI_NDI_STA_SUPPORT = 241,
++	WMI_TLV_SERVICE_BW_TRUE_160_SUPPORT = 242,
++	WMI_TLV_SERVICE_HOST_SCAN_STOP_VDEV_ALL_SUPPORT = 243,
++	WMI_TLV_SERVICE_BEACON_PROTECTION_SUPPORT = 244,
++	WMI_TLV_SERVICE_EMA_AP_SUPPORT = 245,
++	WMI_TLV_SERVICE_PEER_POWER_SAVE_DURATION_SUPPORT = 246,
++	WMI_TLV_SERVICE_5_DOT_9GHZ_SUPPORT = 247,
++	WMI_TLV_SERVICE_MU_PREAMBLE_PUNCTURE_SUPPORT = 248,
+ 	WMI_TLV_SERVICE_SRG_SRP_SPATIAL_REUSE_SUPPORT = 249,
+ 	WMI_TLV_SERVICE_CONFIGURE_ROAM_TRIGGER_PARAM_SUPPORT = 254,
+ 	WMI_TLV_SERVICE_CFR_TA_RA_AS_FP_SUPPORT = 255,
+@@ -5786,6 +5815,33 @@ struct wmi_qos_null_tx_cmd {
  #define WMI_SERVICE_READY_TIMEOUT_HZ (5 * HZ)
  #define WMI_SEND_TIMEOUT_HZ (3 * HZ)
  
