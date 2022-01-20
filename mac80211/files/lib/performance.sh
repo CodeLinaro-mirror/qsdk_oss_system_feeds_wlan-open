@@ -14,6 +14,7 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 [ -e /lib/smp_affinity_settings.sh ] && . /lib/smp_affinity_settings.sh
+. /lib/functions.sh
 
 perf_setup(){
 
@@ -22,7 +23,13 @@ perf_setup(){
 		#read the to check whether nss_offload is enabled or not if not then set 0
 		enable_nss_offload=$(cat /sys/module/ath11k/parameters/nss_offload)
 
-		if [ "$enable_nss_offload" -eq 0 ]; then
+		if [ -e /sys/module/ath11k/parameters/nss_offload ];then
+			uni_dp=0
+		else
+			uni_dp=1
+		fi
+
+		if [ "$enable_nss_offload" -eq 0 ] || ["$uni_dp" -eq 1]; then
 			/etc/init.d/qca-nss-ecm stop
 		fi
 

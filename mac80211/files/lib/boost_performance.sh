@@ -24,6 +24,12 @@ boost_performance() {
 	if [ -d "/sys/kernel/debug/ath11k" ]; then
 		local board=$(ipq806x_board_name)
 
+	if [ -e /sys/module/ath11k/parameters/nss_offload ];then
+		uni_dp=0
+	else
+		uni_dp=1
+	fi
+
 		case "$board" in
 			ap-hk10-c2)
 				#case for rdp413
@@ -96,6 +102,34 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				;;
+			ap-mp03.5-c1)
+				#case for rdp432
+				if [ "$uni_dp" -eq 1 ];then
+					ethtool -K eth1 gro off
+					ethtool -K eth0 gro off
+					ethtool -K wlan0 gro off
+					ethtool -K wlan1 gro off
+					ethtool -K wlan2 gro off
+
+					tc qdisc replace dev wlan0 root noqueue
+					tc qdisc replace dev wlan1 root noqueue
+					tc qdisc replace dev wlan2 root noqueue
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+
+					echo 1 > /sys/kernel/debug/ath11k/qcn6122_2/stats_disable
+					echo 1 > /sys/kernel/debug/ath11k/qcn6122_1/stats_disable
+					echo 1 > /sys/kernel/debug/ath11k/ipq5018\ hw1.0/stats_disable
+
+					echo 0 > /sys/kernel/debug/ath11k/ipq5018\ hw1.0/trace_qdss
+					echo 0 > /sys/kernel/debug/ath11k/qcn6122_1/trace_qdss
+					echo 0 > /sys/kernel/debug/ath11k/qcn6122_2/trace_qdss
+
+					echo 0x44444444 > /sys/kernel/debug/ath11k/ipq5018\ hw1.0/rx_hash
+					echo 0x44444444 > /sys/kernel/debug/ath11k/qcn6122_1/rx_hash
+					echo 0x44444444 > /sys/kernel/debug/ath11k/qcn6122_2/rx_hash
+				fi
 				;;
 			*)
 				#no settings
