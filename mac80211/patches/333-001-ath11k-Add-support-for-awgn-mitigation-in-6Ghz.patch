@@ -37,9 +37,21 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  drivers/net/wireless/ath/ath11k/wmi.h     |   2 +-
  6 files changed, 151 insertions(+), 13 deletions(-)
 
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -1580,6 +1580,9 @@ void ath11k_core_halt(struct ath11k *ar)
+ 
+ 	ar->num_created_vdevs = 0;
+ 	ar->allocated_vdev_map = 0;
++	spin_lock_bh(&ar->data_lock);
++	ar->num_mesh_vdevs = 0;
++	spin_unlock_bh(&ar->data_lock);
+ 
+ 	ath11k_mac_scan_finish(ar);
+ 	ath11k_mac_peer_cleanup_all(ar);
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -750,6 +750,7 @@ struct ath11k {
+@@ -767,6 +767,7 @@ struct ath11k {
  	int max_num_peers;
  	u32 num_started_vdevs;
  	u32 num_created_vdevs;
@@ -47,7 +59,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  	unsigned long long allocated_vdev_map;
  
  	struct idr txmgmt_idr;
-@@ -823,6 +824,10 @@ struct ath11k {
+@@ -838,6 +839,10 @@ struct ath11k {
  
  	struct ath11k_smart_ant_info smart_ant_info;
  	u32 rx_antenna;
@@ -60,7 +72,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  struct ath11k_band_cap {
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -2395,6 +2395,7 @@ static ssize_t ath11k_write_simulate_awg
+@@ -2398,6 +2398,7 @@ static ssize_t ath11k_write_simulate_awg
  {
  	struct ath11k *ar = file->private_data;
  	int ret;
@@ -68,7 +80,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  
  	mutex_lock(&ar->conf_mutex);
  	if (ar->state != ATH11K_STATE_ON) {
-@@ -2402,7 +2403,10 @@ static ssize_t ath11k_write_simulate_awg
+@@ -2405,7 +2406,10 @@ static ssize_t ath11k_write_simulate_awg
  		goto exit;
  	}
  
@@ -82,8 +94,8 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -886,7 +886,7 @@ void ath11k_mac_peer_cleanup_all(struct
- 	ar->num_stations = 0;
+@@ -964,7 +964,7 @@ static inline int ath11k_mac_vdev_setup_
+ 	return ar->last_wmi_vdev_start_status ? -EINVAL : 0;
  }
  
 -static void
@@ -91,7 +103,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  ath11k_mac_get_any_chandef_iter(struct ieee80211_hw *hw,
  				struct ieee80211_chanctx_conf *conf,
  				void *data)
-@@ -6933,6 +6933,11 @@ static int ath11k_mac_op_start(struct ie
+@@ -7037,6 +7037,11 @@ static int ath11k_mac_op_start(struct ie
  	ar->num_peers = 0;
  	ar->allocated_vdev_map = 0;
  
@@ -103,7 +115,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  	/* Configure monitor status ring with default rx_filter to get rx status
  	 * such as rssi, rx_duration.
  	 */
-@@ -7009,6 +7014,10 @@ static void ath11k_mac_op_stop(struct ie
+@@ -7111,6 +7116,10 @@ static void ath11k_mac_op_stop(struct ie
  	synchronize_rcu();
  
  	atomic_set(&ar->num_pending_mgmt_tx, 0);
@@ -114,7 +126,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  }
  
  static int
-@@ -7142,6 +7151,10 @@ static int ath11k_mac_vdev_delete(struct
+@@ -7236,6 +7245,10 @@ static int ath11k_mac_vdev_delete(struct
  	ar->ab->free_vdev_map |= 1LL << (arvif->vdev_id);
  	ar->allocated_vdev_map &= ~(1LL << arvif->vdev_id);
  	ar->num_created_vdevs--;
@@ -125,7 +137,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  
  	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "vdev %pM deleted, vdev_id %d\n",
  		   vif->addr, arvif->vdev_id);
-@@ -7294,6 +7307,8 @@ static int ath11k_mac_op_add_interface(s
+@@ -7388,6 +7401,8 @@ static int ath11k_mac_op_add_interface(s
  	ab->free_vdev_map &= ~(1LL << arvif->vdev_id);
  
  	spin_lock_bh(&ar->data_lock);
@@ -134,7 +146,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  	list_add(&arvif->list, &ar->arvifs);
  	spin_unlock_bh(&ar->data_lock);
  
-@@ -7995,6 +8010,75 @@ ath11k_mac_change_chanctx_fill_iter(void
+@@ -8031,6 +8046,75 @@ ath11k_mac_change_chanctx_fill_iter(void
  	arg->next_vif++;
  }
  
@@ -210,7 +222,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  static void
  ath11k_mac_update_vif_chan(struct ath11k *ar,
  			   struct ieee80211_vif_chanctx_switch *vifs,
-@@ -8002,6 +8086,7 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -8038,17 +8122,20 @@ ath11k_mac_update_vif_chan(struct ath11k
  {
  	struct ath11k_base *ab = ar->ab;
  	struct ath11k_vif *arvif;
@@ -218,26 +230,23 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  	int ret;
  	int i;
  	bool monitor_vif = false;
-@@ -8049,13 +8134,15 @@ ath11k_mac_update_vif_chan(struct ath11k
- 		}
- 	}
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
  
 +	chandef = &vifs[0].new_ctx->def;
 +
- 	/* All relevant vdevs are downed and associated channel resources
+ 	/* Associated channel resources of all relevant vdevs
  	 * should be available for the channel switch now.
  	 */
- 
- 	ath11k_smart_ant_disable(arvif);
  
 -	/* TODO: Update ar->rx_channel */
 +	ath11k_mac_update_rx_channel(ar, NULL, vifs, n_vifs);
  
  	for (i = 0; i < n_vifs; i++) {
  		struct vdev_up_params params = {0};
-@@ -8116,6 +8203,38 @@ ath11k_mac_update_vif_chan(struct ath11k
- 		if (!ath11k_mac_monitor_stop(ar))
- 			ath11k_mac_monitor_start(ar);
+@@ -8108,6 +8195,38 @@ ath11k_mac_update_vif_chan(struct ath11k
+ 			return;
+ 		}
  	}
 +
 +	spin_lock_bh(&ar->data_lock);
@@ -276,9 +285,9 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  static void
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -168,4 +168,7 @@ void ath11k_mac_bcn_tx_event(struct ath1
- void ath11k_mac_handle_beacon(struct ath11k *ar, struct sk_buff *skb);
- void ath11k_mac_handle_beacon_miss(struct ath11k *ar, u32 vdev_id);
+@@ -165,4 +165,7 @@ void ath11k_mac_handle_beacon_miss(struc
+ void ath11k_mac_bcn_tx_event(struct ath11k_vif *arvif);
+ void ath11k_mac_bcn_tx_event(struct ath11k_vif *arvif);
  bool ath11k_mac_sta_level_info(struct ath11k_vif *arvif, struct ieee80211_sta *sta);
 +void ath11k_mac_get_any_chandef_iter(struct ieee80211_hw *hw,
 +				     struct ieee80211_chanctx_conf *conf,
@@ -286,7 +295,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  #endif
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -8942,8 +8942,8 @@ ath11k_wmi_dcs_awgn_interference_event(s
+@@ -8983,8 +8983,8 @@ ath11k_wmi_dcs_awgn_interference_event(s
  {
  	const struct wmi_dcs_interference_ev *dcs_intf_ev;
  	struct wmi_dcs_awgn_info awgn_info = {};
@@ -296,7 +305,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  	const struct wmi_tlv *tlv;
  	u16 tlv_tag;
  	u8 *ptr;
-@@ -9002,20 +9002,35 @@ ath11k_wmi_dcs_awgn_interference_event(s
+@@ -9043,20 +9043,35 @@ ath11k_wmi_dcs_awgn_interference_event(s
  		goto exit;
  	}
  
@@ -337,7 +346,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  exit:
  	rcu_read_unlock();
  }
-@@ -10498,7 +10513,7 @@ int ath11k_wmi_simulate_radar(struct ath
+@@ -10540,7 +10555,7 @@ int ath11k_wmi_simulate_radar(struct ath
  }
  
  
@@ -346,7 +355,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  {
  	struct ath11k_vif *arvif;
  	u32 awgn_args[WMI_AWGN_MAX_TEST_ARGS];
-@@ -10521,14 +10536,16 @@ int ath11k_wmi_simulate_awgn(struct ath1
+@@ -10563,14 +10578,16 @@ int ath11k_wmi_simulate_awgn(struct ath1
  		return -EINVAL;
  
  	awgn_args[WMI_AWGN_TEST_AWGN_INT] = WMI_UNIT_TEST_AWGN_INTF_TYPE;
@@ -367,7 +376,7 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -6947,7 +6947,7 @@ void ath11k_wmi_fw_stats_fill(struct ath
+@@ -6933,7 +6933,7 @@ void ath11k_wmi_fw_stats_fill(struct ath
  			      struct ath11k_fw_stats *fw_stats, u32 stats_id,
  			      char *buf);
  int ath11k_wmi_simulate_radar(struct ath11k *ar);
@@ -376,15 +385,3 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  int ath11k_wmi_send_twt_enable_cmd(struct ath11k *ar, u32 pdev_id);
  int ath11k_wmi_send_twt_disable_cmd(struct ath11k *ar, u32 pdev_id);
  int ath11k_wmi_send_twt_add_dialog_cmd(struct ath11k *ar,
---- a/drivers/net/wireless/ath/ath11k/core.c
-+++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -1397,6 +1397,9 @@ void ath11k_core_halt(struct ath11k *ar)
- 
- 	ar->num_created_vdevs = 0;
- 	ar->allocated_vdev_map = 0;
-+	spin_lock_bh(&ar->data_lock);
-+	ar->num_mesh_vdevs = 0;
-+	spin_unlock_bh(&ar->data_lock);
- 
- 	ath11k_mac_scan_finish(ar);
- 	ath11k_mac_peer_cleanup_all(ar);

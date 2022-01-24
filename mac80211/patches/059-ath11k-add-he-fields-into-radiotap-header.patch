@@ -20,31 +20,23 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2371,7 +2371,7 @@ static void ath11k_dp_rx_deliver_msdu(st
- 	char tid[32];
- 
- 	status = IEEE80211_SKB_RXCB(msdu);
--	if (status->encoding == RX_ENC_HE) {
-+	if ((status->encoding == RX_ENC_HE) && !(status->flag & RX_FLAG_RADIOTAP_HE)) {
- 		he = skb_push(msdu, sizeof(known));
- 		memcpy(he, &known, sizeof(known));
- 		status->flag |= RX_FLAG_RADIOTAP_HE;
-@@ -4720,13 +4720,14 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
+@@ -4720,14 +4720,15 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  {
  	struct ath11k_base *ab = ar->ab;
- 	struct sk_buff *msdu, *mpdu_buf, *prev_buf;
+	struct sk_buff *msdu, *prev_buf;
 -	u32 wifi_hdr_len;
  	struct hal_rx_desc *rx_desc;
  	char *hdr_desc;
  	u8 *dest, decap_format;
  	struct ieee80211_hdr_3addr *wh;
  	struct rx_attention *rx_attention;
+	u32 err_bitmap;
 +	static u32 pkt_type = 0;
  
 +	pkt_type++;
- 	mpdu_buf = NULL;
+	if (!head_msdu)
+		goto err_merge_fail;
  
- 	if (!head_msdu)
 @@ -4759,38 +4760,28 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  
  		skb_trim(prev_buf, prev_buf->len - HAL_RX_FCS_LEN);
@@ -72,7 +64,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 -			rx_desc = (struct hal_rx_desc *)msdu->data;
 -			hdr_desc = ath11k_dp_rxdesc_get_80211hdr(ab, rx_desc);
  
-+			ath11k_dp_rx_msdus_set_payload(msdu);
++			ath11k_dp_rx_msdus_set_payload(ar, msdu);
  			if (qos_pkt) {
  				dest = skb_push(msdu, sizeof(__le16));
  				if (!dest)
@@ -172,18 +164,15 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  				    struct sk_buff *tail_msdu,
  				    struct napi_struct *napi)
  {
-@@ -4852,10 +4920,9 @@ static int ath11k_dp_rx_mon_deliver(stru
+@@ -4852,7 +4920,7 @@ static int ath11k_dp_rx_mon_deliver(stru
  			rxs->flag |= RX_FLAG_ALLOW_SAME_PN;
  		}
  		rxs->flag |= RX_FLAG_ONLY_MONITOR;
 -
 +		ath11k_update_radiotap(ppduinfo, mon_skb, rxs);
- 		status = IEEE80211_SKB_RXCB(mon_skb);
- 		*status = *rxs;
--
- 		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb);
- 		mon_skb = skb_next;
- 	} while (mon_skb);
+		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb, rxs);
+		mon_skb = skb_next;
+	} while (mon_skb);
 @@ -4928,6 +4995,7 @@ static void ath11k_dp_rx_mon_dest_proces
  		}
  		if (head_msdu && tail_msdu) {

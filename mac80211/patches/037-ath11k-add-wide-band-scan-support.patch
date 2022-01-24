@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2737,6 +2737,28 @@ static int ath11k_start_scan(struct ath1
+@@ -3448,6 +3448,28 @@ static int ath11k_start_scan(struct ath1
  	return 0;
  }
  
@@ -29,30 +29,44 @@
  static int ath11k_mac_op_hw_scan(struct ieee80211_hw *hw,
  				 struct ieee80211_vif *vif,
  				 struct ieee80211_scan_request *hw_req)
-@@ -2793,10 +2815,16 @@ static int ath11k_mac_op_hw_scan(struct
+@@ -3504,18 +3526,16 @@ static int ath11k_mac_op_hw_scan(struct
  		arg.scan_flags |= WMI_SCAN_FLAG_PASSIVE;
  	}
  
 -	if (req->n_channels) {
 -		arg.num_chan = req->n_channels;
--		for (i = 0; i < arg.num_chan; i++)
--			arg.chan_list[i] = req->channels[i]->center_freq;
+-		arg.chan_list = kcalloc(arg.num_chan, sizeof(*arg.chan_list),
+-					GFP_KERNEL);
 +	if (req->n_channels)
 +		ath11k_mac_update_scan_params(req, &arg);
-+
+ 
+-		if (!arg.chan_list) {
+-			ret = -ENOMEM;
 +	if (req->chandef) {
 +		arg.scan_f_wide_band = true;
 +		arg.scan_f_passive = true;
 +		arg.chandef = req->chandef;
 +		ret = ath11k_wmi_update_scan_chan_list(ar, &arg);
 +		if (ret)
-+			goto exit;
+ 			goto exit;
+-		}
+-
+-		for (i = 0; i < arg.num_chan; i++)
+-			arg.chan_list[i] = req->channels[i]->center_freq;
  	}
  
  	ret = ath11k_start_scan(ar, &arg);
-@@ -6929,6 +6957,11 @@ static int __ath11k_mac_register(struct
- 	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
- 	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_STA_TX_PWR);
+@@ -3532,7 +3552,6 @@ static int ath11k_mac_op_hw_scan(struct
+ 						      ATH11K_MAC_SCAN_TIMEOUT_MSECS));
+ 
+ exit:
+-	kfree(arg.chan_list);
+ 
+ 	if (req->ie_len)
+ 		kfree(arg.extraie.ptr);
+@@ -8192,6 +8211,11 @@ static int __ath11k_mac_register(struct
+ 		wiphy_ext_feature_set(ar->hw->wiphy,
+ 				      NL80211_EXT_FEATURE_BSS_COLOR);
  
 +	if (test_bit(WMI_TLV_SERVICE_SCAN_PHYMODE_SUPPORT,
 +		     ar->ab->wmi_ab.svc_map))
@@ -64,7 +78,7 @@
  
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -2031,6 +2031,110 @@ int ath11k_wmi_send_peer_assoc_cmd(struc
+@@ -2092,6 +2092,110 @@ int ath11k_wmi_send_peer_assoc_cmd(struc
  	return ret;
  }
  
@@ -175,7 +189,7 @@
  void ath11k_wmi_start_scan_init(struct ath11k *ar,
  				struct scan_req_params *arg)
  {
-@@ -2150,15 +2254,17 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2211,15 +2315,17 @@ int ath11k_wmi_send_scan_start_cmd(struc
  	void *ptr;
  	int i, ret, len;
  	u32 *tmp_ptr;
@@ -195,7 +209,7 @@
  
  	len += TLV_HDR_SIZE;
  	if (params->num_ssids)
-@@ -2182,6 +2288,19 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2243,6 +2349,19 @@ int ath11k_wmi_send_scan_start_cmd(struc
  		len += TLV_HDR_SIZE +
  		       params->num_hint_s_ssid * sizeof(struct hint_short_ssid);
  
@@ -215,7 +229,7 @@
  	skb = ath11k_wmi_alloc_skb(wmi->wmi_ab, len);
  	if (!skb)
  		return -ENOMEM;
-@@ -2213,7 +2332,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2274,7 +2393,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
  	cmd->max_scan_time = params->max_scan_time;
  	cmd->probe_delay = params->probe_delay;
  	cmd->burst_duration = params->burst_duration;
@@ -224,7 +238,7 @@
  	cmd->num_bssid = params->num_bssid;
  	cmd->num_ssids = params->num_ssids;
  	cmd->ie_len = params->extraie.len;
-@@ -2221,7 +2340,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2282,7 +2401,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
  
  	ptr += sizeof(*cmd);
  
@@ -233,7 +247,7 @@
  
  	tlv = ptr;
  	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_UINT32) |
-@@ -2229,8 +2348,8 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2290,8 +2409,8 @@ int ath11k_wmi_send_scan_start_cmd(struc
  	ptr += TLV_HDR_SIZE;
  	tmp_ptr = (u32 *)ptr;
  
@@ -244,7 +258,7 @@
  
  	ptr += len;
  
-@@ -2271,6 +2390,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
+@@ -2332,6 +2451,7 @@ int ath11k_wmi_send_scan_start_cmd(struc
  	ptr += params->num_bssid * sizeof(*bssid);
  
  	len = extraie_len_with_pad;
@@ -252,12 +266,10 @@
  	tlv = ptr;
  	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_BYTE) |
  		      FIELD_PREP(WMI_TLV_LEN, len);
-@@ -2313,6 +2433,38 @@ int ath11k_wmi_send_scan_start_cmd(struc
- 		}
- 	}
+@@ -2343,6 +2463,36 @@ int ath11k_wmi_send_scan_start_cmd(struc
  
-+	ptr += extraie_len_with_pad;
-+
+ 	ptr += extraie_len_with_pad;
+ 
 +	len = params->ie_whitelist.num_vendor_oui * sizeof(struct wmi_vendor_oui);
 +	tlv = ptr;
 +	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
@@ -288,10 +300,10 @@
 +	}
 +	ptr += phymode_roundup;
 +
- 	ret = ath11k_wmi_cmd_send(wmi, skb,
- 				  WMI_START_SCAN_CMDID);
- 	if (ret) {
-@@ -2408,7 +2560,7 @@ int ath11k_wmi_send_scan_chan_list_cmd(s
+ 	if (params->num_hint_s_ssid) {
+ 		len = params->num_hint_s_ssid * sizeof(struct hint_short_ssid);
+ 		tlv = ptr;
+@@ -2469,7 +2619,7 @@ int ath11k_wmi_send_scan_chan_list_cmd(s
  			FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
  		cmd->pdev_id = chan_list->pdev_id;
  		cmd->num_scan_chans = num_send_chans;
@@ -311,7 +323,16 @@
  #define WMI_BA_MODE_BUFFER_SIZE_256  3
  /*
   * HW mode config type replicated from FW header
-@@ -3045,6 +3043,12 @@ struct wlan_ssid {
+@@ -3089,6 +3087,8 @@ enum scan_dwelltime_adaptive_mode {
+ #define WLAN_SCAN_MAX_NUM_SSID          10
+ #define WLAN_SCAN_MAX_NUM_BSSID         10
+ 
++#define WLAN_SCAN_MAX_NUM_CHANNELS	60
++
+ #define WLAN_SSID_MAX_LEN 32
+ 
+ struct element_info {
+@@ -3102,6 +3102,12 @@ struct wlan_ssid {
  };
  
  #define WMI_IE_BITMAP_SIZE             8
@@ -324,7 +345,7 @@
  
  #define WMI_SCAN_MAX_NUM_SSID                0x0A
  /* prefix used by scan requestor ids on the host */
-@@ -3179,6 +3183,22 @@ struct hint_bssid {
+@@ -3236,6 +3242,22 @@ struct hint_bssid {
  	struct wmi_mac_addr bssid;
  };
  
@@ -347,7 +368,7 @@
  struct scan_req_params {
  	u32 scan_id;
  	u32 scan_req_id;
-@@ -3241,17 +3261,17 @@ struct scan_req_params {
+@@ -3298,17 +3320,17 @@ struct scan_req_params {
  			    scan_f_forced:1,
  			    scan_f_2ghz:1,
  			    scan_f_5ghz:1,
@@ -362,13 +383,13 @@
  	u32 num_bssid;
  	u32 num_ssids;
  	u32 n_probes;
--	u32 chan_list[WLAN_SCAN_MAX_NUM_CHANNELS];
+-	u32 *chan_list;
 +	struct chan_list chan_list;
 +	struct cfg80211_chan_def *chandef;
  	u32 notify_scan_events;
  	struct wlan_ssid ssid[WLAN_SCAN_MAX_NUM_SSID];
  	struct wmi_mac_addr bssid_list[WLAN_SCAN_MAX_NUM_BSSID];
-@@ -3262,6 +3282,7 @@ struct scan_req_params {
+@@ -3319,6 +3341,7 @@ struct scan_req_params {
  	u32 num_hint_bssid;
  	struct hint_short_ssid hint_s_ssid[WLAN_SCAN_MAX_HINT_S_SSID];
  	struct hint_bssid hint_bssid[WLAN_SCAN_MAX_HINT_BSSID];
@@ -376,12 +397,12 @@
  };
  
  struct wmi_ssid_arg {
-@@ -3614,9 +3635,12 @@ struct wmi_stop_scan_cmd {
+@@ -3672,9 +3695,12 @@ struct wmi_stop_scan_cmd {
  struct scan_chan_list_params {
  	u32 pdev_id;
  	u16 nallchans;
 +	bool append_chan_list;
- 	struct channel_param ch_param[1];
+ 	struct channel_param ch_param[];
  };
  
 +#define WMI_APPEND_TO_EXISTING_CHAN_LIST_FLAG BIT(0)
@@ -389,7 +410,7 @@
  struct wmi_scan_chan_list_cmd {
  	u32 tlv_header;
  	u32 num_scan_chans;
-@@ -5358,6 +5382,8 @@ int ath11k_wmi_vdev_delete(struct ath11k
+@@ -5476,6 +5502,8 @@ int ath11k_wmi_vdev_delete(struct ath11k
  void ath11k_wmi_start_scan_init(struct ath11k *ar, struct scan_req_params *arg);
  int ath11k_wmi_send_scan_start_cmd(struct ath11k *ar,
  				   struct scan_req_params *params);
@@ -400,7 +421,7 @@
  int ath11k_wmi_send_wmm_update_cmd_tlv(struct ath11k *ar, u32 vdev_id,
 --- a/drivers/net/wireless/ath/ath11k/reg.c
 +++ b/drivers/net/wireless/ath/ath11k/reg.c
-@@ -90,99 +90,7 @@ ath11k_reg_notifier(struct wiphy *wiphy,
+@@ -90,96 +90,7 @@ ath11k_reg_notifier(struct wiphy *wiphy,
  
  int ath11k_reg_update_chan_list(struct ath11k *ar)
  {
@@ -411,7 +432,6 @@
 -	struct channel_param *ch;
 -	enum nl80211_band band;
 -	int num_channels = 0;
--	int params_len;
 -	int i, ret;
 -
 -	bands = hw->wiphy->bands;
@@ -431,10 +451,8 @@
 -	if (WARN_ON(!num_channels))
 -		return -EINVAL;
 -
--	params_len = sizeof(struct scan_chan_list_params) +
--			num_channels * sizeof(struct channel_param);
--	params = kzalloc(params_len, GFP_KERNEL);
--
+-	params = kzalloc(struct_size(params, ch_param, num_channels),
+-			 GFP_KERNEL);
 -	if (!params)
 -		return -ENOMEM;
 -

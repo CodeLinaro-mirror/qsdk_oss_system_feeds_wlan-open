@@ -25,7 +25,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -967,6 +967,8 @@ struct ath11k_base {
+@@ -993,6 +993,8 @@ struct ath11k_base {
  	struct ath11k_internal_pci ipci;
  	bool enable_memory_stats;
  
@@ -36,7 +36,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  };
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -1414,6 +1414,55 @@ static const struct file_operations fops
+@@ -1418,6 +1418,55 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -92,7 +92,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  static ssize_t ath11k_debug_write_fw_recovery(struct file *file,
                                                char __user *user_buf,
                                                size_t count, loff_t *ppos)
-@@ -1688,6 +1737,9 @@ int ath11k_debugfs_pdev_create(struct at
+@@ -1698,6 +1747,9 @@ int ath11k_debugfs_pdev_create(struct at
  	debugfs_create_file("ce_latency_stats", 0600, ab->debugfs_soc, ab,
  			    &fops_ce_latency_stats);
  
@@ -102,14 +102,6 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	return 0;
  }
  
-@@ -1840,7 +1892,6 @@ static ssize_t ath11k_write_pktlog_filte
- 	debugfs_create_file("memory_stats", 0600, ab->debugfs_soc, ab,
- 			    &fops_memory_stats);
- 
--
- #define HTT_RX_FILTER_TLV_LITE_MODE \
- 			(HTT_RX_FILTER_TLV_FLAGS_PPDU_START | \
- 			HTT_RX_FILTER_TLV_FLAGS_PPDU_END | \
 --- a/drivers/net/wireless/ath/ath11k/dp.c
 +++ b/drivers/net/wireless/ath/ath11k/dp.c
 @@ -48,7 +48,7 @@ int ath11k_dp_peer_setup(struct ath11k *
@@ -121,37 +113,29 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		rx_hash_enable = DP_RX_HASH_DISABLE;
  
  	/* NOTE: reo_dest ring id starts from 1 unlike mac_id which starts from 0 */
-@@ -468,6 +468,8 @@ static int ath11k_dp_srng_common_setup(s
- 
- 	ath11k_hal_reo_hw_setup(ab, ring_hash_map);
- 
-+	ab->rx_hash = ring_hash_map;
-+
- 	return 0;
- 
- err:
 --- a/drivers/net/wireless/ath/ath11k/hal.h
 +++ b/drivers/net/wireless/ath/ath11k/hal.h
-@@ -917,6 +917,7 @@ void ath11k_hal_reo_qdesc_setup(void *va
+@@ -920,6 +920,7 @@ void ath11k_hal_reo_qdesc_setup(void *va
+ 				u32 start_seq, enum hal_pn_type type);
  void ath11k_hal_reo_init_cmd_ring(struct ath11k_base *ab,
  				  struct hal_srng *srng);
- void ath11k_hal_reo_hw_setup(struct ath11k_base *ab, u32 ring_hash_map);
 +void ath11k_hal_reo_hash_setup(struct ath11k_base *ab, u32 ring_hash_map);
  void ath11k_hal_setup_link_idle_list(struct ath11k_base *ab,
  				     struct hal_wbm_idle_scatter_list *sbuf,
  				     u32 nsbufs, u32 tot_link_desc,
---- a/drivers/net/wireless/ath/ath11k/hal_rx.c
-+++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
-@@ -801,11 +801,25 @@ void ath11k_hal_reo_init_cmd_ring(struct
- 	}
+--- a/drivers/net/wireless/ath/ath11k/hw.c
++++ b/drivers/net/wireless/ath/ath11k/hw.c
+@@ -102,6 +102,23 @@ static void ath11k_init_wmi_config_qca63
+ 	config->flag1 |= WMI_RSRC_CFG_FLAG1_BSS_CHANNEL_INFO_64;
  }
  
--void ath11k_hal_reo_hw_setup(struct ath11k_base *ab, u32 ring_hash_map)
 +void ath11k_hal_reo_hash_setup(struct ath11k_base *ab, u32 ring_hash_map)
- {
- 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
- 	u8 reo_dest_hash_shift = ab->hw_params.reo_dest_ring_map_shift;
- 
++{
++	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
++	u8 reo_dest_hash_shift = ab->hw_params.reo_dest_ring_map_shift;
++
++	ab->rx_hash = ring_hash_map;
++
 +	/* These registers use only 24bits(3 bits x 8 hash values) for
 +	 * mapping the dest rings and remaining bits are reserved/not used
 +	 * so its safe to write them completely.
@@ -162,14 +146,18 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +			   ring_hash_map << reo_dest_hash_shift);
 +}
 +
-+void ath11k_hal_reo_hw_setup(struct ath11k_base *ab, u32 ring_hash_map)
-+{
-+	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
-+
+ static void ath11k_hw_ipq8074_reo_setup(struct ath11k_base *ab)
+ {
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+@@ -115,7 +132,6 @@ static void ath11k_hw_ipq8074_reo_setup(
+ 		HAL_HASH_ROUTING_RING_SW2 << 15 |
+ 		HAL_HASH_ROUTING_RING_SW3 << 18 |
+ 		HAL_HASH_ROUTING_RING_SW4 << 21;
+-	u8 reo_dest_hash_shift = ab->hw_params.reo_dest_ring_map_shift;
+ 
  	ab->hw_params.hw_ops->set_rx_fragmentation_dst_ring(ab);
- 	ath11k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_0(ab),
- 			   HAL_DEFAULT_REO_TIMEOUT_USEC);
-@@ -820,18 +834,7 @@ void ath11k_hal_reo_hw_setup(struct ath1
+ 
+@@ -132,18 +148,7 @@ static void ath11k_hw_ipq8074_reo_setup(
  	if (ab->nss.enabled)
  		return;
  
@@ -177,6 +165,48 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 -	 * mapping the dest rings and remaining bits are reserved/not used
 -	 * so its safe to write them completely.
 -	 */
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_0,
+-				      ring_hash_map << reo_dest_hash_shift);
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_1,
+-				      ring_hash_map << reo_dest_hash_shift);
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_2,
+-				      ring_hash_map << reo_dest_hash_shift);
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_3,
+-				      ring_hash_map << reo_dest_hash_shift);
++	ath11k_hal_reo_hash_setup(ab, ring_hash_map);
+ }
+ 
+ static void ath11k_init_wmi_config_ipq8074(struct ath11k_base *ab,
+@@ -909,7 +914,6 @@ static void ath11k_hw_wcn6855_reo_setup(
+ 		HAL_HASH_ROUTING_RING_SW2 << 20 |
+ 		HAL_HASH_ROUTING_RING_SW3 << 24 |
+ 		HAL_HASH_ROUTING_RING_SW4 << 28;
+-	u8 reo_dest_hash_shift = ab->hw_params.reo_dest_ring_map_shift;
+ 
+ 	ab->hw_params.hw_ops->set_rx_fragmentation_dst_ring(ab);
+ 
+@@ -927,16 +931,12 @@ static void ath11k_hw_wcn6855_reo_setup(
+ 	if (ab->nss.enabled)
+ 		return;
+ 
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_2,
+-			   ring_hash_map << reo_dest_hash_shift);
+-	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_3,
+-			   ring_hash_map << reo_dest_hash_shift);
++	ath11k_hal_reo_hash_setup(ab, ring_hash_map);
+ }
+ 
+ static void ath11k_hw_ipq5018_reo_setup(struct ath11k_base *ab)
+ {
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+-	u8 reo_dest_hash_shift = ab->hw_params.reo_dest_ring_map_shift;
+ 
+ 	/* Each hash entry uses three bits to map to a particular ring. */
+ 	u32 ring_hash_map = HAL_HASH_ROUTING_RING_SW1 << 0 |
+@@ -963,14 +963,7 @@ static void ath11k_hw_ipq5018_reo_setup(
+ 	if (ab->nss.enabled)
+ 		return;
+ 
 -	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_0,
 -			   ring_hash_map << reo_dest_hash_shift);
 -	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_1,
@@ -188,4 +218,4 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +	ath11k_hal_reo_hash_setup(ab, ring_hash_map);
  }
  
- static inline void
+ static u16 ath11k_hw_ipq8074_mpdu_info_get_peerid(u8 *tlv_data)
