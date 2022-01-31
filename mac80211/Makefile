@@ -4,15 +4,15 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=mac80211
 
-PKG_BACKPORTS_VERSION:=3a9d70a32ea5
+PKG_BACKPORTS_VERSION:=d44432d6c6c7
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=b157d2276
+PKG_KERNEL_VERSION:=b7ab87182e
 PKG_KERNEL_SOURCE_URL:=https://source.codeaurora.org/quic/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
-PKG_VERSION:=20210222_001
+PKG_VERSION:=20211207_001
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -254,17 +254,19 @@ define DownloadBackports
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
 	git revert --no-edit db3bdcb9 && \
 	git revert --no-edit c8ffcd122 && git revert --no-edit 48a54f6bc && \
-	git revert --no-edit b55379e34 && git revert --no-edit e908435e4 && \
-	git revert --no-edit 36b0cefe9)
+	git revert --no-edit b55379e34 && git revert --no-edit 47c662486 && \
+	git revert --no-edit 36b0cefe9 && git revert --no-edit dfcb63ce && \
+	git revert --no-edit e72aeb9e && git revert --no-edit de1352ead8)
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
-	git revert --no-edit b35b2767 && \
+	git revert --no-edit 49432781 && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
+
 ifeq ($(CONFIG_LINUX_4_4),y)
 	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
 else
