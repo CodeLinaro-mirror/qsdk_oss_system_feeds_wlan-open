@@ -45,7 +45,7 @@ perf_setup(){
 			fi
 		fi
 
-		if [ "$board" != "ap-hk14" ] && [ "$board" != "ap-hk10-c2" ]; then
+		if [ "$board" != "ap-hk14" ] && [ "$board" != "ap-hk10-c2" ] && [ "$board" != "ap-al02-c1" ]; then
 			[ -d "/sys/class/net/wlan0" ] && echo e > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 			[ -d "/sys/class/net/wlan1" ] && echo e > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 			[ -d "/sys/class/net/wlan2" ] && echo e > /sys/class/net/wlan2/queues/rx-0/rps_cpus

@@ -131,6 +131,39 @@ boost_performance() {
 					echo 0x44444444 > /sys/kernel/debug/ath11k/qcn6122_2/rx_hash
 				fi
 				;;
+			ap-al02-c1)
+				#case for rdp418
+				echo 1 > /sys/kernel/debug/ath11k/ipq9574/stats_disable
+				echo 0 > /sys/kernel/debug/ath11k/ipq9574/ce_latency_stats
+
+				echo 1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0003\:01\:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0003\:01\:00.0/ce_latency_stats
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/ce_latency_stats
+
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0003\:01\:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/trace_qdss
+
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+				tc qdisc replace dev eth4 root noqueue
+				tc qdisc replace dev eth5 root noqueue
+				ethtool -K eth4 gro off
+				ethtool -K eth4 gso off
+				ethtool -K eth5 gro off
+				ethtool -K eth5 gso off
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+				echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0003\:01\:00.0/rx_hash
+				echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/rx_hash
+
+				;;
 			*)
 				#no settings
 				;;
