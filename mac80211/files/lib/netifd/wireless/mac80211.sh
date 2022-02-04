@@ -784,6 +784,7 @@ find_phy() {
 	delta=$(($radio_idx - $first_phy_idx))
 
 	[ -n "$path" ] && {
+		sleep 1
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
 				*$path)
