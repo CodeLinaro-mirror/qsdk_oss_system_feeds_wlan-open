@@ -1,6 +1,6 @@
-From 9ad4610da014a5b1c35533e6bf2f1c5b2d1a0fa0 Mon Sep 17 00:00:00 2001
+From 00d07d474f2ee3aa8aa2945fc26e473183e9201a Mon Sep 17 00:00:00 2001
 From: Anilkumar Kolli <quic_akolli@quicinc.com>
-Date: Mon, 6 Dec 2021 15:07:03 +0530
+Date: Fri, 17 Dec 2021 17:16:11 +0530
 Subject: [PATCH] ath11k: Fix updating rx stats with monitor vif enabled
 
 Rx stats update fails when monitor vif is enabled.
@@ -12,41 +12,40 @@ Fixes: 1f49c59c7222 ("mac80211: Package upgrade")
 
 Signed-off-by: Anilkumar Kolli <quic_akolli@quicinc.com>
 ---
- drivers/net/wireless/ath/ath11k/dp_rx.c | 84 ++++++---------------------------
- 1 file changed, 15 insertions(+), 69 deletions(-)
+ drivers/net/wireless/ath/ath11k/dp_rx.c            | 96 ++++++----------------
 
 diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
-index ea634b36fb40..002757993ac2 100644
+index 4e1d40a8189f..80c4e651597d 100644
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -4021,6 +4021,9 @@ int ath11k_dp_rx_process_mon_status(struct ath11k_base *ab, int mac_id,
- 	if (!num_buffs_reaped)
- 		goto exit;
- 
-+	if (pmon->mon_ppdu_status != DP_PPDU_STATUS_START)
-+		goto exit;
-+
- 	while ((skb = __skb_dequeue(&skb_list))) {
- 		if (ath11k_debugfs_is_pktlog_rx_stats_enabled(ar)) {
- 			log_type = ATH11K_PKTLOG_TYPE_LITE_RX;
-@@ -4038,8 +4041,14 @@ int ath11k_dp_rx_process_mon_status(struct ath11k_base *ab, int mac_id,
+@@ -4126,12 +4126,23 @@ int ath11k_dp_rx_process_mon_status(struct ath11k_base *ab, int mac_id,
  
  		hal_status = ath11k_hal_rx_parse_mon_status(ab, ppdu_info, skb);
  
 -		if (ppdu_info->peer_id == HAL_INVALID_PEERID ||
 -		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
-+		if ((ppdu_info->peer_id == HAL_INVALID_PEERID ||
-+		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) &&
-+		    ar->monitor_started &&
-+		    !ab->hw_params.full_monitor_mode) {
++		if (ar->monitor_started &&
++		    hal_status == HAL_RX_MON_STATUS_PPDU_DONE &&
++		    pmon->mon_ppdu_status == DP_PPDU_STATUS_START) {
 +			rx_mon_stats->status_ppdu_done++;
 +			pmon->mon_ppdu_status = DP_PPDU_STATUS_DONE;
-+			ath11k_dp_rx_mon_dest_process(ar, mac_id, budget, napi);
-+			pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
++
++			if (!ab->hw_params.full_monitor_mode) {
++				ath11k_dp_rx_mon_dest_process(ar, mac_id, budget, napi);
++				pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
++			}
++		}
++
++		if ((ppdu_info->peer_id == HAL_INVALID_PEERID ||
++		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE)) {
  			dev_kfree_skb_any(skb);
  			continue;
  		}
-@@ -6268,76 +6277,13 @@ void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, int mac_id,
+-
+ 		rcu_read_lock();
+ 		spin_lock_bh(&ab->base_lock);
+ 		peer = ath11k_peer_find_by_id(ab, ppdu_info->peer_id);
+@@ -6369,76 +6380,13 @@ void ath11k_dp_rx_mon_dest_process(struct ath11k *ar, int mac_id,
  	}
  }
  
@@ -127,6 +126,28 @@ index ea634b36fb40..002757993ac2 100644
  }
  
  static int ath11k_dp_rx_pdev_mon_status_attach(struct ath11k *ar)
+@@ -6835,6 +6783,13 @@ int ath11k_dp_full_mon_process_rx(struct ath11k_base *ab, int mac_id,
+ 
+ 	spin_lock_bh(&pmon->mon_lock);
+ 
++	pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
++	if (!ar->monitor_started) {
++		quota = ath11k_dp_rx_process_mon_status(ab, mac_id, napi, budget);
++		spin_unlock_bh(&pmon->mon_lock);
++		return quota;
++	}
++
+ 	sw_mon_entries = &pmon->sw_mon_entries;
+ 	rx_mon_stats = &pmon->rx_mon_stats;
+ 
+@@ -6880,7 +6835,6 @@ int ath11k_dp_full_mon_process_rx(struct ath11k_base *ab, int mac_id,
+ 		}
+ 
+ 		rx_mon_stats->dest_ppdu_done++;
+-		pmon->mon_ppdu_status = DP_PPDU_STATUS_START;
+ 		pmon->mon_status_buf_state = DP_MON_STATUS_LAG;
+ 		pmon->mon_status_paddr = sw_mon_entries->mon_status_paddr;
+ 		pmon->hold_mon_dst_ring = true;
 -- 
 2.7.4
 
