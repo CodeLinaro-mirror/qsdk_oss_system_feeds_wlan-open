@@ -1,3 +1,54 @@
+--- a/backport-include/linux/kernel.h
++++ b/backport-include/linux/kernel.h
+@@ -2,7 +2,9 @@
+ #define __BACKPORT_KERNEL_H
+ #include_next <linux/kernel.h>
+ /* needed to include BUILD_BUG_ON_ZERO on <= 4.12 */
++#if LINUX_VERSION_IS_G(4,4,60)
+ #include <linux/bug.h>
++#endif
+ #include <linux/version.h>
+ 
+ 
+--- a/backport-include/linux/netdevice.h
++++ b/backport-include/linux/netdevice.h
+@@ -70,6 +70,9 @@ static inline void netif_trans_update(st
+ 	(_dev)->needs_free_netdev = true;
+ #endif
+ 
++#define netdev_tstats(dev)  dev->tstats
++#define netdev_assign_tstats(dev, e)    dev->tstats = (e);
++
+ #if LINUX_VERSION_IS_LESS(4,15,0)
+ static inline int _bp_netdev_upper_dev_link(struct net_device *dev,
+ 					    struct net_device *upper_dev)
+--- a/backport-include/linux/pm_qos.h
++++ b/backport-include/linux/pm_qos.h
+@@ -32,5 +32,4 @@ static inline s32 cpu_latency_qos_limit(
+ 	return pm_qos_request(PM_QOS_CPU_DMA_LATENCY);
+ }
+ #endif /* < 5.7 */
+-
+ #endif	/* _COMPAT_LINUX_PM_QOS_H */
+--- a/backport-include/linux/slab.h
++++ b/backport-include/linux/slab.h
+@@ -7,4 +7,6 @@
+ #define kfree_sensitive(x)	kzfree(x)
+ #endif
+ 
++#define kfree_sensitive(x)	kzfree(x)	/* For backward compatibility */
++
+ #endif /* __BACKPORT_SLAB_H */
+--- a/backport-include/linux/version.h
++++ b/backport-include/linux/version.h
+@@ -12,6 +12,7 @@
+ 
+ #define LINUX_VERSION_IS_LESS(x1,x2,x3)	(LINUX_VERSION_CODE < KERNEL_VERSION(x1,x2,x3))
+ #define LINUX_VERSION_IS_GEQ(x1,x2,x3)	(LINUX_VERSION_CODE >= KERNEL_VERSION(x1,x2,x3))
++#define LINUX_VERSION_IS_G(x1,x2,x3)	(LINUX_VERSION_CODE > KERNEL_VERSION(x1,x2,x3))
+ #define LINUX_VERSION_IN_RANGE(x1,x2,x3, y1,y2,y3) \
+ 	(LINUX_VERSION_IS_GEQ(x1,x2,x3) && LINUX_VERSION_IS_LESS(y1,y2,y3))
+ #endif /* _BP_LINUX_VERSION_H */
 --- a/drivers/net/wireless/ath/ath10k/ahb.c
 +++ b/drivers/net/wireless/ath/ath10k/ahb.c
 @@ -180,40 +180,35 @@ static int ath10k_ahb_rst_ctrl_init(stru
@@ -46,16 +97,87 @@
  	if (IS_ERR(ar_ahb->cpu_init_rst)) {
  		ath10k_err(ar, "failed to get cpu init rst ctrl: %ld\n",
  			   PTR_ERR(ar_ahb->cpu_init_rst));
---- a/drivers/net/wireless/ath/ath11k/Kconfig
-+++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -5,7 +5,6 @@ config ATH11K
- 	depends on MAC80211 && HAS_DMA
- 	depends on CRYPTO_MICHAEL_MIC
- 	select ATH_COMMON
--	depends on QCOM_QMI_HELPERS
- 	help
- 	  This module adds support for Qualcomm Technologies 802.11ax family of
- 	  chipsets.
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
+@@ -29,7 +29,13 @@ static int ath11k_hal_reo_cmd_queue_stat
+ 		  FIELD_PREP(HAL_TLV_HDR_LEN, sizeof(*desc));
+ 
+ 	desc = (struct hal_reo_get_queue_stats *)tlv->value;
++#if LINUX_VERSION_IS_LESS(5,16,0)
++	memset(&desc->queue_addr_lo, 0,
++			(sizeof(*desc) - sizeof(struct hal_reo_cmd_hdr)));
++#else
+ 	memset_startat(desc, 0, queue_addr_lo);
++#endif
++
+ 
+ 	desc->cmd.info0 &= ~HAL_REO_CMD_HDR_INFO0_STATUS_REQUIRED;
+ 	if (cmd->flag & HAL_REO_CMD_FLG_NEED_STATUS)
+@@ -61,7 +67,12 @@ static int ath11k_hal_reo_cmd_flush_cach
+ 		  FIELD_PREP(HAL_TLV_HDR_LEN, sizeof(*desc));
+ 
+ 	desc = (struct hal_reo_flush_cache *)tlv->value;
++#if LINUX_VERSION_IS_LESS(5,16,0)
++	memset(&desc->cache_addr_lo, 0,
++			(sizeof(*desc) - sizeof(struct hal_reo_cmd_hdr)));
++#else
+ 	memset_startat(desc, 0, cache_addr_lo);
++#endif
+ 
+ 	desc->cmd.info0 &= ~HAL_REO_CMD_HDR_INFO0_STATUS_REQUIRED;
+ 	if (cmd->flag & HAL_REO_CMD_FLG_NEED_STATUS)
+@@ -99,7 +110,12 @@ static int ath11k_hal_reo_cmd_update_rx_
+ 		  FIELD_PREP(HAL_TLV_HDR_LEN, sizeof(*desc));
+ 
+ 	desc = (struct hal_reo_update_rx_queue *)tlv->value;
++#if LINUX_VERSION_IS_LESS(5,16,0)
++	memset(&desc->queue_addr_lo, 0,
++			(sizeof(*desc) - sizeof(struct hal_reo_cmd_hdr)));
++#else
+ 	memset_startat(desc, 0, queue_addr_lo);
++#endif
+ 
+ 	desc->cmd.info0 &= ~HAL_REO_CMD_HDR_INFO0_STATUS_REQUIRED;
+ 	if (cmd->flag & HAL_REO_CMD_FLG_NEED_STATUS)
+--- a/drivers/net/wireless/ath/ath11k/mhi.c
++++ b/drivers/net/wireless/ath/ath11k/mhi.c
+@@ -372,8 +372,10 @@ int ath11k_mhi_register(struct ath11k_pc
+ 		return ret;
+ 	}
+ 
++#if LINUX_VERSION_IS_GEQ(5,15,0)
+ 	if (!test_bit(ATH11K_PCI_FLAG_MULTI_MSI_VECTORS, &ab_pci->flags))
+ 		mhi_ctrl->irq_flags = IRQF_SHARED | IRQF_NOBALANCING;
++#endif
+ 
+ 	if (test_bit(ATH11K_FLAG_FIXED_MEM_RGN, &ab->dev_flags)) {
+ 		ret = ath11k_mhi_read_addr_from_dt(mhi_ctrl);
+@@ -577,11 +579,15 @@ static int ath11k_mhi_set_state(struct a
+ 		ret = mhi_pm_suspend(ab_pci->mhi_ctrl);
+ 		break;
+ 	case ATH11K_MHI_RESUME:
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ 		/* Do force MHI resume as some devices like QCA6390, WCN6855
+ 		 * are not in M3 state but they are functional. So just ignore
+ 		 * the MHI state while resuming.
+ 		 */
+ 		ret = mhi_pm_resume_force(ab_pci->mhi_ctrl);
++#else
++		ret = mhi_pm_resume(ab_pci->mhi_ctrl);
++#endif
+ 		break;
+ 	case ATH11K_MHI_TRIGGER_RDDM:
+ 		ret = mhi_force_rddm_mode(ab_pci->mhi_ctrl);
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
+@@ -12,6 +12,7 @@
+ #include <linux/of_address.h>
+ #include <linux/ioport.h>
+ #include <linux/firmware.h>
++#include <linux/module.h>
+ 
+ #define SLEEP_CLOCK_SELECT_INTERNAL_BIT	0x02
+ #define HOST_CSTATE_BIT			0x04
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -46,7 +46,7 @@ struct wmi_tlv {
@@ -207,6 +329,133 @@
  }
  
  extern __must_check bool refcount_dec_if_one(refcount_t *r);
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -1209,7 +1209,13 @@ ieee80211_tx_info_clear_status(struct ie
+ 	/* clear the rate counts */
+ 	for (i = 0; i < IEEE80211_TX_MAX_RATES; i++)
+ 		info->status.rates[i].count = 0;
++#if LINUX_VERSION_IS_LESS(5,16,0)
++	memset(&info->status.ack_signal, 0,
++	       sizeof(struct ieee80211_tx_info) -
++	       offsetof(struct ieee80211_tx_info, status.ack_signal));
++#else
+ 	memset_after(&info->status, 0, rates);
++#endif
+ }
+ 
+ 
+@@ -4283,11 +4289,13 @@ struct ieee80211_ops {
+ 				     struct ieee80211_sta *sta, u8 flowid);
+ 	int (*set_radar_background)(struct ieee80211_hw *hw,
+ 				    struct cfg80211_chan_def *chandef);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ 	int (*net_fill_forward_path)(struct ieee80211_hw *hw,
+ 				     struct ieee80211_vif *vif,
+ 				     struct ieee80211_sta *sta,
+ 				     struct net_device_path_ctx *ctx,
+ 				     struct net_device_path *path);
++#endif
+ };
+ 
+ /**
+--- a/net/mac80211/driver-ops.h
++++ b/net/mac80211/driver-ops.h
+@@ -1486,6 +1486,7 @@ static inline void drv_twt_teardown_requ
+ 	trace_drv_return_void(local);
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ static inline int drv_net_fill_forward_path(struct ieee80211_local *local,
+ 					    struct ieee80211_sub_if_data *sdata,
+ 					    struct ieee80211_sta *sta,
+@@ -1507,5 +1508,6 @@ static inline int drv_net_fill_forward_p
+ 
+ 	return ret;
+ }
++#endif
+ 
+ #endif /* __MAC80211_DRIVER_OPS */
+--- a/net/mac80211/ethtool.c
++++ b/net/mac80211/ethtool.c
+@@ -13,10 +13,15 @@
+ #include "sta_info.h"
+ #include "driver-ops.h"
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ static int ieee80211_set_ringparam(struct net_device *dev,
+ 				   struct ethtool_ringparam *rp,
+ 				   struct kernel_ethtool_ringparam *kernel_rp,
+ 				   struct netlink_ext_ack *extack)
++#else
++static int ieee80211_set_ringparam(struct net_device *dev,
++				   struct ethtool_ringparam *rp)
++#endif
+ {
+ 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
+ 
+@@ -26,10 +31,15 @@ static int ieee80211_set_ringparam(struc
+ 	return drv_set_ringparam(local, rp->tx_pending, rp->rx_pending);
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ static void ieee80211_get_ringparam(struct net_device *dev,
+ 				    struct ethtool_ringparam *rp,
+ 				    struct kernel_ethtool_ringparam *kernel_rp,
+ 				    struct netlink_ext_ack *extack)
++#else
++static void ieee80211_get_ringparam(struct net_device *dev,
++				    struct ethtool_ringparam *rp)
++#endif
+ {
+ 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
+ 
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -851,6 +851,7 @@ static const struct net_device_ops ieee8
+ 
+ };
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ static int ieee80211_netdev_fill_forward_path(struct net_device_path_ctx *ctx,
+ 					      struct net_device_path *path)
+ {
+@@ -908,6 +909,7 @@ out:
+ 
+ 	return ret;
+ }
++#endif
+ 
+ static const struct net_device_ops ieee80211_dataif_8023_ops = {
+ #if LINUX_VERSION_IS_LESS(4,10,0)
+@@ -926,8 +928,9 @@ static const struct net_device_ops ieee8
+ #else
+ 	.ndo_get_stats64 = bp_ieee80211_get_stats64,
+ #endif
+-
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ 	.ndo_fill_forward_path	= ieee80211_netdev_fill_forward_path,
++#endif
+ };
+ 
+ static bool ieee80211_iftype_supports_hdr_offload(enum nl80211_iftype iftype)
+--- a/net/mac80211/trace.h
++++ b/net/mac80211/trace.h
+@@ -2892,12 +2892,14 @@ TRACE_EVENT(drv_twt_teardown_request,
+ 	)
+ );
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+ DEFINE_EVENT(sta_event, drv_net_fill_forward_path,
+ 	TP_PROTO(struct ieee80211_local *local,
+ 		 struct ieee80211_sub_if_data *sdata,
+ 		 struct ieee80211_sta *sta),
+ 	TP_ARGS(local, sdata, sta)
+ );
++#endif
+ 
+ #endif /* !__MAC80211_DRIVER_TRACE || TRACE_HEADER_MULTI_READ */
+ 
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
 @@ -31,6 +31,8 @@
@@ -218,7 +467,7 @@
  static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
  				   struct genl_info *info,
  				   struct cfg80211_crypto_settings *settings,
-@@ -13978,7 +13980,7 @@ static int nl80211_vendor_check_policy(c
+@@ -14010,7 +14012,7 @@ static int nl80211_vendor_check_policy(c
  		return -EINVAL;
  	}
  
@@ -227,54 +476,13 @@
  }
  
  static int nl80211_vendor_cmd(struct sk_buff *skb, struct genl_info *info)
---- a/backport-include/linux/pm_qos.h
-+++ b/backport-include/linux/pm_qos.h
-@@ -32,5 +32,4 @@ static inline s32 cpu_latency_qos_limit(
- 	return pm_qos_request(PM_QOS_CPU_DMA_LATENCY);
- }
- #endif /* < 5.7 */
--
- #endif	/* _COMPAT_LINUX_PM_QOS_H */
---- a/backport-include/linux/slab.h
-+++ b/backport-include/linux/slab.h
-@@ -7,4 +7,6 @@
- #define kfree_sensitive(x)	kzfree(x)
- #endif
- 
-+#define kfree_sensitive(x)	kzfree(x)	/* For backward compatibility */
-+
- #endif /* __BACKPORT_SLAB_H */
---- a/backport-include/linux/netdevice.h
-+++ b/backport-include/linux/netdevice.h
-@@ -70,6 +70,9 @@ static inline void netif_trans_update(st
- 	(_dev)->needs_free_netdev = true;
- #endif
- 
-+#define netdev_tstats(dev)  dev->tstats
-+#define netdev_assign_tstats(dev, e)    dev->tstats = (e);
-+
- #if LINUX_VERSION_IS_LESS(4,15,0)
- static inline int _bp_netdev_upper_dev_link(struct net_device *dev,
- 					    struct net_device *upper_dev)
---- a/backport-include/linux/kernel.h
-+++ b/backport-include/linux/kernel.h
-@@ -2,7 +2,9 @@
- #define __BACKPORT_KERNEL_H
- #include_next <linux/kernel.h>
- /* needed to include BUILD_BUG_ON_ZERO on <= 4.12 */
-+#if LINUX_VERSION_IS_G(4,4,60)
- #include <linux/bug.h>
-+#endif
- #include <linux/version.h>
- 
- 
---- a/backport-include/linux/version.h
-+++ b/backport-include/linux/version.h
-@@ -12,6 +12,7 @@
- 
- #define LINUX_VERSION_IS_LESS(x1,x2,x3)	(LINUX_VERSION_CODE < KERNEL_VERSION(x1,x2,x3))
- #define LINUX_VERSION_IS_GEQ(x1,x2,x3)	(LINUX_VERSION_CODE >= KERNEL_VERSION(x1,x2,x3))
-+#define LINUX_VERSION_IS_G(x1,x2,x3)	(LINUX_VERSION_CODE > KERNEL_VERSION(x1,x2,x3))
- #define LINUX_VERSION_IN_RANGE(x1,x2,x3, y1,y2,y3) \
- 	(LINUX_VERSION_IS_GEQ(x1,x2,x3) && LINUX_VERSION_IS_LESS(y1,y2,y3))
- #endif /* _BP_LINUX_VERSION_H */
+--- a/drivers/net/wireless/ath/ath11k/Kconfig
++++ b/drivers/net/wireless/ath/ath11k/Kconfig
+@@ -5,7 +5,6 @@ config ATH11K
+ 	depends on MAC80211 && HAS_DMA
+ 	depends on CRYPTO_MICHAEL_MIC
+ 	select ATH_COMMON
+-	depends on QCOM_QMI_HELPERS
+ 	help
+ 	  This module adds support for Qualcomm Technologies 802.11ax family of
+ 	  chipsets.

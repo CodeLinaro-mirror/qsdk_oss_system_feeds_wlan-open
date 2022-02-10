@@ -4,15 +4,15 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=mac80211
 
-PKG_BACKPORTS_VERSION:=d44432d6c6c7
+PKG_BACKPORTS_VERSION:=83f664bbc583
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=b7ab87182e
+PKG_KERNEL_VERSION:=f40abb4788
 PKG_KERNEL_SOURCE_URL:=https://source.codeaurora.org/quic/qsdk/kvalo/ath.git
-PKG_KERNEL_BRANCH:=ath-qca
+PKG_KERNEL_BRANCH:=ath12k-bringup-extras
 
-PKG_VERSION:=20211207_001
+PKG_VERSION:=20220209
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -20,7 +20,7 @@ PKG_RELEASE:=1
 PKG_BUILD_DIR:=$(KERNEL_BUILD_DIR)/$(PKG_SUBDIR)-$(BUILD_VARIANT)/$(PKG_SUBDIR)
 PKG_BUILD_PARALLEL:=1
 
-PKG_DRIVERS = ath9k-common ath9k ath9k-htc ath10k ath11k ath
+PKG_DRIVERS = ath9k-common ath9k ath9k-htc ath10k ath11k ath12k ath
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_kmod-mac80211 \
@@ -452,6 +452,21 @@ This module adds support for wireless adapters based on
 60GHz QCA Wilocity family of chipsets. These support 802.11d.
 endef
 
+define KernelPackage/ath12k
+  $(call KernelPackage/mac80211/Default)
+  TITLE:=QTI 802.11be wireless cards support
+  DEPENDS+= +kmod-ath \
+	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
+  FILES:= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
+  AUTOLOAD:=$(call AutoProbe,ath12k)
+endef
+
+define KernelPackage/ath12k/description
+This module adds support for wireless adapters based on
+QTI IEEE 802.11be family of chipsets. For now only
+AHB is supported.
+endef
+
 config_package=$(if $(CONFIG_PACKAGE_kmod-$(1)),m)
 
 config-y:= \
@@ -476,12 +491,13 @@ ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
 	ATH9K_HTC_DEBUGFS \
 	ATH10K_DEBUGFS \
 	ATH11K_DEBUGFS \
+	ATH12K_DEBUGFS \
 	ATH10K_PKTLOG \
 	ATH11K_PKTLOG
 endif
 
 config-$(CONFIG_PACKAGE_MAC80211_NSS_SUPPORT) += MAC80211_NSS_SUPPORT
-config-$(CONFIG_PACKAGE_MAC80211_MESSAGE_TRACING) += MAC80211_MESSAGE_TRACING ATH10K_TRACING ATH11K_TRACING
+config-$(CONFIG_PACKAGE_MAC80211_MESSAGE_TRACING) += MAC80211_MESSAGE_TRACING ATH10K_TRACING ATH11K_TRACING ATH12K_TRACING
 config-$(CONFIG_PACKAGE_MAC80211_DEBUG_MENU) += MAC80211_DEBUG_MENU
 config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_MLME_DEBUG) += MAC80211_MLME_DEBUG
@@ -491,7 +507,7 @@ config-$(CONFIG_PACKAGE_MAC80211_IBSS_DEBUG) += MAC80211_IBSS_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_PS_DEBUG) += MAC80211_PS_DEBUG
 
 config-$(call config_package,ath) += ATH_CARDS ATH_COMMON
-config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG HWMON
+config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG ATH12K_DEBUG HWMON
 
 config-$(call config_package,ath9k) += ATH9K
 config-$(call config_package,ath9k-common) += ATH9K_COMMON
@@ -504,6 +520,7 @@ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
 config-$(call config_package,ath11k) += ATH11K ATH11K_PCI ATH11K_AHB
+config-$(call config_package,ath12k) += ATH12K
 config-$(call config_package,wil6210) += ATH_CARDS WIL6210
 
 config-$(CONFIG_PACKAGE_WIL6210_NSS_SUPPORT) += WIL6210_NSS_SUPPORT
@@ -641,6 +658,10 @@ define KernelPackage/ath11k/install
 	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
 endef
 
+define KernelPackage/ath12k/install
+	$(INSTALL_DIR) $(1)/etc/init.d
+endef
+
 $(eval $(call KernelPackage,cfg80211))
 $(eval $(call KernelPackage,mac80211))
 $(eval $(call KernelPackage,mac80211-nonss))
@@ -654,3 +675,4 @@ $(eval $(call KernelPackage,ath11k-nonss))
 $(eval $(call KernelPackage,ath))
 $(eval $(call KernelPackage,ath-nonss))
 $(eval $(call KernelPackage,wil6210))
+$(eval $(call KernelPackage,ath12k))
