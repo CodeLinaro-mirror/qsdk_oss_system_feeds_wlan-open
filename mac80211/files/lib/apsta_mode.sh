@@ -42,7 +42,7 @@ hostapd_vht_he_oper_centr_freq_seg0_idx() {
 	local sta_width="$1"
 	local sta_channel="$2"
 	# Frequency is needed for specially handling 6 GHz channels
-	local freq="$3"
+        local freq="$3"
 
 	case $ap_vht_he_oper_chwidth in
 		# 20/40 MHz chan width
@@ -52,11 +52,12 @@ hostapd_vht_he_oper_centr_freq_seg0_idx() {
 				ap_vht_he_oper_centr_freq_seg0_idx=$sta_channel;;
 			"40")
 				if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-					case "$(( ($sta_channel / 4) % 2 ))" in
-						1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
-						0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
-					esac
-				elif [ $sta_channel -lt 7 ]; then
+                                        case "$(( ($sta_channel / 4) % 2 ))" in
+                                                1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
+                                                0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
+                                        esac
+
+				if [ $sta_channel -lt 7 ]; then
 					ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2))
 				elif [ $sta_channel -lt 36 ]; then
 					ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2))
@@ -71,41 +72,51 @@ hostapd_vht_he_oper_centr_freq_seg0_idx() {
 		;;
 		# 80 MHz chan width
 		"1")
-			if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-				case "$(( ($sta_channel / 4) % 4 ))" in
-					0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 6));;
-					1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
-					2) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
-					3) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 6));;
-				esac
-			elif [ $freq != 5935 ]; then
-				case "$(( ($sta_channel / 4) % 4 ))" in
-					1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 6));;
-					2) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
-					3) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
-					0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 6));;
-				esac
-			fi
+			 if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
+                                case "$(( ($sta_channel / 4) % 4 ))" in
+                                        0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 6));;
+                                        1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
+                                        2) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
+                                        3) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 6));;
+                                esac
+                        elif [ $freq != 5935 ]; then
+                                case "$(( ($sta_channel / 4) % 4 ))" in
+                                        1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 6));;
+                                        2) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
+                                        3) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
+                                        0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 6));;
+                                esac
+                        fi
+			case "$(( ($sta_channel / 4) % 4 ))" in
+				1) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 6));;
+				2) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel + 2));;
+				3) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 2));;
+				0) ap_vht_he_oper_centr_freq_seg0_idx=$(($sta_channel - 6));;
+			esac
 		;;
 		# 160 MHz chan width
 		"2")
-			# Freq based division is required since for 5 GHz, no need to have seg0 for DFS channels
-			if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-				case "$sta_channel" in
-					1|5|9|13|17|21|25|29) ap_vht_he_oper_centr_freq_seg0_idx=15;;
-					33|37|41|45|49|53|57|61) ap_vht_he_oper_centr_freq_seg0_idx=47;;
-					65|69|73|77|81|85|89|93) ap_vht_he_oper_centr_freq_seg0_idx=79;;
-					97|101|105|109|113|117|121|125) ap_vht_he_oper_centr_freq_seg0_idx=111;;
-					129|133|137|141|145|149|153|157) ap_vht_he_oper_centr_freq_seg0_idx=143;;
-					161|165|169|173|177|181|185|189) ap_vht_he_oper_centr_freq_seg0_idx=175;;
-					193|197|201|205|209|213|217|221) ap_vht_he_oper_centr_freq_seg0_idx=207;;
-				esac
-			elif [ $freq != 5935 ]; then
-				case "$sta_channel" in
-					36|40|44|48|52|56|60|64) ap_vht_he_oper_centr_freq_seg0_idx=50;;
-					100|104|108|112|116|120|124|128) ap_vht_he_oper_centr_freq_seg0_idx=114;;
-				esac
-			fi
+			 # Freq based division is required since for 5 GHz, no need to have seg0 for DFS channels
+                        if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
+                                case "$sta_channel" in
+                                        1|5|9|13|17|21|25|29) ap_vht_he_oper_centr_freq_seg0_idx=15;;
+                                        33|37|41|45|49|53|57|61) ap_vht_he_oper_centr_freq_seg0_idx=47;;
+                                        65|69|73|77|81|85|89|93) ap_vht_he_oper_centr_freq_seg0_idx=79;;
+                                        97|101|105|109|113|117|121|125) ap_vht_he_oper_centr_freq_seg0_idx=111;;
+                                        129|133|137|141|145|149|153|157) ap_vht_he_oper_centr_freq_seg0_idx=143;;
+                                        161|165|169|173|177|181|185|189) ap_vht_he_oper_centr_freq_seg0_idx=175;;
+                                        193|197|201|205|209|213|217|221) ap_vht_he_oper_centr_freq_seg0_idx=207;;
+                                esac
+                        elif [ $freq != 5935 ]; then
+                                case "$sta_channel" in
+                                        36|40|44|48|52|56|60|64) ap_vht_he_oper_centr_freq_seg0_idx=50;;
+                                        100|104|108|112|116|120|124|128) ap_vht_he_oper_centr_freq_seg0_idx=114;;
+                                esac
+                        fi
+			case "$sta_channel" in
+				36|40|44|48|52|56|60|64) ap_vht_he_oper_centr_freq_seg0_idx=50;;
+				100|104|108|112|116|120|124|128) ap_vht_he_oper_centr_freq_seg0_idx=114;;
+			esac
 	esac
 }
 
@@ -205,26 +216,41 @@ hostapd_adjust_config() {
 
                 #echo "he_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
                 hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
-
 		# VHT Operations is not applicable for 6GHz interface
-		if [ $wifi_6gband == false ]; then
-			#echo "Interface in Wifi 6 gen, but its not a 6GHz interface" > /dev/ttyMSM0
-			#echo "Set 802.11n, ac to 1" > /dev/ttyMSM0
-			hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/nul
-			hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
-			hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
+                if [ $wifi_6gband == false ]; then
+                       #echo "Interface in Wifi 6 gen, but its not a 6GHz interface" > /dev/ttyMSM0
+                       #echo "Set 802.11n, ac to 1" > /dev/ttyMSM0
+                       hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/nul
+                       hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
+                       hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
 
-			#echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
-			#echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
-			hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
+                       #echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
+                       #echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                       hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
 
-			if [ $sta_width = "20" ]; then
-				#echo "Setting HE20 mode to AP" > /dev/ttyMSM0
-				hostapd_ht20_mode
-			else
-				hostapd_ht40_mode "$sta_channel"
-			fi
+                       if [ $sta_width = "20" ]; then
+                               #echo "Setting HE20 mode to AP" > /dev/ttyMSM0
+                               hostapd_ht20_mode
+                       else
+                               hostapd_ht40_mode "$sta_channel"
+                       fi
 		fi
+                #echo "Set 802.11n, ac & ax to 1" > /dev/ttyMSM0
+                hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/null
+                hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
+                hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_oper_chwidth
+                #echo "New vht_oper_chwidth is $ap_vht_he_oper_chwidth" > /dev/ttyMSM0
+
+                #echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
+                hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_oper_centr_freq_seg0_idx
+
+                if [ $sta_width = "20" ]; then
+                        #echo "Setting HE20 mode to AP" > /dev/ttyMSM0
+                        hostapd_ht20_mode
+                else
+                        hostapd_ht40_mode "$sta_channel"
+                fi
+
 	elif [ $wifi_gen == 5 -o $ieee80211ac == 1 ]; then
 		#echo "STA associated in VHT$sta_width mode, applying same config to AP" > /dev/ttyMSM0
 		local ap_vht_he_oper_chwidth
@@ -269,12 +295,12 @@ hostapd_adjust_config() {
 }
 
 hostapd_is_6ghz_band() {
-	local freq=$1
-	if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
-		echo true
-	else
-		echo false
-	fi
+       local freq=$1
+       if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
+               echo true
+       else
+               echo false
+       fi
 }
 
 #echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
@@ -304,11 +330,11 @@ do
 		arping "$ip_addr" -U -I br-lan -D -c 5
 
 		# DFS Channel check is applicable only for 5 GHz interface
-		local sta_freq=$(wpa_cli -i $sta_intf status 2> /dev/null | grep freq | cut -d'=' -f 2)
-		wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
-		#echo "Is 6GHz interface: $wifi_6gband" > /dev/ttyMSM0
+               local sta_freq=$(wpa_cli -i $sta_intf status 2> /dev/null | grep freq | cut -d'=' -f 2)
+               wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
+               #echo "Is 6GHz interface: $wifi_6gband" > /dev/ttyMSM0
 
-		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_6gband == true ]; then
+               if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_6gband == true ]; then
 			hostapd_adjust_config
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
 			hostapd_cli -i $ap_intf status 2> /dev/null

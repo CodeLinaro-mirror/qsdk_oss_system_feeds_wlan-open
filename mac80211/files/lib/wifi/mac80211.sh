@@ -268,33 +268,6 @@ post_mac80211() {
 		;;
 	esac
 
-	chipset=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
-	board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
-	if [ "$chipset" == "IPQ5018" ]; then
-		echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
-		echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
-		echo 5 > /sys/bus/coresight/devices/coresight-funnel-mm/funnel_ctrl
-		echo 7 >/sys/bus/coresight/devices/coresight-funnel-in0/funnel_ctrl
-		echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
-	elif [ "$chipset" == "IPQ8074" ] && [ "$board" != "AP-HK10-C2" ]; then
-		echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
-		echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
-		echo 5 > /sys/bus/coresight/devices/coresight-funnel-mm/funnel_ctrl
-		echo 6 > /sys/bus/coresight/devices/coresight-funnel-in0/funnel_ctrl
-		echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
-	elif [ "$chipset" == "IPQ6018" ] || [ "$chipset" == "IPQ807x" ]; then
-		echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
-		echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
-		echo 5 > /sys/bus/coresight/devices/coresight-funnel-mm/funnel_ctrl
-		echo 6 > /sys/bus/coresight/devices/coresight-funnel-in0/funnel_ctrl
-		echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
-	elif [ "$chipset" == "IPQ9574" ]; then
-                echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
-                echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
-                echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
-                echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
-	fi
-
 	return 0
 }
 

@@ -23,6 +23,18 @@ if [ ! -n "$SERVER" ]; then
 	exit 0
 fi
 
+if [ -e /sys/bus/pci/devices/0002:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+        FILENAME="qcn9224-pci0-q6dump-$TIMESTAMP.bin"
+        DUMPPATH="/sys/bus/pci/devices/0002:01:00.0/devcoredump/data"
+
+if [ -e /sys/bus/pci/devices/0003:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="qcn9224-pci1-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/bus/pci/devices/0003:01:00.0/devcoredump/data"
+
+if [ -e /sys/bus/pci/devices/0004:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="qcn9224-pci2-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/bus/pci/devices/0004:01:00.0/devcoredump/data"
+
 if [ -e /sys/devices/platform/soc/c000000.wifi1/devcoredump/data ] && [ "$ACTION" = add ]; then
 	FILENAME="IPQ8074-m3dump-$TIMESTAMP.bin"
 	DUMPPATH="/sys/devices/platform/soc/c000000.wifi1/devcoredump/data"
@@ -40,16 +52,6 @@ fi
 if [ -e /sys/bus/pci/devices/0001:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
 	FILENAME="qcn9000-pci1-q6dump-$TIMESTAMP.bin"
 	DUMPPATH="/sys/bus/pci/devices/0001:01:00.0/devcoredump/data"
-fi
-
-if [ -e /sys/bus/pci/devices/0003:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
-	FILENAME="qcn9000-pci0-q6dump-$TIMESTAMP.bin"
-	DUMPPATH="/sys/bus/pci/devices/0003:01:00.0/devcoredump/data"
-fi
-
-if [ -e /sys/bus/pci/devices/0004:01:00.0/devcoredump/data ] && [ "$ACTION" = add ]; then
-	FILENAME="qcn9000-pci1-q6dump-$TIMESTAMP.bin"
-	DUMPPATH="/sys/bus/pci/devices/0004:01:00.0/devcoredump/data"
 fi
 
 if [ -e /sys/devices/platform/soc/soc:wifi1@c000000/devcoredump/data ] && [ "$ACTION" = add ]; then
