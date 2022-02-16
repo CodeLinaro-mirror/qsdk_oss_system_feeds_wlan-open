@@ -17,7 +17,7 @@
  static const struct ath11k_hw_params ath11k_hw_params[] = {
  	{
  		.hw_rev = ATH11K_HW_IPQ8074,
-@@ -803,6 +806,98 @@ err_firmware_stop:
+@@ -986,6 +989,98 @@ err_firmware_stop:
  	return ret;
  }
  
@@ -116,7 +116,7 @@
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -848,6 +943,7 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -1031,6 +1126,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
@@ -124,9 +124,9 @@
  	ath11k_hif_irq_enable(ab);
  	mutex_unlock(&ab->core_lock);
  
-@@ -1053,6 +1149,14 @@ int ath11k_core_init(struct ath11k_base
- 		return ret;
- 	}
+@@ -1230,6 +1326,14 @@ int ath11k_core_init(struct ath11k_base
+ {
+ 	int ret;
  
 +#ifdef CONFIG_QCOM_QMI_HELPERS
 +	/* Register a notifier after core init
@@ -136,13 +136,14 @@
 +	ath11k_hif_ssr_notifier_reg(ab);
 +#endif
 +
- 	return 0;
- }
- EXPORT_SYMBOL(ath11k_core_init);
-@@ -1061,6 +1165,13 @@ void ath11k_core_deinit(struct ath11k_ba
- {
- 	mutex_lock(&ab->core_lock);
- 
+ 	ret = ath11k_core_soc_create(ab);
+ 	if (ret) {
+ 		ath11k_err(ab, "failed to create soc core: %d\n", ret);
+@@ -1252,6 +1356,14 @@ void ath11k_core_deinit(struct ath11k_ba
+ 	ath11k_hif_power_down(ab);
+ 	ath11k_mac_destroy(ab);
+ 	ath11k_core_soc_destroy(ab);
++
 +#ifdef CONFIG_QCOM_QMI_HELPERS
 +	/* Unregister the ssr notifier as we are not intersted
 +	 * in receving these notifications after mac is unregistered.
@@ -150,10 +151,10 @@
 +	ath11k_hif_ssr_notifier_unreg(ab);
 +
 +#endif
- 	ath11k_core_pdev_destroy(ab);
- 	ath11k_core_stop(ab);
+ }
+ EXPORT_SYMBOL(ath11k_core_deinit);
  
-@@ -1083,6 +1194,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1266,6 +1378,8 @@ struct ath11k_base *ath11k_core_alloc(st
  				      const struct ath11k_bus_params *bus_params)
  {
  	struct ath11k_base *ab;
@@ -162,7 +163,7 @@
  
  	ab = kzalloc(sizeof(*ab) + priv_size, GFP_KERNEL);
  	if (!ab)
-@@ -1109,6 +1222,10 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1292,6 +1406,10 @@ struct ath11k_base *ath11k_core_alloc(st
  	ab->dev = dev;
  	ab->bus_params = *bus_params;
  	ab->hif.bus = bus;
@@ -188,7 +189,7 @@
  	bool stats_rxd = false;
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -113,6 +113,8 @@ void ath11k_debugfs_unregister(struct at
+@@ -117,6 +117,8 @@ void ath11k_debugfs_unregister(struct at
  void ath11k_debugfs_fw_stats_process(struct ath11k_base *ab, struct sk_buff *skb);
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
@@ -197,7 +198,7 @@
  
  static inline bool ath11k_debugfs_is_pktlog_lite_mode_enabled(struct ath11k *ar)
  {
-@@ -146,6 +148,12 @@ static inline int ath11k_debugfs_rx_filt
+@@ -150,6 +152,12 @@ static inline int ath11k_debugfs_rx_filt
  }
  
  #else
@@ -221,7 +222,7 @@
 +#include <linux/remoteproc/qcom_rproc.h>
  
  #define ATH11K_HOST_VERSION_STRING		"WIN"
- #define ATH11K_QMI_WLANFW_TIMEOUT_MS		5000
+ #define ATH11K_QMI_WLANFW_TIMEOUT_MS		10000
 @@ -123,6 +125,7 @@ struct ath11k_qmi {
  	struct workqueue_struct *event_wq;
  	struct list_head event_list;
@@ -232,7 +233,7 @@
  	u32 mem_seg_count;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -41,6 +41,8 @@ extern unsigned int ath11k_frame_mode;
+@@ -42,6 +42,8 @@ extern unsigned int ath11k_frame_mode;
  
  #define ATH11K_MON_TIMER_INTERVAL  10
  
