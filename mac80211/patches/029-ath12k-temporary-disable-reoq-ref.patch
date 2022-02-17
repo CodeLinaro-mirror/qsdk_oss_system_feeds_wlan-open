@@ -1,0 +1,227 @@
+From d95e0b31932304074692411d59912eb4f0fe53fd Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Tue, 1 Mar 2022 18:34:25 +0530
+Subject: [PATCH] ath12k:temporarily disable reoq reference
+
+Use wmi bsaed reo queue setup and disable HW based reo
+queue reference changes temporarily
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
+
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -1166,6 +1166,7 @@ static void ath12k_dp_cc_cleanup(struct
+ 
+ static void ath12k_dp_reoq_lut_cleanup(struct ath12k_base *ab)
+ {
++#ifdef REOQ_REF_SUPPORT
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+ 	if (!dp->reoq_lut.vaddr)
+@@ -1176,6 +1177,7 @@ static void ath12k_dp_reoq_lut_cleanup(s
+ 	dp->reoq_lut.vaddr = NULL;
+ 
+ 	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0, 0);
++#endif
+ }
+ 
+ void ath12k_dp_free(struct ath12k_base *ab)
+@@ -1414,6 +1416,7 @@ free:
+ 
+ static int ath12k_dp_reoq_lut_setup(struct ath12k_base *ab)
+ {
++#ifdef REOQ_REF_SUPPORT
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+ 	dp->reoq_lut.vaddr = dma_alloc_coherent(ab->dev,
+@@ -1430,7 +1433,7 @@ static int ath12k_dp_reoq_lut_setup(stru
+ 
+ 	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0,
+ 			   dp->reoq_lut.paddr);
+-
++#endif
+ 	return 0;
+ }
+ 
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -767,6 +767,7 @@ free_desc:
+ static void ath12k_peer_rx_tid_qref_setup(struct ath12k_base *ab, u16 peer_id, u16 tid,
+ 					  dma_addr_t paddr)
+ {
++#ifdef REOQ_REF_SUPPORT
+ 	struct ath12k_reo_queue_ref *qref;
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+@@ -777,10 +778,12 @@ static void ath12k_peer_rx_tid_qref_setu
+ 	qref->info0 = FIELD_PREP(BUFFER_ADDR_INFO0_ADDR, lower_32_bits(paddr));
+ 	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, upper_32_bits(paddr)) |
+ 		      FIELD_PREP(DP_REO_QREF_NUM, tid);
++#endif
+ }
+ 
+ static void ath12k_peer_rx_tid_qref_reset(struct ath12k_base *ab, u16 peer_id, u16 tid)
+ {
++#ifdef REOQ_REF_SUPPORT
+ 	struct ath12k_reo_queue_ref *qref;
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+@@ -791,6 +794,7 @@ static void ath12k_peer_rx_tid_qref_rese
+ 	qref->info0 = FIELD_PREP(BUFFER_ADDR_INFO0_ADDR, 0);
+ 	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, 0) |
+ 		      FIELD_PREP(DP_REO_QREF_NUM, tid);
++#endif
+ }
+ 
+ void ath12k_peer_rx_tid_delete(struct ath12k *ar,
+@@ -933,7 +937,9 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 			     enum hal_pn_type pn_type)
+ {
+ 	struct ath12k_base *ab = ar->ab;
++#ifdef REOQ_REF_SUPPORT
+ 	struct ath12k_dp *dp = &ab->dp;
++#endif
+ 	struct ath12k_peer *peer;
+ 	struct dp_rx_tid *rx_tid;
+ 	u32 hw_desc_sz;
+@@ -951,11 +957,13 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 		return -ENOENT;
+ 	}
+ 
++#ifdef REOQ_REF_SUPPORT
+ 	if (!dp->reoq_lut.vaddr) {
+ 		spin_unlock_bh(&ab->base_lock);
+ 		ath12k_warn(ab, "reo qref table is not setup\n");
+ 		return -EINVAL;
+ 	}
++#endif
+ 
+ 	if (peer->peer_id > DP_MAX_PEER_ID || tid > IEEE80211_NUM_TIDS) {
+ 		ath12k_warn(ab, "peer id of peer %d or tid %d doesn't allow reoq setup\n",
+@@ -976,6 +984,14 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 			return ret;
+ 		}
+ 
++		/* TODO Move to REOQ reference */
++		ret = ath12k_wmi_peer_rx_reorder_queue_setup(ar, vdev_id,
++							     peer_mac, paddr,
++							     tid, 1, ba_win_sz);
++		if (ret)
++			ath12k_warn(ab, "failed to send wmi command to update rx reorder queue, tid :%d (%d)\n",
++				    tid, ret);
++
+ 		return ret;
+ 	}
+ 
+@@ -1021,6 +1037,13 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 
+ 	spin_unlock_bh(&ab->base_lock);
+ 
++	ret = ath12k_wmi_peer_rx_reorder_queue_setup(ar, vdev_id, peer_mac,
++						     paddr, tid, 1, ba_win_sz);
++	if (ret) {
++		ath12k_warn(ar->ab, "failed to setup rx reorder queue, tid :%d (%d)\n",
++			    tid, ret);
++	}
++
+ 	return ret;
+ 
+ err_mem_free:
+@@ -1053,6 +1076,7 @@ int ath12k_dp_rx_ampdu_stop(struct ath12
+ 	struct ath12k_peer *peer;
+ 	struct ath12k_sta *arsta = (void *)params->sta->drv_priv;
+ 	int vdev_id = arsta->arvif->vdev_id;
++	dma_addr_t paddr;
+ 	bool active;
+ 	int ret;
+ 
+@@ -1065,6 +1089,7 @@ int ath12k_dp_rx_ampdu_stop(struct ath12
+ 		return -ENOENT;
+ 	}
+ 
++	paddr = peer->rx_tid[params->tid].paddr;
+ 	active = peer->rx_tid[params->tid].active;
+ 
+ 	if (!active) {
+@@ -1080,6 +1105,13 @@ int ath12k_dp_rx_ampdu_stop(struct ath12
+ 		return ret;
+ 	}
+ 
++	ret = ath12k_wmi_peer_rx_reorder_queue_setup(ar, vdev_id,
++						     params->sta->addr, paddr,
++						     params->tid, 1, 1);
++	if (ret)
++		ath12k_warn(ab, "failed to send wmi to delete rx tid %d\n",
++			    ret);
++
+ 	return ret;
+ }
+ 
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -1174,6 +1174,50 @@ int ath12k_wmi_send_peer_flush_tids_cmd(
+ 	return ret;
+ }
+ 
++// This is temporary wmi cmd to FW until HW based queue reference is validated
++int ath12k_wmi_peer_rx_reorder_queue_setup(struct ath12k *ar,
++					   int vdev_id, const u8 *addr,
++					   dma_addr_t paddr, u8 tid,
++					   u8 ba_window_size_valid,
++					   u32 ba_window_size)
++{
++	struct wmi_peer_reorder_queue_setup_cmd *cmd;
++	struct sk_buff *skb;
++	int ret;
++
++	skb = ath12k_wmi_alloc_skb(ar->wmi->wmi_ab, sizeof(*cmd));
++	if (!skb)
++		return -ENOMEM;
++
++	cmd = (struct wmi_peer_reorder_queue_setup_cmd *)skb->data;
++	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG,
++				     WMI_TAG_REORDER_QUEUE_SETUP_CMD) |
++			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
++
++	ether_addr_copy(cmd->peer_macaddr.addr, addr);
++	cmd->vdev_id = vdev_id;
++	cmd->tid = tid;
++	cmd->queue_ptr_lo = lower_32_bits(paddr);
++	cmd->queue_ptr_hi = upper_32_bits(paddr);
++	cmd->queue_no = tid;
++	cmd->ba_window_size_valid = ba_window_size_valid;
++	cmd->ba_window_size = ba_window_size;
++
++	ret = ath12k_wmi_cmd_send(ar->wmi, skb,
++				  WMI_PEER_REORDER_QUEUE_SETUP_CMDID);
++	if (ret) {
++		ath12k_warn(ar->ab,
++			    "failed to send WMI_PEER_REORDER_QUEUE_SETUP\n");
++		dev_kfree_skb(skb);
++	}
++
++	ath12k_dbg(ar->ab, ATH12K_DBG_WMI,
++		   "wmi rx reorder queue setup addr %pM vdev_id %d tid %d\n",
++		   addr, vdev_id, tid);
++
++	return ret;
++}
++
+ int
+ ath12k_wmi_rx_reord_queue_remove(struct ath12k *ar,
+ 				 struct rx_reorder_queue_remove_params *param)
+--- a/drivers/net/wireless/ath/ath12k/wmi.h
++++ b/drivers/net/wireless/ath/ath12k/wmi.h
+@@ -5404,6 +5404,11 @@ ath12k_wmi_send_thermal_mitigation_param
+ int ath12k_wmi_pdev_pktlog_enable(struct ath12k *ar, u32 pktlog_filter);
+ int ath12k_wmi_pdev_pktlog_disable(struct ath12k *ar);
+ int ath12k_wmi_pdev_peer_pktlog_filter(struct ath12k *ar, u8 *addr, u8 enable);
++int ath12k_wmi_peer_rx_reorder_queue_setup(struct ath12k *ar,
++					   int vdev_id, const u8 *addr,
++					   dma_addr_t paddr, u8 tid,
++					   u8 ba_window_size_valid,
++					   u32 ba_window_size);
+ int
+ ath12k_wmi_rx_reord_queue_remove(struct ath12k *ar,
+ 				 struct rx_reorder_queue_remove_params *param);
