@@ -31,7 +31,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  };
  
  enum ath11k_hw_rev {
-@@ -994,6 +995,7 @@ struct ath11k_base {
+@@ -995,6 +996,7 @@ struct ath11k_base {
  	bool enable_memory_stats;
  
  	u32 rx_hash;
@@ -121,7 +121,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  static ssize_t ath11k_debug_write_fw_recovery(struct file *file,
                                                char __user *user_buf,
                                                size_t count, loff_t *ppos)
-@@ -1786,6 +1859,9 @@ int ath11k_debugfs_soc_create(struct ath
+@@ -1787,6 +1860,9 @@ int ath11k_debugfs_soc_create(struct ath
  		return -ENOMEM;
  	}
  
@@ -208,15 +208,17 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  {
  	bool  fill_crypto_hdr;
  	enum hal_encrypt_type enctype;
-@@ -2564,6 +2620,7 @@ static void ath11k_dp_rx_h_mpdu(struct a
+@@ -2564,7 +2620,8 @@ static void ath11k_dp_rx_h_mpdu(struct a
  	struct ath11k_peer *peer;
  	struct rx_attention *rx_attention;
  	u32 err_bitmap;
+-
 +	struct wireless_dev *wdev = NULL;
++	struct ath11k_sta *arsta = NULL;
  
  	/* PN for multicast packets will be checked in mac80211 */
  	rxcb = ATH11K_SKB_RXCB(msdu);
-@@ -2578,6 +2635,25 @@ static void ath11k_dp_rx_h_mpdu(struct a
+@@ -2579,6 +2636,30 @@ static void ath11k_dp_rx_h_mpdu(struct a
  	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath11k_dp_rx_h_find_peer(ar->ab, msdu);
  	if (peer) {
@@ -233,6 +235,11 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
 +				msdu->dev = wdev->netdev;
 +				msdu->protocol = eth_type_trans(msdu, msdu->dev);
 +				napi_gro_receive(rxcb->napi, msdu);
++				if (peer->sta)
++					arsta =
++					(struct ath11k_sta *)peer->sta->drv_priv;
++				if (arsta)
++					atomic_inc(&arsta->drv_rx_pkts.pkts_out_to_netif);
 +				return;
 +			}
 +		}
@@ -242,7 +249,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		if (rxcb->is_mcbc)
  			enctype = peer->sec_type_grp;
  		else
-@@ -2846,7 +2922,8 @@ static void ath11k_dp_rx_deliver_msdu(st
+@@ -2841,7 +2922,8 @@ static void ath11k_dp_rx_deliver_msdu(st
  static int ath11k_dp_rx_process_msdu(struct ath11k *ar,
  				     struct sk_buff *msdu,
  				     struct sk_buff_head *msdu_list,
@@ -252,7 +259,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  {
  	struct ath11k_base *ab = ar->ab;
  	struct hal_rx_desc *rx_desc, *lrx_desc;
-@@ -2928,8 +3005,13 @@ static int ath11k_dp_rx_process_msdu(str
+@@ -2923,8 +3005,13 @@ static int ath11k_dp_rx_process_msdu(str
  		}
  	}
  
@@ -267,7 +274,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	rx_status->flag |= RX_FLAG_SKIP_MONITOR | RX_FLAG_DUP_VALIDATED;
  
-@@ -2944,10 +3026,12 @@ static void ath11k_dp_rx_process_receive
+@@ -2939,10 +3026,12 @@ static void ath11k_dp_rx_process_receive
  						  struct sk_buff_head *msdu_list,
  						  int mac_id)
  {
@@ -280,7 +287,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	if (skb_queue_empty(msdu_list))
  		return;
-@@ -2964,7 +3048,12 @@ static void ath11k_dp_rx_process_receive
+@@ -2959,7 +3048,12 @@ static void ath11k_dp_rx_process_receive
  	}
  
  	while ((msdu = __skb_dequeue(msdu_list))) {
@@ -294,7 +301,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  		if (unlikely(ret)) {
  			ath11k_dbg(ab, ATH11K_DBG_DATA,
  				   "Unable to process msdu %d", ret);
-@@ -2972,7 +3061,10 @@ static void ath11k_dp_rx_process_receive
+@@ -2967,7 +3061,10 @@ static void ath11k_dp_rx_process_receive
  			continue;
  		}
  
@@ -306,7 +313,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	}
  }
  
-@@ -4574,6 +4666,7 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -4569,6 +4666,7 @@ static int ath11k_dp_rx_h_null_q_desc(st
  	struct ath11k_sta *arsta = NULL;
  	u32 hal_rx_desc_sz = ar->ab->hw_params.hal_desc_sz;
  	u32 peer_id;
@@ -314,7 +321,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  
  	msdu_len = ath11k_dp_rx_h_msdu_start_msdu_len(ar->ab, desc);
  
-@@ -4617,7 +4710,8 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -4612,7 +4710,8 @@ static int ath11k_dp_rx_h_null_q_desc(st
  	}
  	ath11k_dp_rx_h_ppdu(ar, desc, status);
  
@@ -360,7 +367,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  static bool ath11k_hw_qcn9074_rx_desc_get_mpdu_seq_ctl_vld(struct hal_rx_desc *desc)
  {
  	return !!FIELD_GET(RX_MPDU_START_INFO11_MPDU_SEQ_CTRL_VALID,
-@@ -1188,6 +1208,7 @@ const struct ath11k_hw_ops ipq8074_ops =
+@@ -1192,6 +1212,7 @@ const struct ath11k_hw_ops ipq8074_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_ipq8074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_ipq8074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_ipq8074_rx_desc_get_mesh_ctl,
@@ -368,7 +375,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.rx_desc_get_mpdu_seq_ctl_vld = ath11k_hw_ipq8074_rx_desc_get_mpdu_seq_ctl_vld,
  	.rx_desc_get_mpdu_fc_valid = ath11k_hw_ipq8074_rx_desc_get_mpdu_fc_valid,
  	.rx_desc_get_mpdu_start_seq_no = ath11k_hw_ipq8074_rx_desc_get_mpdu_start_seq_no,
-@@ -1236,6 +1257,7 @@ const struct ath11k_hw_ops ipq6018_ops =
+@@ -1240,6 +1261,7 @@ const struct ath11k_hw_ops ipq6018_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_ipq8074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_ipq8074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_ipq8074_rx_desc_get_mesh_ctl,
@@ -376,7 +383,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.rx_desc_get_mpdu_seq_ctl_vld = ath11k_hw_ipq8074_rx_desc_get_mpdu_seq_ctl_vld,
  	.rx_desc_get_mpdu_fc_valid = ath11k_hw_ipq8074_rx_desc_get_mpdu_fc_valid,
  	.rx_desc_get_mpdu_start_seq_no = ath11k_hw_ipq8074_rx_desc_get_mpdu_start_seq_no,
-@@ -1284,6 +1306,7 @@ const struct ath11k_hw_ops qca6390_ops =
+@@ -1288,6 +1310,7 @@ const struct ath11k_hw_ops qca6390_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_ipq8074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_ipq8074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_ipq8074_rx_desc_get_mesh_ctl,
@@ -384,7 +391,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.rx_desc_get_mpdu_seq_ctl_vld = ath11k_hw_ipq8074_rx_desc_get_mpdu_seq_ctl_vld,
  	.rx_desc_get_mpdu_fc_valid = ath11k_hw_ipq8074_rx_desc_get_mpdu_fc_valid,
  	.rx_desc_get_mpdu_start_seq_no = ath11k_hw_ipq8074_rx_desc_get_mpdu_start_seq_no,
-@@ -1334,6 +1357,7 @@ const struct ath11k_hw_ops qcn9074_ops =
+@@ -1338,6 +1361,7 @@ const struct ath11k_hw_ops qcn9074_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_qcn9074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_qcn9074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_qcn9074_rx_desc_get_mesh_ctl,
@@ -392,7 +399,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.rx_desc_get_mpdu_seq_ctl_vld = ath11k_hw_qcn9074_rx_desc_get_mpdu_seq_ctl_vld,
  	.rx_desc_get_mpdu_fc_valid = ath11k_hw_qcn9074_rx_desc_get_mpdu_fc_valid,
  	.rx_desc_get_mpdu_start_seq_no = ath11k_hw_qcn9074_rx_desc_get_mpdu_start_seq_no,
-@@ -1427,6 +1451,7 @@ const struct ath11k_hw_ops ipq5018_ops =
+@@ -1431,6 +1455,7 @@ const struct ath11k_hw_ops ipq5018_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_qcn9074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_qcn9074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_qcn9074_rx_desc_get_mesh_ctl,
@@ -400,7 +407,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	.rx_desc_get_mpdu_seq_ctl_vld = ath11k_hw_qcn9074_rx_desc_get_mpdu_seq_ctl_vld,
  	.rx_desc_get_mpdu_fc_valid = ath11k_hw_qcn9074_rx_desc_get_mpdu_fc_valid,
  	.rx_desc_get_mpdu_start_seq_no = ath11k_hw_qcn9074_rx_desc_get_mpdu_start_seq_no,
-@@ -1468,6 +1493,7 @@ const struct ath11k_hw_ops qcn6122_ops =
+@@ -1479,6 +1504,7 @@ const struct ath11k_hw_ops qcn6122_ops =
  	.rx_desc_get_encrypt_type = ath11k_hw_qcn9074_rx_desc_get_encrypt_type,
  	.rx_desc_get_decap_type = ath11k_hw_qcn9074_rx_desc_get_decap_type,
  	.rx_desc_get_mesh_ctl = ath11k_hw_qcn9074_rx_desc_get_mesh_ctl,
@@ -420,7 +427,7 @@ Signed-off-by: P Praneesh <ppranees@codeaurora.org>
  	u16 (*rx_desc_get_mpdu_start_seq_no)(struct hal_rx_desc *desc);
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -5063,6 +5063,14 @@ free:
+@@ -5131,6 +5131,14 @@ free:
  		}
  	} else if (old_state == IEEE80211_STA_AUTHORIZED &&
  		   new_state == IEEE80211_STA_ASSOC) {
