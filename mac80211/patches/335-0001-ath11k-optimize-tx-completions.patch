@@ -11,11 +11,9 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  drivers/net/wireless/ath/ath11k/dp_tx.c | 114 ++++++++++++++++----------------
  1 file changed, 58 insertions(+), 56 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/dp_tx.c b/drivers/net/wireless/ath/ath11k/dp_tx.c
-index e13c9a3..a71958f 100644
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -529,10 +529,34 @@ static void ath11k_dp_tx_cache_peer_stats(struct ath11k *ar,
+@@ -529,10 +529,41 @@ static void ath11k_dp_tx_cache_peer_stat
  	}
  }
  
@@ -25,6 +23,13 @@ index e13c9a3..a71958f 100644
 +{
 +	ts->buf_rel_source =
 +		FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE, desc->info0);
++	if (unlikely(ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_FW &&
++		     ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM))
++		return;
++
++	if (unlikely(ts->buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW))
++		return;
++
 +	ts->status = FIELD_GET(HAL_WBM_RELEASE_INFO0_TQM_RELEASE_REASON,
 +			       desc->info0);
 +	ts->ppdu_id = FIELD_GET(HAL_WBM_RELEASE_INFO1_TQM_STATUS_NUMBER,
@@ -52,10 +57,10 @@ index e13c9a3..a71958f 100644
  {
  	struct ieee80211_tx_status status = { 0 };
  	struct ath11k_base *ab = ar->ab;
-@@ -543,9 +567,12 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+@@ -543,9 +574,12 @@ static void ath11k_dp_tx_complete_msdu(s
  	struct ieee80211_vif *vif = NULL;
- 	struct rate_info rate;
  	struct ath11k_vif *arvif = NULL;
+ 	struct rate_info rate;
 +	struct hal_tx_status ts = { 0 };
 +	enum hal_wbm_htt_tx_comp_status wbm_status;
 +	enum hal_wbm_tqm_rel_reason rel_status;
@@ -66,7 +71,7 @@ index e13c9a3..a71958f 100644
  		/* Must not happen */
  		return;
  	}
-@@ -556,11 +583,14 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+@@ -556,11 +590,14 @@ static void ath11k_dp_tx_complete_msdu(s
  
  	flags = skb_cb->flags;
  
@@ -83,17 +88,17 @@ index e13c9a3..a71958f 100644
  		}
  		if (skb_has_frag_list(msdu)) {
  			kfree_skb_list(skb_shinfo(msdu)->frag_list);
-@@ -570,6 +600,8 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+@@ -570,6 +607,8 @@ static void ath11k_dp_tx_complete_msdu(s
  		return;
  	}
  
 +	ath11k_dp_tx_status_parse(ab, tx_status, &ts);
 +
- 	rcu_read_lock();
- 
- 	if (unlikely(!rcu_dereference(ab->pdevs_active[ar->pdev_idx]))) {
-@@ -582,6 +614,9 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
- 		goto exit;
+ 	if (unlikely(!rcu_access_pointer(ab->pdevs_active[ar->pdev_idx]))) {
+ 		dev_kfree_skb_any(msdu);
+ 		return;
+@@ -580,6 +619,9 @@ static void ath11k_dp_tx_complete_msdu(s
+ 		return;
  	}
  
 +	wbm_status = FIELD_GET(HTT_TX_WBM_COMP_INFO0_STATUS,
@@ -102,7 +107,7 @@ index e13c9a3..a71958f 100644
  	vif = skb_cb->vif;
  	arvif = (void *)vif->drv_priv;
  	if(arvif && wbm_status < HAL_WBM_REL_HTT_TX_COMP_STATUS_MAX)
-@@ -593,41 +628,41 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+@@ -591,41 +633,41 @@ static void ath11k_dp_tx_complete_msdu(s
  	/* skip tx rate update from ieee80211_status*/
  	info->status.rates[0].idx = -1;
  
@@ -154,7 +159,7 @@ index e13c9a3..a71958f 100644
  	}
  
  	/* NOTE: Tx rate status reporting. Tx completion status does not have
-@@ -636,11 +671,11 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+@@ -634,11 +676,11 @@ static void ath11k_dp_tx_complete_msdu(s
  	 */
  
  	spin_lock_bh(&ab->base_lock);
@@ -167,8 +172,8 @@ index e13c9a3..a71958f 100644
 +			    ts.peer_id);
  		spin_unlock_bh(&ab->base_lock);
  		dev_kfree_skb_any(msdu);
- 		goto exit;
-@@ -652,7 +687,7 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+ 		return;
+@@ -650,7 +692,7 @@ static void ath11k_dp_tx_complete_msdu(s
  	rate = arsta->last_txrate;
  	status.rate = &rate;
  
@@ -177,8 +182,8 @@ index e13c9a3..a71958f 100644
  		arsta->fail_pkts += 1;
  		arsta->per_fail_pkts += 1;
  		arsta->fail_bytes += msdu->len;
-@@ -682,37 +717,6 @@ exit:
- 	rcu_read_unlock();
+@@ -678,37 +720,6 @@ static void ath11k_dp_tx_complete_msdu(s
+ 	return;
  }
  
 -static inline void ath11k_dp_tx_status_parse(struct ath11k_base *ab,
@@ -188,7 +193,7 @@ index e13c9a3..a71958f 100644
 -	ts->buf_rel_source =
 -		FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE, desc->info0);
 -	if (unlikely(ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_FW &&
--	    ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM))
+-		     ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM))
 -		return;
 -
 -	if (unlikely(ts->buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW))
@@ -215,19 +220,18 @@ index e13c9a3..a71958f 100644
  static inline bool ath11k_dp_tx_completion_valid(struct hal_wbm_release_ring *desc)
  {
  	struct htt_tx_wbm_completion *status_desc;
-@@ -736,10 +740,9 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
- 	int hal_ring_id = dp->tx_ring[ring_id].tcl_comp_ring.ring_id;
+@@ -732,9 +743,8 @@ void ath11k_dp_tx_completion_handler(str
  	struct hal_srng *status_ring = &ab->hal.srng_list[hal_ring_id];
  	struct sk_buff *msdu;
 -	struct hal_tx_status ts = { 0 };
  	struct dp_tx_ring *tx_ring = &dp->tx_ring[ring_id];
- 	struct hal_wbm_release_ring *tx_status;
+	int valid_entries;
 -	enum hal_wbm_htt_tx_comp_status wbm_status;
 +	enum hal_wbm_rel_src_module buf_rel_source;
- 	int valid_entries, count = 0, i = 0;
  	u32 *desc;
  	u32 msdu_id, desc_id;
-@@ -779,17 +782,16 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
+ 	u8 mac_id;
+@@ -765,17 +775,16 @@ void ath11k_dp_tx_completion_handler(str
  
  	while (count--) {
  		tx_status = &tx_ring->tx_status[i++];
@@ -248,7 +252,7 @@ index e13c9a3..a71958f 100644
  			ath11k_dp_tx_process_htt_tx_complete(ab,
  							     (void *)tx_status,
  							     mac_id, msdu_id,
-@@ -813,7 +815,7 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
+@@ -799,7 +808,7 @@ void ath11k_dp_tx_completion_handler(str
  		if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  			wake_up(&ar->dp.tx_empty_waitq);
  
@@ -257,6 +261,3 @@ index e13c9a3..a71958f 100644
  	}
  }
  
--- 
-2.7.4
-
