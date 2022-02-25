@@ -77,7 +77,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ab->mem = mem;
 +	ab->mem_pa = mem_res->start;
  	ab->mem_len = resource_size(mem_res);
- 	ab->enable_cold_boot_cal = enable_cold_boot_cal;
+ 	ab->enable_cold_boot_cal = ath11k_cold_boot_cal;
  	platform_set_drvdata(pdev, ab);
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
@@ -94,7 +94,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  unsigned int ath11k_debug_mask;
  EXPORT_SYMBOL(ath11k_debug_mask);
  module_param_named(debug_mask, ath11k_debug_mask, uint, 0644);
-@@ -642,23 +648,30 @@ static int ath11k_core_pdev_create(struc
+@@ -823,23 +829,30 @@ static int ath11k_core_pdev_create(struc
  		return ret;
  	}
  
@@ -131,7 +131,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	}
  
  	ret = ath11k_spectral_init(ab);
-@@ -671,10 +684,12 @@ static int ath11k_core_pdev_create(struc
+@@ -852,10 +865,12 @@ static int ath11k_core_pdev_create(struc
  
  err_thermal_unregister:
  	ath11k_thermal_unregister(ab);
@@ -146,7 +146,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  err_pdev_debug:
  	ath11k_debugfs_pdev_destroy(ab);
  
-@@ -686,6 +701,10 @@ static void ath11k_core_pdev_destroy(str
+@@ -867,6 +882,10 @@ static void ath11k_core_pdev_destroy(str
  	ath11k_spectral_deinit(ab);
  	ath11k_thermal_unregister(ab);
  	ath11k_mac_unregister(ab);
@@ -157,7 +157,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_hif_irq_disable(ab);
  	ath11k_dp_pdev_free(ab);
  	ath11k_debugfs_pdev_destroy(ab);
-@@ -972,6 +991,10 @@ static int ath11k_core_reconfigure_on_cr
+@@ -1153,6 +1172,10 @@ static int ath11k_core_reconfigure_on_cr
  	int ret;
  
  	mutex_lock(&ab->core_lock);
@@ -165,10 +165,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +	ath11k_nss_teardown(ab);
 +	ab->nss.enabled = false;
 +
- #ifdef CONFIG_QCOM_QMI_HELPERS
- 	/* Unregister the ssr notifier as we are not interested
- 	 * in receving these notifications after mac is unregistered.
-@@ -1193,6 +1216,10 @@ int ath11k_core_pre_init(struct ath11k_b
+	ath11k_thermal_unregister(ab);
+	ath11k_hif_irq_disable(ab);
+	ath11k_dp_pdev_free(ab);
+@@ -1374,6 +1397,10 @@ int ath11k_core_pre_init(struct ath11k_b
  		ath11k_err(ab, "failed to get hw params: %d\n", ret);
  		return ret;
  	}
@@ -179,14 +179,6 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	return 0;
  }
-@@ -1207,7 +1234,6 @@ int ath11k_core_init(struct ath11k_base
- 		ath11k_err(ab, "failed to create soc core: %d\n", ret);
- 		return ret;
- 	}
--
- 	return 0;
- }
- EXPORT_SYMBOL(ath11k_core_init);
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
 @@ -26,6 +26,7 @@
@@ -197,7 +189,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -262,6 +263,9 @@ struct ath11k_vif {
+@@ -282,6 +283,9 @@ struct ath11k_vif {
  	struct ieee80211_chanctx_conf chanctx;
  	struct dentry *debugfs_twt;
  	struct ath11k_mgmt_frame_stats mgmt_stats;
@@ -207,17 +199,17 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  };
  
  struct ath11k_vif_iter {
-@@ -409,6 +413,9 @@ struct ath11k_sta {
+@@ -429,6 +433,9 @@ struct ath11k_sta {
  #endif
  
  	bool use_4addr_set;
 +#ifdef CPTCFG_ATH11K_NSS_SUPPORT
 +	struct ath11k_nss_sta_stats *nss_stats;
 +#endif
+ 	u16 tcl_metadata;
  };
  
- #define ATH11K_MIN_5G_FREQ 4150
-@@ -526,6 +533,9 @@ struct ath11k {
+@@ -547,6 +554,9 @@ struct ath11k {
  	struct ieee80211_hw *hw;
  	struct ieee80211_ops *ops;
  	struct ath11k_pdev_wmi *wmi;
@@ -227,7 +219,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	struct ath11k_pdev_dp dp;
  	u8 mac_addr[ETH_ALEN];
  	u32 ht_cap_info;
-@@ -763,8 +773,10 @@ struct ath11k_base {
+@@ -783,8 +793,10 @@ struct ath11k_base {
  	struct ath11k_htc htc;
  
  	struct ath11k_dp dp;
@@ -259,7 +251,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	if (ret) {
  		ath11k_warn(ab, "failed to set default routing %d peer :%pM vdev_id :%d\n",
-@@ -126,6 +131,18 @@ static int ath11k_dp_srng_calculate_msi_
+@@ -129,6 +134,18 @@ static int ath11k_dp_srng_calculate_msi_
  {
  	const u8 *grp_mask;
  
@@ -278,20 +270,19 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	switch (type) {
  	case HAL_WBM2SW_RELEASE:
  		if (ring_num < 3) {
-@@ -755,14 +772,18 @@ int ath11k_dp_service_srng(struct ath11k
+@@ -773,13 +790,17 @@ int ath11k_dp_service_srng(struct ath11k
  	int work_done = 0;
- 	int i = 0, j;
+ 	int i, j;
  	int tot_work_done = 0;
 +	bool nss_offload;
 +
 +	/* Processing of offloaded rings are not required */
 +	nss_offload = ab->nss.enabled;
  
--	while (ab->hw_params.ring_mask->tx[grp_id] >> i) {
-+	while (!nss_offload && ab->hw_params.ring_mask->tx[grp_id] >> i) {
- 		if (ab->hw_params.ring_mask->tx[grp_id] & BIT(i))
- 			ath11k_dp_tx_completion_handler(ab, i);
- 		i++;
+-	if (ab->hw_params.ring_mask->tx[grp_id]) {
++	if (!nss_offload && ab->hw_params.ring_mask->tx[grp_id]) {
+ 		i = __fls(ab->hw_params.ring_mask->tx[grp_id]);
+ 		ath11k_dp_tx_completion_handler(ab, i);
  	}
  
 -	if (ab->hw_params.ring_mask->rx_err[grp_id]) {
@@ -299,7 +290,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		work_done = ath11k_dp_process_rx_err(ab, napi, budget);
  		budget -= work_done;
  		tot_work_done += work_done;
-@@ -770,7 +791,7 @@ int ath11k_dp_service_srng(struct ath11k
+@@ -787,7 +808,7 @@ int ath11k_dp_service_srng(struct ath11k
  			goto done;
  	}
  
@@ -308,7 +299,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		work_done = ath11k_dp_rx_process_wbm_err(ab,
  							 napi,
  							 budget);
-@@ -781,7 +802,7 @@ int ath11k_dp_service_srng(struct ath11k
+@@ -798,7 +819,7 @@ int ath11k_dp_service_srng(struct ath11k
  			goto done;
  	}
  
@@ -317,7 +308,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		i =  fls(ab->hw_params.ring_mask->rx[grp_id]) - 1;
  		work_done = ath11k_dp_process_rx(ab, i, napi,
  						 budget);
-@@ -815,7 +836,7 @@ int ath11k_dp_service_srng(struct ath11k
+@@ -832,7 +853,7 @@ int ath11k_dp_service_srng(struct ath11k
  	if (ab->hw_params.ring_mask->reo_status[grp_id])
  		ath11k_dp_process_reo_status(ab);
  
@@ -328,7 +319,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -166,6 +166,7 @@ struct ath11k_pdev_dp {
+@@ -167,6 +167,7 @@ struct ath11k_pdev_dp {
  #define DP_AVG_MSDUS_PER_MPDU 4
  
  #define DP_RX_HASH_ENABLE	1 /* Enable hash based Rx steering */
@@ -346,38 +337,38 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  #define ATH11K_DP_RX_FRAGMENT_TIMEOUT_MS (2 * HZ)
  
-@@ -190,8 +191,8 @@ static u8 ath11k_dp_rx_h_mpdu_start_tid(
+@@ -206,8 +207,8 @@ static inline u8 ath11k_dp_rx_h_mpdu_sta
  	return ab->hw_params.hw_ops->rx_desc_get_mpdu_tid(desc);
  }
  
--static u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct ath11k_base *ab,
--					     struct hal_rx_desc *desc)
+-static inline u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct ath11k_base *ab,
+-						    struct hal_rx_desc *desc)
 +u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct ath11k_base *ab,
 +				      struct hal_rx_desc *desc)
  {
  	return ab->hw_params.hw_ops->rx_desc_get_mpdu_peer_id(desc);
  }
-@@ -202,8 +203,8 @@ static u8 ath11k_dp_rx_h_msdu_end_l3pad(
+@@ -218,8 +219,8 @@ static inline u8 ath11k_dp_rx_h_msdu_end
  	return ab->hw_params.hw_ops->rx_desc_get_l3_pad_bytes(desc);
  }
  
--static bool ath11k_dp_rx_h_msdu_end_first_msdu(struct ath11k_base *ab,
--					       struct hal_rx_desc *desc)
+-static inline bool ath11k_dp_rx_h_msdu_end_first_msdu(struct ath11k_base *ab,
+-						      struct hal_rx_desc *desc)
 +bool ath11k_dp_rx_h_msdu_end_first_msdu(struct ath11k_base *ab,
 +					struct hal_rx_desc *desc)
  {
  	return ab->hw_params.hw_ops->rx_desc_get_first_msdu(desc);
  }
-@@ -294,7 +295,7 @@ static int ath11k_dp_purge_mon_ring(stru
- 	return -ETIMEDOUT;
+@@ -276,7 +277,7 @@ static inline void ath11k_dp_rxdesc_set_
+ 	ab->hw_params.hw_ops->rx_desc_set_msdu_len(desc, len);
  }
  
 -static bool ath11k_dp_rx_h_attn_is_mcbc(struct ath11k_base *ab,
 +bool ath11k_dp_rx_h_attn_is_mcbc(struct ath11k_base *ab,
-                    struct hal_rx_desc *desc)
+ 					struct hal_rx_desc *desc)
  {
-    struct rx_attention *attn = ath11k_dp_rx_get_attention(ab, desc);
-@@ -498,7 +499,9 @@ static int ath11k_dp_rxdma_pdev_buf_setu
+ 	struct rx_attention *attn = ath11k_dp_rx_get_attention(ab, desc);
+@@ -514,7 +515,9 @@ static int ath11k_dp_rxdma_pdev_buf_setu
  	struct dp_rxdma_ring *rx_ring = &dp->rx_refill_buf_ring;
  	int i;
  
@@ -388,7 +379,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	if (ar->ab->hw_params.rxdma1_enable) {
  		rx_ring = &dp->rxdma_mon_buf_ring;
-@@ -1994,7 +1997,7 @@ static void ath11k_dp_rx_h_csum_offload(
+@@ -2023,7 +2026,7 @@ static void ath11k_dp_rx_h_csum_offload(
  			  CHECKSUM_NONE : CHECKSUM_UNNECESSARY;
  }
  
@@ -397,7 +388,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  				       enum hal_encrypt_type enctype)
  {
  	switch (enctype) {
-@@ -2021,7 +2024,7 @@ static int ath11k_dp_rx_crypto_mic_len(s
+@@ -2050,7 +2053,7 @@ static int ath11k_dp_rx_crypto_mic_len(s
  	return 0;
  }
  
@@ -406,7 +397,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  					 enum hal_encrypt_type enctype)
  {
  	switch (enctype) {
-@@ -2049,7 +2052,7 @@ static int ath11k_dp_rx_crypto_param_len
+@@ -2078,7 +2081,7 @@ static int ath11k_dp_rx_crypto_param_len
  	return 0;
  }
  
@@ -415,7 +406,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  				       enum hal_encrypt_type enctype)
  {
  	switch (enctype) {
-@@ -3074,6 +3077,13 @@ static void ath11k_dp_rx_update_user_sta
+@@ -3108,6 +3111,13 @@ static void ath11k_dp_rx_update_user_sta
  	arsta = (struct ath11k_sta *)peer->sta->drv_priv;
  	rx_stats = arsta->rx_stats;
  
@@ -429,7 +420,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	if (!rx_stats)
  		return;
  
-@@ -3150,8 +3160,10 @@ static void ath11k_dp_rx_update_peer_mu_
+@@ -3184,8 +3194,10 @@ static void ath11k_dp_rx_update_peer_mu_
  {
  	u32 num_users, i;
  
@@ -441,7 +432,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	num_users = ppdu_info->num_users;
  	if (num_users > HAL_MAX_UL_MU_USERS)
-@@ -3429,7 +3441,7 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -3466,7 +3478,7 @@ int ath11k_dp_rx_process_mon_status(stru
  	struct sk_buff_head skb_list;
  	struct hal_rx_mon_ppdu_info *ppdu_info;
  	struct ath11k_peer *peer;
@@ -450,7 +441,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	int num_buffs_reaped = 0;
  	u32 rx_buf_sz;
  	u16 log_type = 0;
-@@ -3498,6 +3510,7 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -3530,6 +3542,7 @@ int ath11k_dp_rx_process_mon_status(stru
  		if (ppdu_info->reception_type == HAL_RX_RECEPTION_TYPE_SU) {
  			arsta = (struct ath11k_sta *)peer->sta->drv_priv;
  			ath11k_dp_rx_update_peer_su_stats(arsta, ppdu_info);
@@ -460,7 +451,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  			ath11k_dp_rx_mon_process_ulofdma(ppdu_info);
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
-@@ -146,4 +146,16 @@ int ath11k_peer_rx_frag_setup(struct ath
+@@ -147,4 +147,16 @@ int ath11k_peer_rx_frag_setup(struct ath
  int ath11k_dp_rx_pktlog_start(struct ath11k_base *ab);
  int ath11k_dp_rx_pktlog_stop(struct ath11k_base *ab, bool stop_timer);
  
@@ -479,7 +470,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  #endif /* ATH11K_DP_RX_H */
 --- a/drivers/net/wireless/ath/ath11k/hal.h
 +++ b/drivers/net/wireless/ath/ath11k/hal.h
-@@ -414,6 +414,8 @@ enum hal_srng_ring_id {
+@@ -416,6 +416,8 @@ enum hal_srng_ring_id {
  #define HAL_SRNG_RING_ID_MAX    (HAL_SRNG_RING_ID_UMAC_ID_END + \
  				 HAL_SRNG_NUM_LMAC_RINGS)
  
@@ -490,38 +481,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	HAL_REO_EXCEPTION,
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
-@@ -803,14 +803,18 @@ void ath11k_hal_reo_init_cmd_ring(struct
- 
- void ath11k_hal_reo_hw_setup(struct ath11k_base *ab, u32 ring_hash_map)
- {
-+	u8 frag_dest_ring = HAL_SRNG_RING_ID_REO2SW1;
- 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
- 	u32 val;
- 
-+	if (ab->nss.enabled)
-+		frag_dest_ring = HAL_SRNG_REO_ALTERNATE_SELECT;
-+
- 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_GEN_ENABLE);
- 
- 	val &= ~HAL_REO1_GEN_ENABLE_FRAG_DST_RING;
- 	val |= FIELD_PREP(HAL_REO1_GEN_ENABLE_FRAG_DST_RING,
--			  HAL_SRNG_RING_ID_REO2SW1) |
-+			  frag_dest_ring) |
- 	       FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_LIST_ENABLE, 1) |
- 	       FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_FLUSH_ENABLE, 1);
- 	ath11k_hif_write32(ab, reo_base + HAL_REO1_GEN_ENABLE, val);
-@@ -824,6 +828,10 @@ void ath11k_hal_reo_hw_setup(struct ath1
- 	ath11k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_3(ab),
- 			   HAL_DEFAULT_REO_TIMEOUT_USEC);
- 
-+	/* REO Dest ring setup is not required in NSS offload case */
-+	if (ab->nss.enabled)
-+		return;
-+
- 	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_0,
- 			   FIELD_PREP(HAL_REO_DEST_RING_CTRL_HASH_RING_MAP,
- 				      ring_hash_map));
-@@ -968,6 +976,12 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -932,6 +932,12 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->num_mpdu_fcs_err =
  			FIELD_GET(HAL_RX_PPDU_END_USER_STATS_INFO0_MPDU_CNT_FCS_ERR,
  				  info0);
@@ -536,7 +496,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  			ppdu_info->ht_flags = 1;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -17,6 +17,7 @@
+@@ -18,6 +18,7 @@
  #include "peer.h"
  #include "debugfs_sta.h"
  #include "vendor.h"
@@ -544,7 +504,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -1102,6 +1103,11 @@ static void ath11k_control_beaconing(str
+@@ -1331,6 +1332,11 @@ static void ath11k_control_beaconing(str
  	lockdep_assert_held(&arvif->ar->conf_mutex);
  
  	if (!info->enable_beacon) {
@@ -556,7 +516,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		ret = ath11k_wmi_vdev_down(ar, arvif->vdev_id);
  		if (ret)
  			ath11k_warn(ar->ab, "failed to down vdev_id %i: %d\n",
-@@ -1135,6 +1141,12 @@ static void ath11k_control_beaconing(str
+@@ -1364,6 +1370,12 @@ static void ath11k_control_beaconing(str
  
  	arvif->is_up = true;
  
@@ -569,7 +529,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac vdev %d up\n", arvif->vdev_id);
  }
  
-@@ -2306,6 +2318,12 @@ static void ath11k_bss_assoc(struct ieee
+@@ -2798,6 +2810,12 @@ static void ath11k_bss_assoc(struct ieee
  		   "mac vdev %d up (associated) bssid %pM aid %d\n",
  		   arvif->vdev_id, bss_conf->bssid, bss_conf->aid);
  
@@ -579,10 +539,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +		return;
 +	}
 +
- 	/* Authorize BSS Peer */
- 	ret = ath11k_wmi_set_peer_param(ar, arvif->bssid,
- 					arvif->vdev_id,
-@@ -2330,6 +2348,10 @@ static void ath11k_bss_disassoc(struct i
+ 	spin_lock_bh(&ar->ab->base_lock);
+ 
+ 	peer = ath11k_peer_find(ar->ab, arvif->vdev_id, arvif->bssid);
+@@ -2831,6 +2849,10 @@ static void ath11k_bss_disassoc(struct i
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -593,7 +553,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "mac vdev %i disassoc bssid %pM\n",
  		   arvif->vdev_id, arvif->bssid);
  
-@@ -2603,6 +2625,28 @@ static int ath11k_mac_config_obss_pd(str
+@@ -3104,6 +3126,28 @@ static int ath11k_mac_config_obss_pd(str
  	return 0;
  }
  
@@ -622,7 +582,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  static void ath11k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  					   struct ieee80211_vif *vif,
  					   struct ieee80211_bss_conf *info,
-@@ -3360,6 +3404,26 @@ static int ath11k_mac_op_set_key(struct
+@@ -3905,6 +3949,26 @@ static int ath11k_mac_op_set_key(struct
  
  	spin_lock_bh(&ab->base_lock);
  	peer = ath11k_peer_find(ab, arvif->vdev_id, peer_addr);
@@ -649,7 +609,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	if (peer && cmd == SET_KEY) {
  		peer->keys[key->keyidx] = key;
  		if (key->flags & IEEE80211_KEY_FLAG_PAIRWISE) {
-@@ -3398,9 +3462,8 @@ static int ath11k_mac_op_set_key(struct
+@@ -3943,9 +4007,8 @@ static int ath11k_mac_op_set_key(struct
  			break;
  		}
  	}
@@ -660,23 +620,23 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  exit:
  	mutex_unlock(&ar->conf_mutex);
  	return ret;
-@@ -5089,10 +5152,14 @@ static void ath11k_mac_op_tx(struct ieee
- 		return;
- 	}
+@@ -5695,10 +5758,14 @@ static void ath11k_mac_op_tx(struct ieee
+ 	if (control->sta)
+ 		arsta = (struct ath11k_sta *)control->sta->drv_priv;
  
--	ret = ath11k_dp_tx(ar, arvif, skb);
+-	ret = ath11k_dp_tx(ar, arvif, arsta, skb);
 +	if (ar->ab->nss.enabled)
 +		ret = ath11k_nss_tx(arvif,skb);
 +	else
-+		ret = ath11k_dp_tx(ar, arvif, skb);
- 	if (ret) {
++		ret = ath11k_dp_tx(ar, arvif, arsta, skb);
+ 	if (unlikely(ret)) {
  		ath11k_warn(ar->ab, "failed to transmit frame %d\n", ret);
  		ieee80211_free_txskb(ar->hw, skb);
 +		return;
  	}
  }
  
-@@ -5114,6 +5181,8 @@ static int ath11k_mac_config_mon_status_
+@@ -5720,6 +5787,8 @@ static int ath11k_mac_config_mon_status_
  
  	if (enable) {
  		tlv_filter = ath11k_mac_mon_status_filter_default;
@@ -685,24 +645,35 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		if (ath11k_debugfs_rx_filter(ar))
  			tlv_filter.rx_filter = ath11k_debugfs_rx_filter(ar);
  	}
-@@ -5349,6 +5418,12 @@ static void ath11k_mac_op_update_vif_off
- 	u32 param_id, param_value;
- 	int ret;
+@@ -5944,7 +6013,7 @@ ath11k_mac_setup_vdev_create_params(stru
+ 	}
+ }
  
+-static void ath11k_mac_op_update_vif_offload(struct ieee80211_hw *hw,
++static int ath11k_mac_op_update_vif_offload(struct ieee80211_hw *hw,
+ 					     struct ieee80211_vif *vif)
+ {
+ 	struct ath11k *ar = hw->priv;
+@@ -5990,6 +6059,8 @@ static void ath11k_mac_op_update_vif_off
+ 			    arvif->vdev_id, ret);
+ 		vif->offload_flags &= ~IEEE80211_OFFLOAD_DECAP_ENABLED;
+ 	}
++
++	return ret;
+ }
+ 
+ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -6095,7 +6166,34 @@ static int ath11k_mac_op_add_interface(s
+ 	list_add(&arvif->list, &ar->arvifs);
+ 	spin_unlock_bh(&ar->data_lock);
+ 
+-	ath11k_mac_op_update_vif_offload(hw, vif);
 +	ret = ath11k_nss_vdev_create(arvif);
 +	if(ret) {
 +		ath11k_warn(ab, "failed to create nss vdev %d\n", ret);
 +		goto err_vdev_del;
 +	}
 +
- 	param_id = WMI_VDEV_PARAM_TX_ENCAP_TYPE;
- 	if (ath11k_frame_mode != ATH11K_HW_TXRX_ETHERNET ||
- 	    (vif->type != NL80211_IFTYPE_STATION &&
-@@ -5493,7 +5568,28 @@ static int ath11k_mac_op_add_interface(s
- 	list_add(&arvif->list, &ar->arvifs);
- 	spin_unlock_bh(&ar->data_lock);
- 
--	ath11k_mac_op_update_vif_offload(hw, vif);
 +	if (ath11k_mac_op_update_vif_offload(hw, vif))
 +		goto err_vdev_del;
 +
@@ -728,7 +699,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	nss = get_num_chains(ar->cfg_tx_chainmask) ? : 1;
  	ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
-@@ -5618,6 +5714,7 @@ err_peer_del:
+@@ -6226,6 +6324,7 @@ err_peer_del:
  	}
  
  err_vdev_del:
@@ -736,7 +707,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ath11k_wmi_vdev_delete(ar, arvif->vdev_id);
  	ar->num_created_vdevs--;
  	ar->allocated_vdev_map &= ~(1LL << arvif->vdev_id);
-@@ -5667,6 +5764,8 @@ static void ath11k_mac_op_remove_interfa
+@@ -6277,6 +6376,8 @@ static void ath11k_mac_op_remove_interfa
  
  	reinit_completion(&ar->vdev_delete_done);
  
@@ -745,18 +716,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	ret = ath11k_wmi_vdev_delete(ar, arvif->vdev_id);
  	if (ret) {
  		ath11k_warn(ab, "failed to delete WMI vdev %d: %d\n",
-@@ -6084,6 +6183,10 @@ ath11k_mac_update_vif_chan(struct ath11k
- 		if (WARN_ON(!arvif->is_up))
- 			continue;
- 
-+		ret = ath11k_nss_vdev_down(arvif);
-+		if(ret)
-+			ath11k_warn(ar->ab, "failure in nss vdev down %d\r\n",ret);
-+
- 		ret = ath11k_wmi_vdev_down(ar, arvif->vdev_id);
- 		if (ret) {
- 			ath11k_warn(ab, "failed to down vdev %d: %d\n",
-@@ -6126,6 +6229,10 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -6710,6 +6811,10 @@ ath11k_mac_update_vif_chan(struct ath11k
  				    arvif->vdev_id, ret);
  			continue;
  		}
@@ -767,7 +727,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	}
  
  	/* Restart the internal monitor vdev on new channel */
-@@ -7157,6 +7264,8 @@ static void ath11k_mac_op_sta_statistics
+@@ -7795,6 +7900,8 @@ static void ath11k_mac_op_sta_statistics
  	/* TODO: Use real NF instead of default one. */
  	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
@@ -776,7 +736,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  }
  
  #define ATH11K_WLAN_PRIO_MAX	0x63
-@@ -7254,6 +7363,7 @@ static const struct ieee80211_ops ath11k
+@@ -7892,6 +7999,7 @@ static const struct ieee80211_ops ath11k
  	.update_vif_offload		= ath11k_mac_op_update_vif_offload,
  	.config                         = ath11k_mac_op_config,
  	.bss_info_changed               = ath11k_mac_op_bss_info_changed,
@@ -784,7 +744,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	.configure_filter		= ath11k_mac_op_configure_filter,
  	.hw_scan                        = ath11k_mac_op_hw_scan,
  	.cancel_hw_scan                 = ath11k_mac_op_cancel_hw_scan,
-@@ -7652,7 +7762,8 @@ static int __ath11k_mac_register(struct
+@@ -8301,7 +8409,8 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, TX_AMPDU_SETUP_IN_HW);
  		ieee80211_hw_set(ar->hw, SUPPORTS_REORDERING_BUFFER);
  		ieee80211_hw_set(ar->hw, SUPPORTS_AMSDU_IN_AMPDU);
@@ -794,7 +754,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	}
  
  	ar->hw->wiphy->features |= NL80211_FEATURE_STATIC_SMPS;
-@@ -7724,6 +7835,9 @@ static int __ath11k_mac_register(struct
+@@ -8377,6 +8486,9 @@ static int __ath11k_mac_register(struct
  		ieee80211_hw_set(ar->hw, SUPPORT_FAST_XMIT);
  	}
  
@@ -844,7 +804,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -749,6 +749,11 @@ static int ath11k_pci_ext_irq_config(str
+@@ -819,6 +819,11 @@ static int ath11k_pci_ext_irq_config(str
  		netif_napi_add(&irq_grp->napi_ndev, &irq_grp->napi,
  			       ath11k_pci_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
  
@@ -856,7 +816,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		if (ab->hw_params.ring_mask->tx[i] ||
  		    ab->hw_params.ring_mask->rx[i] ||
  		    ab->hw_params.ring_mask->rx_err[i] ||
-@@ -974,6 +979,7 @@ static int ath11k_pci_claim(struct ath11
+@@ -1115,6 +1120,7 @@ static int ath11k_pci_claim(struct ath11
  		goto clear_master;
  	}
  
@@ -866,7 +826,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -922,6 +922,7 @@ static ssize_t ath11k_write_extd_rx_stat
+@@ -923,6 +923,7 @@ static ssize_t ath11k_write_extd_rx_stat
  			HTT_RX_FP_DATA_FILTER_FLASG3;
  	} else {
  		tlv_filter = ath11k_mac_mon_status_filter_default;
@@ -874,7 +834,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	}
  
  	ar->debug.rx_filter = tlv_filter.rx_filter;
-@@ -1837,6 +1838,75 @@ static const struct file_operations fops
+@@ -1836,6 +1837,75 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -950,7 +910,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  static int ath11k_get_tpc_ctl_mode(struct wmi_tpc_stats_event *tpc_stats,
  				   u32 pream_idx, int *mode)
  {
-@@ -2483,6 +2553,10 @@ int ath11k_debugfs_register(struct ath11
+@@ -2482,6 +2552,10 @@ int ath11k_debugfs_register(struct ath11
  	debugfs_create_file("tpc_stats_type", 0600, ar->debug.debugfs_pdev,
  			    ar, &fops_tpc_stats_type);
  
@@ -963,24 +923,15 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -10,7 +10,7 @@
- #include "hw.h"
+@@ -11,7 +11,7 @@
  #include "peer.h"
+ #include "mac.h"
  
 -static enum hal_tcl_encap_type
 +enum hal_tcl_encap_type
  ath11k_dp_tx_get_encap_type(struct ath11k_vif *arvif, struct sk_buff *skb)
  {
  	struct ieee80211_tx_info *tx_info = IEEE80211_SKB_CB(skb);
-@@ -935,7 +935,7 @@ int ath11k_dp_tx_htt_h2t_ppdu_stats_req(
- 		cmd->msg = FIELD_PREP(HTT_PPDU_STATS_CFG_MSG_TYPE,
- 				      HTT_H2T_MSG_TYPE_PPDU_STATS_CFG);
- 
--		pdev_mask = 1 << (i + 1);
-+		pdev_mask = 1 << (ar->pdev_idx + i);
- 		cmd->msg |= FIELD_PREP(HTT_PPDU_STATS_CFG_PDEV_ID, pdev_mask);
- 		cmd->msg |= FIELD_PREP(HTT_PPDU_STATS_CFG_TLV_TYPE_BITMASK, mask);
- 
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.h
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.h
 @@ -36,5 +36,7 @@ int ath11k_dp_tx_htt_rx_filter_setup(str
@@ -993,7 +944,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  #endif
 --- a/local-symbols
 +++ b/local-symbols
-@@ -134,6 +134,7 @@ ATH10K_DFS_CERTIFIED=
+@@ -126,6 +126,7 @@ ATH10K_DFS_CERTIFIED=
  ATH11K=
  ATH11K_AHB=
  ATH11K_PCI=
@@ -1088,3 +1039,84 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  {
  	return 0;
  }
+--- a/drivers/net/wireless/ath/ath11k/hw.c
++++ b/drivers/net/wireless/ath/ath11k/hw.c
+@@ -103,8 +103,10 @@ static void ath11k_init_wmi_config_qca63
+ 
+ static void ath11k_hw_ipq8074_reo_setup(struct ath11k_base *ab)
+ {
++	u8 frag_dest_ring = HAL_SRNG_RING_ID_REO2SW1;
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+ 	u32 val;
++
+ 	/* Each hash entry uses three bits to map to a particular ring. */
+ 	u32 ring_hash_map = HAL_HASH_ROUTING_RING_SW1 << 0 |
+ 		HAL_HASH_ROUTING_RING_SW2 << 3 |
+@@ -115,11 +117,14 @@ static void ath11k_hw_ipq8074_reo_setup(
+ 		HAL_HASH_ROUTING_RING_SW3 << 18 |
+ 		HAL_HASH_ROUTING_RING_SW4 << 21;
+ 
++	if (ab->nss.enabled)
++		frag_dest_ring = HAL_SRNG_REO_ALTERNATE_SELECT;
++
+ 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_GEN_ENABLE);
+ 
+ 	val &= ~HAL_REO1_GEN_ENABLE_FRAG_DST_RING;
+ 	val |= FIELD_PREP(HAL_REO1_GEN_ENABLE_FRAG_DST_RING,
+-			HAL_SRNG_RING_ID_REO2SW1) |
++			  frag_dest_ring) |
+ 		FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_LIST_ENABLE, 1) |
+ 		FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_FLUSH_ENABLE, 1);
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_GEN_ENABLE, val);
+@@ -133,6 +138,10 @@ static void ath11k_hw_ipq8074_reo_setup(
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_3(ab),
+ 			   HAL_DEFAULT_REO_TIMEOUT_USEC);
+ 
++	/* REO Dest ring setup is not required in NSS offload case */
++	if (ab->nss.enabled)
++		return;
++
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_0,
+ 			   FIELD_PREP(HAL_REO_DEST_RING_CTRL_HASH_RING_MAP,
+ 				      ring_hash_map));
+@@ -741,8 +750,10 @@ static u8 *ath11k_hw_wcn6855_rx_desc_mpd
+ 
+ static void ath11k_hw_wcn6855_reo_setup(struct ath11k_base *ab)
+ {
++	u8 frag_dest_ring = HAL_SRNG_RING_ID_REO2SW1;
+ 	u32 reo_base = HAL_SEQ_WCSS_UMAC_REO_REG;
+ 	u32 val;
++
+ 	/* Each hash entry uses four bits to map to a particular ring. */
+ 	u32 ring_hash_map = HAL_HASH_ROUTING_RING_SW1 << 0 |
+ 		HAL_HASH_ROUTING_RING_SW2 << 4 |
+@@ -753,6 +764,9 @@ static void ath11k_hw_wcn6855_reo_setup(
+ 		HAL_HASH_ROUTING_RING_SW3 << 24 |
+ 		HAL_HASH_ROUTING_RING_SW4 << 28;
+ 
++	if (ab->nss.enabled)
++		frag_dest_ring = HAL_SRNG_REO_ALTERNATE_SELECT;
++
+ 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_GEN_ENABLE);
+ 	val |= FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_LIST_ENABLE, 1) |
+ 		FIELD_PREP(HAL_REO1_GEN_ENABLE_AGING_FLUSH_ENABLE, 1);
+@@ -760,7 +774,7 @@ static void ath11k_hw_wcn6855_reo_setup(
+ 
+ 	val = ath11k_hif_read32(ab, reo_base + HAL_REO1_MISC_CTL);
+ 	val &= ~HAL_REO1_MISC_CTL_FRAGMENT_DST_RING;
+-	val |= FIELD_PREP(HAL_REO1_MISC_CTL_FRAGMENT_DST_RING, HAL_SRNG_RING_ID_REO2SW1);
++	val |= FIELD_PREP(HAL_REO1_MISC_CTL_FRAGMENT_DST_RING, frag_dest_ring);
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_MISC_CTL, val);
+ 
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_0(ab),
+@@ -772,6 +786,10 @@ static void ath11k_hw_wcn6855_reo_setup(
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_3(ab),
+ 			   HAL_DEFAULT_REO_TIMEOUT_USEC);
+ 
++	/* REO Dest ring setup is not required in NSS offload case */
++	if (ab->nss.enabled)
++		return;
++
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_2,
+ 			   ring_hash_map);
+ 	ath11k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_3,

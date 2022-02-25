@@ -26,22 +26,22 @@ index 5816db23d116..71d6a6c21360 100644
   * @he_oper: HE operation IE (or %NULL if HE isn't enabled)
 - * @fils_discovery: FILS discovery transmission parameters
 - * @unsol_bcast_probe_resp: Unsolicited broadcast probe response parameters
+  * @mbssid_config: AP settings for multiple bssid
   */
- struct cfg80211_ap_settings {
- 	struct cfg80211_chan_def chandef;
+  struct cfg80211_ap_settings {
 @@ -1213,8 +1211,6 @@ struct cfg80211_ap_settings {
  	u32 flags;
  	struct ieee80211_he_obss_pd he_obss_pd;
  	struct cfg80211_he_bss_color he_bss_color;
 -	struct cfg80211_fils_discovery fils_discovery;
 -	struct cfg80211_unsol_bcast_probe_resp unsol_bcast_probe_resp;
+	struct cfg80211_mbssid_config mbssid_config;
  };
- 
- /**
+
 @@ -3986,6 +3982,9 @@ struct mgmt_frame_regs {
-  *	given TIDs. This callback may sleep.
-  *
-  * @set_sar_specs: Update the SAR (TX power) settings.
+  * @set_fils_aad: Set FILS AAD data to the AP driver so that the driver can use
+  *	those to decrypt (Re)Association Request and encrypt (Re)Association
+  *	Response frame.
 + * @set_fils_discovery: Set FILS discovery transmission parameters.
 + * @set_unsol_bcast_probe_resp: Set unsolicited broadcast probe response
 + * 	transmission parameters.
@@ -49,9 +49,9 @@ index 5816db23d116..71d6a6c21360 100644
  struct cfg80211_ops {
  	int	(*suspend)(struct wiphy *wiphy, struct cfg80211_wowlan *wow);
 @@ -4313,6 +4312,12 @@ struct cfg80211_ops {
- 				    const u8 *peer, u8 tids);
- 	int	(*set_sar_specs)(struct wiphy *wiphy,
- 				 struct cfg80211_sar_specs *sar);
+				struct cfg80211_color_change_settings *params);
+	int     (*set_fils_aad)(struct wiphy *wiphy, struct net_device *dev,
+				struct cfg80211_fils_aad *fils_aad);
 +	int	(*set_fils_discovery)(struct wiphy *wiphy,
 +				      struct net_device *dev,
 +				      struct cfg80211_fils_discovery *params);
@@ -87,9 +87,9 @@ index 595236ab60c7..7bc93188e647 100644
 +	NL80211_CMD_SET_FILS_DISCOVERY,
 +	NL80211_CMD_SET_UNSOL_BCAST_PROBE_RESP,
 +
- 	/* add new commands above here */
- 
- 	/* used to define NL80211_CMD_MAX below */
+	NL80211_CMD_OBSS_COLOR_COLLISION,
+
+	NL80211_CMD_COLOR_CHANGE_REQUEST,
 diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
 index 868227717f34..d56a16a7b3fa 100644
 --- a/net/mac80211/cfg.c
@@ -168,9 +168,9 @@ index 868227717f34..d56a16a7b3fa 100644
  	if (err) {
  		old = sdata_dereference(sdata->u.ap.beacon, sdata);
 @@ -4206,4 +4196,6 @@ const struct cfg80211_ops mac80211_config_ops = {
- 	.set_tid_config = ieee80211_set_tid_config,
- 	.reset_tid_config = ieee80211_reset_tid_config,
- 	.set_sar_specs = ieee80211_set_sar_specs,
+	.reset_tid_config = ieee80211_reset_tid_config,
+	.set_sar_specs = ieee80211_set_sar_specs,
+	.color_change = ieee80211_color_change,
 +	.set_fils_discovery = ieee80211_set_fils_discovery,
 +	.set_unsol_bcast_probe_resp = ieee80211_set_unsol_bcast_probe_resp,
  };
@@ -178,17 +178,10 @@ diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
 index 24f985b77d59..a3947d85edae 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -410,9 +410,13 @@ nl80211_fils_discovery_policy[NL80211_FILS_DISCOVERY_ATTR_MAX + 1] = {
- 	[NL80211_FILS_DISCOVERY_ATTR_INT_MIN] = NLA_POLICY_MAX(NLA_U32, 10000),
- 	[NL80211_FILS_DISCOVERY_ATTR_INT_MAX] = NLA_POLICY_MAX(NLA_U32, 10000),
- #if LINUX_VERSION_IS_GEQ(5,10,0)
--	NLA_POLICY_RANGE(NLA_BINARY,
--			 NL80211_FILS_DISCOVERY_TMPL_MIN_LEN,
--			 IEEE80211_MAX_DATA_LEN),
-+	[NL80211_FILS_DISCOVERY_ATTR_TMPL] =
-+		NLA_POLICY_RANGE(NLA_BINARY,
-+				 NL80211_FILS_DISCOVERY_TMPL_MIN_LEN,
-+				 IEEE80211_MAX_DATA_LEN),
+@@ -419,6 +419,9 @@ nl80211_fils_discovery_policy[NL80211_FI
+ 			NLA_POLICY_RANGE(NLA_BINARY,
+ 					 NL80211_FILS_DISCOVERY_TMPL_MIN_LEN,
+ 					 IEEE80211_MAX_DATA_LEN),
 +#else
 +	[NL80211_FILS_DISCOVERY_ATTR_TMPL] = { .type = NLA_BINARY,
 +					       .len = IEEE80211_MAX_DATA_LEN }
@@ -296,14 +289,14 @@ index 24f985b77d59..a3947d85edae 100644
  	return 0;
  }
  
-@@ -5495,22 +5515,6 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
+@@ -5702,22 +5721,6 @@ static int nl80211_start_ap(struct sk_bu
  			goto out;
  	}
  
 -	if (info->attrs[NL80211_ATTR_FILS_DISCOVERY]) {
 -		err = nl80211_parse_fils_discovery(rdev,
 -						   info->attrs[NL80211_ATTR_FILS_DISCOVERY],
--						   &params);
+-						   params);
 -		if (err)
 -			goto out;
 -	}
@@ -311,14 +304,14 @@ index 24f985b77d59..a3947d85edae 100644
 -	if (info->attrs[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP]) {
 -		err = nl80211_parse_unsol_bcast_probe_resp(
 -			rdev, info->attrs[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP],
--			&params);
+-			params);
 -		if (err)
--			return err;
+-			goto out;
 -	}
 -
- 	nl80211_calculate_ap_params(&params);
- 
- 	if (info->attrs[NL80211_ATTR_EXTERNAL_AUTH_SUPPORT])
+ 	if (info->attrs[NL80211_ATTR_MBSSID_CONFIG]) {
+ 		err = nl80211_parse_mbssid_config(&rdev->wiphy, dev,
+ 						  info->attrs[NL80211_ATTR_MBSSID_CONFIG],
 @@ -15835,6 +15839,22 @@ static const struct genl_small_ops nl80211_small_ops[] = {
  		.internal_flags = NL80211_FLAG_NEED_WIPHY |
  				  NL80211_FLAG_NEED_RTNL,

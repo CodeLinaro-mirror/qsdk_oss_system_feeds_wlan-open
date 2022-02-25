@@ -33,7 +33,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -512,6 +512,7 @@ struct ath11k_debug {
+@@ -534,6 +534,7 @@ struct ath11k_debug {
  	struct list_head wmi_list;
  	struct completion wmi_ctrl_path_stats_rcvd;
  	u32 wmi_ctrl_path_stats_tagid;
@@ -84,12 +84,13 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
 +
  static int ath11k_dbring_bufs_replenish(struct ath11k *ar,
  					struct ath11k_dbring *ring,
- 					struct ath11k_dbring_element *buff,
-+					enum wmi_direct_buffer_module id,
- 					gfp_t gfp)
+-					struct ath11k_dbring_element *buff)
++ 					struct ath11k_dbring_element *buff,
++					enum wmi_direct_buffer_module id)
  {
  	struct ath11k_base *ab = ar->ab;
-@@ -27,6 +63,7 @@ static int ath11k_dbring_bufs_replenish(
+ 	struct hal_srng *srng;
+@@ -26,6 +62,7 @@ static int ath11k_dbring_bufs_replenish(
  
  	ptr_unaligned = buff->payload;
  	ptr_aligned = PTR_ALIGN(ptr_unaligned, ring->buf_align);
@@ -97,7 +98,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  	paddr = dma_map_single(ab->dev, ptr_aligned, ring->buf_sz,
  			       DMA_FROM_DEVICE);
  
-@@ -55,6 +92,7 @@ static int ath11k_dbring_bufs_replenish(
+@@ -54,6 +91,7 @@ static int ath11k_dbring_bufs_replenish(
  
  	ath11k_hal_rx_buf_addr_info_set(desc, paddr, cookie, 0);
  
@@ -105,24 +106,26 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  	ath11k_hal_srng_access_end(ab, srng);
  
  	return 0;
-@@ -73,6 +111,7 @@ err:
+@@ -71,7 +109,8 @@ err:
+ }
  
  static int ath11k_dbring_fill_bufs(struct ath11k *ar,
- 				   struct ath11k_dbring *ring,
-+				   enum wmi_direct_buffer_module id,
- 				   gfp_t gfp)
+-				   struct ath11k_dbring *ring)
++				   struct ath11k_dbring *ring,
++				   enum wmi_direct_buffer_module id)
  {
  	struct ath11k_dbring_element *buff;
-@@ -96,7 +135,7 @@ static int ath11k_dbring_fill_bufs(struc
- 		if (!buff)
+ 	struct hal_srng *srng;
+@@ -99,7 +138,7 @@ static int ath11k_dbring_fill_bufs(struc
+ 			kfree(buff);
  			break;
- 
--		ret = ath11k_dbring_bufs_replenish(ar, ring, buff, gfp);
-+		ret = ath11k_dbring_bufs_replenish(ar, ring, buff, id, gfp);
+ 		}
+-		ret = ath11k_dbring_bufs_replenish(ar, ring, buff);
++		ret = ath11k_dbring_bufs_replenish(ar, ring, buff, id);
  		if (ret) {
  			ath11k_warn(ar->ab, "failed to replenish db ring num_remain %d req_ent %d\n",
  				    num_remain, req_entries);
-@@ -161,7 +200,8 @@ int ath11k_dbring_set_cfg(struct ath11k
+@@ -165,7 +204,8 @@ int ath11k_dbring_set_cfg(struct ath11k
  
  int ath11k_dbring_buf_setup(struct ath11k *ar,
  			    struct ath11k_dbring *ring,
@@ -132,16 +135,16 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  {
  	struct ath11k_base *ab = ar->ab;
  	struct hal_srng *srng;
-@@ -177,7 +217,7 @@ int ath11k_dbring_buf_setup(struct ath11
+@@ -181,7 +221,7 @@ int ath11k_dbring_buf_setup(struct ath11
  	ring->hp_addr = ath11k_hal_srng_get_hp_addr(ar->ab, srng);
  	ring->tp_addr = ath11k_hal_srng_get_tp_addr(ar->ab, srng);
  
--	ret = ath11k_dbring_fill_bufs(ar, ring, GFP_KERNEL);
-+	ret = ath11k_dbring_fill_bufs(ar, ring, id, GFP_KERNEL);
+-	ret = ath11k_dbring_fill_bufs(ar, ring);
++	ret = ath11k_dbring_fill_bufs(ar, ring, id);
  
  	return ret;
  }
-@@ -237,7 +277,7 @@ int ath11k_dbring_buffer_release_event(s
+@@ -241,7 +281,7 @@ int ath11k_dbring_buffer_release_event(s
  	struct ath11k_buffer_addr desc;
  	u8 *vaddr_unalign;
  	u32 num_entry, num_buff_reaped;
@@ -150,7 +153,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  	u32 cookie;
  	int buf_id;
  	int size;
-@@ -245,6 +285,7 @@ int ath11k_dbring_buffer_release_event(s
+@@ -249,6 +289,7 @@ int ath11k_dbring_buffer_release_event(s
  	int ret = 0;
  
  	pdev_idx = ev->fixed.pdev_id;
@@ -158,7 +161,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  
  	if (pdev_idx >= ab->num_radios) {
  		ath11k_warn(ab, "Invalid pdev id %d\n", pdev_idx);
-@@ -313,6 +354,9 @@ int ath11k_dbring_buffer_release_event(s
+@@ -317,6 +358,9 @@ int ath11k_dbring_buffer_release_event(s
  		dma_unmap_single(ab->dev, buff->paddr, ring->buf_sz,
  				 DMA_FROM_DEVICE);
  
@@ -168,12 +171,12 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  		if (ring->handler) {
  			vaddr_unalign = buff->payload;
  			handler_data.data = PTR_ALIGN(vaddr_unalign,
-@@ -323,7 +367,7 @@ int ath11k_dbring_buffer_release_event(s
- 		}
+@@ -328,7 +372,7 @@ int ath11k_dbring_buffer_release_event(s
  
- 		memset(buff, 0, size);
--		ath11k_dbring_bufs_replenish(ar, ring, buff, GFP_ATOMIC);
-+		ath11k_dbring_bufs_replenish(ar, ring, buff, module_id, GFP_ATOMIC);
+ 		buff->paddr = 0;
+ 		memset(buff->payload, 0, size);
+-		ath11k_dbring_bufs_replenish(ar, ring, buff);
++		ath11k_dbring_bufs_replenish(ar, ring, buff, module_id);
  	}
  
  	spin_unlock_bh(&srng->lock);
@@ -197,7 +200,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  #endif /* ATH11K_DBRING_H */
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -3281,6 +3281,203 @@ static const struct file_operations fops
+@@ -3301,6 +3301,203 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -401,9 +404,9 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  int ath11k_debugfs_register(struct ath11k *ar)
  {
  	struct ath11k_base *ab = ar->ab;
-@@ -3368,11 +3565,32 @@ int ath11k_debugfs_register(struct ath11
- 				    &fops_athdiag);
- 	}
+@@ -3387,11 +3584,32 @@ int ath11k_debugfs_register(struct ath11
+ 			    ar->debug.debugfs_pdev, ar,
+ 			    &fops_athdiag);
  
 +	debugfs_create_file("enable_dbr_debug", 0200, ar->debug.debugfs_pdev,
 +			    ar, &fops_dbr_debug);
@@ -436,7 +439,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  	ar->debug.debugfs_pdev = NULL;
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -92,6 +92,34 @@ enum ath11k_debug_tpc_stats_ctl_mode {
+@@ -88,6 +88,34 @@ enum ath11k_debug_tpc_stats_ctl_mode {
  	ATH11K_TPC_STATS_CTL_MODE_BW_160,
  };
  
@@ -471,7 +474,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  struct debug_htt_stats_req {
  	bool done;
  	u8 pdev_id;
-@@ -197,6 +225,10 @@ void ath11k_debugfs_fw_stats_process(str
+@@ -193,6 +221,10 @@ void ath11k_debugfs_fw_stats_process(str
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
  ssize_t ath11k_debugfs_dump_soc_ring_bp_stats(struct ath11k_base *ab,
  					    char *buf, int size);
@@ -482,7 +485,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  
  static inline bool ath11k_debugfs_is_pktlog_lite_mode_enabled(struct ath11k *ar)
  {
-@@ -320,7 +352,13 @@ static inline int ath11k_debugfs_rx_filt
+@@ -316,7 +348,13 @@ static inline int ath11k_debugfs_rx_filt
  {
  	return 0;
  }
@@ -507,11 +510,11 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  
  	lockdep_assert_held(&ar->spectral.lock);
  
-@@ -615,6 +616,11 @@ int ath11k_spectral_process_fft(struct a
+@@ -614,6 +615,11 @@ int ath11k_spectral_process_fft(struct a
  		return -EINVAL;
  	}
  
-+	check_length = sizeof(*fft_report) + (num_bins * ab->hw_params.spectral_fft_sz);
++	check_length = sizeof(*fft_report) + (num_bins * ab->hw_params.spectral.fft_sz);
 +	ret = ath11k_dbring_validate_buffer(ar, data, check_length);
 +	if (ret)
 +		return ret;
@@ -519,7 +522,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  	ret = ath11k_spectral_pull_search(ar, data, &search);
  	if (ret) {
  		ath11k_warn(ab, "failed to pull search report %d\n", ret);
-@@ -731,15 +737,18 @@ static int ath11k_spectral_process_data(
+@@ -730,15 +736,18 @@ static int ath11k_spectral_process_data(
  
  		tag = FIELD_GET(SPECTRAL_TLV_HDR_TAG,
  				__le32_to_cpu(tlv->header));
@@ -539,13 +542,13 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
 +		 */
 +		if (tag == ATH11K_SPECTRAL_TAG_SCAN_SUMMARY)
  			tlv_len = sizeof(*summary) - sizeof(*tlv) +
- 				  ab->hw_params.spectral_summary_pad_sz;
+ 				  ab->hw_params.spectral.summary_pad_sz;
 +		switch (tag) {
 +		case ATH11K_SPECTRAL_TAG_SCAN_SUMMARY:
  
  			if (tlv_len < (sizeof(*summary) - sizeof(*tlv))) {
  				ath11k_warn(ab, "failed to parse spectral summary at bytes %d tlv_len:%d\n",
-@@ -748,6 +757,10 @@ static int ath11k_spectral_process_data(
+@@ -747,6 +756,10 @@ static int ath11k_spectral_process_data(
  				goto err;
  			}
  
@@ -556,7 +559,7 @@ Signed-off-by: Venkateswara Naralasetty <vnaralas@codeaurora.org>
  			summary = (struct spectral_summary_fft_report *)tlv;
  			ath11k_spectral_pull_summary(ar, &param->meta,
  						     summary, &summ_rpt);
-@@ -804,7 +817,7 @@ static int ath11k_spectral_ring_alloc(st
+@@ -803,7 +816,7 @@ static int ath11k_spectral_ring_alloc(st
  			      ATH11K_SPECTRAL_EVENT_TIMEOUT_MS,
  			      ath11k_spectral_process_data);
  

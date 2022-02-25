@@ -31,11 +31,9 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  drivers/net/wireless/ath/ath11k/wmi.h  |   2 +
  3 files changed, 154 insertions(+), 5 deletions(-)
 
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/core.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/core.h
-@@ -279,9 +279,8 @@ struct ath11k_vif {
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -295,9 +295,8 @@ struct ath11k_vif {
  	struct dentry *amsdu_aggr_size;
  	struct dentry *wmi_ctrl_stat;
  	struct ath11k_mgmt_frame_stats mgmt_stats;
@@ -46,11 +44,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/c
  };
  
  struct ath11k_vif_iter {
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/mac.c
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/mac.c
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4248,6 +4248,11 @@ static void ath11k_sta_rc_update_wk(stru
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -4362,6 +4362,11 @@ static void ath11k_sta_rc_update_wk(stru
  	arvif = arsta->arvif;
  	ar = arvif->ar;
  
@@ -62,8 +58,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	if (WARN_ON(ath11k_mac_vif_chan(arvif->vif, &def)))
  		return;
  
-@@ -4365,26 +4370,121 @@ static void ath11k_sta_rc_update_wk(stru
- static void ath11k_sta_use_4addr_wk(struct work_struct *wk)
+@@ -4495,17 +4500,28 @@ static void ath11k_sta_rc_update_wk(stru
+ static void ath11k_sta_set_4addr_wk(struct work_struct *wk)
  {
  	struct ath11k *ar;
 -	struct ath11k_vif *arvif;
@@ -77,28 +73,27 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
 +	u32 wds_peer_id;
  	int ret = 0;
  
- 	arsta = container_of(wk, struct ath11k_sta, use_4addr_wk);
+ 	arsta = container_of(wk, struct ath11k_sta, set_4addr_wk);
  	sta = container_of((void *)arsta, struct ieee80211_sta, drv_priv);
  	arvif = arsta->arvif;
  	ar = arvif->ar;
 +	ab = ar->ab;
  
 -	ath11k_dbg(ar->ab, ATH11K_DBG_MAC,
--		   "setting USE_4ADDR for STA %pM\n", sta->addr);
 +	if (ab->nss.enabled && arvif->vif->type == NL80211_IFTYPE_AP_VLAN) {
 +		ap_vlan_arvif = arsta->arvif;
 +		arvif = ap_vlan_arvif->nss.ap_vif;
 +	}
 +
 +	ath11k_dbg(ab, ATH11K_DBG_MAC,
-+		   "setting USE_4ADDR for peer %pM\n", sta->addr);
+ 		   "setting USE_4ADDR for peer %pM\n", sta->addr);
  
  	ret = ath11k_wmi_set_peer_param(ar, sta->addr,
- 					arvif->vdev_id,
+@@ -4513,8 +4529,92 @@ static void ath11k_sta_set_4addr_wk(stru
  					WMI_PEER_USE_4ADDR, 1);
  
  	if (ret)
--		ath11k_warn(ar->ab, "failed to set 4addr for STA %pM: %d\n",
+-		ath11k_warn(ar->ab, "failed to set peer %pM 4addr capability: %d\n",
 +		ath11k_warn(ab, "failed to set 4addr for STA %pM: %d\n",
  			    sta->addr, ret);
 +
@@ -188,8 +183,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  }
  
  static int ath11k_mac_inc_num_stations(struct ath11k_vif *arvif,
-@@ -4694,9 +4794,32 @@ static void ath11k_mac_op_sta_set_4addr(
-                                        bool enabled)
+@@ -4837,9 +4937,32 @@ static void ath11k_mac_op_sta_set_4addr(
+ 					struct ieee80211_sta *sta, bool enabled)
  {
  	struct ath11k *ar = hw->priv;
 +	struct ath11k_vif *arvif = (void *)vif->drv_priv;
@@ -218,20 +213,20 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
 +			arsta->arvif = arvif;
 +		}
 +
- 		ieee80211_queue_work(ar->hw, &arsta->use_4addr_wk);
+ 		ieee80211_queue_work(ar->hw, &arsta->set_4addr_wk);
  		arsta->use_4addr_set = true;
  	}
-@@ -6031,6 +6154,9 @@ static void ath11k_mac_op_update_vif_off
+@@ -6161,6 +6284,9 @@ static int ath11k_mac_op_update_vif_offl
  	u32 param_id, param_value;
  	int ret;
  
 +	if (ab->nss.enabled && vif->type == NL80211_IFTYPE_AP_VLAN)
 +		return 0;
 +
- 	ret = ath11k_nss_vdev_create(arvif);
- 	if(ret) {
- 		ath11k_warn(ab, "failed to create nss vdev %d\n", ret);
-@@ -6101,7 +6227,8 @@ static int ath11k_mac_op_add_interface(s
+ 	param_id = WMI_VDEV_PARAM_TX_ENCAP_TYPE;
+ 	if (ath11k_frame_mode != ATH11K_HW_TXRX_ETHERNET ||
+ 	    (vif->type != NL80211_IFTYPE_STATION &&
+@@ -6227,7 +6353,8 @@ static int ath11k_mac_op_add_interface(s
  		goto err;
  	}
  
@@ -241,7 +236,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  		ath11k_warn(ab, "failed to create vdev %u, reached max vdev limit %d\n",
  			    ar->num_created_vdevs, TARGET_NUM_VDEVS);
  		ret = -EBUSY;
-@@ -6114,6 +6241,28 @@ static int ath11k_mac_op_add_interface(s
+@@ -6240,6 +6367,28 @@ static int ath11k_mac_op_add_interface(s
  	arvif->vif = vif;
  
  	INIT_LIST_HEAD(&arvif->list);
@@ -268,9 +263,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
 +	}
 +
  	INIT_DELAYED_WORK(&arvif->connection_loss_work,
-                           ath11k_mac_vif_sta_connection_loss_work);
+ 			  ath11k_mac_vif_sta_connection_loss_work);
  
-@@ -6143,6 +6292,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -6269,6 +6418,7 @@ static int ath11k_mac_op_add_interface(s
  		fallthrough;
  	case NL80211_IFTYPE_AP:
  		arvif->vdev_type = WMI_VDEV_TYPE_AP;
@@ -278,7 +273,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  		break;
  	case NL80211_IFTYPE_MONITOR:
  		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
-@@ -6363,15 +6513,32 @@ static void ath11k_mac_op_remove_interfa
+@@ -6501,15 +6651,32 @@ static void ath11k_mac_op_remove_interfa
  {
  	struct ath11k *ar = hw->priv;
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
@@ -313,7 +308,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	ath11k_dbg(ab, ATH11K_DBG_MAC, "mac remove interface (vdev %d)\n",
  		   arvif->vdev_id);
  
-@@ -6380,6 +6547,14 @@ static void ath11k_mac_op_remove_interfa
+@@ -6518,6 +6685,14 @@ static void ath11k_mac_op_remove_interfa
  		if (ret)
  			ath11k_warn(ab, "failed to submit AP self-peer removal on vdev %d: %d\n",
  				    arvif->vdev_id, ret);
@@ -328,7 +323,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	}
  
  	reinit_completion(&ar->vdev_delete_done);
-@@ -6447,6 +6622,7 @@ err_vdev_del:
+@@ -6595,6 +6770,7 @@ err_vdev_del:
  	debugfs_remove(arvif->wmi_ctrl_stat);
  	arvif->wmi_ctrl_stat = NULL;
  
@@ -336,7 +331,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  	mutex_unlock(&ar->conf_mutex);
  }
  
-@@ -6511,16 +6687,17 @@ static int ath11k_mac_op_ampdu_action(st
+@@ -6654,16 +6830,17 @@ static int ath11k_mac_op_ampdu_action(st
  				      struct ieee80211_ampdu_params *params)
  {
  	struct ath11k *ar = hw->priv;
@@ -356,7 +351,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  		break;
  	case IEEE80211_AMPDU_TX_START:
  	case IEEE80211_AMPDU_TX_STOP_CONT:
-@@ -8019,6 +8196,7 @@ static void ath11k_mac_op_sta_statistics
+@@ -8173,6 +8350,7 @@ static void ath11k_mac_op_sta_statistics
  					 struct station_info *sinfo)
  {
  	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
@@ -364,7 +359,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  
  	sinfo->rx_duration = arsta->rx_duration;
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
-@@ -8046,7 +8224,8 @@ static void ath11k_mac_op_sta_statistics
+@@ -8199,7 +8377,8 @@ static void ath11k_mac_op_sta_statistics
  	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
  
@@ -374,11 +369,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/m
  }
  
  #define ATH11K_WLAN_PRIO_MAX	0x63
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/wmi.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -4849,6 +4849,8 @@ enum wmi_vdev_subtype {
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -4835,6 +4835,8 @@ enum wmi_vdev_subtype {
  	WMI_VDEV_SUBTYPE_MESH_11S,
  };
  
@@ -387,11 +380,9 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/w
  enum wmi_sta_powersave_param {
  	WMI_STA_PS_PARAM_RX_WAKE_POLICY = 0,
  	WMI_STA_PS_PARAM_TX_WAKE_THRESHOLD = 1,
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.c
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/dp_rx.c
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -1116,12 +1116,13 @@ err_mem_free:
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1150,12 +1150,13 @@ err_mem_free:
  	return ret;
  }
  
@@ -407,7 +398,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  	int ret;
  
  	ret = ath11k_peer_rx_tid_setup(ar, params->sta->addr, vdev_id,
-@@ -1133,13 +1134,13 @@ int ath11k_dp_rx_ampdu_start(struct ath1
+@@ -1167,13 +1168,13 @@ int ath11k_dp_rx_ampdu_start(struct ath1
  	return ret;
  }
  
@@ -424,7 +415,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  	dma_addr_t paddr;
  	bool active;
  	int ret;
-@@ -3113,11 +3114,11 @@ ath11k_dp_rx_update_peer_rate_table_stat
+@@ -3147,11 +3148,11 @@ ath11k_dp_rx_update_peer_rate_table_stat
  		rx_stats->byte_stats.rx_rate[rate_idx] += ppdu_info->mpdu_len;
  }
  
@@ -439,7 +430,7 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  	u32 num_msdu;
  
  	if (!rx_stats)
-@@ -3718,7 +3719,7 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -3749,7 +3750,7 @@ int ath11k_dp_rx_process_mon_status(stru
  
  		if (ppdu_info->reception_type == HAL_RX_RECEPTION_TYPE_SU) {
  			arsta = (struct ath11k_sta *)peer->sta->drv_priv;
@@ -448,10 +439,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  			ath11k_nss_update_sta_rxrate(ppdu_info, peer, NULL);
  		} else if ((ppdu_info->fc_valid) &&
  			   (ppdu_info->ast_index != HAL_AST_IDX_INVALID)) {
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/dp_rx.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/dp_rx.h
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.h
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
 @@ -88,9 +88,9 @@ static inline u32 ath11k_he_gi_to_nl8021
          return ret;
  }
@@ -464,10 +453,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/d
  			    struct ieee80211_ampdu_params *params);
  int ath11k_dp_peer_rx_pn_replay_config(struct ath11k_vif *arvif,
  				       const u8 *peer_addr,
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/peer.c
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/peer.c
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/peer.c
+--- a/drivers/net/wireless/ath/ath11k/peer.c
++++ b/drivers/net/wireless/ath/ath11k/peer.c
 @@ -140,6 +140,24 @@ struct ath11k_ast_entry *ath11k_peer_ast
  	return NULL;
  }
@@ -523,10 +510,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/p
  
  	if (ast_entry->is_mapped)
  		list_del(&ast_entry->ase_list);
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/peer.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/peer.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/peer.h
+--- a/drivers/net/wireless/ath/ath11k/peer.h
++++ b/drivers/net/wireless/ath/ath11k/peer.h
 @@ -33,6 +33,7 @@ enum ath11k_ast_entry_type {
  enum ath11k_wds_wmi_action {
  	ATH11K_WDS_WMI_ADD = 1,
@@ -557,10 +542,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/p
  
  static inline int ath11k_peer_add_ast(struct ath11k *ar, struct ath11k_peer *peer,
  				      u8* mac_addr, enum ath11k_ast_entry_type type)
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/nss.c
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/nss.c
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/nss.c
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
 @@ -996,6 +996,9 @@ int ath11k_nss_vdev_set_cmd(struct ath11
  	case ATH11K_NSS_WIFI_VDEV_DECAP_TYPE_CMD:
  		cmd = NSS_WIFI_VDEV_DECAP_TYPE_CMD;
@@ -571,10 +554,8 @@ Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/n
  	default:
  		return -EINVAL;
  	}
-Index: backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/nss.h
-===================================================================
---- backports-20210222_001-5.4.89-b157d2276.orig/drivers/net/wireless/ath/ath11k/nss.h
-+++ backports-20210222_001-5.4.89-b157d2276/drivers/net/wireless/ath/ath11k/nss.h
+--- a/drivers/net/wireless/ath/ath11k/nss.h
++++ b/drivers/net/wireless/ath/ath11k/nss.h
 @@ -108,6 +108,7 @@ enum ath11k_nss_vdev_cmd {
  	ATH11K_NSS_WIFI_VDEV_SECURITY_TYPE_CMD,
  	ATH11K_NSS_WIFI_VDEV_ENCAP_TYPE_CMD,
