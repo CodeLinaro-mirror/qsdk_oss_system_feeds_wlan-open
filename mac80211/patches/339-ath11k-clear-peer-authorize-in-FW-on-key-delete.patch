@@ -53,20 +53,20 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  drivers/net/wireless/ath/ath11k/mac.c | 29 ++++++++++++++++++++++++++++-
  1 file changed, 28 insertions(+), 1 deletion(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index c706286..6923ce3 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4162,6 +4162,23 @@ static int ath11k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+@@ -4277,7 +4277,25 @@ static int ath11k_mac_op_set_key(struct
  	 */
- 	if (peer && sta && cmd == SET_KEY)
+ 	if (peer && cmd == SET_KEY)
  		ath11k_peer_frags_flush(ar, peer);
+-	spin_unlock_bh(&ab->base_lock);
 +
 +	/* Reset peer authorized flag in FW before deleting keys
 +	 * to avoid races in FW during encryption of queued packets.
 +	 */
 +	if (peer && sta && cmd == DISABLE_KEY && peer->is_authorized) {
 +		peer->is_authorized = false;
++		spin_unlock_bh(&ab->base_lock);
 +		ret = ath11k_wmi_set_peer_param(ar, sta->addr,
 +						arvif->vdev_id,
 +						WMI_PEER_AUTHORIZE,
@@ -76,18 +76,21 @@ index c706286..6923ce3 100644
 +				    "peer (%pM) vdev %d: %d\n",
 +				    sta->addr, arvif->vdev_id, ret);
 +		}
++	} else {
++		spin_unlock_bh(&ab->base_lock);
 +	}
-+
- 	spin_unlock_bh(&ab->base_lock);
  
  	if (!peer) {
-@@ -5611,8 +5628,18 @@ static int ath11k_mac_op_sta_state(struct ieee80211_hw *hw,
+ 		if (cmd == SET_KEY) {
+@@ -5795,9 +5813,21 @@ free:
  
  		spin_lock_bh(&ar->ab->base_lock);
  		peer = ath11k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
 -		if (peer)
 +		if (peer) {
  			peer->is_authorized = false;
+-		spin_unlock_bh(&ar->ab->base_lock);
++			spin_unlock_bh(&ar->ab->base_lock);
 +			ret = ath11k_wmi_set_peer_param(ar, sta->addr,
 +							arvif->vdev_id,
 +							WMI_PEER_AUTHORIZE,
@@ -97,10 +100,9 @@ index c706286..6923ce3 100644
 +					    "peer (%pM) vdev %d: %d\n",
 +					    sta->addr, arvif->vdev_id, ret);
 +			}
++		} else {
++			spin_unlock_bh(&ar->ab->base_lock);
 +		}
- 		spin_unlock_bh(&ar->ab->base_lock);
  	} else if (old_state == IEEE80211_STA_ASSOC &&
- 		   new_state == IEEE80211_STA_AUTH &&
--- 
-2.7.4
-
+		   new_state == IEEE80211_STA_AUTH &&
+		   (vif->type == NL80211_IFTYPE_AP ||
