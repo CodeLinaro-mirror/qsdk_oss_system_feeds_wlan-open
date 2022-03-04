@@ -103,7 +103,7 @@ drv_mac80211_init_device_config() {
 		rx_antenna_pattern \
 		tx_antenna_pattern
 	config_add_int vht_max_mpdu vht_link_adapt vht160 rx_stbc tx_stbc
-	config_add_int max_ampdu_length_exp
+	config_add_int max_ampdu_length_exp ru_punct_bitmap
 	config_add_boolean \
                ldpc \
                greenfield \
@@ -592,10 +592,15 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "he_default_pe_duration=4" "$N"
 
 		if [ "$enable_be" != "0" ]; then
+			json_get_vars ru_punct_bitmap:0
+
 			append base_cfg "ieee80211be=1" "$N"
 			append base_cfg "eht_su_beamformer=1" "$N"
 			append base_cfg "eht_mu_beamformer=1" "$N"
 			append base_cfg "eht_su_beamformee=1" "$N"
+			if [ -n $ru_punct_bitmap ] && [ $ru_punct_bitmap -gt 0 ]; then
+				append base_cfg "ru_punct_bitmap=$ru_punct_bitmap" "$N"
+			fi
 		fi
 
 		[ "$he_mu_edca" != "0" ] && {

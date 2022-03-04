@@ -1,0 +1,133 @@
+From 726f01686254ab45b8bdbe1403e52460254201f3 Mon Sep 17 00:00:00 2001
+From: Aloka Dixit <quic_alokad@quicinc.com>
+Date: Mon, 14 Feb 2022 14:30:51 -0800
+Subject: [PATCH 3/7] nl80211: validate RU puncturing bitmap
+
+Add new attributes NL80211_ATTR_RU_PUNCT_BITMAP and
+NL80211_ATTR_RU_PUNCT_SUPP_HE to receive RU puncturing information
+from the userspace.
+- Bitmap consists of 16 bits, each bit corresponding to a 20 MHz
+channel in the operating bandwidth. Lowest bit corresponds to
+the lowest frequency. Validate the bitmap against the minimum
+bandwidth support advertised by the driver.
+- HE support flag indicates whether OFDMA puncturing patterns
+should be considered during validation.
+
+Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
+---
+ include/uapi/linux/nl80211.h | 10 ++++++++
+ net/wireless/nl80211.c       | 49 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 59 insertions(+)
+
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index f72ae2c70869..55587e47b5d9 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -2668,6 +2668,14 @@ enum nl80211_commands {
+  *	the driver supports preamble puncturing, value should be of type
+  *	&enum nl80211_ru_punct_supp_bw
+  *
++ * @NL80211_ATTR_RU_PUNCT_SUPP_HE: flag attribute, used to indicate that RU
++ *	puncturing bitmap validation should include OFDMA bitmaps.
++ *
++ * @NL80211_ATTR_RU_PUNCT_BITMAP: (u16) RU puncturing bitmap where the lowest
++ *	bit corresponds to the lowest 20 MHz channel. Each bit set to 1
++ *	indicates that the sub-channel is punctured, set 0 indicates that the
++ *	channel is active.
++ *
+  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
+  * @NL80211_ATTR_MAX: highest attribute number currently defined
+  * @__NL80211_ATTR_AFTER_LAST: internal use
+@@ -3183,6 +3191,8 @@ enum nl80211_attrs {
+ 	NL80211_ATTR_DISABLE_EHT,
+ 
+ 	NL80211_ATTR_RU_PUNCT_SUPP_BW,
++	NL80211_ATTR_RU_PUNCT_SUPP_HE,
++	NL80211_ATTR_RU_PUNCT_BITMAP,
+ 
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 8dbeb50737f4..90db22477189 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -818,6 +818,8 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+ 	[NL80211_ATTR_DISABLE_EHT] = { .type = NLA_FLAG },
+ 	[NL80211_ATTR_RU_PUNCT_SUPP_BW] =
+ 		NLA_POLICY_MAX(NLA_U8, NL80211_RU_PUNCT_SUPP_BW_320),
++	[NL80211_ATTR_RU_PUNCT_SUPP_HE] = { .type = NLA_FLAG },
++	[NL80211_ATTR_RU_PUNCT_BITMAP] = { .type = NLA_U16 },
+ };
+ 
+ /* policy for the key attributes */
+@@ -3148,6 +3150,46 @@ static bool nl80211_can_set_dev_channel(struct wireless_dev *wdev)
+ 		wdev->iftype == NL80211_IFTYPE_P2P_GO;
+ }
+ 
++static int nl80211_parse_ru_punct_bitmap(struct cfg80211_registered_device *rdev,
++					 struct genl_info *info,
++					 struct cfg80211_chan_def *chandef)
++{
++	chandef->ru_punct_bitmap_supp_he =
++		nla_get_flag(info->attrs[NL80211_ATTR_RU_PUNCT_SUPP_HE]);
++
++	chandef->ru_punct_bitmap =
++		nla_get_u16(info->attrs[NL80211_ATTR_RU_PUNCT_BITMAP]);
++
++	if (!chandef->ru_punct_bitmap)
++		return 0;
++
++	if (!rdev->wiphy.ru_punct_supp_bw &&
++	    (chandef->ru_punct_bitmap || chandef->ru_punct_bitmap_supp_he))
++		return -EOPNOTSUPP;
++
++	switch (chandef->width) {
++	case NL80211_CHAN_WIDTH_80:
++		if (rdev->wiphy.ru_punct_supp_bw >=
++		    NL80211_RU_PUNCT_SUPP_BW_160)
++			return -EOPNOTSUPP;
++		break;
++
++	case NL80211_CHAN_WIDTH_160:
++		if (rdev->wiphy.ru_punct_supp_bw >=
++		    NL80211_RU_PUNCT_SUPP_BW_320)
++			return -EOPNOTSUPP;
++		break;
++
++	case NL80211_CHAN_WIDTH_320:
++		break;
++
++	default:
++		return -EOPNOTSUPP;
++	}
++
++	return 0;
++}
++
+ int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
+ 			  struct genl_info *info,
+ 			  struct cfg80211_chan_def *chandef)
+@@ -3155,6 +3197,7 @@ int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
+ 	struct netlink_ext_ack *extack = genl_info_extack(info);
+ 	struct nlattr **attrs = info->attrs;
+ 	u32 control_freq;
++	int err;
+ 
+ 	if (!attrs[NL80211_ATTR_WIPHY_FREQ])
+ 		return -EINVAL;
+@@ -3231,6 +3274,12 @@ int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
+ 				nla_get_u32(attrs[NL80211_ATTR_CENTER_FREQ2]);
+ 	}
+ 
++	if (info->attrs[NL80211_ATTR_RU_PUNCT_BITMAP]) {
++		err = nl80211_parse_ru_punct_bitmap(rdev, info, chandef);
++		if (err)
++			return err;
++	}
++
+ 	if (info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]) {
+ 		chandef->edmg.channels =
+ 		      nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]);
+-- 
+2.31.1
+
