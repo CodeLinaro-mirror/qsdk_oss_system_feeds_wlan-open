@@ -133,15 +133,16 @@
  	enum nl80211_band band;
  	struct cfg80211_bitrate_mask *mask;
 -	u8 num_vht_rates;
-+	u8 num_vht_rates, num_he_rates;
++	u8 num_vht_rates, num_he_rates, num_ht_rates;
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -3520,9 +3604,10 @@ static int ath11k_station_assoc(struct a
+@@ -3520,9 +3604,11 @@ static int ath11k_station_assoc(struct a
  	}
  
  	num_vht_rates = ath11k_mac_bitrate_mask_num_vht_rates(ar, band, mask);
 +	num_he_rates = ath11k_mac_bitrate_mask_num_he_rates(ar, band, mask);
++	num_ht_rates = ath11k_mac_bitrate_mask_num_ht_rates(ar, band, mask);
  
 -	/* If single VHT rate is configured (by set_bitrate_mask()),
 -	 * peer_assoc will disable VHT. This is now enabled by a peer specific
@@ -150,7 +151,7 @@
  	 * fixed param.
  	 * Note that all other rates and NSS will be disabled for this peer.
  	 */
-@@ -3531,6 +3616,11 @@ static int ath11k_station_assoc(struct a
+@@ -3531,6 +3617,16 @@ static int ath11k_station_assoc(struct a
  							 band);
  		if (ret)
  			return ret;
@@ -159,10 +160,15 @@
 +							 band);
 +		if (ret)
 +			return ret;
++	} else if (sta->ht_cap.ht_supported && num_ht_rates == 1) {
++		ret = ath11k_mac_set_peer_ht_fixed_rate(arvif, sta, mask,
++							band);
++		if (ret)
++			return ret;
  	}
  
  	/* Re-assoc is run only to update supported rates for given station. It
-@@ -3603,7 +3693,7 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -3603,7 +3699,7 @@ static void ath11k_sta_rc_update_wk(stru
  	const u16 *vht_mcs_mask;
  	const u16 *he_mcs_mask;
  	u32 changed, bw, nss, smps;
@@ -171,7 +177,7 @@
  	const struct cfg80211_bitrate_mask *mask;
  	struct peer_assoc_params peer_arg;
  
-@@ -3670,6 +3760,8 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -3670,6 +3766,8 @@ static void ath11k_sta_rc_update_wk(stru
  
  	if (changed & IEEE80211_RC_SUPP_RATES_CHANGED) {
  		mask = &arvif->bitrate_mask;
@@ -180,7 +186,7 @@
  		num_vht_rates = ath11k_mac_bitrate_mask_num_vht_rates(ar, band,
  								      mask);
  		num_he_rates = ath11k_mac_bitrate_mask_num_he_rates(ar, band,
-@@ -3692,11 +3784,25 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -3692,11 +3790,25 @@ static void ath11k_sta_rc_update_wk(stru
  		} else if (sta->he_cap.has_he && num_he_rates == 1) {
  			ath11k_mac_set_peer_he_fixed_rate(arvif, sta, mask,
  							  band);
@@ -208,7 +214,7 @@
  			ath11k_peer_assoc_prepare(ar, arvif->vif, sta,
  						  &peer_arg, true);
  
-@@ -5285,6 +5391,7 @@ static int ath11k_mac_op_add_interface(s
+@@ -5285,6 +5397,7 @@ static int ath11k_mac_op_add_interface(s
  
  	for (i = 0; i < ARRAY_SIZE(arvif->bitrate_mask.control); i++) {
  		arvif->bitrate_mask.control[i].legacy = 0xffffffff;
@@ -216,7 +222,7 @@
  		memset(arvif->bitrate_mask.control[i].ht_mcs, 0xff,
  		       sizeof(arvif->bitrate_mask.control[i].ht_mcs));
  		memset(arvif->bitrate_mask.control[i].vht_mcs, 0xff,
-@@ -6274,20 +6381,6 @@ static void ath11k_mac_op_flush(struct i
+@@ -6274,20 +6387,6 @@ static void ath11k_mac_op_flush(struct i
  		ath11k_warn(ar->ab, "failed to flush transmit queue %ld\n", time_left);
  }
  
@@ -237,7 +243,7 @@
  static bool
  ath11k_mac_has_single_legacy_rate(struct ath11k *ar,
  				  enum nl80211_band band,
-@@ -6581,6 +6674,53 @@ static void ath11k_mac_disable_peer_fixe
+@@ -6581,6 +6680,53 @@ static void ath11k_mac_disable_peer_fixe
  			    sta->addr, ret);
  }
  
@@ -291,7 +297,7 @@
  static int
  ath11k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
  			       struct ieee80211_vif *vif,
-@@ -6643,6 +6783,11 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -6643,6 +6789,11 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  		nss = single_nss;
  	} else {
  		rate = WMI_FIXED_RATE_NONE;
@@ -303,7 +309,7 @@
  		nss = min_t(u32, ar->num_tx_chains,
  			    max(max(ath11k_mac_max_ht_nss(ht_mcs_mask),
  				    ath11k_mac_max_vht_nss(vht_mcs_mask)),
-@@ -6691,10 +6836,6 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -6691,10 +6842,6 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  			return -EINVAL;
  		}
  
