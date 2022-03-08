@@ -19,7 +19,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -3738,6 +3738,20 @@ ath11k_mac_bitrate_mask_num_he_rates(str
+@@ -4098,6 +4098,20 @@ ath11k_mac_bitrate_mask_num_he_rates(str
  }
  
  static int
@@ -40,7 +40,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  ath11k_mac_set_peer_vht_fixed_rate(struct ath11k_vif *arvif,
  				   struct ieee80211_sta *sta,
  				   const struct cfg80211_bitrate_mask *mask,
-@@ -7048,10 +7062,11 @@ ath11k_mac_set_auto_rate_GI_LTF(struct a
+@@ -7512,10 +7526,11 @@ ath11k_mac_set_auto_rate_gi_ltf(struct a
  
  static int ath11k_mac_set_rate_params(struct ath11k_vif *arvif,
  				      u32 rate, u8 nss, u8 sgi, u8 ldpc,
@@ -54,7 +54,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -7113,6 +7128,20 @@ static int ath11k_mac_set_rate_params(st
+@@ -7583,6 +7598,20 @@ static int ath11k_mac_set_rate_params(st
  		}
  	}
  
@@ -75,7 +75,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  	return 0;
  }
  
-@@ -7166,6 +7195,21 @@ ath11k_mac_he_mcs_range_present(struct a
+@@ -7636,6 +7665,21 @@ ath11k_mac_he_mcs_range_present(struct a
  	return true;
  }
  
@@ -97,8 +97,8 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  static void ath11k_mac_set_bitrate_mask_iter(void *data,
  					     struct ieee80211_sta *sta)
  {
-@@ -7202,13 +7246,15 @@ ath11k_mac_validate_vht_he_fixed_rate_se
- 					const struct cfg80211_bitrate_mask *mask)
+@@ -7672,13 +7716,15 @@ ath11k_mac_validate_vht_he_fixed_rate_se
+ 					       const struct cfg80211_bitrate_mask *mask)
  {
  	bool he_fixed_rate = false, vht_fixed_rate = false;
 +	bool he_ul_fixed_rate = false;
@@ -115,11 +115,11 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  
  	if (ath11k_mac_bitrate_mask_num_vht_rates(ar, band, mask) == 1)
  		vht_fixed_rate = true;
-@@ -7216,11 +7262,15 @@ ath11k_mac_validate_vht_he_fixed_rate_se
+@@ -7686,11 +7732,15 @@ ath11k_mac_validate_vht_he_fixed_rate_se
  	if (ath11k_mac_bitrate_mask_num_he_rates(ar, band, mask) == 1)
  		he_fixed_rate = true;
  
--	if(!vht_fixed_rate && !he_fixed_rate)
+-	if (!vht_fixed_rate && !he_fixed_rate)
 +	if (ath11k_mac_bitrate_mask_num_he_ul_rates(ar, band, mask) == 1)
 +		he_ul_fixed_rate = true;
 +
@@ -132,9 +132,9 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  
  	rcu_read_lock();
  	spin_lock_bh(&ar->ab->base_lock);
-@@ -7236,6 +7286,14 @@ ath11k_mac_validate_vht_he_fixed_rate_se
+@@ -7706,6 +7756,14 @@ ath11k_mac_validate_vht_he_fixed_rate_se
  				ret = false;
- 				goto exit;
+ 				goto out;
  			}
 +			/* TODO:
 +				check when UL is valid
@@ -142,22 +142,23 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
 +			if (he_ul_fixed_rate && (!peer->sta->he_cap.has_he ||
 +                            peer->sta->rx_nss < he_ul_nss)) {
 +                                ret = false;
-+                                goto exit;
++                                goto out;
 +                        }
  		}
  	}
- exit:
-@@ -7303,14 +7361,16 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+ 
+@@ -7774,15 +7832,17 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  	const u8 *ht_mcs_mask;
  	const u16 *vht_mcs_mask;
  	const u16 *he_mcs_mask;
 +	const u16 *he_ul_mcs_mask;
+ 	u8 he_ltf = 0;
+ 	u8 he_gi = 0;
  	u32 rate;
 -	u8 nss;
 +	u8 nss, he_ul_nss = 0;
  	u8 sgi;
  	u8 ldpc;
- 	u8 he_gi = 0, he_ltf = 0;
  	int single_nss;
 -	int ret;
 +	int ret, i;
@@ -166,7 +167,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  	bool he_fixed_rate = false;
  
  	if (ath11k_mac_vif_chan(vif, &def))
-@@ -7320,6 +7380,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -7792,6 +7852,7 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  	ht_mcs_mask = mask->control[band].ht_mcs;
  	vht_mcs_mask = mask->control[band].vht_mcs;
  	he_mcs_mask = mask->control[band].he_mcs;
@@ -174,7 +175,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  	ldpc = !!(ar->ht_cap_info & WMI_HT_CAP_LDPC);
  
  	sgi = mask->control[band].gi;
-@@ -7329,6 +7390,15 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -7801,6 +7862,23 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  	he_gi = mask->control[band].he_gi;
  	he_ltf = mask->control[band].he_ltf;
  
@@ -182,31 +183,23 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
 +		if (hweight16(mask->control[band].he_ul_mcs[i]) == 1) {
 +			he_ul_nss = i + 1;
 +			he_ul_rate = ffs((int)
-+					 mask->control[band].he_ul_mcs[i]) - 1;
++					mask->control[band].he_ul_mcs[i]) - 1;
 +			break;
 +		}
++	}
++	num_rates = ath11k_mac_bitrate_mask_num_he_ul_rates(ar, band,
++			mask);
++	if (ath11k_mac_he_ul_mcs_present(ar, band, mask) &&
++			num_rates != 1) {
++		ath11k_warn(ar->ab,
++				"Setting HE UL MCS Fixed Rate range is not supported\n");
++		return -EINVAL;
 +	}
 +
  	/* mac80211 doesn't support sending a fixed HT/VHT MCS alone, rather it
  	 * requires passing atleast one of used basic rates along with them.
  	 * Fixed rate setting across different preambles(legacy, HT, VHT) is
-@@ -7418,6 +7488,15 @@ ath11k_mac_op_set_bitrate_mask(struct ie
- 			return -EINVAL;
- 		}
- 
-+		num_rates = ath11k_mac_bitrate_mask_num_he_ul_rates(ar, band,
-+									   mask);
-+		if (ath11k_mac_he_ul_mcs_present(ar, band, mask) &&
-+		    num_rates != 1) {
-+			ath11k_warn(ar->ab,
-+				    "Setting HE UL MCS Fixed Rate range is not supported\n");
-+			return -EINVAL;
-+		}
-+
- 		mutex_lock(&ar->conf_mutex);
- 		ieee80211_iterate_stations_atomic(ar->hw,
- 						  ath11k_mac_disable_peer_fixed_rate,
-@@ -7434,9 +7513,10 @@ ath11k_mac_op_set_bitrate_mask(struct ie
+@@ -7906,9 +7984,10 @@ ath11k_mac_op_set_bitrate_mask(struct ie
  	mutex_lock(&ar->conf_mutex);
  
  	ret = ath11k_mac_set_rate_params(arvif, rate, nss, sgi, ldpc, he_gi,
@@ -221,7 +214,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -1075,6 +1075,7 @@ enum wmi_tlv_vdev_param {
+@@ -1080,6 +1080,7 @@ enum wmi_tlv_vdev_param {
  	WMI_VDEV_PARAM_BA_MODE = 0x7e,
  	WMI_VDEV_PARAM_AUTORATE_MISC_CFG = 0x80,
  	WMI_VDEV_PARAM_SET_HE_SOUNDING_MODE = 0x87,
@@ -241,7 +234,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -4919,6 +4919,7 @@ enum nl80211_key_attributes {
+@@ -4971,6 +4971,7 @@ enum nl80211_key_attributes {
   *	see &struct nl80211_txrate_he
   * @NL80211_TXRATE_HE_GI: configure HE GI, 0.8us, 1.6us and 3.2us.
   * @NL80211_TXRATE_HE_LTF: configure HE LTF, 1XLTF, 2XLTF and 4XLTF.
@@ -249,7 +242,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
   * @__NL80211_TXRATE_AFTER_LAST: internal
   * @NL80211_TXRATE_MAX: highest TX rate attribute
   */
-@@ -4931,6 +4932,7 @@ enum nl80211_tx_rate_attributes {
+@@ -4983,6 +4984,7 @@ enum nl80211_tx_rate_attributes {
  	NL80211_TXRATE_HE,
  	NL80211_TXRATE_HE_GI,
  	NL80211_TXRATE_HE_LTF,
@@ -259,7 +252,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  	__NL80211_TXRATE_AFTER_LAST,
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -381,6 +381,10 @@ static const struct nla_policy nl80211_t
+@@ -386,6 +386,10 @@ static const struct nla_policy nl80211_t
  	[NL80211_TXRATE_HE_LTF] = NLA_POLICY_RANGE(NLA_U8,
  						   NL80211_RATE_INFO_HE_1XLTF,
  						   NL80211_RATE_INFO_HE_4XLTF),
@@ -270,7 +263,7 @@ Signed-off-by: Muna Sinada <msinada@codeaurora.org>
  };
  
  static const struct nla_policy
-@@ -4891,6 +4895,14 @@ static int nl80211_parse_tx_bitrate_mask
+@@ -4962,6 +4966,14 @@ static int nl80211_parse_tx_bitrate_mask
  			mask->control[band].he_ltf =
  				nla_get_u8(tb[NL80211_TXRATE_HE_LTF]);
  

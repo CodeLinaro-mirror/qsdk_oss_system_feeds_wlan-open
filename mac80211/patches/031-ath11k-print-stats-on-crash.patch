@@ -17,7 +17,7 @@
  static const struct ath11k_hw_params ath11k_hw_params[] = {
  	{
  		.hw_rev = ATH11K_HW_IPQ8074,
-@@ -803,6 +806,89 @@ err_firmware_stop:
+@@ -986,6 +989,98 @@ err_firmware_stop:
  	return ret;
  }
  
@@ -56,11 +56,20 @@
 +	phandle rproc_phandle;
 +	struct device_node *rproc_node = NULL;
 +	struct platform_device *pdev = NULL;
++	struct platform_device *ssr_pdev = (struct platform_device *)data;
 +#endif
 +
 +	if (test_bit(ATH11K_FLAG_FW_RESTART_FOR_HOST, &qmi->ab->dev_flags)) {
 +		return 0;
 +	}
++
++#if LINUX_VERSION_IS_GEQ(5,4,0)
++	if (event != SUBSYS_PREPARE_FOR_FATAL_SHUTDOWN)
++		return 0;
++#else
++	if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
++		return 0;
++#endif
 +
 +	/* Print the stats only if notification is received for expected PD*/
 +	multi_pd_arch = of_property_read_bool(dev->of_node, "qcom,multipd_arch");
@@ -85,7 +94,7 @@
 +			ath11k_warn(ab, "Failed to get pdev from device node\n");
 +			return 0;
 +		}
-+		if (strcmp((char *)data, pdev->name) != 0) {
++		if (strcmp(ssr_pdev->name, pdev->name) != 0) {
 +			ath11k_warn(ab, "SSR notification mismatch %s  pdev name:%s\n",
 +				    (char *)data, pdev->name);
 +			return 0;
@@ -107,38 +116,45 @@
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -848,6 +934,16 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -1031,6 +1126,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
 +
-+#ifdef CONFIG_QCOM_QMI_HELPERS
-+	/* Register a notifier after mac registration
-+	 * to be called on fw crash
-+	 */
-+	if (ab->hif.bus == ATH11K_BUS_AHB) {
-+		ab->qmi.ssr_nb.notifier_call = ath11k_core_ssr_notifier_cb;
-+		qcom_register_ssr_notifier(&ab->qmi.ssr_nb);
-+	}
-+#endif
  	ath11k_hif_irq_enable(ab);
  	mutex_unlock(&ab->core_lock);
  
-@@ -1061,6 +1157,13 @@ void ath11k_core_deinit(struct ath11k_ba
+@@ -1230,6 +1326,14 @@ int ath11k_core_init(struct ath11k_base
  {
- 	mutex_lock(&ab->core_lock);
+ 	int ret;
  
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	/* Register a notifier after core init
++	 * to be called on fw crash
++	 */
++	ab->qmi.ssr_nb.notifier_call = ath11k_core_ssr_notifier_cb;
++	ath11k_hif_ssr_notifier_reg(ab);
++#endif
++
+ 	ret = ath11k_core_soc_create(ab);
+ 	if (ret) {
+ 		ath11k_err(ab, "failed to create soc core: %d\n", ret);
+@@ -1252,6 +1356,14 @@ void ath11k_core_deinit(struct ath11k_ba
+ 	ath11k_hif_power_down(ab);
+ 	ath11k_mac_destroy(ab);
+ 	ath11k_core_soc_destroy(ab);
++
 +#ifdef CONFIG_QCOM_QMI_HELPERS
 +	/* Unregister the ssr notifier as we are not intersted
 +	 * in receving these notifications after mac is unregistered.
 +	 */
-+	if (ab->hif.bus == ATH11K_BUS_AHB)
-+		qcom_unregister_ssr_notifier(&ab->qmi.ssr_nb);
++	ath11k_hif_ssr_notifier_unreg(ab);
++
 +#endif
- 	ath11k_core_pdev_destroy(ab);
- 	ath11k_core_stop(ab);
+ }
+ EXPORT_SYMBOL(ath11k_core_deinit);
  
-@@ -1083,6 +1186,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1266,6 +1378,8 @@ struct ath11k_base *ath11k_core_alloc(st
  				      const struct ath11k_bus_params *bus_params)
  {
  	struct ath11k_base *ab;
@@ -147,7 +163,7 @@
  
  	ab = kzalloc(sizeof(*ab) + priv_size, GFP_KERNEL);
  	if (!ab)
-@@ -1109,6 +1214,10 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1292,6 +1406,10 @@ struct ath11k_base *ath11k_core_alloc(st
  	ab->dev = dev;
  	ab->bus_params = *bus_params;
  	ab->hif.bus = bus;
@@ -173,7 +189,7 @@
  	bool stats_rxd = false;
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -113,6 +113,8 @@ void ath11k_debugfs_unregister(struct at
+@@ -117,6 +117,8 @@ void ath11k_debugfs_unregister(struct at
  void ath11k_debugfs_fw_stats_process(struct ath11k_base *ab, struct sk_buff *skb);
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
@@ -182,7 +198,7 @@
  
  static inline bool ath11k_debugfs_is_pktlog_lite_mode_enabled(struct ath11k *ar)
  {
-@@ -146,6 +148,12 @@ static inline int ath11k_debugfs_rx_filt
+@@ -150,6 +152,12 @@ static inline int ath11k_debugfs_rx_filt
  }
  
  #else
@@ -206,7 +222,7 @@
 +#include <linux/remoteproc/qcom_rproc.h>
  
  #define ATH11K_HOST_VERSION_STRING		"WIN"
- #define ATH11K_QMI_WLANFW_TIMEOUT_MS		5000
+ #define ATH11K_QMI_WLANFW_TIMEOUT_MS		10000
 @@ -123,6 +125,7 @@ struct ath11k_qmi {
  	struct workqueue_struct *event_wq;
  	struct list_head event_list;
@@ -217,7 +233,7 @@
  	u32 mem_seg_count;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -41,6 +41,8 @@ extern unsigned int ath11k_frame_mode;
+@@ -42,6 +42,8 @@ extern unsigned int ath11k_frame_mode;
  
  #define ATH11K_MON_TIMER_INTERVAL  10
  
@@ -226,3 +242,84 @@
  enum ath11k_supported_bw {
  	ATH11K_BW_20	= 0,
  	ATH11K_BW_40	= 1,
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -616,6 +616,31 @@ static int ath11k_ahb_map_service_to_pip
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_QCOM_QMI_HELPERS
++static void ath11k_ahb_ssr_notifier_reg(struct ath11k_base *ab)
++{
++#if LINUX_VERSION_IS_LESS(5, 4, 0)
++	qcom_register_ssr_notifier(&ab->qmi.ssr_nb);
++#else
++	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
++	rproc_register_subsys_notifier(ab_ahb->tgt_rproc->name,
++				       &ab->qmi.ssr_nb, &ab->qmi.ssr_nb);
++#endif
++}
++
++static void ath11k_ahb_ssr_notifier_unreg(struct ath11k_base *ab)
++{
++#if LINUX_VERSION_IS_LESS(5, 4, 0)
++	qcom_unregister_ssr_notifier(&ab->qmi.ssr_nb);
++#else
++	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
++	rproc_unregister_subsys_notifier(ab_ahb->tgt_rproc->name,
++					 &ab->qmi.ssr_nb.notifier_call,
++					 NULL);
++#endif
++}
++#endif
++
+ static const struct ath11k_hif_ops ath11k_ahb_hif_ops = {
+ 	.start = ath11k_ahb_start,
+ 	.stop = ath11k_ahb_stop,
+@@ -626,6 +651,10 @@ static const struct ath11k_hif_ops ath11
+ 	.map_service_to_pipe = ath11k_ahb_map_service_to_pipe,
+ 	.power_down = ath11k_ahb_power_down,
+ 	.power_up = ath11k_ahb_power_up,
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	.ssr_notifier_reg = ath11k_ahb_ssr_notifier_reg,
++	.ssr_notifier_unreg = ath11k_ahb_ssr_notifier_unreg,
++#endif
+ };
+ 
+ static int ath11k_core_get_rproc(struct ath11k_base *ab)
+--- a/drivers/net/wireless/ath/ath11k/hif.h
++++ b/drivers/net/wireless/ath/ath11k/hif.h
+@@ -29,6 +29,10 @@ struct ath11k_hif_ops {
+ 	void (*ce_irq_enable)(struct ath11k_base *ab);
+ 	void (*ce_irq_disable)(struct ath11k_base *ab);
+ 	void (*get_ce_msi_idx)(struct ath11k_base *ab, u32 ce_id, u32 *msi_idx);
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	void (*ssr_notifier_reg)(struct ath11k_base *ab);
++	void (*ssr_notifier_unreg)(struct ath11k_base *ab);
++#endif
+ };
+ 
+ static inline void ath11k_hif_ce_irq_enable(struct ath11k_base *ab)
+@@ -134,4 +138,22 @@ static inline void ath11k_get_ce_msi_idx
+ 	else
+ 		*msi_data_idx = ce_id;
+ }
++
++#ifdef CONFIG_QCOM_QMI_HELPERS
++static inline void ath11k_hif_ssr_notifier_reg(struct ath11k_base *ab)
++{
++	if (!ab->hif.ops->ssr_notifier_reg)
++		return;
++
++	ab->hif.ops->ssr_notifier_reg(ab);
++}
++
++static inline void ath11k_hif_ssr_notifier_unreg(struct ath11k_base *ab)
++{
++	if (!ab->hif.ops->ssr_notifier_unreg)
++		return;
++
++	ab->hif.ops->ssr_notifier_unreg(ab);
++}
++#endif
+ #endif /* _HIF_H_ */
