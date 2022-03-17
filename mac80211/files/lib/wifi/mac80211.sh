@@ -126,7 +126,7 @@ EOF
 		fi
 	done
 
-	for _dev in /sys/class/ieee80211/*; do
+	for _dev in `ls -dv /sys/class/ieee80211/*`; do
 		[ -e "$_dev" ] || continue
 		dev="${_dev##*/}"
 		found=0
