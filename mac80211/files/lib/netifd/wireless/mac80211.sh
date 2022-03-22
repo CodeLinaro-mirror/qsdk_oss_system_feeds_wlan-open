@@ -630,7 +630,6 @@ mac80211_hostapd_setup_base() {
 				multiple_bssid=1
 				ema=1
 			fi
-			append base_cfg "he_co_locate=1" "$N"
 		fi
 
 		if [ "$has_ap" -gt 1 ]; then
