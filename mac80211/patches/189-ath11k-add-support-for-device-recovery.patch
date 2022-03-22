@@ -28,7 +28,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -1075,9 +1075,49 @@ static void ath11k_core_restart(struct w
+@@ -1325,9 +1325,49 @@ static void ath11k_core_restart(struct w
  		}
  		mutex_unlock(&ar->conf_mutex);
  	}
@@ -78,7 +78,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  static int ath11k_init_hw_params(struct ath11k_base *ab)
  {
  	const struct ath11k_hw_params *hw_params = NULL;
-@@ -1179,14 +1219,20 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1435,8 +1475,13 @@ struct ath11k_base *ath11k_core_alloc(st
  	if (!ab->workqueue)
  		goto err_sc_free;
  
@@ -92,14 +92,15 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  
  	INIT_LIST_HEAD(&ab->peers);
  	init_waitqueue_head(&ab->peer_mapping_wq);
- 	init_waitqueue_head(&ab->wmi_ab.tx_credits_wq);
- 	init_waitqueue_head(&ab->qmi.cold_boot_waitq);
+@@ -1446,6 +1491,7 @@ struct ath11k_base *ath11k_core_alloc(st
+ 	init_waitqueue_head(&ath11k_ssr_dump_wq);
+ #endif
  	INIT_WORK(&ab->restart_work, ath11k_core_restart);
 +	INIT_WORK(&ab->reset_work, ath11k_core_reset);
  	timer_setup(&ab->rx_replenish_retry, ath11k_ce_rx_replenish_retry, 0);
  	init_completion(&ab->htc_suspend);
  	init_completion(&ab->wow.wakeup_completed);
-@@ -1197,6 +1243,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1460,6 +1506,8 @@ struct ath11k_base *ath11k_core_alloc(st
  
  	return ab;
  
@@ -110,15 +111,15 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  	return NULL;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -36,6 +36,7 @@
+@@ -41,6 +41,7 @@ extern bool ath11k_collect_dump;
  /* Pending management packets threshold for dropping probe responses */
  #define ATH11K_PRB_RSP_DROP_THRESHOLD ((ATH11K_TX_MGMT_TARGET_MAX_SUPPORT_WMI * 3) / 4)
  
 +#define ATH11K_RESET_TIMEOUT_HZ (10 * HZ)
  #define ATH11K_INVALID_HW_MAC_ID	0xFF
+ #define ATH11K_CONNECTION_LOSS_HZ	(3 * HZ)
  #define ATH11K_RX_RATE_TABLE_NUM 320
- #define ATH11K_RX_RATE_TABLE_11AX_NUM 576
-@@ -819,6 +820,11 @@ struct ath11k_base {
+@@ -850,6 +851,11 @@ struct ath11k_base {
  	struct completion driver_recovery;
  	struct workqueue_struct *workqueue;
  	struct work_struct restart_work;
@@ -132,7 +133,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  		u32 fw_crash_counter;
 --- a/drivers/net/wireless/ath/ath11k/mhi.c
 +++ b/drivers/net/wireless/ath/ath11k/mhi.c
-@@ -281,6 +281,29 @@ static int ath11k_mhi_get_msi(struct ath
+@@ -288,6 +288,29 @@ static int ath11k_mhi_get_msi(struct ath
  	return 0;
  }
  
@@ -162,7 +163,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  static int ath11k_mhi_op_runtime_get(struct mhi_controller *mhi_cntrl)
  {
  	return 0;
-@@ -288,6 +311,7 @@ static int ath11k_mhi_op_runtime_get(str
+@@ -295,6 +318,7 @@ static int ath11k_mhi_op_runtime_get(str
  
  static void ath11k_mhi_op_runtime_put(struct mhi_controller *mhi_cntrl)
  {
@@ -170,7 +171,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  }
  
  static void ath11k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
-@@ -295,10 +319,16 @@ static void ath11k_mhi_op_status_cb(stru
+@@ -302,10 +326,16 @@ static void ath11k_mhi_op_status_cb(stru
  {
  	struct ath11k_base *ab = dev_get_drvdata(mhi_cntrl->cntrl_dev);
  
@@ -189,7 +190,7 @@ Signed-off-by: Wen Gong <wgong@codeaurora.org>
  	}
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1334,6 +1334,7 @@ static void ath11k_pci_remove(struct pci
+@@ -1543,6 +1543,7 @@ static void ath11k_pci_remove(struct pci
  	}
  
  	set_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags);

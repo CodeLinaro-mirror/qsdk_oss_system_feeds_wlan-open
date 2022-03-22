@@ -8,16 +8,24 @@
  #include "core.h"
  #include "dp_tx.h"
  #include "dp_rx.h"
-@@ -30,6 +31,8 @@ module_param_named(frame_mode, ath11k_fr
+@@ -30,6 +31,16 @@ module_param_named(frame_mode, ath11k_fr
  MODULE_PARM_DESC(frame_mode,
  		 "Datapath frame mode (0: raw, 1: native wifi (default), 2: ethernet)");
  
++#ifdef CONFIG_QCOM_QMI_HELPERS
++wait_queue_head_t ath11k_ssr_dump_wq;
++EXPORT_SYMBOL(ath11k_ssr_dump_wq);
++
++bool ath11k_collect_dump = false;
++EXPORT_SYMBOL(ath11k_collect_dump);
++#endif
++
 +struct ath11k_soc *ath11k_soc[MAX_SOCS];
 +
  static const struct ath11k_hw_params ath11k_hw_params[] = {
  	{
  		.hw_rev = ATH11K_HW_IPQ8074,
-@@ -986,6 +989,98 @@ err_firmware_stop:
+@@ -986,6 +997,127 @@ err_firmware_stop:
  	return ret;
  }
  
@@ -42,6 +50,22 @@
 +
 +#ifdef CONFIG_QCOM_QMI_HELPERS
 +
++#define ATH11K_COLLECT_DUMP_TIMEOUT	(90 * HZ)
++
++void ath11k_core_wait_dump_collect(struct ath11k_base *ab)
++{
++	int timeout;
++
++	if (ath11k_collect_dump) {
++		timeout = wait_event_timeout(ath11k_ssr_dump_wq,
++					     (ath11k_collect_dump == false),
++					     ATH11K_COLLECT_DUMP_TIMEOUT);
++		if (timeout <= 0)
++			ath11k_warn(ab, "dump collection timed out\n");
++	}
++	return;
++}
++
 +/* Print the driver stats and crash the system on receiving this notification */
 +int ath11k_core_ssr_notifier_cb(struct notifier_block *nb, unsigned long event,
 +				void *data)
@@ -64,8 +88,15 @@
 +	}
 +
 +#if LINUX_VERSION_IS_GEQ(5,4,0)
++	if (ath11k_collect_dump && event == SUBSYS_AFTER_POWERUP) {
++		ath11k_collect_dump = false;
++		wake_up(&ath11k_ssr_dump_wq);
++		return 0;
++	}
++
 +	if (event != SUBSYS_PREPARE_FOR_FATAL_SHUTDOWN)
 +		return 0;
++	ath11k_collect_dump = true;
 +#else
 +	if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
 +		return 0;
@@ -111,12 +142,18 @@
 +
 +	return 0;
 +}
++#else
++void ath11k_core_wait_dump_collect(struct ath11k_base *ab)
++{
++	return;
++}
 +#endif
++EXPORT_SYMBOL(ath11k_core_wait_dump_collect);
 +
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -1031,6 +1126,7 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -1031,6 +1163,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
@@ -124,7 +161,7 @@
  	ath11k_hif_irq_enable(ab);
  	mutex_unlock(&ab->core_lock);
  
-@@ -1230,6 +1326,14 @@ int ath11k_core_init(struct ath11k_base
+@@ -1230,6 +1363,14 @@ int ath11k_core_init(struct ath11k_base
  {
  	int ret;
  
@@ -139,7 +176,7 @@
  	ret = ath11k_core_soc_create(ab);
  	if (ret) {
  		ath11k_err(ab, "failed to create soc core: %d\n", ret);
-@@ -1252,6 +1356,14 @@ void ath11k_core_deinit(struct ath11k_ba
+@@ -1252,6 +1393,14 @@ void ath11k_core_deinit(struct ath11k_ba
  	ath11k_hif_power_down(ab);
  	ath11k_mac_destroy(ab);
  	ath11k_core_soc_destroy(ab);
@@ -154,7 +191,7 @@
  }
  EXPORT_SYMBOL(ath11k_core_deinit);
  
-@@ -1266,6 +1378,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1266,6 +1415,8 @@ struct ath11k_base *ath11k_core_alloc(st
  				      const struct ath11k_bus_params *bus_params)
  {
  	struct ath11k_base *ab;
@@ -163,7 +200,17 @@
  
  	ab = kzalloc(sizeof(*ab) + priv_size, GFP_KERNEL);
  	if (!ab)
-@@ -1292,6 +1406,10 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1284,6 +1435,9 @@ struct ath11k_base *ath11k_core_alloc(st
+ 	init_waitqueue_head(&ab->peer_mapping_wq);
+ 	init_waitqueue_head(&ab->wmi_ab.tx_credits_wq);
+ 	init_waitqueue_head(&ab->qmi.cold_boot_waitq);
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	init_waitqueue_head(&ath11k_ssr_dump_wq);
++#endif
+ 	INIT_WORK(&ab->restart_work, ath11k_core_restart);
+ 	timer_setup(&ab->rx_replenish_retry, ath11k_ce_rx_replenish_retry, 0);
+ 	init_completion(&ab->htc_suspend);
+@@ -1292,6 +1446,10 @@ struct ath11k_base *ath11k_core_alloc(st
  	ab->dev = dev;
  	ab->bus_params = *bus_params;
  	ab->hif.bus = bus;
@@ -233,7 +280,19 @@
  	u32 mem_seg_count;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -42,6 +42,8 @@ extern unsigned int ath11k_frame_mode;
+@@ -26,6 +26,11 @@
+ #include "spectral.h"
+ #include "vendor.h"
+ 
++#ifdef CONFIG_QCOM_QMI_HELPERS
++extern wait_queue_head_t ath11k_ssr_dump_wq;
++extern bool ath11k_collect_dump;
++#endif
++
+ #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
+ 
+ #define ATH11K_TX_MGMT_NUM_PENDING_MAX	512
+@@ -42,6 +47,8 @@ extern unsigned int ath11k_frame_mode;
  
  #define ATH11K_MON_TIMER_INTERVAL  10
  
@@ -242,9 +301,33 @@
  enum ath11k_supported_bw {
  	ATH11K_BW_20	= 0,
  	ATH11K_BW_40	= 1,
+@@ -1004,6 +1011,7 @@ int ath11k_core_suspend(struct ath11k_ba
+ 
+ const struct firmware *ath11k_core_firmware_request(struct ath11k_base *ab,
+ 						    const char *filename);
++void ath11k_core_wait_dump_collect(struct ath11k_base *ab);
+ 
+ static inline const char *ath11k_scan_state_str(enum ath11k_scan_state state)
+ {
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -616,6 +616,31 @@ static int ath11k_ahb_map_service_to_pip
+@@ -326,6 +326,7 @@ static int ath11k_ahb_power_up(struct at
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+ 	int ret;
+ 
++	ath11k_core_wait_dump_collect(ab);
+ 	ret = rproc_boot(ab_ahb->tgt_rproc);
+ 	if (ret)
+ 		ath11k_err(ab, "failed to boot the remote processor Q6\n");
+@@ -337,6 +338,7 @@ static void ath11k_ahb_power_down(struct
+ {
+ 	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
+ 
++	ath11k_core_wait_dump_collect(ab);
+ 	rproc_shutdown(ab_ahb->tgt_rproc);
+ }
+ 
+@@ -616,6 +618,31 @@ static int ath11k_ahb_map_service_to_pip
  	return 0;
  }
  
@@ -267,8 +350,8 @@
 +#else
 +	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
 +	rproc_unregister_subsys_notifier(ab_ahb->tgt_rproc->name,
-+					 &ab->qmi.ssr_nb.notifier_call,
-+					 NULL);
++					 &ab->qmi.ssr_nb,
++					 &ab->qmi.ssr_nb);
 +#endif
 +}
 +#endif
@@ -276,7 +359,7 @@
  static const struct ath11k_hif_ops ath11k_ahb_hif_ops = {
  	.start = ath11k_ahb_start,
  	.stop = ath11k_ahb_stop,
-@@ -626,6 +651,10 @@ static const struct ath11k_hif_ops ath11
+@@ -626,6 +653,10 @@ static const struct ath11k_hif_ops ath11
  	.map_service_to_pipe = ath11k_ahb_map_service_to_pipe,
  	.power_down = ath11k_ahb_power_down,
  	.power_up = ath11k_ahb_power_up,
