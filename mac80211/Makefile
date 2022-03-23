@@ -9,7 +9,7 @@ PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backport
 PKG_BACKPORTS_BRANCH:=master
 
 PKG_KERNEL_VERSION:=b7ab87182e
-PKG_KERNEL_SOURCE_URL:=https://source.codeaurora.org/quic/qsdk/kvalo/ath.git
+PKG_KERNEL_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath-qca
 
 PKG_VERSION:=20211207_001
