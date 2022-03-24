@@ -233,43 +233,143 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		for (i = 0; i < dest_idx; i++) {
  			skb = pmon->dest_skb_q[i];
-@@ -2513,8 +2520,7 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2510,11 +2517,12 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 	struct dp_rxdma_ring *buf_ring;
+ 	struct ath12k_sta *arsta = NULL;
+ 	struct ath12k_peer *peer;
++	struct sk_buff_head skb_list;
  	u64 cookie;
  	int num_buffs_reaped = 0, srng_id, buf_id;
- 	u8 dest_idx = 0, i;
+-	u8 dest_idx = 0, i;
 -	bool end_of_ppdu;
 -	u32 hal_status;
 +	u32 hal_status, end_reason;
++
++	__skb_queue_head_init(&skb_list);
  
  	srng_id = ath12k_hw_mac_id_to_srng_id(&ab->hw_params, mac_id);
  	mon_dst_ring = &pdev_dp->rxdma_mon_dst_ring[srng_id];
-@@ -2547,12 +2553,15 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2530,6 +2538,7 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 				ath12k_hal_srng_dst_peek(ab, srng);
+ 		if (unlikely(!mon_dst_desc))
+ 			break;
++
+ 		cookie = mon_dst_desc->cookie;
+ 		buf_id = u32_get_bits(cookie, DP_RXDMA_BUF_COOKIE_BUF_ID);
+ 
+@@ -2547,62 +2556,68 @@ int ath12k_dp_mon_rx_process_stats(struc
  		dma_unmap_single(ab->dev, rxcb->paddr,
  				 skb->len + skb_tailroom(skb),
  				 DMA_FROM_DEVICE);
-+
- 		pmon->dest_skb_q[dest_idx] = skb;
- 		dest_idx++;
+-		pmon->dest_skb_q[dest_idx] = skb;
+-		dest_idx++;
 -		end_of_ppdu = u32_get_bits(mon_dst_desc->info0,
 -					   HAL_MON_DEST_INFO0_END_OF_PPDU);
 -		if (!end_of_ppdu)
+-			continue;
+-
+-		for (i = 0; i < dest_idx; i++) {
+-			skb = pmon->dest_skb_q[i];
+-			hal_status = ath12k_dp_mon_parse_rx_dest(ab, pmon, skb);
+ 
+-			if (ppdu_info->peer_id == HAL_INVALID_PEERID ||
+-			    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
+-				dev_kfree_skb_any(skb);
+-				continue;
+-			}
+-
+-			rcu_read_lock();
+-			spin_lock_bh(&ab->base_lock);
+-			peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
+-			if (!peer || !peer->sta) {
+-				ath12k_dbg(ab, ATH12K_DBG_DATA,
+-					   "failed to find the peer with peer_id %d\n",
+-					   ppdu_info->peer_id);
+-				spin_unlock_bh(&ab->base_lock);
+-				rcu_read_unlock();
+-				dev_kfree_skb_any(skb);
+-				continue;
+-			}
+-
+-			if (ppdu_info->reception_type == HAL_RX_RECEPTION_TYPE_SU) {
+-				arsta = (struct ath12k_sta *)peer->sta->drv_priv;
+-				ath12k_dp_mon_rx_update_peer_su_stats(ar, arsta,
+-								      ppdu_info);
+-			} else if ((ppdu_info->fc_valid) &&
+-				   (ppdu_info->ast_index != HAL_AST_IDX_INVALID)) {
+-				ath12k_dp_mon_rx_process_ulofdma(ppdu_info);
+-				ath12k_dp_mon_rx_update_peer_mu_stats(ar, ppdu_info);
+-			}
+-
+-			spin_unlock_bh(&ab->base_lock);
+-			rcu_read_unlock();
 +		end_reason = u32_get_bits(mon_dst_desc->info0,
 +					  HAL_MON_DEST_INFO0_END_REASON);
-+		if (end_reason != HAL_MON_END_OF_PPDU) {
++		if ((end_reason == HAL_MON_FLUSH_DETECTED) ||
++		    (end_reason == HAL_MON_PPDU_TRUNCATED)) {
 +			ath12k_warn(ab, "Monitor dest descriptor end reason %d", end_reason);
- 			continue;
-+		}
+ 			dev_kfree_skb_any(skb);
+-			memset(ppdu_info, 0, sizeof(*ppdu_info));
+-			ppdu_info->peer_id = HAL_INVALID_PEERID;
++			goto move_next;
+ 		}
  
- 		for (i = 0; i < dest_idx; i++) {
- 			skb = pmon->dest_skb_q[i];
-@@ -2597,7 +2606,7 @@ int ath12k_dp_mon_rx_process_stats(struc
- 		dest_idx = 0;
+-		dest_idx = 0;
++		__skb_queue_tail(&skb_list, skb);
  move_next:
  		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
 -		ath12k_hal_srng_src_get_next_entry(ab, srng);
 +		ath12k_hal_srng_dst_get_next_entry(ab, srng);
  		num_buffs_reaped++;
  	}
+ 
+ 	ath12k_hal_srng_access_end(ab, srng);
+ 	spin_unlock_bh(&srng->lock);
++
++	if (!num_buffs_reaped)
++		return 0;
++
++	memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
++
++	while ((skb = __skb_dequeue(&skb_list))) {
++
++		hal_status = ath12k_dp_mon_parse_rx_dest(ab, pmon, skb);
++		if (ppdu_info->peer_id == HAL_INVALID_PEERID ||
++		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
++			dev_kfree_skb_any(skb);
++			continue;
++		}
++
++		rcu_read_lock();
++		spin_lock_bh(&ab->base_lock);
++		peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
++		if (!peer || !peer->sta) {
++			ath12k_dbg(ab, ATH12K_DBG_DATA,
++				   "failed to find the peer with peer_id %d\n",
++				   ppdu_info->peer_id);
++			goto next_skb;
++		}
++
++		if (ppdu_info->reception_type == HAL_RX_RECEPTION_TYPE_SU) {
++			arsta = (struct ath12k_sta *)peer->sta->drv_priv;
++			ath12k_dp_mon_rx_update_peer_su_stats(ar, arsta,
++							      ppdu_info);
++		} else if ((ppdu_info->fc_valid) &&
++			   (ppdu_info->ast_index != HAL_AST_IDX_INVALID)) {
++			ath12k_dp_mon_rx_process_ulofdma(ppdu_info);
++			ath12k_dp_mon_rx_update_peer_mu_stats(ar, ppdu_info);
++ 		}
++
++next_skb:
++		spin_unlock_bh(&ab->base_lock);
++		rcu_read_unlock();
++		dev_kfree_skb_any(skb);
++		memset(ppdu_info, 0, sizeof(*ppdu_info));
++		ppdu_info->peer_id = HAL_INVALID_PEERID;
++	}
++
+ 	return num_buffs_reaped;
+ }
  
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
