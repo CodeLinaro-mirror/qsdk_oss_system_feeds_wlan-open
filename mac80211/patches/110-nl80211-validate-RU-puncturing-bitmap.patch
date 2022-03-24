@@ -19,11 +19,27 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  net/wireless/nl80211.c       | 49 ++++++++++++++++++++++++++++++++++++
  2 files changed, 59 insertions(+)
 
-diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
-index f72ae2c70869..55587e47b5d9 100644
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -2668,6 +2668,14 @@ enum nl80211_commands {
+@@ -1469,6 +1469,8 @@ enum nl80211_commands {
+ 
+ 	NL80211_CMD_SET_SAR_SPECS,
+ 
++	NL80211_CMD_UPDATE_HE_MUEDCA_PARAMS,
++
+ 	NL80211_CMD_OBSS_COLOR_COLLISION,
+ 
+ 	NL80211_CMD_COLOR_CHANGE_REQUEST,
+@@ -1477,6 +1479,8 @@ enum nl80211_commands {
+ 	NL80211_CMD_COLOR_CHANGE_ABORTED,
+ 	NL80211_CMD_COLOR_CHANGE_COMPLETED,
+ 
++	NL80211_CMD_AWGN_DETECT,
++
+ 	NL80211_CMD_SET_FILS_AAD,
+ 
+ 	NL80211_CMD_ASSOC_COMEBACK,
+@@ -2668,6 +2672,14 @@ enum nl80211_commands {
   *	the driver supports preamble puncturing, value should be of type
   *	&enum nl80211_ru_punct_supp_bw
   *
@@ -38,20 +54,69 @@ index f72ae2c70869..55587e47b5d9 100644
   * @NUM_NL80211_ATTR: total number of nl80211_attrs available
   * @NL80211_ATTR_MAX: highest attribute number currently defined
   * @__NL80211_ATTR_AFTER_LAST: internal use
-@@ -3183,6 +3191,8 @@ enum nl80211_attrs {
+@@ -3165,6 +3177,8 @@ enum nl80211_attrs {
+ 
+ 	NL80211_ATTR_DISABLE_HE,
+ 
++	NL80211_ATTR_HE_MUEDCA_PARAMS,
++
+ 	NL80211_ATTR_OBSS_COLOR_BITMAP,
+ 
+ 	NL80211_ATTR_COLOR_CHANGE_COUNT,
+@@ -3174,15 +3188,29 @@ enum nl80211_attrs {
+ 	NL80211_ATTR_MBSSID_CONFIG,
+ 	NL80211_ATTR_MBSSID_ELEMS,
+ 
+-	NL80211_ATTR_RADAR_BACKGROUND,
++	NL80211_ATTR_BEACON_TX_MODE,
+ 
+-	NL80211_ATTR_AP_SETTINGS_FLAGS,
++	NL80211_ATTR_WIPHY_ANTENNA_GAIN,
++
++	NL80211_ATTR_STA_MGMT_RTS_CTS_CONFIG,
++
++	NL80211_ATTR_AWGN_INTERFERENCE_BITMAP,
++
++	NL80211_ATTR_6G_REG_POWER_MODE,
++
++	NL80211_ATTR_EMA_RNR_ELEMS,
+ 
+ 	NL80211_ATTR_EHT_CAPABILITY = NL80211_ATTR_MBSSID_ELEMS + 15,
+ 
  	NL80211_ATTR_DISABLE_EHT,
  
  	NL80211_ATTR_RU_PUNCT_SUPP_BW,
 +	NL80211_ATTR_RU_PUNCT_SUPP_HE,
 +	NL80211_ATTR_RU_PUNCT_BITMAP,
++
++	NL80211_ATTR_RADAR_BACKGROUND,
++
++	NL80211_ATTR_AP_SETTINGS_FLAGS,
  
  	/* add attributes here, update the policy in nl80211.c */
  
-diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 8dbeb50737f4..90db22477189 100644
+@@ -4185,6 +4213,10 @@ enum nl80211_reg_rule_attr {
+ 
+ 	NL80211_ATTR_DFS_CAC_TIME,
+ 
++	NL80211_ATTR_POWER_RULE_PSD,
++
++	NL80211_ATTR_REG_POWER_MODE,
++
+ 	/* keep last */
+ 	__NL80211_REG_RULE_ATTR_AFTER_LAST,
+ 	NL80211_REG_RULE_ATTR_MAX = __NL80211_REG_RULE_ATTR_AFTER_LAST - 1
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -818,6 +818,8 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+@@ -808,6 +808,7 @@ static const struct nla_policy nl80211_p
+ 	[NL80211_ATTR_MBSSID_ELEMS] = { .type = NLA_NESTED },
+ 	[NL80211_ATTR_RADAR_BACKGROUND] = { .type = NLA_FLAG },
+ 	[NL80211_ATTR_AP_SETTINGS_FLAGS] = { .type = NLA_U32 },
++	[NL80211_ATTR_6G_REG_POWER_MODE] = NLA_POLICY_RANGE(NLA_U8, 0, 2),
+ #if LINUX_VERSION_IS_GEQ(5,10,0)
+ 	[NL80211_ATTR_EHT_CAPABILITY] =
+ 		NLA_POLICY_RANGE(NLA_BINARY,
+@@ -821,6 +822,8 @@ static const struct nla_policy nl80211_p
  	[NL80211_ATTR_DISABLE_EHT] = { .type = NLA_FLAG },
  	[NL80211_ATTR_RU_PUNCT_SUPP_BW] =
  		NLA_POLICY_MAX(NLA_U8, NL80211_RU_PUNCT_SUPP_BW_320),
@@ -60,7 +125,7 @@ index 8dbeb50737f4..90db22477189 100644
  };
  
  /* policy for the key attributes */
-@@ -3148,6 +3150,46 @@ static bool nl80211_can_set_dev_channel(struct wireless_dev *wdev)
+@@ -3151,6 +3154,46 @@ static bool nl80211_can_set_dev_channel(
  		wdev->iftype == NL80211_IFTYPE_P2P_GO;
  }
  
@@ -107,7 +172,7 @@ index 8dbeb50737f4..90db22477189 100644
  int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
  			  struct genl_info *info,
  			  struct cfg80211_chan_def *chandef)
-@@ -3155,6 +3197,7 @@ int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
+@@ -3158,6 +3201,7 @@ int nl80211_parse_chandef(struct cfg8021
  	struct netlink_ext_ack *extack = genl_info_extack(info);
  	struct nlattr **attrs = info->attrs;
  	u32 control_freq;
@@ -115,7 +180,7 @@ index 8dbeb50737f4..90db22477189 100644
  
  	if (!attrs[NL80211_ATTR_WIPHY_FREQ])
  		return -EINVAL;
-@@ -3231,6 +3274,12 @@ int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
+@@ -3234,6 +3278,12 @@ int nl80211_parse_chandef(struct cfg8021
  				nla_get_u32(attrs[NL80211_ATTR_CENTER_FREQ2]);
  	}
  
@@ -128,6 +193,3 @@ index 8dbeb50737f4..90db22477189 100644
  	if (info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]) {
  		chandef->edmg.channels =
  		      nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]);
--- 
-2.31.1
-
