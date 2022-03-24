@@ -630,7 +630,7 @@ endif
 	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
-	$(INSTALL_BIN) ./files/ath11k-coredump.sh $(1)/etc/hotplug.d/devcoredump
+	$(INSTALL_BIN) ./files/coredump.sh $(1)/etc/hotplug.d/devcoredump
 ifeq ($(CONFIG_LINUX_5_4),y)
 	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
 endif
