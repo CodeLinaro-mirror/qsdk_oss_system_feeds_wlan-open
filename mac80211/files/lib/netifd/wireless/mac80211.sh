@@ -240,6 +240,18 @@ mac80211_get_seg0() {
 				esac
 			fi
 		;;
+		320)
+			if [ $freq -gt 5955 ] && [ $freq -le 7115 ]; then
+				case "$channel" in
+					1|5|9|13|17|21|25|29|33|37|41|45) seg0=31;;
+					49|53|57|61|65|69|73|77) seg0=63;;
+					81|85|89|93|97|101|105|109) seg0=95;;
+					113|117|121|125|129|133|137|141) seg0=127;;
+					145|149|153|157|161|165|169|173) seg0=159;;
+					177|181|185|189|193|197|201|205|209|213|217|221) seg0=191;;
+				esac
+			fi
+		;;
 	esac
 	printf "$seg0"
 }
@@ -500,7 +512,7 @@ mac80211_hostapd_setup_base() {
 		is_6ghz=1
 	fi
 
-	if [ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ]; then
+	if [ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ] || [ "$htmode" == "EHT320" ]; then
 		enable_be=1;
 	fi
 
