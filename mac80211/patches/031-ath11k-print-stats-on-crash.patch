@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -8,6 +8,7 @@
+@@ -9,6 +9,7 @@
  #include <linux/remoteproc.h>
  #include <linux/firmware.h>
  #include <linux/of.h>
@@ -8,7 +8,7 @@
  #include "core.h"
  #include "dp_tx.h"
  #include "dp_rx.h"
-@@ -30,6 +31,16 @@ module_param_named(frame_mode, ath11k_fr
+@@ -31,6 +32,16 @@ module_param_named(frame_mode, ath11k_fr
  MODULE_PARM_DESC(frame_mode,
  		 "Datapath frame mode (0: raw, 1: native wifi (default), 2: ethernet)");
  
@@ -25,7 +25,7 @@
  static const struct ath11k_hw_params ath11k_hw_params[] = {
  	{
  		.hw_rev = ATH11K_HW_IPQ8074,
-@@ -986,6 +997,127 @@ err_firmware_stop:
+@@ -1087,6 +1098,127 @@ static int ath11k_core_rfkill_config(str
  	return ret;
  }
  
@@ -153,15 +153,15 @@
  int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
  {
  	int ret;
-@@ -1031,6 +1163,7 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -1132,6 +1264,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
  		goto err_core_stop;
  	}
 +
  	ath11k_hif_irq_enable(ab);
- 	mutex_unlock(&ab->core_lock);
  
-@@ -1230,6 +1363,14 @@ int ath11k_core_init(struct ath11k_base
+ 	ret = ath11k_core_rfkill_config(ab);
+@@ -1391,6 +1524,14 @@ int ath11k_core_init(struct ath11k_base
  {
  	int ret;
  
@@ -176,7 +176,7 @@
  	ret = ath11k_core_soc_create(ab);
  	if (ret) {
  		ath11k_err(ab, "failed to create soc core: %d\n", ret);
-@@ -1252,6 +1393,14 @@ void ath11k_core_deinit(struct ath11k_ba
+@@ -1413,6 +1554,14 @@ void ath11k_core_deinit(struct ath11k_ba
  	ath11k_hif_power_down(ab);
  	ath11k_mac_destroy(ab);
  	ath11k_core_soc_destroy(ab);
@@ -191,7 +191,7 @@
  }
  EXPORT_SYMBOL(ath11k_core_deinit);
  
-@@ -1266,6 +1415,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1430,6 +1579,8 @@ struct ath11k_base *ath11k_core_alloc(st
  				      const struct ath11k_bus_params *bus_params)
  {
  	struct ath11k_base *ab;
@@ -200,7 +200,7 @@
  
  	ab = kzalloc(sizeof(*ab) + priv_size, GFP_KERNEL);
  	if (!ab)
-@@ -1284,6 +1435,9 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -1449,6 +1600,9 @@ struct ath11k_base *ath11k_core_alloc(st
  	init_waitqueue_head(&ab->peer_mapping_wq);
  	init_waitqueue_head(&ab->wmi_ab.tx_credits_wq);
  	init_waitqueue_head(&ab->qmi.cold_boot_waitq);
@@ -208,9 +208,9 @@
 +	init_waitqueue_head(&ath11k_ssr_dump_wq);
 +#endif
  	INIT_WORK(&ab->restart_work, ath11k_core_restart);
- 	timer_setup(&ab->rx_replenish_retry, ath11k_ce_rx_replenish_retry, 0);
- 	init_completion(&ab->htc_suspend);
-@@ -1292,6 +1446,10 @@ struct ath11k_base *ath11k_core_alloc(st
+ 	INIT_WORK(&ab->update_11d_work, ath11k_update_11d);
+ 	INIT_WORK(&ab->rfkill_work, ath11k_rfkill_work);
+@@ -1459,6 +1613,10 @@ struct ath11k_base *ath11k_core_alloc(st
  	ab->dev = dev;
  	ab->bus_params = *bus_params;
  	ab->hif.bus = bus;
@@ -223,7 +223,7 @@
  
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -706,8 +706,8 @@ static int ath11k_fill_bp_stats(struct a
+@@ -751,8 +751,8 @@ static int ath11k_fill_bp_stats(struct a
  	return len;
  }
  
@@ -241,11 +241,11 @@
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
 +ssize_t ath11k_debugfs_dump_soc_ring_bp_stats(struct ath11k_base *ab,
-+					    char *buf, int size);
++					      char *buf, int size);
+ int ath11k_debugfs_get_fw_stats(struct ath11k *ar, u32 pdev_id,
+ 				u32 vdev_id, u32 stats_id);
  
- static inline bool ath11k_debugfs_is_pktlog_lite_mode_enabled(struct ath11k *ar)
- {
-@@ -150,6 +152,12 @@ static inline int ath11k_debugfs_rx_filt
+@@ -152,6 +154,12 @@ static inline int ath11k_debugfs_rx_filt
  }
  
  #else
@@ -270,7 +270,7 @@
  
  #define ATH11K_HOST_VERSION_STRING		"WIN"
  #define ATH11K_QMI_WLANFW_TIMEOUT_MS		10000
-@@ -123,6 +125,7 @@ struct ath11k_qmi {
+@@ -124,6 +126,7 @@ struct ath11k_qmi {
  	struct workqueue_struct *event_wq;
  	struct list_head event_list;
  	spinlock_t event_lock; /* spinlock for qmi event list */
@@ -301,7 +301,7 @@
  enum ath11k_supported_bw {
  	ATH11K_BW_20	= 0,
  	ATH11K_BW_40	= 1,
-@@ -1004,6 +1011,7 @@ int ath11k_core_suspend(struct ath11k_ba
+@@ -1031,6 +1038,7 @@ int ath11k_core_suspend(struct ath11k_ba
  
  const struct firmware *ath11k_core_firmware_request(struct ath11k_base *ab,
  						    const char *filename);
@@ -311,7 +311,7 @@
  {
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -326,6 +326,7 @@ static int ath11k_ahb_power_up(struct at
+@@ -332,6 +332,7 @@ static int ath11k_ahb_power_up(struct at
  	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
  	int ret;
  
@@ -319,7 +319,7 @@
  	ret = rproc_boot(ab_ahb->tgt_rproc);
  	if (ret)
  		ath11k_err(ab, "failed to boot the remote processor Q6\n");
-@@ -337,6 +338,7 @@ static void ath11k_ahb_power_down(struct
+@@ -343,6 +344,7 @@ static void ath11k_ahb_power_down(struct
  {
  	struct ath11k_ahb *ab_ahb = ath11k_ahb_priv(ab);
  
@@ -327,7 +327,7 @@
  	rproc_shutdown(ab_ahb->tgt_rproc);
  }
  
-@@ -616,6 +618,31 @@ static int ath11k_ahb_map_service_to_pip
+@@ -622,6 +624,31 @@ static int ath11k_ahb_map_service_to_pip
  	return 0;
  }
  
@@ -359,7 +359,7 @@
  static const struct ath11k_hif_ops ath11k_ahb_hif_ops = {
  	.start = ath11k_ahb_start,
  	.stop = ath11k_ahb_stop,
-@@ -626,6 +653,10 @@ static const struct ath11k_hif_ops ath11
+@@ -632,6 +659,10 @@ static const struct ath11k_hif_ops ath11
  	.map_service_to_pipe = ath11k_ahb_map_service_to_pipe,
  	.power_down = ath11k_ahb_power_down,
  	.power_up = ath11k_ahb_power_up,

@@ -49,7 +49,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  ath11k_ahb-y += ahb.o pci_cmn.o
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -58,6 +58,12 @@ module_param(ath11k_caldata_bin_path, ch
+@@ -67,6 +67,12 @@ module_param(ath11k_caldata_bin_path, ch
  MODULE_PARM_DESC(ath11k_caldata_bin_path,
  		"Caldata bin path for loading");
  
@@ -70,27 +70,26 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  #include "cfr.h"
 +#include "smart_ant.h"
  
- extern unsigned int ath11k_skip_radio;
- extern wait_queue_head_t ath11k_radio_prb_wq;
-@@ -494,6 +495,7 @@ struct ath11k_sta {
- 	u8 rssi_comb;
+ #ifdef CONFIG_QCOM_QMI_HELPERS
+ extern wait_queue_head_t ath11k_ssr_dump_wq;
+@@ -521,6 +522,7 @@ struct ath11k_sta {
+ 	s8 chain_signal[IEEE80211_MAX_CHAINS];
  	struct ath11k_htt_tx_stats *tx_stats;
  	struct ath11k_rx_peer_stats *rx_stats;
 +	struct ath11k_smart_ant_sta *smart_ant_sta;
  
  #ifdef CPTCFG_MAC80211_DEBUGFS
  	/* protected by conf_mutex */
-@@ -810,6 +812,9 @@ struct ath11k {
+@@ -840,6 +842,8 @@ struct ath11k {
  	u8 cfr_enabled;
  	bool ani_enabled;
  	enum wmi_phy_mode cfr_phymode;
-+
 +	struct ath11k_smart_ant_info smart_ant_info;
 +	u32 rx_antenna;
- };
- 
- struct ath11k_band_cap {
-@@ -1267,6 +1272,24 @@ enum ath11k_fw_recovery_option {
+ 	u32 vdev_id_11d_scan;
+ 	struct completion finish_11d_scan;
+ 	struct completion finish_11d_ch_list;
+@@ -1310,6 +1314,24 @@ enum ath11k_fw_recovery_option {
  	ATH11K_FW_RECOVERY_ENABLE_SSR_ONLY,
  };
  
@@ -121,10 +120,10 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	ATH11K_DBG_CFR		= 0x00008000,
  	ATH11K_DBG_CFR_DUMP	= 0x00010000,
  	ATH11K_DBG_PEER		= 0x00020000,
-+	ATH11K_DBG_SMART_ANT	= 0x00040000,
++	ATH11K_DBG_SMART_ANT    = 0x00040000,
+ 	ATH11K_DBG_TEST		= 0x00080000,
  	ATH11K_DBG_ANY		= 0xffffffff,
  };
- 
 --- a/drivers/net/wireless/ath/ath11k/hw.c
 +++ b/drivers/net/wireless/ath/ath11k/hw.c
 @@ -214,6 +214,7 @@ static void ath11k_init_wmi_config_ipq80
@@ -137,7 +136,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  static int ath11k_hw_mac_id_to_pdev_id_ipq8074(struct ath11k_hw_params *hw,
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -317,7 +317,7 @@ int ath11k_mac_hw_ratecode_to_legacy_rat
+@@ -409,7 +409,7 @@ int ath11k_mac_hw_ratecode_to_legacy_rat
  	return -EINVAL;
  }
  
@@ -146,7 +145,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  {
  	int num_chains = 0;
  
-@@ -5274,6 +5274,13 @@ free:
+@@ -5506,6 +5506,13 @@ static int ath11k_mac_op_sta_state(struc
  		if (ret)
  			ath11k_warn(ar->ab, "Failed to associate station: %pM\n",
  				    sta->addr);
@@ -160,7 +159,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTHORIZED) {
  		spin_lock_bh(&ar->ab->base_lock);
-@@ -5322,6 +5329,8 @@ free:
+@@ -5575,6 +5582,8 @@ static int ath11k_mac_op_sta_state(struc
  		   (vif->type == NL80211_IFTYPE_AP ||
  		    vif->type == NL80211_IFTYPE_MESH_POINT ||
  		    vif->type == NL80211_IFTYPE_ADHOC)) {
@@ -169,7 +168,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		ret = ath11k_station_disassoc(ar, vif, sta);
  		if (ret)
  			ath11k_warn(ar->ab, "Failed to disassociate station: %pM\n",
-@@ -7649,6 +7658,8 @@ ath11k_mac_update_vif_chan(struct ath11k
+@@ -8097,6 +8106,8 @@ ath11k_mac_update_vif_chan(struct ath11k
  		if (!arvif->is_up)
  			continue;
  
@@ -178,7 +177,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		ret = ath11k_mac_setup_bcn_tmpl(arvif);
  		if (ret)
  			ath11k_warn(ab, "failed to update bcn tmpl during csa: %d\n",
-@@ -7858,6 +7869,21 @@ ath11k_mac_op_assign_vif_chanctx(struct
+@@ -8312,6 +8323,21 @@ ath11k_mac_op_assign_vif_chanctx(struct
  
  	arvif->is_started = true;
  
@@ -202,7 +201,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		ret = ath11k_mac_monitor_start(ar);
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -134,6 +134,7 @@ int ath11k_mac_register(struct ath11k_ba
+@@ -141,6 +141,7 @@ int ath11k_mac_register(struct ath11k_ba
  int ath11k_mac_allocate(struct ath11k_base *ab);
  int ath11k_mac_hw_ratecode_to_legacy_rate(u8 hw_rc, u8 preamble, u8 *rateidx,
  					  u16 *rate);
@@ -302,16 +301,16 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
 +#endif
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -145,6 +145,8 @@ static const struct wmi_tlv_policy wmi_t
+@@ -155,6 +155,8 @@ static const struct wmi_tlv_policy wmi_t
  		= { .min_len = sizeof(struct wmi_pdev_update_muedca_event) },
  	[WMI_TAG_WDS_ADDR_EVENT]
  		= { .min_len = sizeof(struct wmi_wds_addr_event) },
 +	[WMI_TAG_PEER_RATECODE_LIST_EVENT]
 +		= { .min_len = sizeof(struct wmi_peer_ratecode_list_fixed_param) },
- };
- 
- #define PRIMAP(_hw_mode_) \
-@@ -4410,6 +4412,7 @@ ath11k_wmi_copy_resource_config(struct w
+ 	[WMI_TAG_11D_NEW_COUNTRY_EVENT] = {
+ 		.min_len = sizeof(struct wmi_11d_new_cc_ev) },
+ 	[WMI_TAG_PER_CHAIN_RSSI_STATS] = {
+@@ -4517,6 +4519,7 @@ ath11k_wmi_copy_resource_config(struct w
  	wmi_cfg->host_service_flags &= ~(1 << WMI_RSRC_CFG_HOST_SERVICE_FLAG_REG_CC_EXT_SUPPORT_BIT);
  	wmi_cfg->host_service_flags |= tg_cfg->is_reg_cc_ext_event_supported <<
  				       WMI_RSRC_CFG_HOST_SERVICE_FLAG_REG_CC_EXT_SUPPORT_BIT;
@@ -319,7 +318,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  }
  
  static int ath11k_init_cmd_send(struct ath11k_pdev_wmi *wmi,
-@@ -9821,6 +9824,165 @@ static void ath11k_wmi_parse_cfr_capture
+@@ -10127,6 +10130,165 @@ static void ath11k_wmi_parse_cfr_capture
  			   "failed to process cfr cpature ret = %d\n", ret);
  }
  
@@ -485,7 +484,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -9985,6 +10147,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+@@ -10297,6 +10459,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_ANI_OFDM_LEVEL_EVENTID:
  		ath11k_wmi_event_ani_ofdm_level(ab, skb);
  		break;
@@ -495,9 +494,9 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	/* TODO: Add remaining events */
  	default:
  		ath11k_dbg(ab, ATH11K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -10310,3 +10475,393 @@ int ath11k_wmi_wow_enable(struct ath11k
+@@ -10650,3 +10815,393 @@ int ath11k_wmi_scan_prob_req_oui(struct
  
- 	return ath11k_wmi_cmd_send(ar->wmi, skb, WMI_WOW_ENABLE_CMDID);
+ 	return ath11k_wmi_cmd_send(ar->wmi, skb, WMI_SCAN_PROB_REQ_OUI_CMDID);
  }
 +
 +void
@@ -902,7 +901,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  struct ath11k_fw_stats;
  
  #define PSOC_HOST_MAX_NUM_SS (8)
-@@ -6618,6 +6622,101 @@ struct wmi_wow_ev_arg {
+@@ -6664,6 +6668,101 @@ struct wmi_wow_ev_arg {
  	u32 data_len;
  };
  
@@ -1004,7 +1003,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  int ath11k_wmi_cmd_send(struct ath11k_pdev_wmi *wmi, struct sk_buff *skb,
  			u32 cmd_id);
  struct sk_buff *ath11k_wmi_alloc_skb(struct ath11k_wmi_base *wmi_sc, u32 len);
-@@ -6792,4 +6891,22 @@ int ath11k_wmi_peer_set_cfr_capture_conf
+@@ -6848,4 +6947,22 @@ int ath11k_wmi_peer_set_cfr_capture_conf
  					 u32 vdev_id, const u8 *mac,
  					 struct wmi_peer_cfr_capture_conf_arg *arg);
  int ath11k_wmi_pdev_get_ani_level(struct ath11k *ar, u32 param_id, u8 pdev_id);
@@ -1027,13 +1026,6 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
 +						  u32 vdev_id, const u8 *macaddr,
 +						  const struct wmi_peer_set_smart_ant_train_ant_fixed_param_cmd *arg);
  #endif
---- a/local-symbols
-+++ b/local-symbols
-@@ -134,3 +134,4 @@ ATH11K_TRACING=
- ATH11K_SPECTRAL=
- ATH11K_PKTLOG=
- ATH11K_CFR=
-+ATH11K_SMART_ANT_ALG=
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath11k/smart_ant_api.c
 @@ -0,0 +1,342 @@
@@ -1732,7 +1724,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
 +#endif /* _SMART_ANT_ALG_ */
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -1529,6 +1529,9 @@ enum  htt_ppdu_stats_usr_compln_status {
+@@ -1482,6 +1482,9 @@ enum  htt_ppdu_stats_usr_compln_status {
  #define HTT_USR_CMPLTN_SHORT_RETRY(_val) \
  	    FIELD_GET(HTT_PPDU_STATS_USR_CMPLTN_CMN_FLAGS_SHORT_RETRY_M, _val)
  
@@ -1742,7 +1734,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  struct htt_ppdu_stats_usr_cmpltn_cmn {
  	u8 status;
  	u8 tid_num;
-@@ -1537,7 +1540,29 @@ struct htt_ppdu_stats_usr_cmpltn_cmn {
+@@ -1490,7 +1493,29 @@ struct htt_ppdu_stats_usr_cmpltn_cmn {
  	u32 ack_rssi;
  	u16 mpdu_tried;
  	u16 mpdu_success;
@@ -1773,7 +1765,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  } __packed;
  
  #define HTT_PPDU_STATS_ACK_BA_INFO_NUM_MPDU_M	GENMASK(8, 0)
-@@ -1559,7 +1584,6 @@ struct htt_ppdu_stats_usr_cmpltn_ack_ba_
+@@ -1512,7 +1537,6 @@ struct htt_ppdu_stats_usr_cmpltn_ack_ba_
  #define HTT_PPDU_STATS_USR_CMN_FLAG_DELAYBA	BIT(14)
  #define HTT_PPDU_STATS_USR_CMN_HDR_SW_PEERID	GENMASK(31, 16)
  #define HTT_PPDU_STATS_USR_CMN_CTL_FRM_CTRL	GENMASK(15, 0)
@@ -1791,7 +1783,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  #include "debugfs_htt_stats.h"
  #include "debugfs_sta.h"
  #include "hal_desc.h"
-@@ -1403,6 +1404,7 @@ static int ath11k_htt_tlv_ppdu_stats_par
+@@ -1404,6 +1405,7 @@ static int ath11k_htt_tlv_ppdu_stats_par
  		memcpy((void *)&user_stats->cmpltn_cmn, ptr,
  		       sizeof(struct htt_ppdu_stats_usr_cmpltn_cmn));
  		user_stats->tlv_flags |= BIT(tag);
@@ -1799,7 +1791,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		break;
  	case HTT_PPDU_STATS_TAG_USR_COMPLTN_ACK_BA_STATUS:
  		if (len <
-@@ -4078,6 +4080,8 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -6245,6 +6247,8 @@ int ath11k_dp_rx_process_mon_status(stru
  							   log_type, rx_buf_sz);
  		}
  
@@ -1810,7 +1802,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		rcu_read_unlock();
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
-@@ -1541,9 +1541,12 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1568,9 +1568,12 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  	case HAL_RXPCU_PPDU_END_INFO: {
  		struct hal_rx_ppdu_end_duration *ppdu_rx_duration =
  			(struct hal_rx_ppdu_end_duration *)tlv_data;
@@ -1826,7 +1818,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		break;
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
-@@ -224,6 +224,7 @@ struct hal_rx_mon_ppdu_info {
+@@ -225,6 +225,7 @@ struct hal_rx_mon_ppdu_info {
  	struct hal_rx_user_status userstats[HAL_MAX_UL_MU_USERS];
  	u8 userid;
  	u16 ampdu_id[HAL_MAX_UL_MU_USERS];
@@ -1834,7 +1826,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  };
  
  #define HAL_RX_UL_OFDMA_USER_INFO_V0_W0_VALID			BIT(30)
-@@ -474,10 +475,13 @@ struct hal_rx_mpdu_info_qcn9074 {
+@@ -484,10 +485,13 @@ struct hal_rx_mpdu_info_qcn9074 {
  } __packed;
  
  #define HAL_RX_PPDU_END_DURATION	GENMASK(23, 0)
@@ -1850,3 +1842,13 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  } __packed;
  
  struct hal_rx_rxpcu_classification_overview {
+--- a/local-symbols
++++ b/local-symbols
+@@ -134,6 +134,7 @@ ATH11K_TRACING=
+ ATH11K_SPECTRAL=
+ ATH11K_PKTLOG=
+ ATH11K_CFR=
++ATH11K_SMART_ANT_ALG=
+ ATH12K=
+ ATH12K_DEBUG=
+ ATH12K_DEBUGFS=

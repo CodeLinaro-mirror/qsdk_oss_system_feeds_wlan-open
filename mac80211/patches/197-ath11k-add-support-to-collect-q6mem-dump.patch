@@ -20,7 +20,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -1075,7 +1075,8 @@ int ath11k_core_ssr_notifier_cb(struct n
+@@ -1210,7 +1210,8 @@ int ath11k_core_ssr_notifier_cb(struct n
  	/* TODO Add more driver stats */
  
  	/* Crash the system once all the stats are dumped */
@@ -32,7 +32,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  }
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -880,6 +880,8 @@ struct ath11k_base {
+@@ -908,6 +908,8 @@ struct ath11k_base {
  		u32 subsystem_device;
  	} id;
  
@@ -41,7 +41,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
-@@ -1036,6 +1038,14 @@ struct ath11k_fw_stats_bcn {
+@@ -1064,6 +1066,14 @@ struct ath11k_fw_stats_bcn {
  	u32 tx_bcn_outage_cnt;
  };
  
@@ -56,7 +56,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  extern const struct ce_pipe_config ath11k_target_ce_config_wlan_ipq8074[];
  extern const struct service_to_pipe ath11k_target_service_to_ce_map_wlan_ipq8074[];
  extern const struct service_to_pipe ath11k_target_service_to_ce_map_wlan_ipq6018[];
-@@ -1063,6 +1073,7 @@ void ath11k_core_halt(struct ath11k *ar)
+@@ -1095,6 +1105,7 @@ void ath11k_core_halt(struct ath11k *ar)
  int ath11k_core_resume(struct ath11k_base *ab);
  int ath11k_core_suspend(struct ath11k_base *ab);
  
@@ -72,9 +72,9 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
   */
 +#include <linux/of.h>
  
- #include "debugfs.h"
+ #include <linux/vmalloc.h>
  
-@@ -1110,6 +1111,73 @@ static const struct file_operations fops
+@@ -1155,6 +1156,73 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -148,7 +148,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  int ath11k_debugfs_pdev_create(struct ath11k_base *ab)
  {
  	if (test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
-@@ -1125,6 +1193,10 @@ int ath11k_debugfs_pdev_create(struct at
+@@ -1170,6 +1238,10 @@ int ath11k_debugfs_pdev_create(struct at
  	debugfs_create_file("soc_dp_stats", 0600, ab->debugfs_soc, ab,
  			    &fops_soc_dp_stats);
  
@@ -161,7 +161,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1372,6 +1372,8 @@ static int ath11k_pci_probe(struct pci_d
+@@ -1379,6 +1379,8 @@ static int ath11k_pci_probe(struct pci_d
  	ab_pci->pdev = pdev;
  	ab->hif.ops = &ath11k_pci_hif_ops;
  	pci_set_drvdata(pdev, ab);
@@ -169,7 +169,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
 +
  	spin_lock_init(&ab_pci->window_lock);
  
- 	/* IPQ8074 reserves memory for FW, ath11k does not need to
+ 	/* Set fixed_mem_region to true for platforms support reserved memory
 --- a/drivers/net/wireless/ath/ath11k/coredump.c
 +++ b/drivers/net/wireless/ath/ath11k/coredump.c
 @@ -163,13 +163,16 @@ void ath11k_coredump_download_rddm(struc
@@ -249,19 +249,6 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  	/* Crash the system once all the stats are dumped */
  	if(!ab->fw_recovery_support) {
  		ath11k_core_dump_bp_stats(ab);
---- a/drivers/net/wireless/ath/ath11k/qmi.c
-+++ b/drivers/net/wireless/ath/ath11k/qmi.c
-@@ -2591,6 +2591,10 @@ static int ath11k_qmi_assign_target_mem_
- 				ab->qmi.target_mem[idx].paddr = ab->hw_params.m3_addr;
- 			else
- 				ab->qmi.target_mem[idx].paddr =  (phys_addr_t)addr;
-+
-+				ab->qmi.target_mem[idx].vaddr =
-+					ioremap(ab->qmi.target_mem[idx].paddr,
-+							ab->qmi.target_mem[i].size);
- 			idx++;
- 			break;
- 		default:
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -954,6 +954,7 @@ enum wmi_tlv_pdev_param {
@@ -274,7 +261,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  enum wmi_tlv_vdev_param {
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -5800,6 +5800,7 @@ static int ath11k_mac_op_start(struct ie
+@@ -6045,6 +6045,7 @@ static int ath11k_mac_op_start(struct ie
  	struct ath11k *ar = hw->priv;
  	struct ath11k_base *ab = ar->ab;
  	struct ath11k_pdev *pdev = ar->pdev;
@@ -282,7 +269,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  	int ret;
  
  	ath11k_mac_drain_tx(ar);
-@@ -5866,6 +5867,17 @@ static int ath11k_mac_op_start(struct ie
+@@ -6119,6 +6120,17 @@ static int ath11k_mac_op_start(struct ie
  		goto err;
  	}
  

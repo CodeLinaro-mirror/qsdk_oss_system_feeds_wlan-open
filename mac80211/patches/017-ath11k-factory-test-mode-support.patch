@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -693,6 +693,7 @@ static int ath11k_ahb_probe(struct platf
+@@ -699,6 +699,7 @@ static int ath11k_ahb_probe(struct platf
  	ab->hif.ops = &ath11k_ahb_hif_ops;
  	ab->pdev = pdev;
  	ab->hw_rev = (enum ath11k_hw_rev)of_id->data;
@@ -10,7 +10,7 @@
  	platform_set_drvdata(pdev, ab);
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -837,7 +837,7 @@ int ath11k_core_qmi_firmware_ready(struc
+@@ -1121,7 +1121,7 @@ int ath11k_core_qmi_firmware_ready(struc
  		set_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags);
  
  	mutex_lock(&ab->core_lock);
@@ -19,7 +19,7 @@
  	if (ret) {
  		ath11k_err(ab, "failed to start core: %d\n", ret);
  		goto err_dp_free;
-@@ -934,7 +934,8 @@ static void ath11k_core_restart(struct w
+@@ -1277,7 +1277,8 @@ static void ath11k_core_restart(struct w
  	for (i = 0; i < ab->num_radios; i++) {
  		pdev = &ab->pdevs[i];
  		ar = pdev->ar;
@@ -29,7 +29,7 @@
  			continue;
  
  		ieee80211_stop_queues(ar->hw);
-@@ -992,6 +993,12 @@ static void ath11k_core_restart(struct w
+@@ -1336,6 +1337,12 @@ static void ath11k_core_restart(struct w
  			ath11k_warn(ab,
  				    "device is wedged, will not restart radio %d\n", i);
  			break;
@@ -44,15 +44,15 @@
  	}
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -189,6 +189,7 @@ enum ath11k_dev_flags {
+@@ -204,6 +204,7 @@ enum ath11k_dev_flags {
  	ATH11K_FLAG_HTC_SUSPEND_COMPLETE,
-	ATH11K_FLAG_CE_IRQ_ENABLED,
-	ATH11K_FLAG_EXT_IRQ_ENABLED,
+ 	ATH11K_FLAG_CE_IRQ_ENABLED,
+ 	ATH11K_FLAG_EXT_IRQ_ENABLED,
 +	ATH11K_FLAG_FW_RESTART_FOR_HOST,
+ 	ATH11K_FLAG_FIXED_MEM_RGN,
  };
  
- enum ath11k_monitor_flags {
-@@ -386,12 +387,19 @@ enum ath11k_state {
+@@ -415,6 +416,7 @@ enum ath11k_state {
  	ATH11K_STATE_RESTARTING,
  	ATH11K_STATE_RESTARTED,
  	ATH11K_STATE_WEDGED,
@@ -60,8 +60,9 @@
  	/* Add other states as required */
  };
  
- /* Antenna noise floor */
- #define ATH11K_DEFAULT_NOISE_FLOOR -95
+@@ -425,6 +427,12 @@ enum ath11k_state {
+ 
+ #define ATH11K_INVALID_RSSI_EMPTY -128
  
 +struct ath11k_ftm_event_obj {
 +	u32 data_pos;
@@ -72,15 +73,15 @@
  struct ath11k_fw_stats {
  	struct dentry *debugfs_fwstats;
  	u32 pdev_id;
-@@ -570,6 +578,7 @@ struct ath11k {
+@@ -604,6 +612,7 @@ struct ath11k {
  #endif
  	bool dfs_block_radar_events;
  	struct ath11k_thermal thermal;
 +	struct completion fw_mode_reset;
- };
- 
- struct ath11k_band_cap {
-@@ -661,6 +670,7 @@ struct ath11k_soc_dp_stats {
+ 	u32 vdev_id_11d_scan;
+ 	struct completion finish_11d_scan;
+ 	struct completion finish_11d_ch_list;
+@@ -703,6 +712,7 @@ struct ath11k_soc_dp_stats {
  /* Master structure to hold the hw data which may be used in core module */
  struct ath11k_base {
  	enum ath11k_hw_rev hw_rev;
@@ -88,7 +89,7 @@
  	struct platform_device *pdev;
  	struct device *dev;
  	struct ath11k_qmi qmi;
-@@ -741,6 +751,7 @@ struct ath11k_base {
+@@ -789,6 +799,7 @@ struct ath11k_base {
  		/* protected by data_lock */
  		u32 fw_crash_counter;
  	} stats;
@@ -98,7 +99,7 @@
  	struct ath11k_dbring_cap *db_caps;
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -528,7 +528,10 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
+@@ -632,7 +632,10 @@ struct ath11k *ath11k_mac_get_ar_by_pdev
  		return NULL;
  
  	for (i = 0; i < ab->num_radios; i++) {
@@ -110,7 +111,7 @@
  
  		if (pdev && pdev->pdev_id == pdev_id)
  			return (pdev->ar ? pdev->ar : NULL);
-@@ -4326,6 +4329,7 @@ static int ath11k_mac_op_start(struct ie
+@@ -5749,6 +5752,7 @@ static int ath11k_mac_op_start(struct ie
  	case ATH11K_STATE_RESTARTED:
  	case ATH11K_STATE_WEDGED:
  	case ATH11K_STATE_ON:
@@ -560,9 +561,9 @@
  
  struct wmi_tlv_policy {
  	size_t min_len;
-@@ -7077,6 +7078,9 @@ static void ath11k_wmi_tlv_op_rx(struct
- 	case WMI_OFFLOAD_PROB_RESP_TX_STATUS_EVENTID:
- 		ath11k_probe_resp_tx_status_event(ab, skb);
+@@ -7631,6 +7632,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	case WMI_OBSS_COLOR_COLLISION_DETECTION_EVENTID:
+ 		ath11k_wmi_obss_color_collision_event(ab, skb);
  		break;
 +	case WMI_PDEV_UTF_EVENTID:
 +		ath11k_tm_event_wmi(ab, id, skb);
@@ -572,7 +573,7 @@
  	case WMI_PEER_OPER_MODE_CHANGE_EVENTID:
 --- a/drivers/net/wireless/ath/ath11k/debugfs_htt_stats.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs_htt_stats.c
-@@ -4469,7 +4469,8 @@ static int ath11k_open_htt_stats(struct
+@@ -4563,7 +4563,8 @@ static int ath11k_open_htt_stats(struct
  
  	mutex_lock(&ar->conf_mutex);
  

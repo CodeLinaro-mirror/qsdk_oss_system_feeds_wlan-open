@@ -23,8 +23,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -531,6 +531,55 @@ static const struct ath11k_num_vdevs_pee
- 	},
+@@ -782,6 +782,55 @@ static const struct ath11k_num_vdevs_pee
+ 	}
  };
  
 +void ath11k_fw_stats_pdevs_free(struct list_head *head)
@@ -81,7 +81,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	int ret;
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -636,8 +636,6 @@ struct ath11k_debug {
+@@ -685,8 +685,6 @@ struct ath11k_debug {
  	struct ath11k_dbg_htt_stats htt_stats;
  	u32 extd_tx_stats;
  	struct ath11k_fw_stats fw_stats;
@@ -90,19 +90,18 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	u32 extd_rx_stats;
  	u32 pktlog_filter;
  	u32 pktlog_mode;
-@@ -878,6 +876,11 @@ struct ath11k {
+@@ -921,6 +919,10 @@ struct ath11k {
  	struct cfg80211_chan_def awgn_chandef;
  	u32 chan_bw_interference_bitmap;
  	bool awgn_intf_handling_in_prog;
-+
 +	/* fw pdev_stats can be requested by get_txpower mac ops too */
 +	struct list_head fw_stats_pdevs;
 +	struct completion fw_stats_complete;
 +	bool fw_stats_done;
- };
- 
- struct ath11k_band_cap {
-@@ -1330,6 +1333,12 @@ enum ath11k_fw_recovery_option {
+ 	u32 vdev_id_11d_scan;
+ 	struct completion finish_11d_scan;
+ 	struct completion finish_11d_ch_list;
+@@ -1394,6 +1396,12 @@ enum ath11k_fw_recovery_option {
  	ATH11K_FW_RECOVERY_ENABLE_SSR_ONLY,
  };
  
@@ -117,7 +116,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static inline bool ath11k_smart_ant_enabled(struct ath11k *ar)
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -803,86 +803,29 @@ void ath11k_debug_aggr_size_config_init(
+@@ -807,91 +807,28 @@ void ath11k_debug_aggr_size_config_init(
  						     &fops_amsdu_aggr_size);
  }
  
@@ -194,17 +193,22 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 -	}
 -
 -	spin_lock_bh(&ar->data_lock);
-+	int i;
- 
+-
 -	if (stats.stats_id == WMI_REQUEST_PDEV_STAT) {
 -		list_splice_tail_init(&stats.pdevs, &ar->debug.fw_stats.pdevs);
 -		ar->debug.fw_stats_done = true;
 -		goto complete;
 -	}
-+	/* WMI_REQUEST_PDEV_STAT request has been already processed. Hence, not doing it again */
+-
+-	if (stats.stats_id == WMI_REQUEST_RSSI_PER_CHAIN_STAT) {
+-		ar->debug.fw_stats_done = true;
+-		goto complete;
+-	}
++	int i;
  
 -	if (stats.stats_id == WMI_REQUEST_VDEV_STAT) {
 -		if (list_empty(&stats.vdevs)) {
++	/* WMI_REQUEST_PDEV_STAT request has been already processed. Hence, not doing it again */
 +	if (stats->stats_id == WMI_REQUEST_VDEV_STAT) {
 +		if (list_empty(&stats->vdevs)) {
  			ath11k_warn(ab, "empty vdev stats");
@@ -213,7 +217,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		}
  		/* FW sends all the active VDEV stats irrespective of PDEV,
  		 * hence limit until the count of all VDEVs started
-@@ -895,43 +838,34 @@ void ath11k_debugfs_fw_stats_process(str
+@@ -904,43 +841,34 @@ void ath11k_debugfs_fw_stats_process(str
  
  		is_end = ((++num_vdev) == total_vdevs_started);
  
@@ -265,7 +269,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
  
  static int ath11k_debugfs_fw_stats_request(struct ath11k *ar,
-@@ -952,7 +886,7 @@ static int ath11k_debugfs_fw_stats_reque
+@@ -961,7 +889,7 @@ static int ath11k_debugfs_fw_stats_reque
  
  	ath11k_debugfs_fw_stats_reset(ar);
  
@@ -274,7 +278,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	ret = ath11k_wmi_send_stats_request_cmd(ar, req_param);
  
-@@ -963,7 +897,7 @@ static int ath11k_debugfs_fw_stats_reque
+@@ -972,7 +900,7 @@ static int ath11k_debugfs_fw_stats_reque
  	}
  
  	time_left =
@@ -283,7 +287,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  				    1 * HZ);
  	if (!time_left)
  		return -ETIMEDOUT;
-@@ -973,7 +907,7 @@ static int ath11k_debugfs_fw_stats_reque
+@@ -982,7 +910,7 @@ static int ath11k_debugfs_fw_stats_reque
  			break;
  
  		spin_lock_bh(&ar->data_lock);
@@ -292,7 +296,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			spin_unlock_bh(&ar->data_lock);
  			break;
  		}
-@@ -2231,11 +2165,12 @@ void ath11k_debugfs_fw_stats_init(struct
+@@ -2284,11 +2212,12 @@ void ath11k_debugfs_fw_stats_init(struct
  	debugfs_create_file("beacon_stats", 0600, fwstats_dir, ar,
  			    &fops_bcn_stats);
  
@@ -318,7 +322,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  void ath11k_debugfs_fw_stats_init(struct ath11k *ar);
  void ath11k_smart_ant_debugfs_init(struct ath11k *ar);
-@@ -334,8 +334,8 @@ static inline void ath11k_debugfs_unregi
+@@ -336,8 +336,8 @@ static inline void ath11k_debugfs_unregi
  {
  }
  
@@ -331,7 +335,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -10679,6 +10679,96 @@ out:
+@@ -11168,6 +11168,96 @@ out:
  	return ret;
  }
  
@@ -428,7 +432,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static const struct ieee80211_ops ath11k_ops = {
  	.tx				= ath11k_mac_op_tx,
  	.start                          = ath11k_mac_op_start,
-@@ -10724,6 +10814,7 @@ static const struct ieee80211_ops ath11k
+@@ -11213,6 +11303,7 @@ static const struct ieee80211_ops ath11k
  #ifdef CPTCFG_MAC80211_MESH
  	.config_mesh_offload_path	= ath11k_mac_op_config_mesh_offload_path,
  #endif
@@ -436,10 +440,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  };
  
  static void ath11k_mac_update_ch_list(struct ath11k *ar,
-@@ -11483,6 +11574,8 @@ int ath11k_mac_allocate(struct ath11k_ba
-
-		ar->monitor_vdev_id = -1;
-		clear_bit(ATH11K_FLAG_MONITOR_VDEV_CREATED, &ar->monitor_flags);
+@@ -11981,6 +12072,8 @@ int ath11k_mac_allocate(struct ath11k_ba
+ 		ar->vdev_id_11d_scan = ATH11K_11D_INVALID_VDEV_ID;
+ 		init_completion(&ar->finish_11d_scan);
+ 		init_completion(&ar->finish_11d_ch_list);
 +
 +		ath11k_fw_stats_init(ar);
  	}
@@ -447,7 +451,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	return 0;
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -7418,7 +7418,7 @@ void ath11k_wmi_fw_stats_fill(struct ath
+@@ -7683,7 +7683,7 @@ void ath11k_wmi_fw_stats_fill(struct ath
  	spin_lock_bh(&ar->data_lock);
  
  	if (stats_id == WMI_REQUEST_PDEV_STAT) {
@@ -456,7 +460,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  						struct ath11k_fw_stats_pdev, list);
  		if (!pdev) {
  			ath11k_warn(ar->ab, "failed to get pdev stats\n");
-@@ -8763,7 +8763,52 @@ static void ath11k_peer_assoc_conf_event
+@@ -9096,7 +9096,52 @@ static void ath11k_peer_assoc_conf_event
  
  static void ath11k_update_stats_event(struct ath11k_base *ab, struct sk_buff *skb)
  {

@@ -17,11 +17,9 @@ Signed-off-by: Anilkumar Kolli <quic_akolli@quicinc.com>
  drivers/net/wireless/ath/ath11k/qmi.h      |  1 +
  4 files changed, 61 insertions(+), 8 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
-index 5089c363ce16..dea725da5c30 100644
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -1323,6 +1323,8 @@ int ath11k_core_suspend(struct ath11k_base *ab);
+@@ -1444,6 +1444,8 @@ int ath11k_core_suspend(struct ath11k_ba
  void ath11k_core_dump_bp_stats(struct ath11k_base *ab);
  void ath11k_coredump_qdss_dump(struct ath11k_base *ab,
  			       struct ath11k_qmi_event_qdss_trace_save_data *event_data);
@@ -29,12 +27,10 @@ index 5089c363ce16..dea725da5c30 100644
 +					  phys_addr_t pa, size_t size);
  const struct firmware *ath11k_core_firmware_request(struct ath11k_base *ab,
  						    const char *filename);
- 
-diff --git a/drivers/net/wireless/ath/ath11k/coredump.c b/drivers/net/wireless/ath/ath11k/coredump.c
-index b3cabd16f0cd..db8c56817532 100644
+ void ath11k_core_wait_dump_collect(struct ath11k_base *ab);
 --- a/drivers/net/wireless/ath/ath11k/coredump.c
 +++ b/drivers/net/wireless/ath/ath11k/coredump.c
-@@ -186,7 +186,8 @@ void ath11k_coredump_download_rddm(struct ath11k_base *ab)
+@@ -186,7 +186,8 @@ void ath11k_coredump_download_rddm(struc
  	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
  		if (ab->qmi.target_mem[i].type == HOST_DDR_REGION_TYPE ||
  		    (ab->qmi.target_mem[i].type == CALDB_MEM_REGION_TYPE && ab->enable_cold_boot_cal && ab->hw_params.cold_boot_calib) ||
@@ -44,7 +40,7 @@ index b3cabd16f0cd..db8c56817532 100644
  			rem_seg_cnt++;
  	}
  
-@@ -201,6 +202,8 @@ void ath11k_coredump_download_rddm(struct ath11k_base *ab)
+@@ -201,6 +202,8 @@ void ath11k_coredump_download_rddm(struc
  		ath11k_warn(ab, "fail to alloc memory for rddm\n");
  
  	for (i = 0; i < fw_img->entries ; i++) {
@@ -53,7 +49,7 @@ index b3cabd16f0cd..db8c56817532 100644
  		seg_sz = fw_img->mhi_buf[i].len;
  		seg_info->len = PAGE_ALIGN(seg_sz);
  		seg_info->addr = fw_img->mhi_buf[i].dma_addr;
-@@ -213,12 +216,12 @@ void ath11k_coredump_download_rddm(struct ath11k_base *ab)
+@@ -213,12 +216,12 @@ void ath11k_coredump_download_rddm(struc
  	}
  
  	for (i = 0; i < rddm_img->entries; i++) {
@@ -68,7 +64,7 @@ index b3cabd16f0cd..db8c56817532 100644
  		seg_info->type = ATH11K_FW_CRASH_RDDM_DATA;
  		ath11k_info(ab, "seg vaddr is %px len is 0x%x type %d\n",
  			    seg_info->vaddr, seg_info->len, seg_info->type);
-@@ -249,7 +252,8 @@ void ath11k_coredump_download_rddm(struct ath11k_base *ab)
+@@ -249,7 +252,8 @@ void ath11k_coredump_download_rddm(struc
  	}
  
  	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
@@ -101,43 +97,23 @@ index b3cabd16f0cd..db8c56817532 100644
 +
 +	return ret;
 +}
-diff --git a/drivers/net/wireless/ath/ath11k/qmi.c b/drivers/net/wireless/ath/ath11k/qmi.c
-index 8c73a044f448..ee03b11942d5 100644
 --- a/drivers/net/wireless/ath/ath11k/qmi.c
 +++ b/drivers/net/wireless/ath/ath11k/qmi.c
-@@ -2780,14 +2780,15 @@ static int ath11k_qmi_alloc_target_mem_chunk(struct ath11k_base *ab)
- 	return 0;
- }
- 
--#define ATH11K_HOST_DDR_M3_OFFSET	0x2D00000
--#define ATH11K_HOST_DDR_QDSS_OFFSET	0x2E00000
--#define ATH11K_HOST_DDR_CALDB_OFFSET	0x2F00000
-+#define ATH11K_HOST_DDR_M3_OFFSET	0x2300000
-+#define ATH11K_HOST_DDR_QDSS_OFFSET	0x2400000
-+#define ATH11K_HOST_DDR_CALDB_OFFSET	0x2500000
-+#define ATH11K_HOST_DDR_PAGEABLE_OFFSET	0x2D00000
- 
- static int ath11k_qmi_assign_target_mem_chunk(struct ath11k_base *ab)
- {
- 	struct device *dev = ab->dev;
--	int i, idx;
-+	int i, idx, ret;
- 	u32 addr = 0;
- 	u32 location[3];
- 
-@@ -2875,6 +2876,32 @@ static int ath11k_qmi_assign_target_mem_chunk(struct ath11k_base *ab)
- 							ab->qmi.target_mem[i].size);
+@@ -2949,6 +2949,34 @@ static int ath11k_qmi_assign_target_mem_
+ 					ab->qmi.target_mem[i].size);
  			idx++;
  			break;
 +		case PAGEABLE_MEM_TYPE:
-+			if (ath11k_host_ddr_addr) {
++			if (hremote_node) {
++				addr = res.start + ATH11K_HOST_DDR_PAGEABLE_OFFSET;
++			} else if (ath11k_host_ddr_addr) {
 +				addr = ath11k_host_ddr_addr +
-+					ATH11K_HOST_DDR_PAGEABLE_OFFSET;
-+			} else if (of_property_read_u32(dev->of_node,
-+						"pageable-addr", &addr)) {
++				       ATH11K_HOST_DDR_PAGEABLE_OFFSET;
++			} else {
 +				ath11k_dbg(ab, ATH11K_DBG_QMI,
-+						"pageable-addr is not in dt\n");
++					   "pageable-addr is not in dt\n");
 +			}
++
 +			ab->qmi.target_mem[idx].paddr =  (phys_addr_t)addr;
 +			ab->qmi.target_mem[idx].vaddr =
 +					ioremap(ab->qmi.target_mem[idx].paddr,
@@ -158,11 +134,9 @@ index 8c73a044f448..ee03b11942d5 100644
  		default:
  			ath11k_warn(ab, "qmi ignore invalid mem req type %d\n",
  				    ab->qmi.target_mem[i].type);
-diff --git a/drivers/net/wireless/ath/ath11k/qmi.h b/drivers/net/wireless/ath/ath11k/qmi.h
-index 454b66c81074..522516b1f11b 100644
 --- a/drivers/net/wireless/ath/ath11k/qmi.h
 +++ b/drivers/net/wireless/ath/ath11k/qmi.h
-@@ -270,6 +270,7 @@ struct qmi_wlanfw_qdss_trace_mode_resp_msg_v01 {
+@@ -279,6 +279,7 @@ struct qmi_wlanfw_qdss_trace_mode_resp_m
  #define M3_DUMP_REGION_TYPE				0x3
  #define CALDB_MEM_REGION_TYPE				0x4
  #define QDSS_ETR_MEM_REGION_TYPE                        0x6
@@ -170,6 +144,3 @@ index 454b66c81074..522516b1f11b 100644
  #define QMI_MEM_REGION_TYPE				0
  
  struct qmi_wlanfw_host_cap_req_msg_v01 {
--- 
-2.7.4
-

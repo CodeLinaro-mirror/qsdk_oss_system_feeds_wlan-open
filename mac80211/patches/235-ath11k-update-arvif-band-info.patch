@@ -5,7 +5,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
 ---
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2703,6 +2703,7 @@ static void ath11k_dp_rx_h_ppdu(struct a
+@@ -2714,6 +2714,7 @@ static void ath11k_dp_rx_h_ppdu(struct a
  	u8 channel_num;
  	u32 center_freq, meta_data;
  	struct ieee80211_channel *channel;
@@ -13,7 +13,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
  	rx_status->freq = 0;
  	rx_status->rate_idx = 0;
-@@ -2720,20 +2721,41 @@ static void ath11k_dp_rx_h_ppdu(struct a
+@@ -2731,20 +2732,40 @@ static void ath11k_dp_rx_h_ppdu(struct a
  	    center_freq <= ATH11K_MAX_6G_FREQ) {
  		rx_status->band = NL80211_BAND_6GHZ;
  		rx_status->freq = center_freq;
@@ -23,15 +23,13 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
 +		no_chan_info = 1;
  	} else if (channel_num >= 36 && channel_num <= 173) {
  		rx_status->band = NL80211_BAND_5GHZ;
--	} else {
+ 	} else {
 +		no_chan_info = 1;
 +	}
 +
 +	if (unlikely(no_chan_info == -1)) {
 +		ath11k_warn(ar->ab, "[Test] not in range channel_num %d center_freq %d\n", channel_num, center_freq);
 +		ath11k_warn(ar->ab, "[Test] wiphy-bandinfo %p\n", ar->hw->wiphy->bands[rx_status->band]);
-+
-+		ath11k_warn(ar->ab, "[Test] msdu err bitmap %d\n", ath11k_dp_rx_h_attn_msdu_len_err(ar->ab, rx_desc));
 +		ath11k_warn(ar->ab, "[Test] msdu is first msdu %d\n", ath11k_dp_rx_h_msdu_end_first_msdu(ar->ab, rx_desc));
 +		ath11k_warn(ar->ab, "[Test] msdu is last msdu %d\n", ath11k_dp_rx_h_msdu_end_first_msdu(ar->ab, rx_desc));
 +		ath11k_warn(ar->ab, "[Test] msdu len %d\n", ath11k_dp_rx_h_msdu_start_msdu_len(ar->ab, rx_desc));
@@ -57,7 +55,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  				rx_desc, sizeof(struct hal_rx_desc));
  	}
  
-@@ -3566,6 +3588,12 @@ static int ath11k_dp_rx_reap_mon_status_
+@@ -3585,6 +3606,12 @@ static int ath11k_dp_rx_reap_mon_status_
  						&cookie, &rbm);
  		if (paddr) {
  			buf_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_BUF_ID, cookie);
@@ -70,7 +68,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
  			spin_lock_bh(&rx_ring->idr_lock);
  			skb = idr_find(&rx_ring->bufs_idr, buf_id);
-@@ -5867,6 +5895,11 @@ void ath11k_dp_rx_mon_dest_process(struc
+@@ -5743,6 +5770,11 @@ void ath11k_dp_rx_mon_dest_process(struc
  	spin_unlock_bh(&pmon->mon_lock);
  
  	if (rx_bufs_used) {
@@ -84,7 +82,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -3764,7 +3764,8 @@ static int ath11k_mac_op_hw_scan(struct
+@@ -3911,7 +3911,8 @@ static int ath11k_mac_op_hw_scan(struct
  
  	ret = ath11k_start_scan(ar, arg);
  	if (ret) {
@@ -94,7 +92,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  		spin_lock_bh(&ar->data_lock);
  		ar->scan.state = ATH11K_SCAN_IDLE;
  		spin_unlock_bh(&ar->data_lock);
-@@ -6932,7 +6933,7 @@ static void ath11k_mac_op_remove_chanctx
+@@ -7295,7 +7296,7 @@ static void ath11k_mac_op_remove_chanctx
  	struct ath11k *ar = hw->priv;
  	struct ath11k_base *ab = ar->ab;
  
@@ -105,7 +103,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -4988,12 +4988,16 @@ void ieee80211_rx_list(struct ieee80211_
+@@ -4994,12 +4994,16 @@ void ieee80211_rx_list(struct ieee80211_
  		}
  	}
  
@@ -145,18 +143,17 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -734,6 +734,8 @@ struct ath11k {
+@@ -743,6 +743,7 @@ struct ath11k {
+ 	u8 ftm_msgref;
  	int ap_ps_enabled;
  	enum ath11k_ap_ps_state ap_ps_state;
- 
 +	int cookie_pdev_id;
-+
  	/* protected by conf_mutex */
  	u8 ps_state_enable;
  	u8 ps_timekeeper_enable;
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -3656,6 +3656,7 @@ int ieee80211_attach_ack_skb(struct ieee
+@@ -3671,6 +3671,7 @@ int ieee80211_attach_ack_skb(struct ieee
  
  	if (id < 0) {
  		kfree_skb(ack_skb);
@@ -176,7 +173,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -23,7 +23,7 @@ module_param_named(nss_offload, nss_offl
+@@ -24,7 +24,7 @@ module_param_named(nss_offload, nss_offl
  MODULE_PARM_DESC(nss_offload, "Enable NSS Offload support");
  #endif
  
@@ -187,11 +184,11 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  MODULE_PARM_DESC(debug_mask, "Debugging mask");
 --- a/drivers/net/wireless/ath/ath11k/debug.h
 +++ b/drivers/net/wireless/ath/ath11k/debug.h
-@@ -26,6 +26,7 @@ enum ath11k_debug_mask {
+@@ -25,6 +25,7 @@ enum ath11k_debug_mask {
+ 	ATH11K_DBG_PCI		= 0x00001000,
  	ATH11K_DBG_DP_TX	= 0x00001000,
  	ATH11K_DBG_DP_RX	= 0x00002000,
- 	ATH11K_DBG_ANY		= 0xffffffff,
 +	ATH11K_DBG_TEST		= 0x00080000,
+ 	ATH11K_DBG_ANY		= 0xffffffff,
  };
  
- __printf(2, 3) void ath11k_info(struct ath11k_base *ab, const char *fmt, ...);

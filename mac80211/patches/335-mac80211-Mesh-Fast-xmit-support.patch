@@ -35,8 +35,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  /*
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -734,6 +734,7 @@ struct ieee80211_if_mesh {
- 	struct mesh_table *mpp_paths; /* Store paths for MPP&MAP */
+@@ -754,6 +754,7 @@ struct ieee80211_if_mesh {
+ 	struct mesh_table mpp_paths; /* Store paths for MPP&MAP */
  	int mesh_paths_generation;
  	int mpp_paths_generation;
 +	struct mesh_hdr_cache *hdr_cache;
@@ -56,8 +56,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  				IEEE80211_MESH_HOUSEKEEPING_INTERVAL));
 --- a/net/mac80211/mesh.h
 +++ b/net/mac80211/mesh.h
-@@ -147,6 +147,36 @@ struct mesh_table {
- 	atomic_t entries;		/* Up to MAX_MESH_NEIGHBOURS */
+@@ -127,6 +127,36 @@ struct mesh_path {
+ 	u32 path_change_count;
  };
  
 +struct mesh_hdr_cache {
@@ -93,7 +93,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  /* Recent multicast cache */
  /* RMC_BUCKETS must be a power of 2, maximum 256 */
  #define RMC_BUCKETS		256
-@@ -327,6 +357,13 @@ bool mesh_action_is_path_sel(struct ieee
+@@ -307,6 +337,13 @@ bool mesh_action_is_path_sel(struct ieee
  void mesh_bmiss_event(struct timer_list *t);
  void mesh_nss_offld_path_update(struct mesh_path *mpath, bool is_mpath, u8 *old_next_hop_addr);
  
@@ -220,7 +220,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static inline bool mpath_expired(struct mesh_path *mpath)
  {
  	return (mpath->flags & MESH_PATH_ACTIVE) &&
-@@ -463,6 +521,348 @@ struct mesh_path *mesh_path_new(struct i
+@@ -455,6 +513,348 @@ struct mesh_path *mesh_path_new(struct i
  	return new_mpath;
  }
  
@@ -569,7 +569,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  struct mesh_path *__mesh_path_add(struct ieee80211_sub_if_data *sdata,
  				  const u8 *dst)
  {
-@@ -490,6 +890,7 @@ struct mesh_path *__mesh_path_add(struct
+@@ -482,6 +882,7 @@ struct mesh_path *__mesh_path_add(struct
  						  mesh_rht_params);
  	if (!mpath)
  		hlist_add_head(&new_mpath->walk_list, &tbl->walk_head);
@@ -577,7 +577,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	spin_unlock_bh(&tbl->walk_lock);
  
  	if (mpath) {
-@@ -675,8 +1076,11 @@ static void __mesh_path_del(struct mesh_
+@@ -667,8 +1068,11 @@ static void __mesh_path_del(struct mesh_
  	if (next_hop)
  		ether_addr_copy(path.next_hop, next_hop->addr);
  
@@ -589,7 +589,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	mesh_path_free_rcu(tbl, mpath);
  
  	drv_config_mesh_offload_path(sdata->local, sdata,
-@@ -909,6 +1313,8 @@ void mesh_path_fix_nexthop(struct mesh_p
+@@ -901,6 +1305,8 @@ void mesh_path_fix_nexthop(struct mesh_p
  	mpath->exp_time = 0;
  	mpath->flags = MESH_PATH_FIXED | MESH_PATH_SN_VALID;
  	mesh_path_activate(mpath);
@@ -598,24 +598,23 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	spin_unlock_bh(&mpath->state_lock);
  	ewma_mesh_fail_avg_init(&next_hop->mesh->fail_avg);
  	/* init it at a low value - 0 start is tricky */
-@@ -939,6 +1345,8 @@ int mesh_pathtbl_init(struct ieee80211_s
- 	atomic_add(sizeof(struct mesh_table),
- 		   &sdata->local->memory_stats.malloc_size);
+@@ -912,6 +1318,7 @@ void mesh_path_fix_nexthop(struct mesh_p
  
+ void mesh_pathtbl_init(struct ieee80211_sub_if_data *sdata)
+ {
 +	mesh_hdr_cache_init(sdata);
-+
- 	sdata->u.mesh.mesh_paths = tbl_path;
- 	sdata->u.mesh.mpp_paths = tbl_mpp;
- 
-@@ -982,4 +1390,5 @@ void mesh_pathtbl_unregister(struct ieee
- 		   &sdata->local->memory_stats.malloc_size);
- 	mesh_table_free(sdata->u.mesh.mesh_paths);
- 	mesh_table_free(sdata->u.mesh.mpp_paths);
+ 	mesh_table_init(&sdata->u.mesh.mesh_paths);
+ 	mesh_table_init(&sdata->u.mesh.mpp_paths);
+ }
+@@ -943,4 +1350,5 @@ void mesh_pathtbl_unregister(struct ieee
+ {
+ 	mesh_table_free(&sdata->u.mesh.mesh_paths);
+ 	mesh_table_free(&sdata->u.mesh.mpp_paths);
 +	mesh_hdr_cache_deinit(sdata);
  }
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -3016,6 +3016,10 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
+@@ -3014,6 +3014,10 @@ ieee80211_rx_h_mesh_fwding(struct ieee80
  				mesh_nss_offld_path_update(mppath, false, NULL);
  		}
  		rcu_read_unlock();

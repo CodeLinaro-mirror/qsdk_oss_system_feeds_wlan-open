@@ -23,7 +23,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -461,7 +461,6 @@ fail_free_skb:
+@@ -483,7 +483,6 @@ fail_free_skb:
  static int ath11k_dp_rxdma_buf_ring_free(struct ath11k *ar,
  					 struct dp_rxdma_ring *rx_ring)
  {
@@ -31,7 +31,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	struct sk_buff *skb;
  	int buf_id;
  
-@@ -479,28 +478,6 @@ static int ath11k_dp_rxdma_buf_ring_free
+@@ -501,28 +500,6 @@ static int ath11k_dp_rxdma_buf_ring_free
  	idr_destroy(&rx_ring->bufs_idr);
  	spin_unlock_bh(&rx_ring->idr_lock);
  
@@ -60,17 +60,16 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	return 0;
  }
  
-@@ -3794,39 +3771,52 @@ static int ath11k_dp_rx_reap_mon_status_
+@@ -3898,39 +3875,51 @@ static int ath11k_dp_rx_reap_mon_status_
  
  			spin_lock_bh(&rx_ring->idr_lock);
  			skb = idr_find(&rx_ring->bufs_idr, buf_id);
 +			spin_unlock_bh(&rx_ring->idr_lock);
-+
  			if (!skb) {
  				ath11k_warn(ab, "rx monitor status with invalid buf_id %d\n",
  					    buf_id);
 -				spin_unlock_bh(&rx_ring->idr_lock);
- 				pmon->mon_status_buf_state = DP_MON_STATUS_REPLINISH;
+ 				pmon->buf_state = DP_MON_STATUS_REPLINISH;
  				goto move_next;
  			}
  
@@ -102,11 +101,11 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +				 * and break from here.
 +				 * Check status for same buffer for next time
 +				 */
- 				pmon->mon_status_buf_state = DP_MON_STATUS_NO_DMA;
+ 				pmon->buf_state = DP_MON_STATUS_NO_DMA;
 -				goto move_next;
 +				break;
  			}
-+
+ 
 +			spin_lock_bh(&rx_ring->idr_lock);
 +			idr_remove(&rx_ring->bufs_idr, buf_id);
 +			spin_unlock_bh(&rx_ring->idr_lock);
@@ -114,13 +113,13 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  			if (ab->hw_params.full_monitor_mode) {
  				ath11k_dp_rx_mon_update_status_buf_state(pmon, tlv);
  				if (paddr == pmon->mon_status_paddr)
- 					pmon->mon_status_buf_state = DP_MON_STATUS_MATCH;
+ 					pmon->buf_state = DP_MON_STATUS_MATCH;
  			}
- 
++
 +			dma_unmap_single(ab->dev, rxcb->paddr,
 +					 skb->len + skb_tailroom(skb),
 +					 DMA_FROM_DEVICE);
 +
  			__skb_queue_tail(skb_list, skb);
  		} else {
- 			pmon->mon_status_buf_state = DP_MON_STATUS_REPLINISH;
+ 			pmon->buf_state = DP_MON_STATUS_REPLINISH;

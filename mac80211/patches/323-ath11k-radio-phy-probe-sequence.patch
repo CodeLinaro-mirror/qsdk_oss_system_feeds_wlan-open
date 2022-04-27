@@ -20,18 +20,18 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -890,6 +890,7 @@ static int ath11k_ahb_probe(struct platf
- 	int ret = 0;
- 	int userpd_id;
+@@ -829,6 +829,7 @@ static int ath11k_ahb_probe(struct platf
+ 	void __iomem *mem;
+ 	int userpd_id, ret = 0;
  	u32 hw_mode_id;
 +	unsigned long left;
  
  	of_id = of_match_device(ath11k_ahb_of_match, &pdev->dev);
  	if (!of_id) {
-@@ -922,6 +923,15 @@ static int ath11k_ahb_probe(struct platf
-	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
-	ab->userpd_id = userpd_id;
-	ab->enable_cold_boot_cal = ath11k_cold_boot_cal;
+@@ -860,6 +861,15 @@ static int ath11k_ahb_probe(struct platf
+ 	ab->fw_mode = ATH11K_FIRMWARE_MODE_NORMAL;
+ 	ab->userpd_id = userpd_id;
+ 	ab->enable_cold_boot_cal = ath11k_cold_boot_cal;
 +	mutex_lock(&dev_init_lock);
 +	left = wait_event_timeout(ath11k_radio_prb_wq, dev_init_progress == false,
 +				  ATH11K_AHB_PROBE_SEQ_TIMEOUT);
@@ -46,7 +46,7 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
  	if (ab->hw_rev != ATH11K_HW_QCN6122) {
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -51,6 +51,14 @@ MODULE_PARM_DESC(skip_radio_bmap, "Bitma
+@@ -61,6 +61,14 @@ MODULE_PARM_DESC(skip_radio_bmap, "Bitma
  unsigned int ath11k_skip_radio;
  EXPORT_SYMBOL(ath11k_skip_radio);
  
@@ -59,9 +59,9 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
 +struct mutex dev_init_lock;
 +EXPORT_SYMBOL(dev_init_lock);
  
- struct ath11k_base *ath11k_soc;
+ struct ath11k_soc *ath11k_soc[MAX_SOCS];
  
-@@ -1545,6 +1553,9 @@ EXPORT_SYMBOL(ath11k_core_alloc);
+@@ -1976,6 +1984,9 @@ EXPORT_SYMBOL(ath11k_core_alloc);
  
  int ath11k_init(void)
  {
@@ -73,7 +73,7 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
  module_init(ath11k_init);
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -9507,6 +9507,8 @@ int ath11k_mac_allocate(struct ath11k_ba
+@@ -10172,6 +10172,8 @@ int ath11k_mac_allocate(struct ath11k_ba
  			ret = -ENOMEM;
  			goto err_free_mac;
  		}
@@ -84,15 +84,15 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
  		ar->hw = hw;
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -1361,6 +1361,7 @@ static int ath11k_pci_probe(struct pci_d
- 	u32 soc_hw_version, soc_hw_version_major, soc_hw_version_minor;
- 	u32 addr;
+@@ -856,6 +856,7 @@ static int ath11k_pci_probe(struct pci_d
+ 	struct ath11k_pci *ab_pci;
+ 	u32 soc_hw_version_major, soc_hw_version_minor, addr;
  	int ret;
 +	unsigned long left;
  
  	ab = ath11k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH11K_BUS_PCI,
  			       &ath11k_pci_bus_params);
-@@ -1379,6 +1380,15 @@ static int ath11k_pci_probe(struct pci_d
+@@ -874,6 +875,15 @@ static int ath11k_pci_probe(struct pci_d
  	pci_set_drvdata(pdev, ab);
  	ab->fw_recovery_support = false;
  
@@ -107,11 +107,11 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
 +
  	spin_lock_init(&ab_pci->window_lock);
  
- 	/* IPQ8074 reserves memory for FW, ath11k does not need to
+ 	/* Set fixed_mem_region to true for platforms support reserved memory
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -30,6 +30,9 @@
- #include "cfr.h"
+@@ -35,6 +35,9 @@ extern bool ath11k_collect_dump;
+ #endif
  
  extern unsigned int ath11k_skip_radio;
 +extern wait_queue_head_t ath11k_radio_prb_wq;
@@ -120,9 +120,9 @@ Signed-off-by: Karthikeyan Kathirvel <kathirve@codeaurora.org>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -52,6 +55,8 @@ extern unsigned int ath11k_frame_mode;
+@@ -61,6 +64,8 @@ extern unsigned int ath11k_frame_mode;
  
- #define ATH11K_MON_TIMER_INTERVAL  10
+ #define MAX_SOCS	3
  
 +#define ATH11K_AHB_PROBE_SEQ_TIMEOUT	(2 * HZ)
 +

@@ -20,24 +20,24 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -4720,14 +4720,15 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
+@@ -4809,14 +4809,15 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  {
  	struct ath11k_base *ab = ar->ab;
-	struct sk_buff *msdu, *prev_buf;
+ 	struct sk_buff *msdu, *prev_buf;
 -	u32 wifi_hdr_len;
  	struct hal_rx_desc *rx_desc;
  	char *hdr_desc;
  	u8 *dest, decap_format;
  	struct ieee80211_hdr_3addr *wh;
  	struct rx_attention *rx_attention;
-	u32 err_bitmap;
+ 	u32 err_bitmap;
 +	static u32 pkt_type = 0;
  
 +	pkt_type++;
-	if (!head_msdu)
-		goto err_merge_fail;
+ 	if (!head_msdu)
+ 		goto err_merge_fail;
  
-@@ -4759,38 +4760,28 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
+@@ -4851,38 +4852,28 @@ ath11k_dp_rx_mon_merg_msdus(struct ath11
  
  		skb_trim(prev_buf, prev_buf->len - HAL_RX_FCS_LEN);
  	} else if (decap_format == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
@@ -78,7 +78,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  			prev_buf = msdu;
  			msdu = msdu->next;
  		}
-@@ -4820,8 +4811,85 @@ err_merge_fail:
+@@ -4906,8 +4897,85 @@ err_merge_fail:
  	return NULL;
  }
  
@@ -164,16 +164,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  				    struct sk_buff *tail_msdu,
  				    struct napi_struct *napi)
  {
-@@ -4852,7 +4920,7 @@ static int ath11k_dp_rx_mon_deliver(stru
+@@ -4943,7 +5011,7 @@ static int ath11k_dp_rx_mon_deliver(stru
  			rxs->flag |= RX_FLAG_ALLOW_SAME_PN;
  		}
  		rxs->flag |= RX_FLAG_ONLY_MONITOR;
 -
 +		ath11k_update_radiotap(ppduinfo, mon_skb, rxs);
-		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb, rxs);
-		mon_skb = skb_next;
-	} while (mon_skb);
-@@ -4928,6 +4995,7 @@ static void ath11k_dp_rx_mon_dest_proces
+ 		ath11k_dp_rx_deliver_msdu(ar, napi, mon_skb, rxs);
+ 		mon_skb = skb_next;
+ 	} while (mon_skb);
+@@ -5017,6 +5085,7 @@ static void ath11k_dp_rx_mon_dest_proces
  		}
  		if (head_msdu && tail_msdu) {
  			ath11k_dp_rx_mon_deliver(ar, dp->mac_id, head_msdu,
@@ -181,15 +181,6 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  						 tail_msdu, napi);
  			rx_mon_stats->dest_mpdu_done++;
  		}
-@@ -4974,6 +5042,8 @@ static void ath11k_dp_rx_mon_status_proc
- 	while (!skb_queue_empty(&pmon->rx_status_q)) {
- 		status_skb = skb_dequeue(&pmon->rx_status_q);
- 
-+		memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
-+
- 		tlv_status = ath11k_hal_rx_parse_mon_status(ar->ab, ppdu_info,
- 							    status_skb);
- 		if (tlv_status == HAL_TLV_STATUS_PPDU_DONE) {
 --- a/drivers/net/wireless/ath/ath11k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath11k/hal_desc.h
 @@ -474,6 +474,7 @@ enum hal_tlv_tag {
@@ -202,8 +193,8 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
-@@ -838,12 +838,75 @@ void ath11k_hal_reo_hw_setup(struct ath1
- 				      ring_hash_map));
+@@ -802,12 +802,75 @@ void ath11k_hal_reo_init_cmd_ring(struct
+ 	}
  }
  
 +#define HAL_MAX_UL_MU_USERS	37
@@ -280,7 +271,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  
  	switch (tlv_tag) {
  	case HAL_RX_PPDU_START: {
-@@ -864,6 +927,9 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -828,6 +891,9 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		info0 = __le32_to_cpu(eu_stats->info0);
  		info1 = __le32_to_cpu(eu_stats->info1);
  
@@ -290,7 +281,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->tid =
  			ffs(FIELD_GET(HAL_RX_PPDU_END_USER_STATS_INFO6_TID_BITMAP,
  				      __le32_to_cpu(eu_stats->info6))) - 1;
-@@ -887,6 +953,42 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -851,6 +917,42 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->num_mpdu_fcs_err =
  			FIELD_GET(HAL_RX_PPDU_END_USER_STATS_INFO0_MPDU_CNT_FCS_ERR,
  				  info0);
@@ -333,7 +324,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_PHYRX_HT_SIG: {
-@@ -953,7 +1055,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -917,7 +1019,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		info1 = __le32_to_cpu(vht_sig->info1);
  
  		ppdu_info->ldpc = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_SU_MU_CODING,
@@ -342,7 +333,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->mcs = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_MCS,
  					   info1);
  		gi_setting = FIELD_GET(HAL_RX_VHT_SIG_A_INFO_INFO1_GI_SETTING,
-@@ -985,23 +1087,153 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -949,23 +1051,153 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		else
  			ppdu_info->reception_type =
  				HAL_RX_RECEPTION_TYPE_MU_MIMO;
@@ -498,7 +489,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->is_stbc = info1 &
  				     HAL_RX_HE_SIG_A_SU_INFO_INFO1_STBC;
  		ppdu_info->beamformed = info1 &
-@@ -1011,22 +1243,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -975,22 +1207,6 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  				   info0);
  		nsts = FIELD_GET(HAL_RX_HE_SIG_A_SU_INFO_INFO0_NSTS, info0);
  
@@ -521,7 +512,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->nss = nsts + 1;
  		ppdu_info->dcm = dcm;
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
-@@ -1036,32 +1252,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1000,32 +1216,133 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		struct hal_rx_he_sig_a_mu_dl_info *he_sig_a_mu_dl =
  			(struct hal_rx_he_sig_a_mu_dl_info *)tlv_data;
  
@@ -667,15 +658,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1075,6 +1392,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
- 		ru_tones = FIELD_GET(HAL_RX_HE_SIG_B1_MU_INFO_INFO0_RU_ALLOCATION,
+@@ -1040,7 +1357,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  				     info0);
- 		ppdu_info->ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(ru_tones);
+ 		ppdu_info->ru_alloc =
+ 			ath11k_mac_phy_he_ru_to_nl80211_he_ru_alloc(ru_tones);
+-
 +		ppdu_info->he_RU[0] = ru_tones;
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
  		break;
  	}
-@@ -1084,14 +1402,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1050,14 +1367,25 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_mu->info0);
  
@@ -705,7 +697,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_PHYRX_HE_SIG_B2_OFDMA: {
-@@ -1100,17 +1429,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1066,17 +1394,38 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  
  		info0 = __le32_to_cpu(he_sig_b2_ofdma->info0);
  
@@ -748,16 +740,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_OFDMA;
  		break;
  	}
-@@ -1123,7 +1473,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+@@ -1092,7 +1441,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		 * PHYRX_OTHER_RECEIVE_INFO TLV.
  		 */
  		ppdu_info->rssi_comb =
 -			FIELD_GET(HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB,
 +			FIELD_GET(HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO0_RSSI_COMB,
  				  __le32_to_cpu(rssi->info0));
- 		break;
- 	}
-@@ -1144,6 +1494,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 
+ 		if (db2dbm) {
+@@ -1118,6 +1467,8 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
  		ppdu_info->rx_duration =
  			FIELD_GET(HAL_RX_PPDU_END_DURATION,
  				  __le32_to_cpu(ppdu_rx_duration->info0));
@@ -766,7 +758,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		break;
  	}
  	case HAL_DUMMY:
-@@ -1167,12 +1519,14 @@ ath11k_hal_rx_parse_mon_status(struct at
+@@ -1141,12 +1492,14 @@ ath11k_hal_rx_parse_mon_status(struct at
  	enum hal_rx_mon_status hal_status = HAL_RX_MON_STATUS_BUF_DONE;
  	u16 tlv_tag;
  	u16 tlv_len;
@@ -781,7 +773,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  		ptr += sizeof(*tlv);
  
  		/* The actual length of PPDU_END is the combined length of many PHY
-@@ -1184,7 +1538,7 @@ ath11k_hal_rx_parse_mon_status(struct at
+@@ -1158,7 +1511,7 @@ ath11k_hal_rx_parse_mon_status(struct at
  			tlv_len = sizeof(struct hal_rx_rxpcu_classification_overview);
  
  		hal_status = ath11k_hal_rx_parse_mon_status_tlv(ab, ppdu_info,
@@ -792,8 +784,8 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
-@@ -77,6 +77,36 @@ enum hal_rx_mon_status {
- 	HAL_RX_MON_STATUS_BUF_DONE,
+@@ -91,6 +91,36 @@ struct hal_sw_mon_ring_entries {
+ 	bool drop_ppdu;
  };
  
 +struct hal_rx_user_status {
@@ -829,7 +821,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  struct hal_rx_mon_ppdu_info {
  	u32 ppdu_id;
  	u32 ppdu_ts;
-@@ -93,16 +123,59 @@ struct hal_rx_mon_ppdu_info {
+@@ -107,17 +137,60 @@ struct hal_rx_mon_ppdu_info {
  	u8 mcs;
  	u8 nss;
  	u8 bw;
@@ -845,6 +837,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  	u8 ldpc;
  	u8 beamformed;
  	u8 rssi_comb;
+ 	u8 rssi_chain_pri20[HAL_RX_MAX_NSS];
  	u8 tid;
 +	u16 ht_flags;
 +	u16 vht_flags;
@@ -889,7 +882,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
-@@ -135,6 +208,9 @@ struct hal_rx_ppdu_start {
+@@ -150,6 +223,9 @@ struct hal_rx_ppdu_start {
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_BITMAP		GENMASK(15, 0)
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_EOSP_BITMAP	GENMASK(31, 16)
  
@@ -899,7 +892,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  struct hal_rx_ppdu_end_user_stats {
  	__le32 rsvd0[2];
  	__le32 info0;
-@@ -145,10 +221,21 @@ struct hal_rx_ppdu_end_user_stats {
+@@ -160,10 +236,21 @@ struct hal_rx_ppdu_end_user_stats {
  	__le32 rsvd1[2];
  	__le32 info4;
  	__le32 info5;
@@ -922,7 +915,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  #define HAL_RX_HT_SIG_INFO_INFO0_MCS		GENMASK(6, 0)
  #define HAL_RX_HT_SIG_INFO_INFO0_BW		BIT(7)
  
-@@ -197,25 +284,63 @@ enum hal_rx_vht_sig_a_gi_setting {
+@@ -212,25 +299,63 @@ enum hal_rx_vht_sig_a_gi_setting {
  	HAL_RX_VHT_SIG_A_SHORT_GI_AMBIGUITY = 3,
  };
  
@@ -990,7 +983,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  
  struct hal_rx_he_sig_a_mu_dl_info {
  	__le32 info0;
-@@ -228,6 +353,7 @@ struct hal_rx_he_sig_b1_mu_info {
+@@ -243,6 +368,7 @@ struct hal_rx_he_sig_b1_mu_info {
  	__le32 info0;
  } __packed;
  
@@ -998,7 +991,7 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_MCS		GENMASK(18, 15)
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_CODING	BIT(20)
  #define HAL_RX_HE_SIG_B2_MU_INFO_INFO0_STA_NSTS		GENMASK(31, 29)
-@@ -236,6 +362,7 @@ struct hal_rx_he_sig_b2_mu_info {
+@@ -251,6 +377,7 @@ struct hal_rx_he_sig_b2_mu_info {
  	__le32 info0;
  } __packed;
  
@@ -1006,16 +999,16 @@ Signed-off-by: Miles Hu <milehu@codeaurora.org>
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_NSTS	GENMASK(13, 11)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_TXBF	BIT(19)
  #define HAL_RX_HE_SIG_B2_OFDMA_INFO_INFO0_STA_MCS	GENMASK(18, 15)
-@@ -246,7 +373,7 @@ struct hal_rx_he_sig_b2_ofdma_info {
+@@ -261,7 +388,7 @@ struct hal_rx_he_sig_b2_ofdma_info {
  	__le32 info0;
  } __packed;
  
 -#define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB	GENMASK(15, 8)
 +#define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO0_RSSI_COMB	GENMASK(15, 8)
  
- struct hal_rx_phyrx_rssi_legacy_info {
- 	__le32 rsvd[35];
-@@ -359,4 +486,96 @@ static inline u32 ath11k_he_ru_tones_to_
+ #define HAL_RX_PHYRX_RSSI_PREAMBLE_PRI20	GENMASK(7, 0)
+ 
+@@ -367,4 +494,96 @@ ath11k_hal_rx_parse_mon_status(struct at
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_1 0xADBEEF
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_2 0xBDBEEF
  #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_3 0xCDBEEF

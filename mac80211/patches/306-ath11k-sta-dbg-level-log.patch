@@ -17,8 +17,8 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -250,6 +250,11 @@ struct ath11k_mgmt_frame_stats {
- 	u32 tx_compl_fail[ATH11K_STATS_MGMT_FRM_TYPE_MAX];
+@@ -271,6 +271,11 @@ struct ath11k_dyn_vlan_cfg {
+ 	struct list_head cfg_list;
  };
  
 +struct ath11k_mac_filter {
@@ -29,7 +29,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  struct ath11k_vif {
  	u32 vdev_id;
  	enum wmi_vdev_type vdev_type;
-@@ -306,7 +311,11 @@ struct ath11k_vif {
+@@ -327,7 +332,11 @@ struct ath11k_vif {
  	struct dentry *ampdu_aggr_size;
  	struct dentry *amsdu_aggr_size;
  	struct dentry *wmi_ctrl_stat;
@@ -40,7 +40,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
 +	u32 mac_filter_count;
  	struct arvif_nss nss;
  	struct list_head ap_vlan_arvifs;
- 	/* VLAN keyidx map required for Dynamic VLAN */
+ 	/* list required by Dynamic VLAN during fw_recovery */
 --- a/drivers/net/wireless/ath/ath11k/debug.h
 +++ b/drivers/net/wireless/ath/ath11k/debug.h
 @@ -28,6 +28,7 @@ enum ath11k_debug_mask {
@@ -48,12 +48,12 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	ATH11K_DBG_CFR		= 0x00008000,
  	ATH11K_DBG_CFR_DUMP	= 0x00010000,
 +	ATH11K_DBG_PEER		= 0x00020000,
+ 	ATH11K_DBG_TEST		= 0x00080000,
  	ATH11K_DBG_ANY		= 0xffffffff,
  };
- 
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -456,6 +456,117 @@ static const struct file_operations ath1
+@@ -458,6 +458,117 @@ static const struct file_operations ath1
  	.read = ath11k_read_wmi_ctrl_path_stats,
  };
  
@@ -192,7 +192,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  void ath11k_debug_aggr_size_config_init(struct ath11k_vif *arvif);
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -4401,6 +4401,25 @@ ath11k_mac_bitrate_mask_num_vht_rates(st
+@@ -4548,6 +4548,25 @@ ath11k_mac_bitrate_mask_num_vht_rates(st
  	return num_rates;
  }
  
@@ -218,7 +218,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  static int
  ath11k_mac_bitrate_mask_num_he_rates(struct ath11k *ar,
  				     enum nl80211_band band,
-@@ -4592,9 +4611,15 @@ static int ath11k_station_assoc(struct a
+@@ -4739,9 +4758,15 @@ static int ath11k_station_assoc(struct a
  	enum nl80211_band band;
  	struct cfg80211_bitrate_mask *mask;
  	u8 num_vht_rates, num_he_rates, num_ht_rates;
@@ -234,7 +234,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	if (WARN_ON(ath11k_mac_vif_chan(vif, &def)))
  		return -EPERM;
  
-@@ -4681,10 +4706,16 @@ static int ath11k_station_disassoc(struc
+@@ -4828,10 +4853,16 @@ static int ath11k_station_disassoc(struc
  				   struct ieee80211_sta *sta)
  {
  	struct ath11k_vif *arvif = (void *)vif->drv_priv;
@@ -251,7 +251,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	if (!sta->wme) {
  		arvif->num_legacy_stations--;
  		ret = ath11k_recalc_rtscts_prot(arvif);
-@@ -4716,6 +4747,7 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4863,6 +4894,7 @@ static void ath11k_sta_rc_update_wk(stru
  	int err, num_ht_rates, num_vht_rates,  num_he_rates;
  	const struct cfg80211_bitrate_mask *mask;
  	struct peer_assoc_params peer_arg;
@@ -259,7 +259,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  	arsta = container_of(wk, struct ath11k_sta, update_wk);
  	sta = container_of((void *)arsta, struct ieee80211_sta, drv_priv);
-@@ -4748,6 +4780,8 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4895,6 +4927,8 @@ static void ath11k_sta_rc_update_wk(stru
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -268,7 +268,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	nss = max_t(u32, 1, nss);
  	nss = min(nss, max(max(ath11k_mac_max_ht_nss(ht_mcs_mask),
  			       ath11k_mac_max_vht_nss(vht_mcs_mask)),
-@@ -4778,8 +4812,9 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4925,8 +4959,9 @@ static void ath11k_sta_rc_update_wk(stru
  	}
  
  	if (changed & IEEE80211_RC_NSS_CHANGED) {
@@ -280,7 +280,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  		err = ath11k_wmi_set_peer_param(ar, sta->addr, arvif->vdev_id,
  						WMI_PEER_NSS, nss);
-@@ -4789,8 +4824,9 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4936,8 +4971,9 @@ static void ath11k_sta_rc_update_wk(stru
  	}
  
  	if (changed & IEEE80211_RC_SMPS_CHANGED) {
@@ -292,7 +292,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  		err = ath11k_wmi_set_peer_param(ar, sta->addr, arvif->vdev_id,
  						WMI_PEER_MIMO_PS_STATE, smps);
-@@ -4800,6 +4836,10 @@ static void ath11k_sta_rc_update_wk(stru
+@@ -4947,6 +4983,10 @@ static void ath11k_sta_rc_update_wk(stru
  	}
  
  	if (changed & IEEE80211_RC_SUPP_RATES_CHANGED) {
@@ -303,7 +303,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  		mask = &arvif->bitrate_mask;
  		num_ht_rates = ath11k_mac_bitrate_mask_num_ht_rates(ar, band,
  								    mask);
-@@ -4872,6 +4912,7 @@ static void ath11k_sta_set_4addr_wk(stru
+@@ -5019,6 +5059,7 @@ static void ath11k_sta_set_4addr_wk(stru
  	struct ath11k_base *ab;
  	struct ath11k_peer *wds_peer;
  	u8 wds_addr[ETH_ALEN];
@@ -311,7 +311,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	u32 wds_peer_id;
  	int ret = 0;
  
-@@ -4881,13 +4922,18 @@ static void ath11k_sta_set_4addr_wk(stru
+@@ -5028,13 +5069,18 @@ static void ath11k_sta_set_4addr_wk(stru
  	ar = arvif->ar;
  	ab = ar->ab;
  
@@ -332,7 +332,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  	ret = ath11k_wmi_set_peer_param(ar, sta->addr,
  					arvif->vdev_id,
-@@ -5048,6 +5094,7 @@ static int ath11k_mac_station_add(struct
+@@ -5195,6 +5241,7 @@ static int ath11k_mac_station_add(struct
  	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
  	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
  	struct peer_create_params peer_param;
@@ -340,7 +340,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -5059,6 +5106,7 @@ static int ath11k_mac_station_add(struct
+@@ -5206,6 +5253,7 @@ static int ath11k_mac_station_add(struct
  		goto exit;
  	}
  
@@ -348,7 +348,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	arsta->rx_stats = kzalloc(sizeof(*arsta->rx_stats), GFP_KERNEL);
  	if (!arsta->rx_stats) {
  		ret = -ENOMEM;
-@@ -5076,8 +5124,9 @@ static int ath11k_mac_station_add(struct
+@@ -5223,8 +5271,9 @@ static int ath11k_mac_station_add(struct
  		goto free_rx_stats;
  	}
  
@@ -360,7 +360,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  	ret = ath11k_mac_ap_ps_recalc(ar);
  	if (ret) {
-@@ -5094,8 +5143,9 @@ static int ath11k_mac_station_add(struct
+@@ -5241,8 +5290,9 @@ static int ath11k_mac_station_add(struct
  	}
  
  	if (ieee80211_vif_is_mesh(vif)) {
@@ -372,16 +372,16 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  		ret = ath11k_wmi_set_peer_param(ar, sta->addr,
  						arvif->vdev_id,
  						WMI_PEER_USE_4ADDR, 1);
-@@ -5212,7 +5262,7 @@ static int ath11k_mac_op_sta_state(struc
- 			ath11k_warn(ar->ab, "Failed to delete peer: %pM for VDEV: %d\n",
- 				    sta->addr, arvif->vdev_id);
- 		else
--			ath11k_dbg(ar->ab, ATH11K_DBG_MAC, "Removed peer: %pM for VDEV: %d\n",
-+			ath11k_dbg(ar->ab, ATH11K_DBG_PEER, "Removed peer: %pM for VDEV: %d\n",
- 				   sta->addr, arvif->vdev_id);
- 
- 		ath11k_mac_dec_num_stations(arvif, sta);
-@@ -5302,6 +5352,10 @@ free:
+@@ -5361,7 +5411,7 @@ static int ath11k_mac_op_sta_state(struc
+ 					    sta->addr, arvif->vdev_id);
+ 			else
+ 				ath11k_dbg(ar->ab,
+-					   ATH11K_DBG_MAC,
++					   ATH11K_DBG_PEER,
+ 					   "Removed peer: %pM for VDEV: %d\n",
+ 					   sta->addr, arvif->vdev_id);
+ 		}
+@@ -5475,6 +5525,10 @@ static int ath11k_mac_op_sta_state(struc
  				    sta->addr);
  	}
  
@@ -392,7 +392,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	mutex_unlock(&ar->conf_mutex);
  	return ret;
  }
-@@ -6867,6 +6921,8 @@ static int ath11k_mac_op_add_interface(s
+@@ -7230,6 +7284,8 @@ static int ath11k_mac_op_add_interface(s
  		goto err;
  	}
  
@@ -401,7 +401,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
  	case NL80211_IFTYPE_STATION:
-@@ -7226,6 +7282,10 @@ err_vdev_del:
+@@ -7593,6 +7649,10 @@ err_vdev_del:
  	debugfs_remove(arvif->wmi_ctrl_stat);
  	arvif->wmi_ctrl_stat = NULL;
  
@@ -414,7 +414,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  }
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -162,4 +162,5 @@ enum hal_encrypt_type ath11k_dp_tx_get_e
+@@ -174,4 +174,5 @@ enum hal_encrypt_type ath11k_dp_tx_get_e
  void ath11k_mac_handle_beacon(struct ath11k *ar, struct sk_buff *skb);
  void ath11k_mac_handle_beacon_miss(struct ath11k *ar, u32 vdev_id);
  void ath11k_mac_bcn_tx_event(struct ath11k_vif *arvif);
@@ -458,7 +458,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  
  	spin_unlock_bh(&ab->base_lock);
  	goto exit;
-@@ -796,6 +799,11 @@ int ath11k_peer_create(struct ath11k *ar
+@@ -782,6 +785,11 @@ int ath11k_peer_create(struct ath11k *ar
  
  	ar->num_peers++;
  
@@ -472,7 +472,7 @@ Signed-off-by: Tamizh Chelvam <tamizhr@codeaurora.org>
  	return 0;
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -8031,9 +8031,9 @@ static void ath11k_peer_sta_kickout_even
+@@ -8342,9 +8342,9 @@ static void ath11k_peer_sta_kickout_even
  		goto exit;
  	}
  

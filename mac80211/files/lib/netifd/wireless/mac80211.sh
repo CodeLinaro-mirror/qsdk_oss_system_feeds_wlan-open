@@ -103,7 +103,7 @@ drv_mac80211_init_device_config() {
 		rx_antenna_pattern \
 		tx_antenna_pattern
 	config_add_int vht_max_mpdu vht_link_adapt vht160 rx_stbc tx_stbc
-	config_add_int max_ampdu_length_exp
+	config_add_int max_ampdu_length_exp ru_punct_bitmap ru_punct_acs_threshold
 	config_add_boolean \
                ldpc \
                greenfield \
@@ -111,7 +111,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema
+	config_add_boolean multiple_bssid ema ru_punct_ofdma
 }
 
 drv_mac80211_init_iface_config() {
@@ -260,8 +260,8 @@ mac80211_hostapd_setup_base() {
 		ieee80211n=1
 		ht_capab=
 		case "$htmode" in
-			VHT20|HT20|HE20) ;;
-			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160)
+			VHT20|HT20|HE20|EHT20) ;;
+			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160)
 				case "$hwmode" in
 					a)
 						case "$(( ($channel / 4) % 2 ))" in
@@ -333,8 +333,8 @@ mac80211_hostapd_setup_base() {
 		enable_ac=0
 		idx="$channel"
 		case "$htmode" in
-			VHT20|HE20)	enable_ac=1;;
-			VHT40|HE40)
+			VHT20|HE20|EHT20)	enable_ac=1;;
+			VHT40|HE40|EHT40)
 				case "$(( ($channel / 4) % 2 ))" in
 					1) idx=$(($channel + 2));;
 					0) idx=$(($channel - 2));;
@@ -345,7 +345,7 @@ mac80211_hostapd_setup_base() {
 					append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
 				fi
 				;;
-			VHT80|HE80)
+			VHT80|HE80|EHT80)
 				case "$(( ($channel / 4) % 4 ))" in
 					1) idx=$(($channel + 6));;
 					2) idx=$(($channel + 2));;
@@ -356,7 +356,7 @@ mac80211_hostapd_setup_base() {
 				append base_cfg "vht_oper_chwidth=1" "$N"
 				append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
 				;;
-			VHT160|HE160)
+			VHT160|HE160|EHT160)
 				case "$channel" in
 					36|40|44|48|52|56|60|64) idx=50;;
 					100|104|108|112|116|120|124|128) idx=114;;
@@ -438,7 +438,7 @@ mac80211_hostapd_setup_base() {
 			# supported Channel widths
 			vht160_hw=0
 			case "$htmode" in
-				VHT160|HE160)
+				VHT160|HE160|EHT160)
 					[ "$(($vht_cap & 12))" -eq 8 -a 1 -le "$vht160" ] && \
 					vht160_hw=1
 					[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
@@ -493,14 +493,19 @@ mac80211_hostapd_setup_base() {
 
 	# 802.11ax
 	enable_ax=0
+	enable_be=0
 	idx="$channel"
 	is_6ghz=0
 	if [ -n "$band" ] && [ "$band" -eq 3 ]; then
 		is_6ghz=1
 	fi
 
+	if [ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ]; then
+		enable_be=1;
+	fi
+
 	case "$htmode" in
-		HE20)	enable_ax=1
+		HE20|EHT20)	enable_ax=1
 			if [ "$is_6ghz" == "1" ]; then
 				if [ $freq == 5935 ]; then
 					append base_cfg "op_class=136" "$N"
@@ -509,30 +514,52 @@ mac80211_hostapd_setup_base() {
 				fi
 			fi
 			;;
-		HE40)
+		HE40|EHT40)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "40")"
 			if [ $hwmode == "a" ]; then
 				if [ "$is_6ghz" == "1" ]; then
 					append base_cfg "op_class=132" "$N"
 				fi
-				append base_cfg "he_oper_chwidth=0" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+				if [ $htmode == "EHT40" ]; then
+					append base_cfg "eht_oper_chwidth=0" "$N"
+					append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+				else
+					append base_cfg "he_oper_chwidth=0" "$N"
+					append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+				fi
 			fi
 			;;
-		HE80)
+		HE80|EHT80)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "80")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=133" "$N"
-			append base_cfg "he_oper_chwidth=1" "$N"
-			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ $htmode == "EHT80" ]; then
+				append base_cfg "eht_oper_chwidth=1" "$N"
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			else
+				append base_cfg "he_oper_chwidth=1" "$N"
+				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			;;
-		HE160)
+		HE160|EHT160)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "160")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=134" "$N"
-			append base_cfg "he_oper_chwidth=2" "$N"
-			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ $htmode == "EHT160" ]; then
+				append base_cfg "eht_oper_chwidth=2" "$N"
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			else
+				append base_cfg "he_oper_chwidth=2" "$N"
+				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
+			;;
+		EHT320)
+			enable_ax=1
+			idx="$(mac80211_get_seg0 "320")"
+			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=137" "$N"
+			append base_cfg "eht_oper_chwidth=2" "$N"
+			append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 	esac
 
@@ -562,6 +589,24 @@ mac80211_hostapd_setup_base() {
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required
 
 		append base_cfg "he_default_pe_duration=4" "$N"
+
+		if [ "$enable_be" != "0" ]; then
+			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0
+
+			append base_cfg "ieee80211be=1" "$N"
+			append base_cfg "eht_su_beamformer=1" "$N"
+			append base_cfg "eht_mu_beamformer=1" "$N"
+			append base_cfg "eht_su_beamformee=1" "$N"
+			if [ -n $ru_punct_bitmap ] && [ $ru_punct_bitmap -gt 0 ]; then
+				append base_cfg "ru_punct_bitmap=$ru_punct_bitmap" "$N"
+			fi
+			if [ -n $ru_punct_ofdma ] && [ $ru_punct_ofdma -gt 0 ]; then
+				append base_cfg "ru_punct_ofdma=$ru_punct_ofdma" "$N"
+			fi
+			if [ -n $ru_punct_acs_threshold ] && [ $ru_punct_acs_threshold -gt 0 ]; then
+				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N
+			fi
+		fi
 
 		[ "$he_mu_edca" != "0" ] && {
 			json_select ..
@@ -772,6 +817,8 @@ find_phy() {
 	local radio_idx=${1:5:1}
 	local first_phy_idx=0
 	local delta=0
+	local phy_count=0
+	local try=0
 	config_load wireless
 	while :; do
 	config_get devicepath "radio$first_phy_idx" path
@@ -783,7 +830,14 @@ find_phy() {
 	delta=$(($radio_idx - $first_phy_idx))
 
 	[ -n "$path" ] && {
-		sleep 1
+		for try in 1 2 3 4; do
+				phy_count="$(ls /sys/class/ieee80211 2>/dev/null | wc -l)"
+	                        if [ $phy_count -gt 0 ]; then
+        	                        break;
+                	        else
+                        	        usleep 500000
+	                        fi
+                	done
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
 				*$path)
@@ -1137,7 +1191,7 @@ mac80211_setup_vif() {
 							;;
 						esac
 					;;
-					VHT80|HE80)
+					VHT80|HE80|EHT80)
 						mesh_htmode="80MHz"
 					;;
 					*) mesh_htmode="NOHT" ;;
@@ -1169,13 +1223,13 @@ mac80211_setup_vif() {
 		;;
 		monitor)
 			case "$htmode" in
-				VHT20|HT20|HE20)
+				VHT20|HT20|HE20|EHT20)
 					iw dev "$ifname" set freq "$freq" "20" ;;
-				HT40*|VHT40|HE40)
+				HT40*|VHT40|HE40|EHT40)
 					iw dev "$ifname" set freq "$freq" "40" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")" ;;
-				VHT80|HE80)
+				VHT80|HE80|EHT80)
 					iw dev "$ifname" set freq "$freq" "80" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")" ;;
-				VHT160|HE160)
+				VHT160|HE160|EHT160)
 					iw dev "$ifname" set freq "$freq" "160" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")" ;;
 			esac
 		;;
