@@ -604,7 +604,7 @@ mac80211_hostapd_setup_base() {
 				append base_cfg "ru_punct_ofdma=$ru_punct_ofdma" "$N"
 			fi
 			if [ -n $ru_punct_acs_threshold ] && [ $ru_punct_acs_threshold -gt 0 ]; then
-				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N
+				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N"
 			fi
 		fi
 

@@ -86,7 +86,7 @@ detect_mac80211() {
 	then
 		chipset=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
 		board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
-		if [ "$chipset" == "IPQ9574" ]; then
+		if [ "$chipset" == "IPQ9574" ] && [ "$board" != "AP-AL02-C4" ]; then
 			echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
 			echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
 			echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
@@ -288,7 +288,7 @@ post_mac80211() {
 		echo 5 > /sys/bus/coresight/devices/coresight-funnel-mm/funnel_ctrl
 		echo 6 > /sys/bus/coresight/devices/coresight-funnel-in0/funnel_ctrl
 		echo 1 > /sys/bus/coresight/devices/coresight-stm/enable
-	elif [ "$chipset" == "IPQ9574" ]; then
+	elif [ "$chipset" == "IPQ9574" ] && [ "$board" != "AP-AL02-C4" ]; then
                 echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
                 echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
                 echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
