@@ -817,8 +817,6 @@ find_phy() {
 	local radio_idx=${1:5:1}
 	local first_phy_idx=0
 	local delta=0
-	local phy_count=0
-	local try=0
 	config_load wireless
 	while :; do
 	config_get devicepath "radio$first_phy_idx" path
@@ -830,14 +828,7 @@ find_phy() {
 	delta=$(($radio_idx - $first_phy_idx))
 
 	[ -n "$path" ] && {
-		for try in 1 2 3 4; do
-				phy_count="$(ls /sys/class/ieee80211 2>/dev/null | wc -l)"
-	                        if [ $phy_count -gt 0 ]; then
-        	                        break;
-                	        else
-                        	        usleep 500000
-	                        fi
-                	done
+		sleep 1
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
 				*$path)
