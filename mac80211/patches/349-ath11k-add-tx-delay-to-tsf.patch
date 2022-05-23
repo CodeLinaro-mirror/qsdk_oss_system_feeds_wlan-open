@@ -1,6 +1,6 @@
-From 24f8df5c39e1e1a3cdcf1af80560da34438205aa Mon Sep 17 00:00:00 2001
+From f12593985e8cb6b8714a6fe39186395818ff9656 Mon Sep 17 00:00:00 2001
 From: Hari Chandrakanthan <quic_haric@quicinc.com>
-Date: Fri, 4 Mar 2022 23:00:18 +0530
+Date: Mon, 30 May 2022 17:30:35 +0530
 Subject: [PATCH] ath11k: add tx delay to tsf
 
 An AP sending a beacon frame shall set the value of the beacon frame’s
@@ -20,30 +20,31 @@ tx delay for 2.4G:
 
 Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
 ---
- drivers/net/wireless/ath/ath11k/core.h |   1 +
- drivers/net/wireless/ath/ath11k/mac.c  |  20 ++++-
+ drivers/net/wireless/ath/ath11k/core.h |   2 +
+ drivers/net/wireless/ath/ath11k/mac.c  |  38 ++++++++-
  drivers/net/wireless/ath/ath11k/mac.h  |   1 +
- drivers/net/wireless/ath/ath11k/wmi.c  | 134 ++++++++++++++++++++++++++++++++-
+ drivers/net/wireless/ath/ath11k/wmi.c  | 138 ++++++++++++++++++++++++++++++++-
  drivers/net/wireless/ath/ath11k/wmi.h  |  18 +++++
- 5 files changed, 172 insertions(+), 2 deletions(-)
+ 5 files changed, 195 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
-index 8d7ab86..08403d9 100644
+index 0acba12..63e0b02 100644
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -369,6 +369,7 @@ struct ath11k_vif {
+@@ -385,6 +385,8 @@ struct ath11k_vif {
  	u32 tid_conf_changed[ATH11K_TID_MAX];
  	struct ath11k_tid_qos_config tid_cfg[ATH11K_TID_MAX];
  	u32 tids_rst;
 +	u64 tbtt_offset;
++	struct work_struct update_bcn_template_work;
  	DECLARE_BITMAP(free_groupidx_map, ATH11K_GROUP_KEYS_NUM_MAX);
  };
  
 diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
-index 6f473e1..d9404b8 100644
+index 6fef799..234268b 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1230,6 +1230,7 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
+@@ -1234,6 +1234,7 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
  	u8 *ies;
  	int ret;
  	const u8 *vht_cap_ie;
@@ -51,7 +52,7 @@ index 6f473e1..d9404b8 100644
  
  	ies = bcn->data + ieee80211_get_hdrlen_from_skb(bcn);
  	ies += sizeof(mgmt->u.beacon);
-@@ -1267,6 +1268,15 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
+@@ -1271,6 +1272,15 @@ static int __ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif, struct sk_buff
  			     WMI_BEACON_EMA_PARAM_LAST_TMPL_SHIFT;
  	}
  
@@ -67,7 +68,7 @@ index 6f473e1..d9404b8 100644
  	ret = ath11k_wmi_bcn_tmpl(ar, arvif->vdev_id, &offs, bcn, ema_param);
  
  	if (ret)
-@@ -1365,7 +1375,7 @@ static int ath11k_mac_setup_bcn_tmpl_legacy(struct ath11k_vif *arvif,
+@@ -1369,7 +1379,7 @@ static int ath11k_mac_setup_bcn_tmpl_legacy(struct ath11k_vif *arvif,
  	return ret;
  }
  
@@ -76,7 +77,7 @@ index 6f473e1..d9404b8 100644
  {
  	struct ath11k_vif *pvif = arvif;
  	struct ath11k_vif *cvif = NULL;
-@@ -6832,11 +6842,13 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -6923,11 +6933,13 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
  	u32 info_flags = info->flags;
  	struct ieee80211_sta *sta = control->sta;
  	struct ath11k_sta *arsta = NULL;
@@ -90,7 +91,7 @@ index 6f473e1..d9404b8 100644
  
  	if (unlikely(test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags))) {
  		ieee80211_free_txskb(ar->hw, skb);
-@@ -6856,6 +6868,12 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -6947,6 +6959,12 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
  	} else if (ieee80211_is_mgmt(hdr->frame_control)) {
  		frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
@@ -103,6 +104,45 @@ index 6f473e1..d9404b8 100644
  		ret = ath11k_mac_tx_over_wmi(ar, skb, is_prb_rsp);
  		if (ret) {
  			if (ret != -EBUSY)
+@@ -7229,6 +7247,22 @@ err:
+ 	return ret;
+ }
+ 
++static void ath11k_update_bcn_template_work(struct work_struct *work)
++{
++	struct ath11k_vif *arvif = container_of(work, struct ath11k_vif,
++						update_bcn_template_work);
++	struct ath11k *ar = arvif->ar;
++	int ret = 0;
++
++	mutex_lock(&ar->conf_mutex);
++	if (arvif->is_up)
++		ret = ath11k_mac_setup_bcn_tmpl(arvif);
++	mutex_unlock(&ar->conf_mutex);
++	if (ret)
++		ath11k_warn(ar->ab, "failed to submit beacon template for vdev_id : %d ret : %d\n",
++			    arvif->vdev_id, ret);
++}
++
+ static void ath11k_mac_op_stop(struct ieee80211_hw *hw)
+ {
+ 	struct ath11k *ar = hw->priv;
+@@ -7477,6 +7511,7 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 
+ 	INIT_DELAYED_WORK(&arvif->connection_loss_work,
+                           ath11k_mac_vif_sta_connection_loss_work);
++	INIT_WORK(&arvif->update_bcn_template_work, ath11k_update_bcn_template_work);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(arvif->bitrate_mask.control); i++) {
+ 		arvif->bitrate_mask.control[i].legacy = 0xffffffff;
+@@ -7784,6 +7819,7 @@ static void ath11k_mac_op_remove_interface(struct ieee80211_hw *hw,
+ 	}
+ 
+ 	cancel_delayed_work_sync(&arvif->connection_loss_work);
++	cancel_work_sync(&arvif->update_bcn_template_work);
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_MAC, "mac remove interface (vdev %d)\n",
+ 		   arvif->vdev_id);
 diff --git a/drivers/net/wireless/ath/ath11k/mac.h b/drivers/net/wireless/ath/ath11k/mac.h
 index 9decde2..475756a 100644
 --- a/drivers/net/wireless/ath/ath11k/mac.h
@@ -114,10 +154,10 @@ index 9decde2..475756a 100644
 +int ath11k_mac_setup_bcn_tmpl(struct ath11k_vif *arvif);
  #endif
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
-index d87069e..3a176f9 100644
+index d87069e..f597fbf 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -10211,6 +10211,126 @@ static void ath11k_wmi_tlv_cfr_cpature_phase_fixed_param(const void *ptr,
+@@ -10211,6 +10211,130 @@ static void ath11k_wmi_tlv_cfr_cpature_phase_fixed_param(const void *ptr,
  	}
  }
  
@@ -125,7 +165,7 @@ index d87069e..3a176f9 100644
 +						u16 len, const void *ptr,
 +						void *data)
 +{
-+	int ret;
++	int ret = 0;
 +	struct ath11k *ar;
 +	u64 tx_delay = 0;
 +	struct wmi_tbtt_offset_info *tbtt_offset_info;
@@ -150,7 +190,7 @@ index d87069e..3a176f9 100644
 +		goto exit;
 +	}
 +
-+	if (!arvif->is_up || (arvif->vdev_type != WMI_VDEV_TYPE_AP)) {
++	if (arvif->vdev_type != WMI_VDEV_TYPE_AP) {
 +		ret = 0;
 +		goto exit;
 +	}
@@ -175,11 +215,7 @@ index d87069e..3a176f9 100644
 +	}
 +	arvif->tbtt_offset -= tx_delay;
 +
-+	ret = ath11k_mac_setup_bcn_tmpl(arvif);
-+
-+	if (ret)
-+		ath11k_warn(ab, "failed to submit beacon template: %d\n",
-+			    ret);
++	ieee80211_queue_work(ar->hw, &arvif->update_bcn_template_work);
 +exit:
 +	rcu_read_unlock();
 +	return ret;
@@ -189,15 +225,23 @@ index d87069e..3a176f9 100644
 +					       u16 tag, u16 len,
 +					       const void *ptr, void *data)
 +{
-+	int ret;
++	int ret = 0;
 +
 +	ath11k_dbg(ab, ATH11K_DBG_WMI, "wmi tbtt offset event tag 0x%x of len %d rcvd\n",
 +		   tag, len);
 +
-+	if (tag == WMI_TAG_ARRAY_STRUCT) {
++	switch (tag) {
++	case WMI_TAG_TBTT_OFFSET_EXT_EVENT:
++		break;
++	case WMI_TAG_ARRAY_STRUCT:
 +		ret = ath11k_wmi_tlv_iter(ab, ptr, len,
 +					  ath11k_wmi_tbtt_offset_subtlv_parser,
 +					  data);
++		break;
++	default:
++		ath11k_warn(ab, "Received invalid tag for wmi tbtt offset event\n");
++		ret = -EINVAL;
++		break;
 +	}
 +
 +	return ret;
@@ -244,7 +288,7 @@ index d87069e..3a176f9 100644
  static int ath11k_wmi_tlv_cfr_capture_evt_parse(struct ath11k_base *ab,
  						u16 tag, u16 len,
  						const void *ptr, void *data)
-@@ -10255,6 +10375,16 @@ static void ath11k_wmi_parse_cfr_capture_event(struct ath11k_base *ab,
+@@ -10255,6 +10379,16 @@ static void ath11k_wmi_parse_cfr_capture_event(struct ath11k_base *ab,
  			   "failed to process cfr cpature ret = %d\n", ret);
  }
  
@@ -261,7 +305,7 @@ index d87069e..3a176f9 100644
  static int ath11k_wmi_peer_ratecode_subtlv_parser(struct ath11k_base *ab,
  						  u16 tag, u16 len,
  						  const void *ptr, void *data)
-@@ -10526,8 +10656,10 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+@@ -10526,8 +10660,10 @@ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  	case WMI_OBSS_COLOR_COLLISION_DETECTION_EVENTID:
  		ath11k_wmi_obss_color_collision_event(ab, skb);
  		break;
@@ -274,7 +318,7 @@ index d87069e..3a176f9 100644
  	case WMI_TWT_ENABLE_EVENTID:
  	case WMI_TWT_DISABLE_EVENTID:
 diff --git a/drivers/net/wireless/ath/ath11k/wmi.h b/drivers/net/wireless/ath/ath11k/wmi.h
-index 95beb56..ecc42fc 100644
+index 582d69d..44851dc 100644
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
 @@ -4618,6 +4618,24 @@ struct wmi_vdev_delete_resp_event {
