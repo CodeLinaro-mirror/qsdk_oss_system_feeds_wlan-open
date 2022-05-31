@@ -15,10 +15,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  drivers/net/wireless/ath/ath11k/qmi.h  |  15 ++++
  4 files changed, 111 insertions(+), 61 deletions(-)
 
-Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/core.c
-===================================================================
---- backports-20210222_001-5.4.164-b157d2276.orig/drivers/net/wireless/ath/ath11k/core.c
-+++ backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/core.c
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -308,6 +308,10 @@ static const struct ath11k_hw_params ath
  		.wakeup_mhi = false,
  		.reo_status_poll = false,
@@ -50,10 +48,8 @@ Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/
   	},
  	{
  		.hw_rev = ATH11K_HW_IPQ9574,
-Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
-===================================================================
---- backports-20210222_001-5.4.164-b157d2276.orig/drivers/net/wireless/ath/ath11k/hw.h
-+++ backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/hw.h
+--- a/drivers/net/wireless/ath/ath11k/hw.h
++++ b/drivers/net/wireless/ath/ath11k/hw.h
 @@ -219,6 +219,11 @@ struct ath11k_hw_params {
  	u8 max_tx_ring;
  	bool reo_status_poll;
@@ -66,10 +62,8 @@ Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/
  };
  
  struct ath11k_hw_ops {
-Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/qmi.c
-===================================================================
---- backports-20210222_001-5.4.164-b157d2276.orig/drivers/net/wireless/ath/ath11k/qmi.c
-+++ backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/qmi.c
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
 @@ -2788,39 +2788,62 @@ static int ath11k_qmi_alloc_target_mem_c
  static int ath11k_qmi_assign_target_mem_chunk(struct ath11k_base *ab)
  {
@@ -269,10 +263,59 @@ Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/
  
  			idx++;
  			break;
-Index: backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/qmi.h
-===================================================================
---- backports-20210222_001-5.4.164-b157d2276.orig/drivers/net/wireless/ath/ath11k/qmi.h
-+++ backports-20210222_001-5.4.164-b157d2276/drivers/net/wireless/ath/ath11k/qmi.h
+@@ -3833,7 +3854,9 @@ int ath11k_qmi_pci_alloc_qdss_mem(struct
+ {
+ 	struct ath11k_base *ab = qmi->ab;
+ 	struct device *dev = ab->dev;
+-	int i;
++	struct device_node *hremote_node = NULL;
++	struct resource res;
++	int i, ret;
+ 	u32 addr = 0;
+ 
+ 	if (ab->qmi.qdss_mem_seg_len  > 1) {
+@@ -3851,14 +3874,32 @@ int ath11k_qmi_pci_alloc_qdss_mem(struct
+ 				return -ENOMEM;
+ 			}
+ 
+-			if (ath11k_host_ddr_addr) {
+-				addr = ath11k_host_ddr_addr +
+-				       ATH11K_HOST_DDR_QDSS_OFFSET;
+-			} else if (of_property_read_u32(dev->of_node,
+-						 "etr-addr", &addr)) {
+-				ath11k_warn(ab, "qmi fail to get etr-addr in dt\n");
+-				return -ENOMEM;
++			hremote_node = of_parse_phandle(dev->of_node, "memory-region", 0);
++			if (!hremote_node) {
++				ath11k_dbg(ab, ATH11K_DBG_QMI,
++					   "qmi fail to get hremote_node\n");
++				return -ENODEV;
++			}
++
++			ret = of_address_to_resource(hremote_node, 0, &res);
++			of_node_put(hremote_node);
++			if (ret) {
++				ath11k_dbg(ab, ATH11K_DBG_QMI,
++					   "qmi fail to get reg from hremote\n");
++				return ret;
+ 			}
++
++			if (res.end - res.start + 1 < ab->qmi.target_mem[i].size) {
++				ath11k_dbg(ab, ATH11K_DBG_QMI,
++					   "qmi fail to assign memory of sz\n");
++				return -EINVAL;
++			}
++
++			if (ath11k_host_ddr_addr)
++				addr = ath11k_host_ddr_addr + ab->hw_params.qdss_offset;
++			else
++				addr = res.start + ab->hw_params.qdss_offset;
++
+ 			ab->qmi.qdss_mem[i].paddr = (phys_addr_t)addr;
+ 			ab->qmi.qdss_mem[i].vaddr =
+ 				ioremap(ab->qmi.qdss_mem[i].paddr,
+--- a/drivers/net/wireless/ath/ath11k/qmi.h
++++ b/drivers/net/wireless/ath/ath11k/qmi.h
 @@ -35,9 +35,17 @@
  #define ATH11K_QMI_DEFAULT_QDSS_CONFIG_FILE_NAME "qdss_trace_config.bin"
  
