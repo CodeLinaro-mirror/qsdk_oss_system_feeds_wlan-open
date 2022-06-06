@@ -16,7 +16,11 @@ lookup_phy() {
 	local devpath
 	config_get devpath "$device" path
 	while :; do
-	config_get devicepath "radio$first_phy_idx" path
+	if [ ${#device} -eq 12 ]; then
+		config_get devicepath "radio$radio_idx\_band$first_phy_idx" path
+	else
+		config_get devicepath "radio$first_phy_idx" path
+	fi
 	[ -n "$devicepath" -a -n "$devpath" ] || break
 	[ "$devpath" == "$devicepath" ] && break
 	first_phy_idx=$(($first_phy_idx + 1))
@@ -133,71 +137,99 @@ EOF
 		config_foreach check_mac80211_device wifi-device
 		[ "$found" -gt 0 ] && continue
 
-		mode_11n=""
-		mode_band="a"
-		channel="36"
-		htmode=""
-		ht_capab=""
-		encryption="none"
-		security=""
+		no_sbands=$(iw phy ${dev} info | grep -i 'Band ' | wc -l)
+		if [ $no_sbands -gt 1 ]; then
+			is_swiphy=1
+		fi
+		bandidx=0
+		for _band in `iw phy ${dev} info | grep -i 'Band ' | cut -d' ' -f 2`; do
+			[ ! -z $_band ] || continue
 
-		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
-		(iw phy "$dev" info | grep -q '5745 MHz' && (iw phy "$dev" info | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
-		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
+			mode_11n=""
+			mode_band="a"
+			channel="36"
+			htmode=""
+			ht_capab=""
+			encryption="none"
+			security=""
 
-		iw phy "$dev" info | grep -q 'Capabilities:' && htmode=HT20
-		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
+			if [ $is_swiphy ]; then
+				expr="iw phy ${dev} info | awk  '/Band ${_band}/{ f = 1; next } /Band /{ f = 0 } f'"
+			else
+				expr="iw phy ${dev} info"
+			fi
+			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
 
-		[ "$mode_band" = a ] && htmode="VHT80"
+			eval $expr_freq | grep -q '5180 MHz' || \
+			eval $expr_freq | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
 
-		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5745 MHz' || {
-			iw phy "$dev" info | grep -q '5955 MHz' && {
-				channel="49"; htmode="HE80"; encryption="sae";
-				append ht_capab "	option band	3" "$N"
+			(eval $expr_freq | grep -q '5745 MHz' && \
+			(eval $expr_freq | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
+
+			eval $expr_freq | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
+
+			eval $expr | grep -q 'Capabilities:' && htmode=HT20
+
+			eval $expr | grep -q 'Capabilities:' && htmode=HT20
+			vht_cap=$(eval $expr | grep -c 'VHT Capabilities')
+
+			[ "$mode_band" = a ] && htmode="VHT80"
+
+			eval $expr_freq | grep -q '5180 MHz' || eval $expr_freq | grep -q '5745 MHz' || {
+				eval $expr_freq | grep -q '5955 MHz' && {
+					channel="49"; htmode="HE80"; encryption="sae";
+					append ht_capab "	option band     3" "$N"
+				}
 			}
-		}
 
-		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
+			[ -n $htmode ] && append ht_capab "	option htmode   $htmode" "$N"
 
-		append security "	option encryption  $encryption" "$N"
-		if [ $encryption == "sae" ]; then
-			append security "	option sae_pwe	1" "$N"
-			append security "	option key	0123456789" "$N"
-		fi
+			append security "	option encryption  $encryption" "$N"
+			if [ $encryption == "sae" ]; then
+				append security "	option sae_pwe  1" "$N"
+				append security "	option key      0123456789" "$N"
+			fi
 
-		if [ -x /usr/bin/readlink -a -h /sys/class/ieee80211/${dev} ]; then
-			path="$(readlink -f /sys/class/ieee80211/${dev}/device)"
-		else
-			path=""
-		fi
-		if [ -n "$path" ]; then
-			path="${path##/sys/devices/}"
-			case "$path" in
-				platform*/pci*) path="${path##platform/}";;
-			esac
-			dev_id="	option path	'$path'"
-		else
-			dev_id="	option macaddr	$(cat /sys/class/ieee80211/${dev}/macaddress)"
-		fi
-
-		cat <<EOF
-config wifi-device  radio$devidx
-	option type     mac80211
-	option channel  ${channel}
-	option hwmode	11${mode_11n}${mode_band}
+			if [ -x /usr/bin/readlink -a -h /sys/class/ieee80211/${dev} ]; then
+				path="$(readlink -f /sys/class/ieee80211/${dev}/device)"
+			else
+				path=""
+			fi
+			if [ -n "$path" ]; then
+				path="${path##/sys/devices/}"
+				case "$path" in
+					platform*/pci*) path="${path##platform/}";;
+				esac
+				dev_id="        option path     '$path'"
+			else
+				dev_id="        option macaddr  $(cat /sys/class/ieee80211/${dev}/macaddress)"
+			fi
+			if [ $is_swiphy ]; then
+				devname=radio$devidx\_band$bandidx
+				bandidx=$(($bandidx + 1))
+			else
+				devname=radio$devidx
+			fi
+			cat <<EOF
+config wifi-device  $devname
+        option type     mac80211
+        option channel  ${channel}
+        option hwmode   11${mode_11n}${mode_band}
 $dev_id
 $ht_capab
-	# REMOVE THIS LINE TO ENABLE WIFI:
-	option disabled 1
+        # REMOVE THIS LINE TO ENABLE WIFI:
+        option disabled 1
 
 config wifi-iface
-	option device   radio$devidx
-	option network  lan
-	option mode     ap
-	option ssid     OpenWrt
+        option device   $devname
+        option network  lan
+        option mode     ap
+        option ssid     OpenWrt
 $security
 
 EOF
+		done
+
 	devidx=$(($devidx + 1))
 	done
 }
