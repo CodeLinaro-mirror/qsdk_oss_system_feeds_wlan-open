@@ -1039,7 +1039,7 @@ mac80211_setup_supplicant() {
 
 mac80211_setup_supplicant_noctl() {
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
-	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan"
+	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap"
 	wpa_supplicant_run "$ifname"
 }
 
@@ -1202,6 +1202,7 @@ mac80211_setup_vif() {
 
 				freq="$(get_freq "$phy" "$channel")"
 				iw dev "$ifname" mesh join "$mesh_id" freq $freq $mesh_htmode \
+					${ru_punct_bitmap:+ru-puncturing-bitmap $ru_punct_bitmap} \
 					${mcval:+mcast-rate $mcval} \
 					beacon-interval $beacon_int
 
@@ -1359,7 +1360,8 @@ drv_mac80211_setup() {
 		txpower antenna_gain \
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
-		htmode band multiple_bssid noscan
+		htmode band multiple_bssid noscan \
+		ru_punct_bitmap
 
 	json_get_values basic_rate_list basic_rate
 	json_select ..
