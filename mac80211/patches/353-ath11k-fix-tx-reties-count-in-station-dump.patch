@@ -1,0 +1,60 @@
+From d989057ac8835cdd5e9f6b67ec7217e3d768a25a Mon Sep 17 00:00:00 2001
+From: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
+Date: Tue, 21 Jun 2022 18:28:39 +0530
+Subject: [PATCH] ath11k: Fix tx retries count in station dump
+
+Tx retries in station dump is showing 0 always.
+Fixed it by getting the retry count in tx completion path
+from tx descriptors. And updated this to station info in
+sta_statistics mac ops.
+
+Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
+---
+ drivers/net/wireless/ath/ath11k/core.h  | 1 +
+ drivers/net/wireless/ath/ath11k/dp_tx.c | 1 +
+ drivers/net/wireless/ath/ath11k/mac.c   | 5 +++++
+ 3 files changed, 7 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 63e0b02..0fb2e80 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -552,6 +552,7 @@ struct ath11k_sta {
+ 	u64 rx_duration;
+ 	u64 tx_duration;
+ 	u8 rssi_comb;
++	u32 tx_retry_count;
+ 	struct ewma_avg_rssi avg_rssi;
+ 	struct ath11k_htt_tx_stats *tx_stats;
+ 	struct ath11k_rx_peer_stats *rx_stats;
+diff --git a/drivers/net/wireless/ath/ath11k/dp_tx.c b/drivers/net/wireless/ath/ath11k/dp_tx.c
+index 229d67e..8a5ee0d 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
+@@ -797,6 +797,7 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
+ 	status.info = info;
+ 	rate = arsta->last_txrate;
+ 	status.rate = &rate;
++	arsta->tx_retry_count += ts.try_cnt > 1 ? (ts.try_cnt - 1) : 0;
+ 
+ 	if (ts.status != HAL_WBM_TQM_REL_REASON_FRAME_ACKED) {
+ 		arsta->fail_pkts += 1;
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 234268b..56ea6ea 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -10745,6 +10745,11 @@ static void ath11k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ 	sinfo->tx_duration = arsta->tx_duration;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_DURATION);
+ 
++	if (arsta->tx_retry_count) {
++		sinfo->tx_retries = arsta->tx_retry_count;
++		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_RETRIES);
++	}
++
+ 	if (!arsta->txrate.legacy && !arsta->txrate.nss)
+ 		return;
+ 
+-- 
+2.7.4
+
