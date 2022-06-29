@@ -241,7 +241,7 @@ mac80211_get_seg0() {
 			fi
 		;;
 		320)
-			if [ $freq -gt 5955 ] && [ $freq -le 7115 ]; then
+			if [ $freq -ge 5955 ] && [ $freq -le 7115 ]; then
 				case "$channel" in
 					1|5|9|13|17|21|25|29|33|37|41|45) seg0=31;;
 					49|53|57|61|65|69|73|77) seg0=63;;
@@ -250,6 +250,8 @@ mac80211_get_seg0() {
 					145|149|153|157|161|165|169|173) seg0=159;;
 					177|181|185|189|193|197|201|205|209|213|217|221) seg0=191;;
 				esac
+			elif [ $freq -ge 5500 ] && [ $freq -le 5730 ]; then
+				seg0=130
 			fi
 		;;
 	esac
@@ -273,7 +275,7 @@ mac80211_hostapd_setup_base() {
 		ht_capab=
 		case "$htmode" in
 			VHT20|HT20|HE20|EHT20) ;;
-			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160)
+			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320)
 				case "$hwmode" in
 					a)
 						case "$(( ($channel / 4) % 2 ))" in
@@ -368,7 +370,7 @@ mac80211_hostapd_setup_base() {
 				append base_cfg "vht_oper_chwidth=1" "$N"
 				append base_cfg "vht_oper_centr_freq_seg0_idx=$idx" "$N"
 				;;
-			VHT160|HE160|EHT160)
+			VHT160|HE160|EHT160|EHT320)
 				case "$channel" in
 					36|40|44|48|52|56|60|64) idx=50;;
 					100|104|108|112|116|120|124|128) idx=114;;
@@ -450,7 +452,7 @@ mac80211_hostapd_setup_base() {
 			# supported Channel widths
 			vht160_hw=0
 			case "$htmode" in
-				VHT160|HE160|EHT160)
+				VHT160|HE160|EHT160|EHT320)
 					[ "$(($vht_cap & 12))" -eq 8 -a 1 -le "$vht160" ] && \
 					vht160_hw=1
 					[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
@@ -570,7 +572,7 @@ mac80211_hostapd_setup_base() {
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "320")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=137" "$N"
-			append base_cfg "eht_oper_chwidth=2" "$N"
+			append base_cfg "eht_oper_chwidth=9" "$N"
 			append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 	esac
