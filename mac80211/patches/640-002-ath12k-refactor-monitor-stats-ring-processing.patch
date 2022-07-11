@@ -61,7 +61,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	srng_id = ath12k_hw_mac_id_to_srng_id(&ab->hw_params, mac_id);
  
-@@ -2088,7 +2090,6 @@ int ath12k_dp_mon_srng_process(struct at
+@@ -2088,18 +2090,17 @@ int ath12k_dp_mon_srng_process(struct at
  	}
  
  	srng = &ab->hal.srng_list[mon_dst_ring->ring_id];
@@ -69,7 +69,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	spin_lock_bh(&srng->lock);
  	ath12k_hal_srng_access_begin(ab, srng);
  
-@@ -2100,6 +2101,7 @@ int ath12k_dp_mon_srng_process(struct at
+ 	while (likely(*budget)) {
+-		*budget -= 1;
+ 		mon_dst_desc = (struct hal_mon_dest_desc *)
+ 				ath12k_hal_srng_dst_peek(ab, srng);
+ 		if (unlikely(!mon_dst_desc))
  			break;
  
  		cookie = mon_dst_desc->cookie;
@@ -77,7 +81,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		buf_id = u32_get_bits(cookie, DP_RXDMA_BUF_COOKIE_BUF_ID);
  
  		spin_lock_bh(&buf_ring->idr_lock);
-@@ -2116,58 +2118,71 @@ int ath12k_dp_mon_srng_process(struct at
+@@ -2116,58 +2117,75 @@ int ath12k_dp_mon_srng_process(struct at
  		dma_unmap_single(ab->dev, rxcb->paddr,
  				 skb->len + skb_tailroom(skb),
  				 DMA_FROM_DEVICE);
@@ -88,23 +92,21 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		end_reason = u32_get_bits(mon_dst_desc->info0,
 -					   HAL_MON_DEST_INFO0_END_REASON);
 -		if (end_reason != HAL_MON_END_OF_PPDU) {
+-			ath12k_warn(ab, "Monitor dest descriptor end reason %d", end_reason);
+-			continue;
 +					  HAL_MON_DEST_INFO0_END_REASON);
 +		if ((end_reason == HAL_MON_FLUSH_DETECTED) ||
 +		    (end_reason == HAL_MON_PPDU_TRUNCATED)) {
- 			ath12k_warn(ab, "Monitor dest descriptor end reason %d", end_reason);
--			continue;
++			ath12k_dbg(ab, ATH12K_DBG_DATA,
++				   "Monitor dest descriptor end reason %d", end_reason);
 +			dev_kfree_skb_any(skb);
 +			goto move_next;
  		}
  
 -		for (i = 0; i < dest_idx; i++) {
 -			skb = pmon->dest_skb_q[i];
-+		__skb_queue_tail(&skb_list, skb);
-+move_next:
-+		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
-+		ath12k_hal_srng_dst_get_next_entry(ab, srng);
-+		num_buffs_reaped++;
-+	}
++		if (end_reason == HAL_MON_END_OF_PPDU)
++			*budget -= 1;
  
 -			if (log_type)
 -				trace_ath12k_htt_rxdesc(ar, skb->data,
@@ -116,12 +118,16 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -			else
 -				ath12k_dp_mon_tx_parse_mon_status(ar, pmon, mac_id,
 -								  skb, napi, ppdu_id);
-+	ath12k_hal_srng_access_end(ab, srng);
-+	spin_unlock_bh(&srng->lock);
++		__skb_queue_tail(&skb_list, skb);
++move_next:
++		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
++		ath12k_hal_srng_dst_get_next_entry(ab, srng);
++		num_buffs_reaped++;
++	}
  
 -			peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
-+	if (!num_buffs_reaped)
-+		return 0;
++	ath12k_hal_srng_access_end(ab, srng);
++	spin_unlock_bh(&srng->lock);
  
 -			if (!peer || !peer->sta) {
 -				ath12k_dbg(ab, ATH12K_DBG_DATA,
@@ -130,6 +136,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -				dev_kfree_skb_any(skb);
 -				continue;
 -			}
++	if (!num_buffs_reaped)
++		return 0;
++
 +	if (!ppdu_info->ppdu_continuation)
 +		memset(ppdu_info, 0, sizeof(*ppdu_info));
  
@@ -188,7 +197,32 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	return num_buffs_reaped;
  }
-@@ -2575,7 +2590,7 @@ move_next:
+@@ -2513,7 +2531,6 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 	ath12k_hal_srng_access_begin(ab, srng);
+ 
+ 	while (likely(*budget)) {
+-		*budget -= 1;
+ 		mon_dst_desc = (struct hal_mon_dest_desc *)
+ 				ath12k_hal_srng_dst_peek(ab, srng);
+ 		if (unlikely(!mon_dst_desc))
+@@ -2541,11 +2558,15 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 					  HAL_MON_DEST_INFO0_END_REASON);
+ 		if ((end_reason == HAL_MON_FLUSH_DETECTED) ||
+ 		    (end_reason == HAL_MON_PPDU_TRUNCATED)) {
+-			ath12k_warn(ab, "Monitor dest descriptor end reason %d", end_reason);
++			ath12k_dbg(ab, ATH12K_DBG_DATA,
++				    "Monitor dest descriptor end reason %d", end_reason);
+ 			dev_kfree_skb_any(skb);
+ 			goto move_next;
+ 		}
+ 
++		if (end_reason == HAL_MON_END_OF_PPDU)
++			*budget -= 1;
++
+ 		__skb_queue_tail(&skb_list, skb);
+ move_next:
+ 		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
+@@ -2575,7 +2596,7 @@ move_next:
  		peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
  		if (!peer || !peer->sta) {
  			ath12k_dbg(ab, ATH12K_DBG_DATA,
