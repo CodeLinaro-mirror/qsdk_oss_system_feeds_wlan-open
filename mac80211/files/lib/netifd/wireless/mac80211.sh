@@ -111,7 +111,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema ru_punct_ofdma
+	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs
 }
 
 drv_mac80211_init_iface_config() {
@@ -267,7 +267,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
 	json_get_vars noscan he_mu_edca:-he_mu_edca=0 skip_unii1_dfs_switch
-	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1
+	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs
 	json_get_values ht_capab_list ht_capab
 
 	if [ "$band" != 3 ]; then
@@ -656,6 +656,7 @@ mac80211_hostapd_setup_base() {
 			[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
 		fi
 	fi
+	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 	cat >> "$hostapd_conf_file" <<EOF
@@ -1041,7 +1042,7 @@ mac80211_setup_supplicant() {
 
 mac80211_setup_supplicant_noctl() {
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
-	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap"
+	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs"
 	wpa_supplicant_run "$ifname"
 }
 
@@ -1363,7 +1364,8 @@ drv_mac80211_setup() {
 		rxantenna txantenna \
 		frag rts beacon_int:100 \
 		htmode band multiple_bssid noscan \
-		ru_punct_bitmap
+		ru_punct_bitmap \
+		disable_csa_dfs
 
 	json_get_values basic_rate_list basic_rate
 	json_select ..
