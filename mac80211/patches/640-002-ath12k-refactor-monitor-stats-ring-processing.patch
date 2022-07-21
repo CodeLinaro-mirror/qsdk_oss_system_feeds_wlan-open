@@ -124,10 +124,13 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +		ath12k_hal_srng_dst_get_next_entry(ab, srng);
 +		num_buffs_reaped++;
 +	}
- 
--			peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
++
 +	ath12k_hal_srng_access_end(ab, srng);
 +	spin_unlock_bh(&srng->lock);
+ 
+-			peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
++	if (!num_buffs_reaped)
++		return 0;
  
 -			if (!peer || !peer->sta) {
 -				ath12k_dbg(ab, ATH12K_DBG_DATA,
@@ -136,9 +139,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -				dev_kfree_skb_any(skb);
 -				continue;
 -			}
-+	if (!num_buffs_reaped)
-+		return 0;
-+
 +	if (!ppdu_info->ppdu_continuation)
 +		memset(ppdu_info, 0, sizeof(*ppdu_info));
  
@@ -222,7 +222,31 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		__skb_queue_tail(&skb_list, skb);
  move_next:
  		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
-@@ -2575,7 +2596,7 @@ move_next:
+@@ -2559,23 +2580,27 @@ move_next:
+ 	if (!num_buffs_reaped)
+ 		return 0;
+ 
+-	memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
++	if (!ppdu_info->ppdu_continuation)
++		memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
+ 
+ 	while ((skb = __skb_dequeue(&skb_list))) {
+ 
+-		hal_status = ath12k_dp_mon_parse_rx_dest(ab, pmon, skb);
+-		if (ppdu_info->peer_id == HAL_INVALID_PEERID ||
+-		    hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
++		hal_status = ath12k_dp_mon_parse_rx_dest(ar, pmon, skb);
++		if (hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
++			ppdu_info->ppdu_continuation = true;
+ 			dev_kfree_skb_any(skb);
+ 			continue;
+ 		}
+ 
++		if (ppdu_info->peer_id == HAL_INVALID_PEERID)
++			goto free_skb;
++
+ 		rcu_read_lock();
+ 		spin_lock_bh(&ab->base_lock);
  		peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
  		if (!peer || !peer->sta) {
  			ath12k_dbg(ab, ATH12K_DBG_DATA,
@@ -231,6 +255,14 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				   ppdu_info->peer_id);
  			goto next_skb;
  		}
+@@ -2593,6 +2618,7 @@ move_next:
+ next_skb:
+ 		spin_unlock_bh(&ab->base_lock);
+ 		rcu_read_unlock();
++free_skb:
+ 		dev_kfree_skb_any(skb);
+ 		memset(ppdu_info, 0, sizeof(*ppdu_info));
+ 		ppdu_info->peer_id = HAL_INVALID_PEERID;
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -231,6 +231,7 @@ struct hal_rx_mon_ppdu_info {
