@@ -164,6 +164,21 @@ boost_performance() {
 				echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/rx_hash
 
 				;;
+			ap-al02-c4)
+				tc qdisc replace dev eth4 root noqueue
+				tc qdisc replace dev eth5 root noqueue
+				ethtool -K eth4 gro off
+				ethtool -K eth4 gso off
+				ethtool -K eth5 gro off
+				ethtool -K eth5 gso off
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				#case for rdp433
+
+				;;
 			*)
 				#no settings
 				;;
