@@ -1448,6 +1448,8 @@ drv_mac80211_setup() {
 		[ -f "$file" ] && echo "$board_file" > "$file"
 	}
 
+	for_each_interface "mesh" mac80211_setup_vif
+	sleep 5
 	[ -n "$hostapd_ctrl" ] && {
 		ifname="wlan${phy#phy}"
 		[ -f "/var/run/hostapd-$ifname.lock" ] &&
@@ -1465,7 +1467,7 @@ drv_mac80211_setup() {
 		fi
 	fi
 
-	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
+	for_each_interface "ap sta adhoc monitor" mac80211_setup_vif
 
 	wireless_set_up
 
