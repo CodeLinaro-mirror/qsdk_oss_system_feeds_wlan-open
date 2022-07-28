@@ -31,8 +31,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  drivers/net/wireless/ath/ath12k/thermal.c |   8 +-
  7 files changed, 459 insertions(+), 165 deletions(-)
 
---- a/drivers/net/wireless/ath/ath12k/core.c
-+++ b/drivers/net/wireless/ath/ath12k/core.c
+Index: b/drivers/net/wireless/ath/ath12k/core.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/core.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/core.c	2022-07-26 22:42:22.937646183 +0530
 @@ -31,6 +31,9 @@ module_param_named(frame_mode, ath12k_fr
  MODULE_PARM_DESC(frame_mode,
  		 "Datapath frame mode (0: raw, 1: native wifi (default), 2: ethernet)");
@@ -615,7 +617,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_hif_stop(ab);
  	ath12k_wmi_detach(ab);
  	ath12k_dp_pdev_reo_cleanup(ab);
-@@ -812,98 +1096,105 @@ void ath12k_core_halt(struct ath12k *ar)
+@@ -812,102 +1096,109 @@ void ath12k_core_halt(struct ath12k *ar)
  static void ath12k_core_restart(struct work_struct *work)
  {
  	struct ath12k_base *ab = container_of(work, struct ath12k_base, restart_work);
@@ -674,6 +676,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +				     ath12k_mac_tx_mgmt_pending_free, ar);
 +			idr_destroy(&ar->txmgmt_idr);
 +			wake_up(&ar->txmgmt_empty_waitq);
++
++			ar->monitor_vdev_id = -1;
++			clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
++			clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
  		}
  
 -		ath12k_mac_drain_tx(ar);
@@ -692,6 +698,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -			     ath12k_mac_tx_mgmt_pending_free, ar);
 -		idr_destroy(&ar->txmgmt_idr);
 -		wake_up(&ar->txmgmt_empty_waitq);
+-
+-		ar->monitor_vdev_id = -1;
+-		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
+-		clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
 -	}
 +		wake_up(&ab->wmi_ab.tx_credits_wq);
 +		wake_up(&ab->peer_mapping_wq);
@@ -792,7 +802,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static void ath12k_core_reset(struct work_struct *work)
-@@ -983,31 +1274,163 @@ int ath12k_core_pre_init(struct ath12k_b
+@@ -987,31 +1278,163 @@ int ath12k_core_pre_init(struct ath12k_b
  	return 0;
  }
  
@@ -965,8 +975,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  void ath12k_core_free(struct ath12k_base *ab)
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
+Index: b/drivers/net/wireless/ath/ath12k/core.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/core.h	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/core.h	2022-07-26 22:42:17.305694090 +0530
 @@ -175,6 +175,8 @@ struct ath12k_he {
  };
  
@@ -1030,8 +1042,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  const struct firmware *ath12k_core_firmware_request(struct ath12k_base *ab,
  						    const char *filename);
  
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
+Index: b/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/mac.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/mac.c	2022-07-26 22:42:17.309694056 +0530
 @@ -6368,7 +6368,8 @@ static void ath12k_mac_setup_he_eht_cap(
  		band->n_iftype_data = count;
  	}
@@ -1529,8 +1543,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	ieee80211_free_hw(ah->hw);
 +	ag->ah = NULL;
  }
---- a/drivers/net/wireless/ath/ath12k/mac.h
-+++ b/drivers/net/wireless/ath/ath12k/mac.h
+Index: b/drivers/net/wireless/ath/ath12k/mac.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/mac.h	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/mac.h	2022-07-26 22:42:17.309694056 +0530
 @@ -12,6 +12,7 @@
  
  struct ath12k;
@@ -1554,8 +1570,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  int ath12k_mac_hw_ratecode_to_legacy_rate(u8 hw_rc, u8 preamble, u8 *rateidx,
  					  u16 *rate);
  u8 ath12k_mac_bitrate_to_idx(const struct ieee80211_supported_band *sband,
---- a/drivers/net/wireless/ath/ath12k/reg.c
-+++ b/drivers/net/wireless/ath/ath12k/reg.c
+Index: b/drivers/net/wireless/ath/ath12k/reg.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/reg.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/reg.c	2022-07-26 22:42:17.309694056 +0530
 @@ -126,8 +126,7 @@ ath12k_reg_send_request(struct ath12k *a
  			    "INIT Country code set to fw failed : %d\n", ret);
  }
@@ -1579,8 +1597,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  void ath12k_reg_free(struct ath12k_base *ab)
  {
  	int i;
---- a/drivers/net/wireless/ath/ath12k/reg.h
-+++ b/drivers/net/wireless/ath/ath12k/reg.h
+Index: b/drivers/net/wireless/ath/ath12k/reg.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/reg.h	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/reg.h	2022-07-26 22:42:17.309694056 +0530
 @@ -26,7 +26,8 @@ enum ath12k_dfs_region {
  };
  
@@ -1591,8 +1611,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  void ath12k_reg_free(struct ath12k_base *ab);
  void ath12k_regd_update_work(struct work_struct *work);
  struct ieee80211_regdomain *
---- a/drivers/net/wireless/ath/ath12k/thermal.c
-+++ b/drivers/net/wireless/ath/ath12k/thermal.c
+Index: b/drivers/net/wireless/ath/ath12k/thermal.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/thermal.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/thermal.c	2022-07-26 22:42:17.309694056 +0530
 @@ -155,36 +155,44 @@ int ath12k_thermal_set_throttling(struct
  	return ret;
  }
@@ -1681,8 +1703,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		thermal_cooling_device_unregister(ar->thermal.cdev);
  	}
  }
---- a/drivers/net/wireless/ath/ath12k/pci.c
-+++ b/drivers/net/wireless/ath/ath12k/pci.c
+Index: b/drivers/net/wireless/ath/ath12k/pci.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/pci.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/pci.c	2022-07-26 22:42:17.309694056 +0530
 @@ -1377,6 +1377,7 @@ static int ath12k_pci_probe(struct pci_d
  		ath12k_err(ab, "failed to init core: %d\n", ret);
  		goto err_free_irq;
@@ -1704,8 +1728,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	cancel_work_sync(&ab->reset_work);
  	ath12k_core_deinit(ab);
---- a/drivers/net/wireless/ath/ath12k/qmi.c
-+++ b/drivers/net/wireless/ath/ath12k/qmi.c
+Index: b/drivers/net/wireless/ath/ath12k/qmi.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/qmi.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/qmi.c	2022-07-26 22:42:17.309694056 +0530
 @@ -4299,7 +4299,8 @@ static void ath12k_qmi_driver_event_work
  			break;
  		case ATH12K_QMI_EVENT_FW_READY:
@@ -1734,8 +1760,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			}
  
  			break;
---- a/drivers/net/wireless/ath/ath12k/mhi.c
-+++ b/drivers/net/wireless/ath/ath12k/mhi.c
+Index: b/drivers/net/wireless/ath/ath12k/mhi.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/mhi.c	2022-07-26 22:42:17.313694022 +0530
++++ b/drivers/net/wireless/ath/ath12k/mhi.c	2022-07-26 22:42:17.309694056 +0530
 @@ -235,7 +235,7 @@ static void ath12k_mhi_op_status_cb(stru
  		ath12k_warn(ab, "firmware crashed: MHI_CB_SYS_ERROR\n");
  		break;
