@@ -535,12 +535,11 @@ mac80211_hostapd_setup_base() {
 				if [ "$is_6ghz" == "1" ]; then
 					append base_cfg "op_class=132" "$N"
 				fi
+				append base_cfg "he_oper_chwidth=0" "$N"
+				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 				if [ $htmode == "EHT40" ]; then
 					append base_cfg "eht_oper_chwidth=0" "$N"
 					append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
-				else
-					append base_cfg "he_oper_chwidth=0" "$N"
-					append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 				fi
 			fi
 			;;
@@ -548,24 +547,22 @@ mac80211_hostapd_setup_base() {
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "80")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=133" "$N"
+			append base_cfg "he_oper_chwidth=1" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			if [ $htmode == "EHT80" ]; then
 				append base_cfg "eht_oper_chwidth=1" "$N"
 				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
-			else
-				append base_cfg "he_oper_chwidth=1" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			fi
 			;;
 		HE160|EHT160)
 			enable_ax=1
 			idx="$(mac80211_get_seg0 "160")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=134" "$N"
+			append base_cfg "he_oper_chwidth=2" "$N"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			if [ $htmode == "EHT160" ]; then
 				append base_cfg "eht_oper_chwidth=2" "$N"
 				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
-			else
-				append base_cfg "he_oper_chwidth=2" "$N"
-				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			fi
 			;;
 		EHT320)
@@ -574,6 +571,9 @@ mac80211_hostapd_setup_base() {
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=137" "$N"
 			append base_cfg "eht_oper_chwidth=9" "$N"
 			append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			append base_cfg "he_oper_chwidth=2" "$N"
+			idx="$(mac80211_get_seg0 "160")"
+			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
 			;;
 	esac
 
