@@ -25,8 +25,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  drivers/net/wireless/ath/ath12k/reg.c  | 109 +++++++++++++++++++++++----------
  3 files changed, 85 insertions(+), 34 deletions(-)
 
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
+Index: b/drivers/net/wireless/ath/ath12k/core.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/core.h	2022-08-01 18:27:08.929744331 +0530
++++ b/drivers/net/wireless/ath/ath12k/core.h	2022-08-01 18:27:08.925744362 +0530
 @@ -872,6 +872,8 @@ struct ath12k_hw {
  	 * concurrent debugfs configuration and concurrent FW statistics events.
  	 */
@@ -36,8 +38,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	u8 num_radio;
  	struct ath12k radio[0] __aligned(sizeof(void *));
  };
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
+Index: b/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/mac.c	2022-08-01 18:27:08.929744331 +0530
++++ b/drivers/net/wireless/ath/ath12k/mac.c	2022-08-01 18:27:08.925744362 +0530
 @@ -10165,6 +10165,7 @@ static int ath12k_mac_setup_channels_rat
  					   u32 supported_bands)
  {
@@ -81,8 +85,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ret = ath12k_regd_update(ar, true);
  		if (ret) {
  			ath12k_err(ar->ab, "ath12k regd update failed: %d\n", ret);
---- a/drivers/net/wireless/ath/ath12k/reg.c
-+++ b/drivers/net/wireless/ath/ath12k/reg.c
+Index: b/drivers/net/wireless/ath/ath12k/reg.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/reg.c	2022-08-01 18:27:08.929744331 +0530
++++ b/drivers/net/wireless/ath/ath12k/reg.c	2022-08-01 18:29:46.460535198 +0530
 @@ -91,11 +91,11 @@ static struct cur_reg_rule
         return reg_rule;
  }
@@ -97,7 +103,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	/* This can happen during wiphy registration where the previous
  	 * user request is received before we update the regd received
  	 * from firmware.
-@@ -107,15 +107,32 @@ static bool ath12k_regdom_changes(struct
+@@ -107,38 +107,11 @@ static bool ath12k_regdom_changes(struct
  }
  
  static void
@@ -111,20 +117,36 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
 -	ath12k_dbg(ar->ab, ATH12K_DBG_REG,
 -		   "Regulatory Notification received for %s\n", wiphy_name(wiphy));
-+	/* Set the country code to the firmware and wait for
-+	 * the WMI_REG_CHAN_LIST_CC EVENT for updating the
-+	 * reg info
-+	 */
-+	init_country_param.flags = ALPHA_IS_SET;
-+	memcpy(&init_country_param.cc_info.alpha2, request->alpha2, 2);
-+	init_country_param.cc_info.alpha2[2] = 0;
-+
-+	ret = ath12k_wmi_send_init_country_cmd(ar, init_country_param);
-+	if (ret)
-+		ath12k_warn(ar->ab,
-+			    "INIT Country code set to fw failed : %d\n", ret);
-+}
-+
+-
+-	/* Currently supporting only General User Hints. Cell base user
+-	 * hints to be handled later.
+-	 * Hints from other sources like Core, Beacons are not expected for
+-	 * self managed wiphy's
+-	 */
+-	if (!(request->initiator == NL80211_REGDOM_SET_BY_USER &&
+-	      request->user_reg_hint_type == NL80211_USER_REG_HINT_USER)) {
+-		ath12k_warn(ar->ab, "Unexpected Regulatory event for this wiphy\n");
+-		return;
+-	}
+-
+-	if (!IS_ENABLED(CPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS)) {
+-		ath12k_dbg(ar->ab, ATH12K_DBG_REG,
+-			   "Country Setting is not allowed\n");
+-		return;
+-	}
+-
+-	if (!ath12k_regdom_changes(ar, request->alpha2)) {
+-		ath12k_dbg(ar->ab, ATH12K_DBG_REG, "Country is already set\n");
+-		return;
+-	}
+-
+ 	/* Set the country code to the firmware and wait for
+ 	 * the WMI_REG_CHAN_LIST_CC EVENT for updating the
+ 	 * reg info
+@@ -153,6 +126,40 @@ ath12k_reg_notifier(struct wiphy *wiphy,
+ 			    "INIT Country code set to fw failed : %d\n", ret);
+ }
+ 
 +static void
 +ath12k_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request)
 +{
@@ -132,52 +154,37 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	struct ath12k_hw *ah = hw->priv;
 +	struct ath12k *ar;
 +	int i;
- 
- 	/* Currently supporting only General User Hints. Cell base user
- 	 * hints to be handled later.
-@@ -123,34 +140,20 @@ ath12k_reg_notifier(struct wiphy *wiphy,
- 	 * self managed wiphy's
- 	 */
- 	if (!(request->initiator == NL80211_REGDOM_SET_BY_USER &&
--	      request->user_reg_hint_type == NL80211_USER_REG_HINT_USER)) {
--		ath12k_warn(ar->ab, "Unexpected Regulatory event for this wiphy\n");
++
++	/* Currently supporting only General User Hints. Cell base user
++	 * hints to be handled later.
++	 * Hints from other sources like Core, Beacons are not expected for
++	 * self managed wiphy's
++	 */
++	if (!(request->initiator == NL80211_REGDOM_SET_BY_USER &&
 +	      request->user_reg_hint_type == NL80211_USER_REG_HINT_USER))
- 		return;
--	}
- 
--	if (!IS_ENABLED(CPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS)) {
--		ath12k_dbg(ar->ab, ATH12K_DBG_REG,
--			   "Country Setting is not allowed\n");
++		return;
++
 +	if (!IS_ENABLED(CPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS))
- 		return;
--	}
- 
--	if (!ath12k_regdom_changes(ar, request->alpha2)) {
--		ath12k_dbg(ar->ab, ATH12K_DBG_REG, "Country is already set\n");
++		return;
++
++	 mutex_lock(&ah->conf_mutex);
 +	if (!ath12k_regdom_changes(ah, request->alpha2))
- 		return;
--	}
- 
--	/* Set the country code to the firmware and wait for
--	 * the WMI_REG_CHAN_LIST_CC EVENT for updating the
--	 * reg info
--	 */
--	init_country_param.flags = ALPHA_IS_SET;
--	memcpy(&init_country_param.cc_info.alpha2, request->alpha2, 2);
--	init_country_param.cc_info.alpha2[2] = 0;
++		goto exit;
++
++	ah->regd_updated = false;
 +	ar = ah->radio;
- 
--	ret = ath12k_wmi_send_init_country_cmd(ar, init_country_param);
--	if (ret)
--		ath12k_warn(ar->ab,
--			    "INIT Country code set to fw failed : %d\n", ret);
++
 +	/* Send the reg change request to all the radios */
 +	for (i = 0; i < ah->num_radio; i++, ar++)
 +		ath12k_reg_send_request(ar, request);
- }
- 
++exit:
++	mutex_unlock(&ah->conf_mutex);
++}
++
  int ath12k_reg_update_chan_list(struct ath12k *ar)
-@@ -167,7 +170,7 @@ int ath12k_reg_update_chan_list(struct a
+ {
+ 	struct ieee80211_supported_band **bands;
+@@ -167,7 +174,7 @@ int ath12k_reg_update_chan_list(struct a
  
  	bands = hw->wiphy->bands;
  	for (band = 0; band < NUM_NL80211_BANDS; band++) {
@@ -186,7 +193,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			continue;
  
  		for (i = 0; i < bands[band]->n_channels; i++) {
-@@ -195,7 +198,7 @@ int ath12k_reg_update_chan_list(struct a
+@@ -195,7 +202,7 @@ int ath12k_reg_update_chan_list(struct a
  	ch = params->ch_param;
  
  	for (band = 0; band < NUM_NL80211_BANDS; band++) {
@@ -195,7 +202,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			continue;
  
  		for (i = 0; i < bands[band]->n_channels; i++) {
-@@ -268,8 +271,32 @@ int ath12k_regd_update(struct ath12k *ar
+@@ -268,8 +275,32 @@ int ath12k_regd_update(struct ath12k *ar
  	struct ieee80211_regdomain *regd, *regd_copy = NULL;
  	int ret, regd_len, pdev_id;
  	struct ath12k_base *ab;
@@ -228,7 +235,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	pdev_id = ar->pdev_idx;
  
  	spin_lock_bh(&ab->base_lock);
-@@ -322,14 +349,29 @@ int ath12k_regd_update(struct ath12k *ar
+@@ -322,14 +353,29 @@ int ath12k_regd_update(struct ath12k *ar
  	if (ret)
  		goto err;
  
