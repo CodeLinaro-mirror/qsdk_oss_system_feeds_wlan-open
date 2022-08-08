@@ -277,6 +277,23 @@ hostapd_is_6ghz_band() {
 	fi
 }
 
+ap_freq=$(iw $ap_intf info 2> /dev/null | grep channel | cut -d' ' -f 3 | cut -b 2-5)
+wifi_6gband=$(hostapd_is_6ghz_band $ap_freq)
+if [ $wifi_6gband == true ]; then
+cat > /lib/repeater_6g_ch_sw.sh << EOF
+#!/bin/sh
+
+if [ "`echo $\2`" = "CTRL-EVENT-STARTED-CHANNEL-SWITCH" ] && [ "`echo $\1`" = $sta_intf ]; then
+        wpa_cli -i $sta_intf disable 0
+        sleep 5
+        wpa_cli -i $sta_intf enable 0
+fi
+EOF
+
+        chmod 777 /lib/repeater_6g_ch_sw.sh
+        wpa_cli -i $sta_intf -a /lib/repeater_6g_ch_sw.sh &
+fi
+
 #echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
 while true;
