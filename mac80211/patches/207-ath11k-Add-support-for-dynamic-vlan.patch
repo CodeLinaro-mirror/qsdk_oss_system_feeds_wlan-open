@@ -21,11 +21,21 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -78,6 +78,34 @@ enum hal_encrypt_type ath11k_dp_tx_get_e
+@@ -78,6 +78,43 @@ enum hal_encrypt_type ath11k_dp_tx_get_e
  	}
  }
  
 +#define HTT_META_DATA_ALIGNMENT	0x8
++
++static int ath11k_dp_metadata_align_skb(struct sk_buff *skb, u8 align_len)
++{
++	if (unlikely(skb_cow_head(skb, align_len)))
++		return -ENOMEM;
++
++	skb_push(skb, align_len);
++	memset(skb->data, 0, align_len);
++	return 0;
++}
 +
 +static int ath11k_dp_prepare_htt_metadata(struct sk_buff *skb,
 +					  u8 *htt_metadata_size)
@@ -33,17 +43,16 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
 +	u8 htt_desc_size;
 +	/* Size rounded of multiple of 8 bytes */
 +	u8 htt_desc_size_aligned;
++	int ret;
 +	struct htt_tx_msdu_desc_ext *desc_ext;
 +
 +	htt_desc_size = sizeof(struct htt_tx_msdu_desc_ext);
 +	htt_desc_size_aligned = ALIGN(htt_desc_size, HTT_META_DATA_ALIGNMENT);
 +
-+	if (skb_headroom(skb) < htt_desc_size_aligned)
-+		if (pskb_expand_head(skb, htt_desc_size_aligned, 0, GFP_ATOMIC))
-+			return -ENOMEM;
++	ret = ath11k_dp_metadata_align_skb(skb, htt_desc_size_aligned);
++	if (unlikely(ret))
++		return ret;
 +
-+	skb_push(skb, htt_desc_size_aligned);
-+	memset(skb->data, 0, htt_desc_size_aligned);
 +	desc_ext = (struct htt_tx_msdu_desc_ext *)skb->data;
 +	desc_ext->valid_encrypt_type = 1;
 +	desc_ext->encrypt_type = 0;
@@ -56,7 +65,7 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  int ath11k_dp_tx(struct ath11k *ar, struct ath11k_vif *arvif,
  		 struct ath11k_sta *arsta, struct sk_buff *skb)
  {
-@@ -94,7 +122,8 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+@@ -94,7 +131,8 @@ int ath11k_dp_tx(struct ath11k *ar, stru
  	u8 hal_ring_id;
  	int ret;
  	u8 ring_selector = 0, ring_map = 0;
@@ -66,7 +75,7 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  
  	if (unlikely(test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return -ESHUTDOWN;
-@@ -192,7 +221,10 @@ tcl_ring_sel:
+@@ -192,7 +230,10 @@ tcl_ring_sel:
  
  	switch (ti.encap_type) {
  	case HAL_TCL_ENCAP_TYPE_NATIVE_WIFI:
@@ -78,7 +87,7 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  		break;
  	case HAL_TCL_ENCAP_TYPE_RAW:
  		if (!test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags)) {
-@@ -211,6 +243,37 @@ tcl_ring_sel:
+@@ -211,6 +252,33 @@ tcl_ring_sel:
  		goto fail_remove_idr;
  	}
  
@@ -93,17 +102,13 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
 +		 *  to get 8-byte aligned start address along with align_pad added
 +		 */
 +		align_pad = ((unsigned long)skb->data) & (HTT_META_DATA_ALIGNMENT - 1);
-+		if (skb_headroom(skb) < align_pad) {
-+			if (pskb_expand_head(skb, align_pad, 0, GFP_ATOMIC)) {
-+				ret = -ENOMEM;
-+				goto fail_remove_idr;
-+			}
-+		}
-+		skb_push(skb, align_pad);
++		ret = ath11k_dp_metadata_align_skb(skb, align_pad);
++		if (unlikely(ret))
++			goto fail_remove_idr;
++
 +		ti.pkt_offset += align_pad;
-+		memset(skb->data, 0, align_pad);
 +		ret = ath11k_dp_prepare_htt_metadata(skb, &htt_meta_size);
-+		if (ret)
++		if (unlikely(ret))
 +			goto fail_remove_idr;
 +
 +		ti.pkt_offset += htt_meta_size;
@@ -116,16 +121,17 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  	ti.paddr = dma_map_single(ab->dev, skb->data, skb->len, DMA_TO_DEVICE);
  	if (unlikely(dma_mapping_error(ab->dev, ti.paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
-@@ -219,7 +282,7 @@ tcl_ring_sel:
+@@ -219,7 +287,8 @@ tcl_ring_sel:
  		goto fail_remove_idr;
  	}
  
 -	ti.data_len = skb->len;
 +	ti.data_len = skb->len - ti.pkt_offset;
++	skb_cb->pkt_offset = ti.pkt_offset;
  	skb_cb->paddr = ti.paddr;
  	skb_cb->vif = arvif->vif;
  	skb_cb->ar = ar;
-@@ -275,6 +338,8 @@ fail_unmap_dma:
+@@ -275,6 +344,8 @@ fail_unmap_dma:
  	dma_unmap_single(ab->dev, ti.paddr, ti.data_len, DMA_TO_DEVICE);
  
  fail_remove_idr:
@@ -134,7 +140,17 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  	spin_lock_bh(&tx_ring->tx_idr_lock);
  	idr_remove(&tx_ring->txbuf_idr,
  		   FIELD_GET(DP_TX_DESC_ID_MSDU_ID, ti.desc_id));
-@@ -627,7 +692,7 @@ static void ath11k_dp_tx_complete_msdu(s
+@@ -354,6 +425,9 @@ ath11k_dp_tx_htt_tx_complete_buf(struct
+ 	flags = skb_cb->flags;
+ 	vif = skb_cb->vif;
+ 
++	if (skb_cb->pkt_offset)
++		skb_pull(msdu, skb_cb->pkt_offset); /* removing the alignment and htt meta data */
++
+ 	memset(&info->status, 0, sizeof(info->status));
+ 
+ 	if (ts->acked) {
+@@ -616,7 +690,7 @@ static void ath11k_dp_tx_complete_msdu(s
  			    ts->peer_id);
  		spin_unlock_bh(&ab->base_lock);
  		dev_kfree_skb_any(msdu);
@@ -403,3 +419,13 @@ Signed-off-by: Seevalamuthu Mariappan <seevalam@codeaurora.org>
  	if (local->ops->wake_tx_queue) {
  		u16 queue = __ieee80211_select_queue(sdata, sta, skb);
  		skb_set_queue_mapping(skb, queue);
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -109,6 +109,7 @@ struct ath11k_skb_cb {
+ 	u32 cipher;
+ 	struct ath11k *ar;
+ 	struct ieee80211_vif *vif;
++	u32 pkt_offset;
+ } __packed;
+ 
+ struct ath11k_skb_rxcb {
