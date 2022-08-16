@@ -164,6 +164,33 @@ boost_performance() {
 				echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/rx_hash
 
 				;;
+			ap-al02-c4)
+				tc qdisc replace dev eth4 root noqueue
+				tc qdisc replace dev eth5 root noqueue
+				ethtool -K eth4 gro off
+				ethtool -K eth4 gso off
+				ethtool -K eth5 gro off
+				ethtool -K eth5 gso off
+				ssdk_sh fdb learnCtrl set disable
+				ssdk_sh fdb entry flush 1
+				sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+				sysctl -w net.bridge.bridge-nf-call-iptables=1
+				echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+				/etc/init.d/firewall stop
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0002\:01\:00.0/rx_hash
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0004\:01\:00.0/rx_hash
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0003\:01\:00.0/rx_hash
+				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				#case for rdp433
+
+				;;
 			*)
 				#no settings
 				;;
