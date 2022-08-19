@@ -37,7 +37,17 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	list_for_each_entry_safe(mon_mpdu, tmp, &pmon->dp_rx_mon_mpdu_list, list) {
  		list_del(&mon_mpdu->list);
-@@ -2043,135 +2048,6 @@ ath12k_dp_mon_tx_parse_mon_status(struct
+@@ -1255,7 +1260,8 @@ int ath12k_dp_mon_buf_replenish(struct a
+ 	struct sk_buff *skb;
+ 	struct hal_srng *srng;
+ 	dma_addr_t paddr;
+-	u32 cookie, buf_id;
++	u64 cookie;
++	u32 buf_id;
+ 
+ 	srng = &ab->hal.srng_list[buf_ring->refill_buf_ring.ring_id];
+ 	spin_lock_bh(&srng->lock);
+@@ -2043,135 +2049,6 @@ ath12k_dp_mon_tx_parse_mon_status(struct
  	return tlv_status;
  }
  
@@ -173,7 +183,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  static void
  ath12k_dp_mon_rx_update_peer_rate_table_stats(struct ath12k_rx_peer_stats *rx_stats,
  					      struct hal_rx_mon_ppdu_info *ppdu_info,
-@@ -2481,6 +2357,162 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
+@@ -2481,6 +2358,167 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
  		ath12k_dp_mon_rx_update_user_stats(ar, ppdu_info, i);
  }
  
@@ -228,6 +238,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +				ath12k_hal_srng_dst_peek(ab, srng);
 +		if (unlikely(!mon_dst_desc))
 +			break;
++
++		if (u32_get_bits(mon_dst_desc->info0, HAL_MON_DEST_INFO0_EMPTY_DESC)) {
++			ab->soc_stats.mon_drop_desc++;
++			goto move_next;
++		}
 +
 +		cookie = mon_dst_desc->cookie;
 +		ppdu_id = mon_dst_desc->ppdu_id;
@@ -336,7 +351,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  int ath12k_dp_mon_rx_process_stats(struct ath12k *ar, int mac_id,
  				   struct napi_struct *napi, int *budget)
  {
-@@ -2513,7 +2545,6 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2513,12 +2551,16 @@ int ath12k_dp_mon_rx_process_stats(struc
  	ath12k_hal_srng_access_begin(ab, srng);
  
  	while (likely(*budget)) {
@@ -344,7 +359,17 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		mon_dst_desc = (struct hal_mon_dest_desc *)
  				ath12k_hal_srng_dst_peek(ab, srng);
  		if (unlikely(!mon_dst_desc))
-@@ -2541,11 +2572,15 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 			break;
+ 
++		if (u32_get_bits(mon_dst_desc->info0, HAL_MON_DEST_INFO0_EMPTY_DESC)) {
++			ab->soc_stats.mon_drop_desc++;
++			goto move_next;
++		}
++
+ 		cookie = mon_dst_desc->cookie;
+ 		buf_id = u32_get_bits(cookie, DP_RXDMA_BUF_COOKIE_BUF_ID);
+ 
+@@ -2541,11 +2583,15 @@ int ath12k_dp_mon_rx_process_stats(struc
  					  HAL_MON_DEST_INFO0_END_REASON);
  		if ((end_reason == HAL_MON_FLUSH_DETECTED) ||
  		    (end_reason == HAL_MON_PPDU_TRUNCATED)) {
@@ -361,7 +386,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		__skb_queue_tail(&skb_list, skb);
  move_next:
  		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
-@@ -2559,23 +2594,27 @@ move_next:
+@@ -2559,23 +2605,27 @@ move_next:
  	if (!num_buffs_reaped)
  		return 0;
  
@@ -394,7 +419,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				   ppdu_info->peer_id);
  			goto next_skb;
  		}
-@@ -2593,6 +2632,7 @@ move_next:
+@@ -2593,6 +2643,7 @@ move_next:
  next_skb:
  		spin_unlock_bh(&ab->base_lock);
  		rcu_read_unlock();
@@ -412,3 +437,26 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -822,6 +822,7 @@ struct ath12k_soc_dp_stats {
+ 	u32 rxdma_error[HAL_REO_ENTR_RING_RXDMA_ECODE_MAX];
+ 	u32 reo_error[HAL_REO_DEST_RING_ERROR_CODE_MAX];
+ 	u32 hal_reo_error[DP_REO_DST_RING_MAX];
++	u32 mon_drop_desc;
+ 	struct ath12k_soc_dp_tx_err_stats tx_err;
+ 	struct ath12k_dp_ring_bp_stats bp_stats;
+ };
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -867,6 +867,10 @@ static ssize_t ath12k_debugfs_dump_soc_d
+ 			 "\nMisc Transmit Failures: %d\n",
+ 			 atomic_read(&soc_stats->tx_err.misc_fail));
+ 
++	len += scnprintf(buf + len, size - len,
++			 "\nMon drop descriptor: %u\n",
++			 soc_stats->mon_drop_desc);
++
+ 	len += ath12k_debugfs_dump_soc_ring_bp_stats(ab, buf + len, size - len);
+ 
+ 	if (len > size)
