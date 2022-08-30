@@ -31,24 +31,19 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  net/mac80211/util.c           | 13 ++++++++++++-
  4 files changed, 50 insertions(+), 1 deletion(-)
 
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index 0c1b35b..89b0f63 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -1830,6 +1830,8 @@ struct ieee80211_vif {
+@@ -1830,6 +1830,7 @@ struct ieee80211_vif {
  	bool color_change_active;
  	u8 color_change_color;
  	u8 bmiss_threshold;
 +	bool noqueue_enable;
-+	bool stop_tx[IEEE80211_NUM_ACS];
  
  	/* must be last */
  	u8 drv_priv[] __aligned(sizeof(void *));
-diff --git a/net/mac80211/debugfs_netdev.c b/net/mac80211/debugfs_netdev.c
-index f9b2529..959c5f5 100644
 --- a/net/mac80211/debugfs_netdev.c
 +++ b/net/mac80211/debugfs_netdev.c
-@@ -326,6 +326,32 @@ static ssize_t ieee80211_if_parse_bmiss_threshold(struct ieee80211_sub_if_data *
+@@ -326,6 +326,32 @@ static ssize_t ieee80211_if_parse_bmiss_
  
  IEEE80211_IF_FILE_RW(bmiss_threshold);
  
@@ -81,7 +76,7 @@ index f9b2529..959c5f5 100644
  static ssize_t ieee80211_if_parse_tkip_mic_test(
  	struct ieee80211_sub_if_data *sdata, const char *buf, int buflen)
  {
-@@ -711,6 +737,7 @@ static void add_ap_files(struct ieee80211_sub_if_data *sdata)
+@@ -711,6 +737,7 @@ static void add_ap_files(struct ieee8021
  	DEBUGFS_ADD_MODE(tkip_mic_test, 0200);
  	DEBUGFS_ADD_MODE(multicast_to_unicast, 0600);
  	DEBUGFS_ADD_MODE(bmiss_threshold, 0600);
@@ -89,7 +84,7 @@ index f9b2529..959c5f5 100644
  }
  
  static void add_vlan_files(struct ieee80211_sub_if_data *sdata)
-@@ -732,6 +759,7 @@ static void add_mesh_files(struct ieee80211_sub_if_data *sdata)
+@@ -732,6 +759,7 @@ static void add_mesh_files(struct ieee80
  	DEBUGFS_ADD_MODE(tsf, 0600);
  	DEBUGFS_ADD_MODE(estab_plinks, 0400);
  	DEBUGFS_ADD_MODE(bmiss_threshold, 0600);
@@ -97,64 +92,29 @@ index f9b2529..959c5f5 100644
  }
  
  static void add_mesh_stats(struct ieee80211_sub_if_data *sdata)
-diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
-index 132cc62..628de09 100644
---- a/net/mac80211/tx.c
-+++ b/net/mac80211/tx.c
-@@ -4062,6 +4062,9 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
- 
- 	rcu_read_lock();
- 
-+	if (sdata->vif.stop_tx[skb_get_queue_mapping(skb)])
-+		goto out_free;
-+
- 	if (ieee80211_vif_is_mesh(&sdata->vif) &&
- 	    ieee80211_mesh_xmit_fast(sdata, skb, ctrl_flags))
- 		goto out;
-@@ -4540,6 +4543,11 @@ netdev_tx_t ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
- 
- 	rcu_read_lock();
- 
-+	if (sdata->vif.stop_tx[skb_get_queue_mapping(skb)]) {
-+		kfree_skb(skb);
-+		goto out;
-+	}
-+
- 	if (ieee80211_lookup_ra_sta(sdata, skb, &sta)) {
- 		kfree_skb(skb);
- 		goto out;
-diff --git a/net/mac80211/util.c b/net/mac80211/util.c
-index cec0987..72e7820 100644
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -414,8 +414,14 @@ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
+@@ -414,8 +414,12 @@ void ieee80211_propagate_queue_wake(stru
  			if (ac_queue == queue ||
  			    (sdata->vif.cab_queue == queue &&
  			     local->queue_stop_reasons[ac_queue] == 0 &&
 -			     skb_queue_empty(&local->pending[ac_queue])))
 +			     skb_queue_empty(&local->pending[ac_queue]))) {
-+				if (sdata->vif.stop_tx[ac]) {
-+					sdata->vif.stop_tx[ac] = false;
++				if (sdata->vif.noqueue_enable)
 +					continue;
-+				}
 +
  				netif_wake_subqueue(sdata->dev, ac);
 +			}
  		}
  	}
  }
-@@ -514,6 +520,11 @@ static void __ieee80211_stop_queue(struct ieee80211_hw *hw, int queue,
+@@ -514,6 +518,9 @@ static void __ieee80211_stop_queue(struc
  		for (ac = 0; ac < n_acs; ac++) {
  			if (sdata->vif.hw_queue[ac] == queue ||
  			    sdata->vif.cab_queue == queue) {
-+				if (!local->ops->wake_tx_queue && sdata->vif.noqueue_enable) {
-+					sdata->vif.stop_tx[ac] = true;
++				if (!local->ops->wake_tx_queue && sdata->vif.noqueue_enable)
 +					continue;
-+				}
 +
  				if (!local->ops->wake_tx_queue) {
  					netif_stop_subqueue(sdata->dev, ac);
  					continue;
--- 
-2.7.4
-
