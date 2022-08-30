@@ -182,9 +182,12 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0002\:01\:00.0/rx_hash
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0004\:01\:00.0/rx_hash
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0003\:01\:00.0/rx_hash
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0002\:01\:00.0/rx_hash_ix3
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0004\:01\:00.0/rx_hash_ix2
+				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0004\:01\:00.0/rx_hash_ix3
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn92xx\ hw1.0_0003\:01\:00.0/rx_hash_ix3
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
