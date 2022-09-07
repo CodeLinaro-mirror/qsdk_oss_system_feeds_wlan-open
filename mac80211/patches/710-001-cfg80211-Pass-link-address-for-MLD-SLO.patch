@@ -1,0 +1,84 @@
+From b98b91992ed90357248b96462d30c0af19e86070 Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 7 Sep 2022 11:20:16 +0530
+Subject: [PATCH 1/6] cfg80211: Pass link address for MLD SLO
+
+When MLD sta supporting SLO is added, the link address gets
+passed during NL80211_CMD_NEW_STATION. This link address
+may be different from mac address passed uring NL80211_ATTR_MAC
+pass this info to mac80211 during new_station() for it to
+be aware of link and mld address for SLO.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ include/net/cfg80211.h       | 3 +++
+ include/uapi/linux/nl80211.h | 4 ++++
+ net/wireless/nl80211.c       | 5 +++++
+ 3 files changed, 12 insertions(+)
+
+Index: backports-20220404-5.4.164-f40abb4788/include/net/cfg80211.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/include/net/cfg80211.h	2022-11-16 11:25:39.288074334 +0530
++++ backports-20220404-5.4.164-f40abb4788/include/net/cfg80211.h	2022-11-16 11:25:39.276074317 +0530
+@@ -1572,6 +1572,8 @@ struct sta_txpwr {
+  * @he_6ghz_capa: HE 6 GHz Band capabilities of station
+  * @eht_capa: EHT capabilities of station
+  * @eht_capa_len: the length of the EHT capabilities
++ * @link_addr: Set when MLD STA is added. Only link address
++ * 	currently added for SLO support
+  */
+ struct station_parameters {
+ 	const u8 *supported_rates;
+@@ -1611,6 +1613,7 @@ struct station_parameters {
+ 	u8 eht_capa_len;
+ 	const struct ieee80211_240mhz_vendor_oper *eht_240mhz_capa;
+ 	u8 eht_240mhz_len;
++	const u8 *link_addr;
+ };
+ 
+ /**
+Index: backports-20220404-5.4.164-f40abb4788/include/uapi/linux/nl80211.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/include/uapi/linux/nl80211.h	2022-11-16 11:25:39.288074334 +0530
++++ backports-20220404-5.4.164-f40abb4788/include/uapi/linux/nl80211.h	2022-11-16 11:26:17.268132197 +0530
+@@ -2723,6 +2723,8 @@ enum nl80211_commands {
+  *	indicates that the sub-channel is punctured, set 0 indicates that the
+  *	channel is active.
+  *
++ * @NL80211_ATTR_MLD_LINK_MAC: MLD LINK Mac address for the SLO
++ *
+  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
+  * @NL80211_ATTR_MAX: highest attribute number currently defined
+  * @__NL80211_ATTR_AFTER_LAST: internal use
+@@ -3260,6 +3262,8 @@ enum nl80211_attrs {
+ 	NL80211_ATTR_AP_PS,
+ 
+ 	NL80211_ATTR_EHT_240MHZ_CAPABILITY,
++
++	NL80211_ATTR_MLD_LINK_MAC,
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+ 	__NL80211_ATTR_AFTER_LAST,
+Index: backports-20220404-5.4.164-f40abb4788/net/wireless/nl80211.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/net/wireless/nl80211.c	2022-11-16 11:25:39.288074334 +0530
++++ backports-20220404-5.4.164-f40abb4788/net/wireless/nl80211.c	2022-11-16 11:25:39.284074328 +0530
+@@ -837,6 +837,7 @@ static const struct nla_policy nl80211_p
+ 	[NL80211_ATTR_RU_PUNCT_SUPP_HE] = { .type = NLA_FLAG },
+ 	[NL80211_ATTR_RU_PUNCT_BITMAP] = { .type = NLA_U16 },
+ 	[NL80211_ATTR_AP_PS] = NLA_POLICY_MAX(NLA_U8, 1),
++	[NL80211_ATTR_MLD_LINK_MAC] = NLA_POLICY_EXACT_LEN_WARN(ETH_ALEN),
+ #if LINUX_VERSION_IS_GEQ(5,10,0)
+ 	[NL80211_ATTR_EHT_240MHZ_CAPABILITY] =
+ 			NLA_POLICY_RANGE(NLA_BINARY,
+@@ -7320,6 +7321,10 @@ static int nl80211_new_station(struct sk
+ 	params.listen_interval =
+ 		nla_get_u16(info->attrs[NL80211_ATTR_STA_LISTEN_INTERVAL]);
+ 
++	if (info->attrs[NL80211_ATTR_MLD_LINK_MAC] &&
++	    dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP)
++		params.link_addr = nla_data(info->attrs[NL80211_ATTR_MLD_LINK_MAC]);
++
+ 	if (info->attrs[NL80211_ATTR_VLAN_ID])
+ 		params.vlan_id = nla_get_u16(info->attrs[NL80211_ATTR_VLAN_ID]);
+ 

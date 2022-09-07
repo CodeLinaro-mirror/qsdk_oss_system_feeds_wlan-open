@@ -1,0 +1,382 @@
+From 8e6d7db31beb29a730d84329c654caf3a19133fb Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 7 Sep 2022 18:36:19 +0530
+Subject: [PATCH 5/6] ath12k: setup ml peer for SLO
+
+Handle MLO peer map and unmap events. Also
+use the ML REOQ LUT for setting up the MLD
+peer rx queue info.
+
+Since we support only SLO for now, there are
+no separate link peer/ml peer objects.
+
+THe link peer object stores the mld address
+which might be needed for searching based on
+MLD address (if required).
+
+Since the ML peer id and link peer id are kept
+same, just clear the ML bit in the peer id to
+search peers based on ml peer id.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c    | 33 ++++++++++---
+ drivers/net/wireless/ath/ath12k/dp.h    | 38 +++++++++++++++
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 22 ++++++---
+ drivers/net/wireless/ath/ath12k/peer.c  | 63 +++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/peer.h  |  3 ++
+ 5 files changed, 147 insertions(+), 12 deletions(-)
+
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/dp.c	2022-12-22 16:42:25.230237877 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp.c	2022-12-22 16:42:25.226237869 +0530
+@@ -1283,15 +1283,21 @@ static void ath12k_dp_reoq_lut_cleanup(s
+ {
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+-	if (!dp->reoq_lut.vaddr)
+-		return;
++	if (dp->reoq_lut.vaddr) {
++		dma_free_coherent(ab->dev, DP_REOQ_LUT_SIZE,
++				  dp->reoq_lut.vaddr, dp->reoq_lut.paddr);
++		dp->reoq_lut.vaddr = NULL;
+ 
+-	dma_free_coherent(ab->dev, DP_REOQ_LUT_SIZE,
+-			  dp->reoq_lut.vaddr, dp->reoq_lut.paddr);
+-	dp->reoq_lut.vaddr = NULL;
++		ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0(ab), 0);
++	}
++
++	if (dp->ml_reoq_lut.vaddr) {
++		dma_free_coherent(ab->dev, DP_REOQ_LUT_SIZE,
++				  dp->ml_reoq_lut.vaddr, dp->ml_reoq_lut.paddr);
++		dp->reoq_lut.vaddr = NULL;
+ 
+-	ath12k_hif_write32(ab,
+-			   HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0(ab), 0);
++		ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE1(ab), 0);
++	}
+ }
+ 
+ void ath12k_dp_free(struct ath12k_base *ab)
+@@ -1548,11 +1554,24 @@ static int ath12k_dp_reoq_lut_setup(stru
+ 		return -ENOMEM;
+ 	}
+ 
+-	memset(dp->reoq_lut.vaddr, 0, DP_REOQ_LUT_SIZE);
++	dp->ml_reoq_lut.vaddr = dma_alloc_coherent(ab->dev,
++						   DP_REOQ_LUT_SIZE,
++						   &dp->ml_reoq_lut.paddr,
++						   GFP_KERNEL);
++
++	if (!dp->ml_reoq_lut.vaddr) {
++		ath12k_warn(ab, "failed to allocate memory for ML reoq table");
++		return -ENOMEM;
++	}
++
++	memset(dp->ml_reoq_lut.vaddr, 0, DP_REOQ_LUT_SIZE);
+ 
+ 	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0(ab),
+ 			   dp->reoq_lut.paddr >> 8);
+ 
++	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE1(ab),
++			   dp->ml_reoq_lut.paddr >> 8);
++
+ 	val = ath12k_hif_read32(ab,
+ 				HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_ADDR_READ(ab));
+ 
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/dp.h	2022-12-22 16:42:25.230237877 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp.h	2022-12-22 17:20:45.359780880 +0530
+@@ -58,6 +58,7 @@ struct dp_reo_update_rx_queue_elem {
+ 	int peer_id;
+ 	u8 tid;
+ 	bool reo_cmd_update_rx_queue_resend_flag;
++	bool is_ml_peer;
+ };
+ 
+ struct dp_reo_cmd {
+@@ -409,6 +410,7 @@ struct ath12k_dp {
+ 	struct dp_rxdma_ring rxdma_mon_buf_ring;
+ 	struct dp_rxdma_ring tx_mon_buf_ring;
+ 	struct ath12k_reo_q_addr_lut reoq_lut;
++	struct ath12k_reo_q_addr_lut ml_reoq_lut;
+ };
+ 
+ /* HTT definitions */
+@@ -1296,6 +1298,8 @@ enum htt_t2h_msg_type {
+ 	HTT_T2H_MSG_TYPE_EXT_STATS_CONF = 0x1c,
+ 	HTT_T2H_MSG_TYPE_BKPRESSURE_EVENT_IND = 0x24,
+ 	HTT_T2H_MSG_TYPE_MLO_TIMESTAMP_OFFSET_IND = 0x28,
++	HTT_T2H_MSG_TYPE_MLO_RX_PEER_MAP = 0x29,
++	HTT_T2H_MSG_TYPE_MLO_RX_PEER_UNMAP = 0x2a,
+ 	HTT_T2H_MSG_TYPE_PEER_MAP3	= 0x2b,
+ 	HTT_T2H_MSG_TYPE_VDEV_TXRX_STATS_PERIODIC_IND = 0x2c,
+ };
+@@ -2112,6 +2116,41 @@ static inline void ath12k_dp_get_mac_add
+ 	memcpy(addr + 4, &addr_h16, ETH_ALEN - 4);
+ }
+ 
++#define ATH12K_ML_PEER_ID		GENMASK(13, 0)
++#define ATH12K_ML_PEER_ID_VALID		BIT(13)
++
++#define ATH12K_HTT_MLO_PEER_MAP_TLV_LINK_INFO_TAG	0
++#define ATH12K_HTT_MAX_MLO_LINKS			3
++#define ATH12K_HTT_MLO_CHIP_ID				GENMASK(2, 0)
++
++struct ath12k_htt_mlo_link_peer_info {
++	struct htt_tlv tlv_hdr;
++	u16 sw_peer_id;
++	u8 vdev_id;
++	u8 chip_id;
++} __packed;
++
++#define ATH12K_HTT_MLO_PEER_MAP_PEER_ID		GENMASK(23, 8)
++#define ATH12K_HTT_MLO_PEER_MAP_NUM_LINKS	GENMASK(26, 24)
++#define ATH12K_HTT_MLO_PEER_MAP_PRI_REO_CHIP	GENMASK(29, 27)
++#define ATH12K_HTT_MLO_PEER_MAP_MAC_ADDR_H16	GENMASK(15, 0)
++
++struct ath12k_htt_mlo_peer_map_msg {
++	u32 info0;
++	struct htt_mac_addr mac_addr;
++	u32 info1;
++	u32 info2;
++	u32 info3;
++	u32 rsvd0;
++	u32 rsvd1;
++	struct ath12k_htt_mlo_link_peer_info link_peer[ATH12K_HTT_MAX_MLO_LINKS];
++} __packed;
++
++#define ATH12K_HTT_MLO_PEER_UNMAP_PEER_ID		GENMASK(23, 8)
++struct ath12k_htt_mlo_peer_unmap_msg {
++	u32 info0;
++} __packed;
++
+ int ath12k_dp_service_srng(struct ath12k_base *ab,
+ 			   struct ath12k_ext_irq_grp *irq_grp,
+ 			   int budget);
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp_rx.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/dp_rx.c	2022-12-22 16:42:25.230237877 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp_rx.c	2022-12-22 17:23:25.372223008 +0530
+@@ -644,14 +644,18 @@ static int ath12k_dp_rx_pdev_srng_alloc(
+ 	return 0;
+ }
+ 
+-static void ath12k_peer_rx_tid_qref_reset(struct ath12k_base *ab, u16 peer_id, u16 tid)
++static void ath12k_peer_rx_tid_qref_reset(struct ath12k_base *ab, u16 peer_id, u16 tid,
++					  bool ml_peer)
+ {
+ 	struct ath12k_reo_queue_ref *qref;
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+-	//TODO based on ML peer or not, select the LUT. below assumes non ML peer
+-	qref = (struct ath12k_reo_queue_ref *)dp->reoq_lut.vaddr +
+-			(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
++	if (ml_peer)
++		qref = (struct ath12k_reo_queue_ref *)dp->ml_reoq_lut.vaddr +
++				(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
++	else
++		qref = (struct ath12k_reo_queue_ref *)dp->reoq_lut.vaddr +
++				(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
+ 
+ 	qref->info0 = FIELD_PREP(BUFFER_ADDR_INFO0_ADDR, 0);
+ 	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, 0) |
+@@ -838,7 +842,8 @@ static void ath12k_dp_rx_tid_del_func(st
+ 				update_rx_tid->active = true;
+ 				break;
+ 			}
+-			ath12k_peer_rx_tid_qref_reset(ab, qelem->peer_id, qelem->tid);
++			ath12k_peer_rx_tid_qref_reset(ab, qelem->peer_id, qelem->tid,
++						      qelem->is_ml_peer);
+ 			update_rx_tid->vaddr = NULL;
+ 			update_rx_tid->paddr = 0;
+ 			update_rx_tid->size = 0;
+@@ -896,14 +901,17 @@ free_desc:
+ }
+ 
+ static void ath12k_peer_rx_tid_qref_setup(struct ath12k_base *ab, u16 peer_id, u16 tid,
+-					  dma_addr_t paddr)
++					  dma_addr_t paddr, bool ml_peer)
+ {
+ 	struct ath12k_reo_queue_ref *qref;
+ 	struct ath12k_dp *dp = &ab->dp;
+ 
+-	//TODO based on ML peer or not, select the LUT. below assumes non ML peer
+-	qref = (struct ath12k_reo_queue_ref *)dp->reoq_lut.vaddr +
+-			(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
++	if (ml_peer)
++		qref = (struct ath12k_reo_queue_ref *)dp->ml_reoq_lut.vaddr +
++				(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
++	else
++		qref = (struct ath12k_reo_queue_ref *)dp->reoq_lut.vaddr +
++				(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
+ 
+ 	qref->info0 = FIELD_PREP(BUFFER_ADDR_INFO0_ADDR, lower_32_bits(paddr));
+ 	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, upper_32_bits(paddr)) |
+@@ -932,6 +940,7 @@ void ath12k_peer_rx_tid_delete(struct at
+ 	elem->reo_cmd_update_rx_queue_resend_flag = false;
+ 	elem->peer_id = peer->peer_id;
+ 	elem->tid = tid;
++	elem->is_ml_peer = peer->sta ? peer->sta->is_mld : false;
+ 	memcpy(&elem->data, rx_tid, sizeof(*rx_tid));
+ 
+ 	spin_lock_bh(&dp->reo_cmd_update_queue_lock);
+@@ -947,7 +956,8 @@ void ath12k_peer_rx_tid_delete(struct at
+ 			elem->reo_cmd_update_rx_queue_resend_flag = true;
+ 			break;
+ 		}
+-		ath12k_peer_rx_tid_qref_reset(ab, elem->peer_id, elem->tid);
++		ath12k_peer_rx_tid_qref_reset(ab, elem->peer_id, elem->tid,
++					      elem->is_ml_peer);
+ 		rx_tid->vaddr = NULL;
+ 		rx_tid->paddr = 0;
+ 		rx_tid->size = 0;
+@@ -1089,7 +1099,7 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 		return -ENOENT;
+ 	}
+ 
+-	if (!dp->reoq_lut.vaddr) {
++	if (!dp->reoq_lut.vaddr || !dp->ml_reoq_lut.vaddr) {
+ 		spin_unlock_bh(&ab->base_lock);
+ 		ath12k_warn(ab, "reo qref table is not setup\n");
+ 		return -EINVAL;
+@@ -1158,7 +1168,8 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 	rx_tid->active = true;
+ 
+ 	/* Update the REO queue LUT at the corresponding peer id and tid with qaddr */
+-	ath12k_peer_rx_tid_qref_setup(ab, peer->peer_id, tid, paddr);
++	ath12k_peer_rx_tid_qref_setup(ab, peer->peer_id, tid, paddr,
++				      peer->sta ? peer->sta->is_mld : false);
+ 
+ 	spin_unlock_bh(&ab->base_lock);
+ 
+@@ -2135,6 +2146,12 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
+ 	case HTT_T2H_MSG_TYPE_VDEV_TXRX_STATS_PERIODIC_IND:
+ 		ath12k_htt_vdev_txrx_stats_handler(ab, skb);
+ 		break;
++	case HTT_T2H_MSG_TYPE_MLO_RX_PEER_MAP:
++		ath12k_peer_mlo_map_event(ab, skb);
++		break;
++	case HTT_T2H_MSG_TYPE_MLO_RX_PEER_UNMAP:
++		ath12k_peer_mlo_unmap_event(ab, skb);
++		break;
+ 	default:
+ 		ath12k_warn(ab, "htt event %d not handled\n", type);
+ 		break;
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/peer.c	2022-12-22 16:42:25.230237877 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.c	2022-12-22 16:42:25.226237869 +0530
+@@ -8,6 +8,9 @@
+ #include "peer.h"
+ #include "debug.h"
+ 
++/* TODO all addr based lookup used only for link addr lookup
++ * extend to include mld addr lookup if required
++ */
+ struct ath12k_peer *ath12k_peer_find(struct ath12k_base *ab, int vdev_id,
+ 				     const u8 *addr)
+ {
+@@ -70,6 +73,11 @@ struct ath12k_peer *ath12k_peer_find_by_
+ 
+ 	lockdep_assert_held(&ab->base_lock);
+ 
++	/* Ignore the ML bit, for SLO the ml peer id is same
++	 * as the link peer id
++	 */
++	peer_id &= ~ATH12K_ML_PEER_ID_VALID;
++
+ 	list_for_each_entry(peer, &ab->peers, list)
+ 		if (peer_id == peer->peer_id)
+ 			return peer;
+@@ -160,6 +168,54 @@ exit:
+ 	spin_unlock_bh(&ab->base_lock);
+ }
+ 
++void ath12k_peer_mlo_map_event(struct ath12k_base *ab, struct sk_buff *skb)
++{
++	struct ath12k_htt_mlo_peer_map_msg *msg;
++	u16 ml_peer_id;
++	struct ath12k_peer *peer;
++	u16 mld_mac_h16;
++	u8 mld_addr[ETH_ALEN];
++
++	msg = (struct ath12k_htt_mlo_peer_map_msg *)skb->data;
++
++	ml_peer_id = FIELD_GET(ATH12K_HTT_MLO_PEER_MAP_PEER_ID, msg->info0);
++
++	ml_peer_id |= ATH12K_ML_PEER_ID_VALID;
++
++	spin_lock_bh(&ab->base_lock);
++	peer = ath12k_peer_find_by_id(ab, ml_peer_id);
++
++	if (!peer) {
++		ath12k_warn(ab, "peer corresponding to ml peer id %d not found", ml_peer_id);
++		spin_unlock_bh(&ab->base_lock);
++		return;
++	}
++	mld_mac_h16 = FIELD_GET(HTT_T2H_PEER_MAP_INFO1_MAC_ADDR_H16,
++					 msg->mac_addr.mac_addr_h16);
++	ath12k_dp_get_mac_addr(msg->mac_addr.mac_addr_l32, mld_mac_h16, mld_addr);
++
++	WARN_ON(memcmp(mld_addr, peer->mld_addr, ETH_ALEN));
++
++	spin_unlock_bh(&ab->base_lock);
++
++	ath12k_dbg(ab, ATH12K_DBG_DP_HTT, "htt MLO peer map peer %pM id %d\n",
++		   mld_addr, ml_peer_id);
++}
++
++void ath12k_peer_mlo_unmap_event(struct ath12k_base *ab, struct sk_buff *skb)
++{
++	struct ath12k_htt_mlo_peer_unmap_msg *msg;
++	u16 ml_peer_id;
++
++	msg = (struct ath12k_htt_mlo_peer_unmap_msg *)skb->data;
++
++	ml_peer_id = FIELD_GET(ATH12K_HTT_MLO_PEER_UNMAP_PEER_ID, msg->info0);
++
++	ml_peer_id |= ATH12K_ML_PEER_ID_VALID;
++
++	ath12k_dbg(ab, ATH12K_DBG_DP_HTT, "htt MLO peer unmap peer ml id %d\n", ml_peer_id);
++}
++
+ static int ath12k_wait_for_peer_common(struct ath12k_base *ab, int vdev_id,
+ 				       const u8 *addr, bool expect_mapped)
+ {
+@@ -332,6 +388,12 @@ int ath12k_peer_create(struct ath12k *ar
+ 	peer->pdev_idx = ar->pdev_idx;
+ 	peer->sta = sta;
+ 
++	/* This address would be used only in ML context, anyways
++	 * for non ML the addr and mld_addr are same
++	 */
++	if (sta)
++		ether_addr_copy(peer->mld_addr, sta->addr);
++
+ 	if (arvif->vif->type == NL80211_IFTYPE_STATION) {
+ 		arvif->ast_hash = peer->ast_hash;
+ 		arvif->ast_idx = peer->hw_peer_id;
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/peer.h	2022-12-22 16:42:25.230237877 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.h	2022-12-22 16:42:25.230237877 +0530
+@@ -24,6 +24,7 @@ struct ath12k_peer {
+ 	struct ieee80211_vif *vif;
+ 	int vdev_id;
+ 	u8 addr[ETH_ALEN];
++	u8 mld_addr[ETH_ALEN];
+ 	int peer_id;
+ 	u16 ast_hash;
+ 	u8 pdev_idx;
+@@ -68,5 +69,7 @@ int ath12k_wait_for_peer_delete_done(str
+ struct ath12k_peer *ath12k_peer_find_by_vdev_id(struct ath12k_base *ab,
+ 						int vdev_id);
+ struct ath12k_peer *ath12k_peer_find_by_ast(struct ath12k_base *ab, int ast_hash);
++void ath12k_peer_mlo_map_event(struct ath12k_base *ab, struct sk_buff *skb);
++void ath12k_peer_mlo_unmap_event(struct ath12k_base *ab, struct sk_buff *skb);
+ 
+ #endif /* _PEER_H_ */

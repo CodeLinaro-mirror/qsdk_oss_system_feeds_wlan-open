@@ -1,0 +1,546 @@
+From b6ed664f946dc41f3d89253a9c6ce666981e9ece Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 7 Sep 2022 18:42:49 +0530
+Subject: [PATCH 4/6] ath12k: pass ml params in WMI commands for SLO
+
+Fill the vdev create/start, peer create/assoc commands
+with ML params required for SLO.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/mac.c |  67 +++++++++++++-
+ drivers/net/wireless/ath/ath12k/wmi.c | 126 +++++++++++++++++++++++---
+ drivers/net/wireless/ath/ath12k/wmi.h |  89 ++++++++++++++++++
+ 3 files changed, 269 insertions(+), 13 deletions(-)
+
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/mac.c	2022-12-20 14:11:46.159402228 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/mac.c	2022-12-20 14:11:46.151402213 +0530
+@@ -2954,6 +2954,53 @@ static void ath12k_peer_assoc_h_phymode(
+ 	WARN_ON(phymode == MODE_UNKNOWN);
+ }
+ 
++static void ath12k_peer_assoc_h_mlo(struct ieee80211_sta *sta,
++				    struct peer_assoc_params *arg)
++{
++	struct peer_assoc_mlo_params *ml = &arg->ml;
++	struct ath12k_sta *arsta;
++	struct ath12k_peer *peer;
++	struct ath12k_base *ab;
++
++	arsta = (struct ath12k_sta *)sta->drv_priv;
++
++	if (!sta->is_mld)
++		return;
++
++	ab = arsta->arvif->ar->ab;
++
++	spin_lock_bh(&ab->base_lock);
++	peer = ath12k_peer_find_by_addr(ab, sta->link_addr);
++
++	if (!peer) {
++		spin_unlock_bh(&ab->base_lock);
++		return;
++	}
++
++	/* To keep things simple for SLO, use the same
++	 * link peer id as ML peer id
++	 */
++	ml->ml_peer_id = peer->peer_id;
++
++	spin_unlock_bh(&ab->base_lock);
++
++	/* For SLO below params are true */
++	ml->enabled = true;
++	ml->assoc_link = true;
++	ml->primary_umac = true;
++	ml->peer_id_valid = true;
++	ml->logical_link_idx_valid = true;
++
++	ether_addr_copy(&ml->mld_addr, sta->addr);
++
++	ath12k_dbg(ab, ATH12K_DBG_MAC, "sta mld addr %pM\n", ml->mld_addr);
++	/* currently using idx as 0 for SLO */
++	ml->logical_link_idx = 0;
++	ml->ieee_link_id = 0;
++
++	/* No partner info added for SLO */
++}
++
+ static void ath12k_peer_assoc_prepare(struct ath12k *ar,
+ 				      struct ieee80211_vif *vif,
+ 				      struct ieee80211_sta *sta,
+@@ -2983,6 +3030,9 @@ static void ath12k_peer_assoc_prepare(st
+ 	ath12k_peer_assoc_h_qos(ar, vif, sta, arg);
+ 	ath12k_peer_assoc_h_smps(sta, arg);
+ 
++	if (!reassoc)
++		ath12k_peer_assoc_h_mlo(sta, arg);
++
+ 	arsta->peer_nss = arg->peer_nss;
+ 
+ 	/* TODO: amsdu_disable req? */
+@@ -5359,6 +5409,7 @@ static int ath12k_mac_station_add(struct
+ 	peer_param.vdev_id = arvif->vdev_id;
+ 	peer_param.peer_addr = sta->link_addr;
+ 	peer_param.peer_type = WMI_PEER_TYPE_DEFAULT;
++	peer_param.ml_enabled = sta->is_mld;
+ 
+ 	ret = ath12k_peer_create(ar, arvif, sta, &peer_param);
+ 	if (ret) {
+@@ -7272,7 +7323,8 @@ static int ath12k_mac_setup_vdev_params_
+ }
+ 
+ static int ath12k_mac_setup_vdev_create_params(struct ath12k_vif *arvif,
+-					       struct vdev_create_params *params)
++					       struct vdev_create_params *params,
++					       bool is_mld)
+ {
+ 	struct ath12k *ar = arvif->ar;
+ 	struct ath12k_pdev *pdev = ar->pdev;
+@@ -7310,6 +7362,11 @@ static int ath12k_mac_setup_vdev_create_
+ 	}
+ 
+ 	params->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
++
++	/* for now, the assumption is the link and mld address are same */
++	if (is_mld)
++		ether_addr_copy(params->mld_addr, arvif->vif->addr);
++
+ 	return 0;
+ }
+ 
+@@ -7431,6 +7488,7 @@ static int ath12k_mac_vdev_create(struct
+ 	u16 nss;
+ 	int i;
+ 	int ret, vdev_id;
++	bool is_mld = false;
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
+ 
+@@ -7465,6 +7523,7 @@ static int ath12k_mac_vdev_create(struct
+ 		fallthrough;
+ 	case NL80211_IFTYPE_AP:
+ 		arvif->vdev_type = WMI_VDEV_TYPE_AP;
++		is_mld = vif->bss_conf.eht_support;
+ 		break;
+ 	case NL80211_IFTYPE_MONITOR:
+ 		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
+@@ -7484,7 +7543,7 @@ static int ath12k_mac_vdev_create(struct
+ 	for (i = 0; i < ARRAY_SIZE(vif->hw_queue); i++)
+ 		vif->hw_queue[i] = i % (ATH12K_HW_MAX_QUEUES - 1);
+ 
+-	ret = ath12k_mac_setup_vdev_create_params(arvif, &vdev_param);
++	ret = ath12k_mac_setup_vdev_create_params(arvif, &vdev_param, is_mld);
+ 	if (ret) {
+ 		ath12k_warn(ab, "failed to create vdev parameters %d: %d\n",
+ 			    arvif->vdev_id, ret);
+@@ -8212,10 +8271,15 @@ ath12k_mac_vdev_start_restart(struct ath
+ 		spin_unlock_bh(&ab->base_lock);
+ 
+ 		/* TODO: Notify if secondary 80Mhz also needs radar detection */
++
++		/* Partner links are not filled for now */
++		if (!restart && arvif->vif->bss_conf.eht_support)
++			arg.ml.enabled = true;
+ 	}
+ 
+ 	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
+ 
++
+ 	ath12k_dbg(ab, ATH12K_DBG_MAC,
+ 		   "mac vdev %d start center_freq %d phymode %s\n",
+ 		   arg.vdev_id, arg.channel.freq,
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/wmi.c	2022-12-20 14:11:46.159402228 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.c	2022-12-20 14:16:09.007912309 +0530
+@@ -728,18 +728,23 @@ int ath12k_wmi_vdev_create(struct ath12k
+ {
+ 	struct ath12k_pdev_wmi *wmi = ar->wmi;
+ 	struct wmi_vdev_create_cmd *cmd;
++	struct wmi_vdev_create_mlo_params *ml_params;
+ 	struct sk_buff *skb;
+ 	struct wmi_vdev_txrx_streams *txrx_streams;
+ 	struct wmi_tlv *tlv;
+ 	int ret, len;
+ 	void *ptr;
++	bool is_ml_vdev;
++
++	is_ml_vdev = is_valid_ether_addr(param->mld_addr);
+ 
+ 	/* It can be optimized my sending tx/rx chain configuration
+ 	 * only for supported bands instead of always sending it for
+ 	 * both the bands.
+ 	 */
+ 	len = sizeof(*cmd) + TLV_HDR_SIZE +
+-		(WMI_NUM_SUPPORTED_BAND_MAX * sizeof(*txrx_streams));
++		(WMI_NUM_SUPPORTED_BAND_MAX * sizeof(*txrx_streams)) +
++		(is_ml_vdev ? TLV_HDR_SIZE + sizeof(*ml_params) : 0);
+ 
+ 	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
+ 	if (!skb)
+@@ -789,6 +794,23 @@ int ath12k_wmi_vdev_create(struct ath12k
+ 	txrx_streams->supported_rx_streams =
+ 				 param->chains[NL80211_BAND_5GHZ].rx;
+ 
++	if (is_ml_vdev) {
++		ptr = skb->data + sizeof(*cmd) + TLV_HDR_SIZE +
++			(WMI_NUM_SUPPORTED_BAND_MAX * sizeof(*txrx_streams));
++		tlv = ptr;
++		tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
++			      FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_params));
++
++		ptr += TLV_HDR_SIZE;
++		ml_params = ptr;
++
++		ml_params->tlv_header =
++			FIELD_PREP(WMI_TLV_TAG, WMI_TAG_MLO_VDEV_CREATE_PARAMS) |
++			FIELD_PREP(WMI_TLV_LEN, ETH_ALEN);
++
++		ether_addr_copy(ml_params->mld_macaddr.addr, param->mld_addr);
++	}
++
+ 	ret = ath12k_wmi_cmd_send(wmi, skb, WMI_VDEV_CREATE_CMDID);
+ 	if (ret) {
+ 		ath12k_warn(ar->ab,
+@@ -947,15 +969,23 @@ int ath12k_wmi_vdev_start(struct ath12k
+ {
+ 	struct ath12k_pdev_wmi *wmi = ar->wmi;
+ 	struct wmi_vdev_start_request_cmd *cmd;
++	struct wmi_vdev_start_mlo_params *ml_params;
+ 	struct sk_buff *skb;
+ 	struct wmi_channel *chan;
+ 	struct wmi_tlv *tlv;
+ 	void *ptr;
+-	int ret, len;
++	int ret, len, ml_arg_size = 0;
+ 
+ 	if (WARN_ON(arg->ssid_len > sizeof(cmd->ssid.ssid)))
+ 		return -EINVAL;
+ 
++	/* partner links are not expected now for SLO */
++	WARN_ON(arg->ml.num_partner_links);
++
++	if (!restart && arg->ml.enabled)
++		ml_arg_size = TLV_HDR_SIZE + sizeof(*ml_params) +
++			      TLV_HDR_SIZE + 0; /* No partner info*/
++
+ 	len = sizeof(*cmd) + sizeof(*chan) + TLV_HDR_SIZE;
+ 
+ 	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
+@@ -1013,6 +1043,36 @@ int ath12k_wmi_vdev_start(struct ath12k
+ 
+ 	ptr += sizeof(*tlv);
+ 
++	if (!ml_arg_size)
++		goto send;
++
++	tlv = ptr;
++	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
++		      FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_params));
++	ptr += TLV_HDR_SIZE;
++
++	ml_params = ptr;
++
++	ml_params->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_MLO_VDEV_START_PARAMS) |
++				 FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_params) - TLV_HDR_SIZE);
++
++	ml_params->flags = FIELD_PREP(ATH12K_WMI_FLAG_MLO_ENABLED,
++				      arg->ml.enabled) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_ASSOC_LINK,
++				      arg->ml.assoc_link) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_MCAST_VDEV,
++				      arg->ml.mcast_link);
++
++	ptr += sizeof(*ml_params);
++
++	/* Empty partner links info for SLO */
++	tlv = ptr;
++	len = 0;
++	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
++		      FIELD_PREP(WMI_TLV_LEN, len);
++	ptr += TLV_HDR_SIZE;
++
++send:
+ 	if (restart)
+ 		ret = ath12k_wmi_cmd_send(wmi, skb,
+ 					  WMI_VDEV_RESTART_REQUEST_CMDID);
+@@ -1074,9 +1134,14 @@ int ath12k_wmi_send_peer_create_cmd(stru
+ 	struct ath12k_pdev_wmi *wmi = ar->wmi;
+ 	struct wmi_peer_create_cmd *cmd;
+ 	struct sk_buff *skb;
+-	int ret;
++	int ret, len;
++	struct wmi_peer_create_mlo_params *ml_param;
++	void *ptr;
++	struct wmi_tlv *tlv;
+ 
+-	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, sizeof(*cmd));
++	len = sizeof(*cmd) + TLV_HDR_SIZE + sizeof(*ml_param);
++
++	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+@@ -1088,6 +1153,18 @@ int ath12k_wmi_send_peer_create_cmd(stru
+ 	cmd->peer_type = param->peer_type;
+ 	cmd->vdev_id = param->vdev_id;
+ 
++	ptr = skb->data + sizeof(*cmd);
++	tlv = ptr;
++	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
++		      FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_param));
++	ptr += TLV_HDR_SIZE;
++
++	ml_param = ptr;
++	ml_param->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_MLO_PEER_CREATE_PARAMS) |
++				FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_param) - TLV_HDR_SIZE);
++
++	ml_param->flags = FIELD_PREP(ATH12K_WMI_FLAG_MLO_ENABLED, param->ml_enabled);
++
+ 	ret = ath12k_wmi_cmd_send(wmi, skb, WMI_PEER_CREATE_CMDID);
+ 	if (ret) {
+ 		ath12k_warn(ar->ab, "failed to submit WMI_PEER_CREATE cmd\n");
+@@ -1095,8 +1172,8 @@ int ath12k_wmi_send_peer_create_cmd(stru
+ 	}
+ 
+ 	ath12k_dbg(ar->ab, ATH12K_DBG_WMI,
+-		   "WMI peer create vdev_id %d peer_addr %pM num_peer : %d\n",
+-		   param->vdev_id, param->peer_addr, ar->num_peers);
++		   "WMI peer create vdev_id %d peer_addr %pM num_peer : %d\n ml_enabled %d\n",
++		   param->vdev_id, param->peer_addr, ar->num_peers, param->ml_enabled);
+ 
+ 	return ret;
+ }
+@@ -1872,6 +1949,7 @@ int ath12k_wmi_send_peer_assoc_cmd(struc
+ 	struct wmi_vht_rate_set *mcs;
+ 	struct wmi_he_rate_set *he_mcs;
+ 	struct wmi_eht_rate_set *eht_mcs;
++	struct wmi_peer_assoc_mlo_params *ml_params;
+ 	struct sk_buff *skb;
+ 	struct wmi_tlv *tlv;
+ 	void *ptr;
+@@ -1879,6 +1957,9 @@ int ath12k_wmi_send_peer_assoc_cmd(struc
+ 	u32 peer_ht_rates_align;
+ 	int i, ret, len;
+ 
++	/* No partner info for SLO support */
++	WARN_ON(param->ml.num_partner_links);
++
+ 	peer_legacy_rates_align = roundup(param->peer_legacy_rates.num_rates,
+ 					  sizeof(u32));
+ 	peer_ht_rates_align = roundup(param->peer_ht_rates.num_rates,
+@@ -1890,7 +1971,8 @@ int ath12k_wmi_send_peer_assoc_cmd(struc
+ 	      sizeof(*mcs) + TLV_HDR_SIZE +
+ 	      (sizeof(*he_mcs) * param->peer_he_mcs_count) +
+ 	      TLV_HDR_SIZE + (sizeof(*eht_mcs) * param->peer_eht_mcs_count) +
+-	      TLV_HDR_SIZE + TLV_HDR_SIZE;/* For MLO */
++	      TLV_HDR_SIZE + sizeof(*ml_params) +
++	      TLV_HDR_SIZE + 0; /* No partner info for SLO */
+ 
+ 	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
+ 	if (!skb)
+@@ -2017,13 +2099,34 @@ int ath12k_wmi_send_peer_assoc_cmd(struc
+ 		ptr += sizeof(*he_mcs);
+ 	}
+ 
+-	/* WAR fill MLO Header TAG with 0 length */
+-	len = 0;
++	/* MLO params */
+ 	tlv = ptr;
+ 	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
+-		      FIELD_PREP(WMI_TLV_LEN, len);
++		      FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_params));
+ 	ptr += TLV_HDR_SIZE;
+ 
++	ml_params = ptr;
++	ml_params->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_MLO_PEER_ASSOC_PARAMS) |
++				FIELD_PREP(WMI_TLV_LEN, sizeof(*ml_params) - TLV_HDR_SIZE);
++
++	ml_params->flags = FIELD_PREP(ATH12K_WMI_FLAG_MLO_ENABLED,
++				      param->ml.enabled) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_ASSOC_LINK,
++				      param->ml.assoc_link) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_PRIMARY_UMAC,
++				      param->ml.primary_umac) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_LOGICAL_LINK_IDX_VALID,
++				      param->ml.logical_link_idx_valid) |
++			   FIELD_PREP(ATH12K_WMI_FLAG_MLO_PEER_ID_VALID,
++				      param->ml.peer_id_valid);
++
++	ether_addr_copy(ml_params->mld_addr.addr, param->ml.mld_addr);
++	ml_params->logical_link_idx = param->ml.logical_link_idx;
++	ml_params->ml_peer_id = param->ml.ml_peer_id;
++	ml_params->ieee_link_id = param->ml.ieee_link_id;
++
++	ptr += sizeof(*ml_params);
++
+ 	/* Loop through the EHT rate set.
+ 	 */
+ 	len = param->peer_eht_mcs_count * sizeof(*eht_mcs);
+@@ -2043,7 +2146,7 @@ int ath12k_wmi_send_peer_assoc_cmd(struc
+ 		ptr += sizeof(*eht_mcs);
+ 	}
+ 
+-	/* fill ML Partner links Header TAG */
++	/* fill ML Partner links Header TAG, no partner for SLO */
+ 	len = 0;
+ 	tlv = ptr;
+ 	tlv->header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_ARRAY_STRUCT) |
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/wmi.h	2022-12-20 14:11:46.159402228 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.h	2022-12-20 14:11:46.155402219 +0530
+@@ -1943,6 +1943,10 @@ enum wmi_tlv_tag {
+ 	WMI_TAG_TPC_STATS_REG_PWR_ALLOWED,
+ 	WMI_TAG_TPC_STATS_RATES_ARRAY,
+ 	WMI_TAG_TPC_STATS_CTL_PWR_TABLE_EVENT,
++	WMI_TAG_MLO_PEER_ASSOC_PARAMS = 0x3D0,
++	WMI_TAG_MLO_PEER_CREATE_PARAMS = 0x3D5,
++	WMI_TAG_MLO_VDEV_START_PARAMS = 0x3D6,
++	WMI_TAG_MLO_VDEV_CREATE_PARAMS = 0x3D7,
+ 	WMI_TAG_CTRL_PATH_CMD_FIXED_PARAM = 0x442,
+ 	WMI_TAG_CTRL_PATH_EVENT_FIXED_PARAM,
+ 	WMI_TAG_MAX
+@@ -2769,6 +2773,7 @@ struct vdev_create_params {
+ 	u32 mbssid_flags;
+ 	u32 mbssid_tx_vdev_id;
+ 	u8 if_stats_id;
++	u8 mld_addr[ETH_ALEN];
+ };
+ 
+ #define ATH12K_MAX_VDEV_STATS_ID	0x30
+@@ -2795,6 +2800,32 @@ struct wmi_vdev_txrx_streams {
+ 	u32 supported_rx_streams;
+ } __packed;
+ 
++struct wmi_vdev_create_mlo_params {
++	u32 tlv_header;
++	struct wmi_mac_addr mld_macaddr;
++} __packed;
++
++#define ATH12K_WMI_FLAG_MLO_ENABLED			BIT(0)
++#define ATH12K_WMI_FLAG_MLO_ASSOC_LINK			BIT(1)
++#define ATH12K_WMI_FLAG_MLO_PRIMARY_UMAC		BIT(2)
++#define ATH12K_WMI_FLAG_MLO_LOGICAL_LINK_IDX_VALID	BIT(3)
++#define ATH12K_WMI_FLAG_MLO_PEER_ID_VALID		BIT(4)
++#define ATH12K_WMI_FLAG_MLO_MCAST_VDEV			BIT(5)
++#define ATH12K_WMI_FLAG_MLO_EMLSR_SUPPORT		BIT(6)
++#define ATH12K_WMI_FLAG_MLO_FORCED_INACTIVE		BIT(7)
++
++struct wmi_vdev_start_mlo_params {
++	u32 tlv_header;
++	u32 flags;
++} __packed;
++
++struct wmi_partner_link_info {
++	u32 tlv_header;
++	u32 vdev_id;
++	u32 hw_link_id;
++	struct wmi_mac_addr vdev_addr;
++} __packed;
++
+ struct wmi_vdev_delete_cmd {
+ 	u32 tlv_header;
+ 	u32 vdev_id;
+@@ -3040,6 +3071,22 @@ struct wmi_channel_arg {
+ 	enum wmi_phy_mode mode;
+ };
+ 
++#define ATH12K_WMI_MLO_MAX_LINKS 2
++
++struct wmi_ml_partner_info {
++	u32 vdev_id;
++	u32 hw_link_id;
++	u8 addr[ETH_ALEN];
++};
++
++struct wmi_ml_arg {
++	bool enabled;
++	bool assoc_link;
++	bool mcast_link;
++	u8 num_partner_links;
++	struct wmi_ml_partner_info partner_info[ATH12K_WMI_MLO_MAX_LINKS];
++};
++
+ struct wmi_vdev_start_req_arg {
+ 	u32 vdev_id;
+ 	struct wmi_channel_arg channel;
+@@ -3062,12 +3109,14 @@ struct wmi_vdev_start_req_arg {
+ 	u32 mbssid_flags;
+ 	u32 mbssid_tx_vdev_id;
+ 	u32 ru_punct_bitmap;
++	struct wmi_ml_arg ml;
+ };
+ 
+ struct peer_create_params {
+ 	const u8 *peer_addr;
+ 	u32 peer_type;
+ 	u32 vdev_id;
++	bool ml_enabled;
+ };
+ 
+ struct peer_delete_params {
+@@ -3211,6 +3260,11 @@ enum wmi_peer_type {
+ 	WMI_PEER_TYPE_TDLS = 2,
+ };
+ 
++struct wmi_peer_create_mlo_params {
++	u32 tlv_header;
++	u32 flags;
++} __packed;
++
+ struct wmi_peer_create_cmd {
+ 	u32 tlv_header;
+ 	u32 vdev_id;
+@@ -3938,6 +3992,20 @@ struct wmi_rate_set_arg {
+ 	u8 rates[WMI_MAX_SUPPORTED_RATES];
+ };
+ 
++struct peer_assoc_mlo_params {
++	bool enabled;
++	bool assoc_link;
++	bool primary_umac;
++	bool peer_id_valid;
++	bool logical_link_idx_valid;
++	u8 mld_addr[ETH_ALEN];
++	u32 logical_link_idx;
++	u32 ml_peer_id;
++	u32 ieee_link_id;
++	u8 num_partner_links;
++	struct wmi_ml_partner_info partner_info[ATH12K_WMI_MLO_MAX_LINKS];
++};
++
+ struct peer_assoc_params {
+ 	struct wmi_mac_addr peer_macaddr;
+ 	u32 vdev_id;
+@@ -4010,8 +4078,27 @@ struct peer_assoc_params {
+ 	struct ath12k_ppe_threshold peer_eht_ppet;
+ 	u32 ru_punct_bitmap;
+ 	bool is_assoc;
++	struct peer_assoc_mlo_params ml;
+ };
+ 
++struct wmi_peer_assoc_mlo_partner_info {
++	u32 tlv_header;
++	u32 vdev_id;
++	u32 hw_link_id;
++} __packed;
++
++struct wmi_peer_assoc_mlo_params {
++	u32 tlv_header;
++	u32 flags;
++	struct wmi_mac_addr mld_addr;
++	u32 logical_link_idx;
++	u32 ml_peer_id;
++	u32 ieee_link_id;
++	u32 emlsr_trans_timeout_us;
++	u32 emlsr_trans_delay_us;
++	u32 emlsr_padding_delay_us;
++} __packed;
++
+ struct  wmi_peer_assoc_complete_cmd {
+ 	u32 tlv_header;
+ 	struct wmi_mac_addr peer_macaddr;

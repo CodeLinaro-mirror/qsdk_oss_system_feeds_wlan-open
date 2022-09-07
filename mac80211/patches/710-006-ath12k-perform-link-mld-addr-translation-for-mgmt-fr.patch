@@ -1,0 +1,210 @@
+From 8a0afc2af7e2cc4b64cd2e78070dabcf6cd23762 Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 7 Sep 2022 20:11:06 +0530
+Subject: [PATCH 6/6] ath12k: perform link<->mld addr translation for mgmt
+ frame
+
+Since mac80211/hostapd works with mld address, ensure they
+are translated to link addr before sending to WMI.
+(Assuming FW expects link addr only - check while testing)
+Similarly on mgmt rx, convert the link addr to MLD addr
+before passing to mac80211
+
+Note: THis is a trial code, changes and optimizations
+are expected while dev testing.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.h  |  1 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c |  2 +-
+ drivers/net/wireless/ath/ath12k/mac.c   | 22 +++++++++++++++-------
+ drivers/net/wireless/ath/ath12k/peer.c  |  4 +++-
+ drivers/net/wireless/ath/ath12k/peer.h  |  1 +
+ drivers/net/wireless/ath/ath12k/wmi.c   | 24 ++++++++++++++++++++++++
+ 6 files changed, 45 insertions(+), 9 deletions(-)
+
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/core.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/core.h	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/core.h	2022-12-22 15:22:32.400855642 +0530
+@@ -386,6 +386,7 @@ struct ath12k_vif {
+ 	u64 obss_color_bitmap;
+ 	struct work_struct update_obss_color_notify_work;
+ 	struct ath12k_mgmt_frame_stats mgmt_stats;
++	bool is_ml_vif;
+ };
+ 
+ struct ath12k_vif_iter {
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp_rx.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/dp_rx.c	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/dp_rx.c	2022-12-22 15:22:32.400855642 +0530
+@@ -1168,7 +1168,7 @@ int ath12k_peer_rx_tid_setup(struct ath1
+ 
+ 	/* Update the REO queue LUT at the corresponding peer id and tid with qaddr */
+ 	ath12k_peer_rx_tid_qref_setup(ab, peer->peer_id, tid, paddr,
+-				      peer->sta ? peer->sta->is_mld : false);
++				      peer->is_ml_peer);
+ 
+ 	spin_unlock_bh(&ab->base_lock);
+ 
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/mac.c	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/mac.c	2022-12-22 15:23:04.028917599 +0530
+@@ -2991,7 +2991,7 @@ static void ath12k_peer_assoc_h_mlo(stru
+ 	ml->peer_id_valid = true;
+ 	ml->logical_link_idx_valid = true;
+ 
+-	ether_addr_copy(&ml->mld_addr, sta->addr);
++	ether_addr_copy(ml->mld_addr, sta->addr);
+ 
+ 	ath12k_dbg(ab, ATH12K_DBG_MAC, "sta mld addr %pM\n", ml->mld_addr);
+ 	/* currently using idx as 0 for SLO */
+@@ -6961,6 +6961,10 @@ static void ath12k_mac_op_tx(struct ieee
+ 		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
+ 
+ 		mgmt_stats = &arvif->mgmt_stats;
++
++		if (arvif->is_ml_vif && sta && sta->is_mld)
++			ether_addr_copy(hdr->addr1, sta->link_addr);
++
+ 		ret = ath12k_mac_mgmt_tx(ar, skb, is_prb_rsp);
+ 		if (ret) {
+ 			if (ret != -EBUSY)
+@@ -7323,8 +7327,7 @@ static int ath12k_mac_setup_vdev_params_
+ }
+ 
+ static int ath12k_mac_setup_vdev_create_params(struct ath12k_vif *arvif,
+-					       struct vdev_create_params *params,
+-					       bool is_mld)
++					       struct vdev_create_params *params)
+ {
+ 	struct ath12k *ar = arvif->ar;
+ 	struct ath12k_pdev *pdev = ar->pdev;
+@@ -7363,9 +7366,10 @@ static int ath12k_mac_setup_vdev_create_
+ 
+ 	params->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
+ 
+-	/* for now, the assumption is the link and mld address are same */
+-	if (is_mld)
+-		ether_addr_copy(params->mld_addr, arvif->vif->addr);
++	/* for now, the assumption is the link and mld address are same
++	 * also add the mld addr param for vdev create by default
++	 */
++	ether_addr_copy(params->mld_addr, arvif->vif->addr);
+ 
+ 	return 0;
+ }
+@@ -7488,7 +7492,6 @@ static int ath12k_mac_vdev_create(struct
+ 	u16 nss;
+ 	int i;
+ 	int ret, vdev_id;
+-	bool is_mld = false;
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
+ 
+@@ -7523,7 +7526,6 @@ static int ath12k_mac_vdev_create(struct
+ 		fallthrough;
+ 	case NL80211_IFTYPE_AP:
+ 		arvif->vdev_type = WMI_VDEV_TYPE_AP;
+-		is_mld = vif->bss_conf.eht_support;
+ 		break;
+ 	case NL80211_IFTYPE_MONITOR:
+ 		arvif->vdev_type = WMI_VDEV_TYPE_MONITOR;
+@@ -7543,7 +7545,7 @@ static int ath12k_mac_vdev_create(struct
+ 	for (i = 0; i < ARRAY_SIZE(vif->hw_queue); i++)
+ 		vif->hw_queue[i] = i % (ATH12K_HW_MAX_QUEUES - 1);
+ 
+-	ret = ath12k_mac_setup_vdev_create_params(arvif, &vdev_param, is_mld);
++	ret = ath12k_mac_setup_vdev_create_params(arvif, &vdev_param);
+ 	if (ret) {
+ 		ath12k_warn(ab, "failed to create vdev parameters %d: %d\n",
+ 			    arvif->vdev_id, ret);
+@@ -8273,7 +8275,7 @@ ath12k_mac_vdev_start_restart(struct ath
+ 		/* TODO: Notify if secondary 80Mhz also needs radar detection */
+ 
+ 		/* Partner links are not filled for now */
+-		if (!restart && arvif->vif->bss_conf.eht_support)
++		if (!restart && arvif->is_ml_vif)
+ 			arg.ml.enabled = true;
+ 	}
+ 
+@@ -9364,6 +9366,9 @@ ath12k_mac_op_assign_vif_chanctx(struct
+ 		return -EINVAL;
+ 
+ 	mutex_lock(&ah->conf_mutex);
++
++	/* Update the ml status of the vif irrespective of create status */
++	arvif->is_ml_vif = vif->bss_conf.eht_support;
+ 	if (!arvif->is_created) {
+ 		ar = ath12k_mac_assign_vif_to_vdev(hw, vif, ctx);
+ 		if (!ar) {
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/peer.c	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.c	2022-12-22 15:22:32.404855650 +0530
+@@ -391,8 +391,10 @@ int ath12k_peer_create(struct ath12k *ar
+ 	/* This address would be used only in ML context, anyways
+ 	 * for non ML the addr and mld_addr are same
+ 	 */
+-	if (sta)
++	if (sta && sta->is_mld) {
+ 		ether_addr_copy(peer->mld_addr, sta->addr);
++		peer->is_ml_peer = true;
++	}
+ 
+ 	if (arvif->vif->type == NL80211_IFTYPE_STATION) {
+ 		arvif->ast_hash = peer->ast_hash;
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.h
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/peer.h	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/peer.h	2022-12-22 15:22:32.404855650 +0530
+@@ -50,6 +50,7 @@ struct ath12k_peer {
+ 	 * a peer has setup its datapath or not
+ 	 */
+ 	bool dp_setup_done;
++	bool is_ml_peer;
+ };
+ 
+ void ath12k_peer_unmap_event(struct ath12k_base *ab, u16 peer_id);
+Index: backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.c
+===================================================================
+--- backports-20220404-5.4.164-f40abb4788.orig/drivers/net/wireless/ath/ath12k/wmi.c	2022-12-22 15:22:32.404855650 +0530
++++ backports-20220404-5.4.164-f40abb4788/drivers/net/wireless/ath/ath12k/wmi.c	2022-12-22 15:34:22.922257394 +0530
+@@ -986,7 +986,7 @@ int ath12k_wmi_vdev_start(struct ath12k
+ 		ml_arg_size = TLV_HDR_SIZE + sizeof(*ml_params) +
+ 			      TLV_HDR_SIZE + 0; /* No partner info*/
+ 
+-	len = sizeof(*cmd) + sizeof(*chan) + TLV_HDR_SIZE;
++	len = sizeof(*cmd) + sizeof(*chan) + TLV_HDR_SIZE + ml_arg_size;
+ 
+ 	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
+ 	if (!skb)
+@@ -7526,6 +7526,26 @@ skip_mgmt_stats:
+ 		   status->freq, status->band, status->signal,
+ 		   status->rate_idx);
+ 
++	/* Do the Link->MLD conversion for MLD peer since
++	 * mac80211 expects sta->addr as MLD address.
++	 */
++	if(!is_valid_ether_addr(hdr->addr2))
++		goto send;
++
++	spin_lock_bh(&ab->base_lock);
++
++	peer = ath12k_peer_find_by_addr(ab, hdr->addr2);
++	/* If peer is not found just skip the conversion */
++	if(peer && peer->is_ml_peer) {
++		ether_addr_copy(hdr->addr2, peer->mld_addr);
++		/* No need conversion for RA, since we assume
++		 * MLD and link addr for vif same currently
++		 */
++	}
++
++	spin_unlock_bh(&ab->base_lock);
++
++send:
+ 	ieee80211_rx_ni(ar->ah->hw, skb);
+ 
+ exit:

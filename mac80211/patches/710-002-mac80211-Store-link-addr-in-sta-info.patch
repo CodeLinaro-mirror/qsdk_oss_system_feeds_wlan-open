@@ -1,0 +1,137 @@
+From e53e0ece43317afbccf42d7bc08884ccf66a7120 Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 7 Sep 2022 11:22:55 +0530
+Subject: [PATCH 2/6] mac80211: Store link addr in sta info
+
+In case of MLD SLO, the mac80211 needs to be
+aware of the MLD address which is the sta->addr
+and the link address corresponding to the single
+link peer which is getting added. This link addr
+is stored in sta_info object as well as the public
+visible sta object for driver use and necessary
+conversion actions.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ include/net/mac80211.h  | 12 +++++++++++-
+ net/mac80211/cfg.c      | 13 +++++++++++++
+ net/mac80211/sta_info.c |  5 +++++
+ net/mac80211/sta_info.h | 11 +++++++++++
+ 4 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index cf2579f..37b71d0 100644
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -2167,7 +2167,7 @@ struct ieee80211_sta_txpwr {
+  * or you must take good care to not use such a pointer after a
+  * call to your sta_remove callback that removed it.
+  *
+- * @addr: MAC address
++ * @addr: MAC address. Indicates MLD address when @is_mld is set
+  * @aid: AID we assigned to the station if we're an AP
+  * @supp_rates: Bitmap of supported rates (per band)
+  * @ht_cap: HT capabilities of this STA; restricted to our own capabilities
+@@ -2207,6 +2207,13 @@ struct ieee80211_sta_txpwr {
+  * @txpwr: the station tx power configuration
+  * @txq: per-TID data TX queues (if driver uses the TXQ abstraction); note that
+  *	the last entry (%IEEE80211_NUM_TIDS) is used for non-data frames
++ * @is_mld: Indicates a MLD STA. Currently only Single
++ * 	link opertaion is supported, hence the addr of
++ * 	STA indicates the MLD address and the link_addr
++ * 	indicates the peer link address.
++ * @link_addr: Indicates the link STA address. When @is_mld
++ * 	is false the addr and link_addr is same. Else this
++ * 	indicates the link peer address.
+  */
+ struct ieee80211_sta {
+ 	u32 supp_rates[NUM_NL80211_BANDS];
+@@ -2255,6 +2262,9 @@ struct ieee80211_sta {
+ 
+ 	struct ieee80211_txq *txq[IEEE80211_NUM_TIDS + 1];
+ 
++	bool is_mld;
++	u8 link_addr[ETH_ALEN];
++
+ 	/* must be last */
+ 	u8 drv_priv[] __aligned(sizeof(void *));
+ };
+diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
+index bfbe75e..c1f49f5 100644
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -2035,6 +2035,19 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
+ 	if (params->sta_flags_set & BIT(NL80211_STA_FLAG_TDLS_PEER))
+ 		sta->sta.tdls = true;
+ 
++	/* Update the link address in case of MLD STA
++	 * The link address is only for conversion purposes and for
++	 * driver use. mac80211 expects only MLD address for control
++	 * and datapath and assumes driver does necessary conversion
++	 * Note: Assumes SLO only
++	 */
++	if (params->link_addr) {
++		memcpy(sta->link_addr, params->link_addr, ETH_ALEN);
++		memcpy(sta->sta.link_addr, params->link_addr, ETH_ALEN);
++		sta->is_mld = true;
++		sta->sta.is_mld = true;
++	}
++
+ 	err = sta_apply_parameters(local, sta, params);
+ 	if (err) {
+ 		sta_info_free(local, sta);
+diff --git a/net/mac80211/sta_info.c b/net/mac80211/sta_info.c
+index 8af22a8..691a861 100644
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -386,6 +386,11 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
+ 
+ 	memcpy(sta->addr, addr, ETH_ALEN);
+ 	memcpy(sta->sta.addr, addr, ETH_ALEN);
++
++	/* default link addr same as passed mac addr */
++	memcpy(sta->link_addr, addr, ETH_ALEN);
++	memcpy(sta->sta.link_addr, addr, ETH_ALEN);
++
+ 	sta->sta.max_rx_aggregation_subframes =
+ 		local->hw.max_rx_aggregation_subframes;
+ 
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index 11001f9..5a0f41f 100644
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -511,6 +511,7 @@ struct ieee80211_fragment_cache {
+  * @hash_node: hash node for rhashtable
+  * @addr: station's MAC address - duplicated from public part to
+  *	let the hash table work with just a single cacheline
++ *	Indicates MLD address when @is_mld is set
+  * @local: pointer to the global information
+  * @sdata: virtual interface this station belongs to
+  * @ptk: peer keys negotiated with this station, if any
+@@ -585,6 +586,13 @@ struct ieee80211_fragment_cache {
+  * @status_stats.ack_signal_filled: last ACK signal validity
+  * @status_stats.avg_ack_signal: average ACK signal
+  * @frags: fragment cache
++ * @is_mld: Indicates a MLD STA. Currently only Single
++ * 	link opertaion is supported, hence the addr of
++ * 	STA indicates the MLD address and the link_addr
++ * 	indicates the peer link address.
++ * @link_addr: Indicates the link STA address. When @is_mld
++ * 	is false the addr and link_addr is same. Else this
++ * 	indicates the link peer address.
+  */
+ struct sta_info {
+ 	/* General information, mostly static */
+@@ -701,6 +709,9 @@ struct sta_info {
+ 	/* Rx packets forwarded to bridge */
+ 	atomic_t rx_forwarded_pkts;
+ 
++	bool is_mld;
++	u8 link_addr[ETH_ALEN];
++
+ 	/* keep last! */
+ 	struct ieee80211_sta sta;
+ };
+-- 
+2.17.1
+
