@@ -1059,24 +1059,26 @@ mac80211_setup_supplicant_noctl() {
 		VHT160|HE160|EHT160)
 			centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")";;
 	esac
-	if [ $centre_freq -gt 5240 ] && [ $centre_freq -lt 5745 ]; then
-		while true;
-		do
-			if [ $(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ]; then
-				break;
-			fi
 
-			if [ $(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "DISCONNECTED" ]; then
-				continue
-			fi
+	while true;
+	do
+		if [ $(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ]; then
+			break;
+		fi
+
+		if [ $(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "DISCONNECTED" ]; then
+			continue
+		fi
+
+		if [ $centre_freq -gt 5240 ] && [ $centre_freq -lt 5745 ]; then
 			wpa_state="$(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)"
 			cac_state="$(wpa_cli -i $ifname status 2> /dev/null | grep cac | cut -d'=' -f 2)"
 			if [ $wpa_state = "SCANNING" ] && [ $cac_state = "inprogress" ]; then
 				break;
 			fi
+		fi
 		usleep 100000
-		done
-	fi
+	done
 }
 
 mac80211_setup_adhoc() {
