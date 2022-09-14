@@ -1,7 +1,7 @@
-From 9368f8e3e822442c13542885dac02331df46163c Mon Sep 17 00:00:00 2001
+From 22f80dbfaa8d7b0e2a463d484e01938d5a189054 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <quic_alokad@quicinc.com>
 Date: Tue, 20 Jul 2021 16:15:31 -0700
-Subject: [PATCH 09/27] nl80211: beacon EHT rate support
+Subject: [PATCH] nl80211: beacon EHT rate support
 
 Add new attributes and feature flags to support EHT rates for beacons.
 Parse the beacon rate passed by the userspace, validate and pass it
@@ -10,10 +10,12 @@ down to mac80211.
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 ---
  include/net/cfg80211.h       |   1 +
- include/uapi/linux/nl80211.h |  21 ++++-
- net/wireless/nl80211.c       | 148 ++++++++++++++++++++++++++++++++++-
- 3 files changed, 164 insertions(+), 6 deletions(-)
+ include/uapi/linux/nl80211.h |  20 ++++-
+ net/wireless/nl80211.c       | 179 ++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 194 insertions(+), 6 deletions(-)
 
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 436bd6c09eb1..34bec2b6d1ee 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -792,6 +792,7 @@ struct cfg80211_bitrate_mask {
@@ -24,6 +26,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	} control[NUM_NL80211_BANDS];
  };
  
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 52b9f6abdd60..e5a9689beb06 100644
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
 @@ -1838,8 +1838,9 @@ enum nl80211_commands {
@@ -88,9 +92,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* add new features before the definition below */
  	NUM_NL80211_EXT_FEATURES,
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index d2ffa9c0b1fc..6e62db0c2ec6 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -390,6 +390,8 @@ static const struct nla_policy nl80211_t
+@@ -390,6 +390,8 @@ static const struct nla_policy nl80211_txattr_policy[NL80211_TXRATE_MAX + 1] = {
  		.type = NLA_EXACT_LEN_WARN,
  		.len = sizeof(struct nl80211_txrate_he),
  	},
@@ -99,7 +105,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static const struct nla_policy
-@@ -4927,6 +4929,108 @@ static bool he_set_mcs_mask(struct genl_
+@@ -4927,6 +4929,139 @@ static bool he_set_mcs_mask(struct genl_info *info,
  	return true;
  }
  
@@ -111,9 +117,18 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	struct net_device *dev = info->user_ptr[1];
 +	struct wireless_dev *wdev = dev->ieee80211_ptr;
 +	u8 mcs_nss_len, nss, mcs_7 = 0, mcs_9 = 0, mcs_11 = 0, mcs_13 = 0;
++	bool mcs_14 = false, mcs_15 = false;
 +
 +	mcs_nss_len = ieee80211_eht_mcs_nss_size(&he_cap->he_cap_elem,
 +						 &eht_cap->eht_cap_elem);
++
++	if (eht_cap->eht_cap_elem.phy_cap_info[6] &
++	    IEEE80211_EHT_PHY_CAP6_EHT_DUP_6GHZ_SUPP)
++		mcs_14 = true;
++
++	if (eht_cap->eht_cap_elem.phy_cap_info[6] &
++	    IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_MASK)
++		mcs_15 = true;
 +
 +	if (mcs_nss_len == 4) {
 +		const struct ieee80211_eht_mcs_nss_supp_20mhz_only *mcs =
@@ -149,6 +164,13 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	}
 +
 +	for (nss = 0; nss < NL80211_EHT_NSS_MAX; nss++) {
++		if (nss == 0) {
++			if (mcs_14)
++				mcs_mask[nss] |= 0x4000;
++			if (mcs_15)
++				mcs_mask[nss] |= 0x8000;
++		}
++
 +		if (!mcs_7)
 +			continue;
 +		mcs_mask[nss] |= 0x00FF;
@@ -191,6 +213,21 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	if (!eht_cap)
 +		return false;
 +
++	/* Checks for MCS 14 and 15 */
++	if (txrate->mcs[0] & 0x4000) {
++		if (sband->band != NL80211_BAND_6GHZ)
++			return false;
++
++		if (!(eht_cap->eht_cap_elem.phy_cap_info[6] &
++		      IEEE80211_EHT_PHY_CAP6_EHT_DUP_6GHZ_SUPP))
++			return false;
++	}
++
++	if (txrate->mcs[0] & 0x8000)
++		if (!(eht_cap->eht_cap_elem.phy_cap_info[6] &
++		      IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_MASK))
++			return false;
++
 +	if (eht_build_mcs_mask(info, he_cap, eht_cap, tx_mcs_mask))
 +		return false;
 +
@@ -208,7 +245,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static int nl80211_parse_tx_bitrate_mask(struct genl_info *info,
  					 struct nlattr *attrs[],
  					 enum nl80211_attrs attr,
-@@ -4946,6 +5050,7 @@ static int nl80211_parse_tx_bitrate_mask
+@@ -4946,6 +5081,7 @@ static int nl80211_parse_tx_bitrate_mask(struct genl_info *info,
  	/* Default to all rates enabled */
  	for (i = 0; i < NUM_NL80211_BANDS; i++) {
  		const struct ieee80211_sta_he_cap *he_cap;
@@ -216,7 +253,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  		if (!default_all_enabled)
  			break;
-@@ -4972,6 +5077,13 @@ static int nl80211_parse_tx_bitrate_mask
+@@ -4972,6 +5108,13 @@ static int nl80211_parse_tx_bitrate_mask(struct genl_info *info,
  		he_tx_mcs_map = he_get_txmcsmap(info, he_cap);
  		he_build_mcs_mask(he_tx_mcs_map, mask->control[i].he_mcs);
  
@@ -230,7 +267,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		mask->control[i].he_gi = 0xFF;
  		mask->control[i].he_ltf = 0xFF;
  	}
-@@ -5052,13 +5164,20 @@ static int nl80211_parse_tx_bitrate_mask
+@@ -5052,13 +5195,20 @@ static int nl80211_parse_tx_bitrate_mask(struct genl_info *info,
  				return -EINVAL;
  		}
  
@@ -252,7 +289,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  				return -EINVAL;
  
  			for (i = 0; i < IEEE80211_HT_MCS_MASK_LEN; i++)
-@@ -5073,6 +5192,10 @@ static int nl80211_parse_tx_bitrate_mask
+@@ -5073,6 +5223,10 @@ static int nl80211_parse_tx_bitrate_mask(struct genl_info *info,
  				if (mask->control[band].he_mcs[i])
  					goto out;
  
@@ -263,7 +300,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  			/* legacy and mcs rates may not be both empty */
  			return -EINVAL;
  		}
-@@ -5086,7 +5209,7 @@ static int validate_beacon_tx_rate(struc
+@@ -5086,7 +5240,7 @@ static int validate_beacon_tx_rate(struct cfg80211_registered_device *rdev,
  				   enum nl80211_band band,
  				   struct cfg80211_bitrate_mask *beacon_rate)
  {
@@ -272,7 +309,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	u32 rate = beacon_rate->control[band].legacy;
  
  	/* Allow only one rate */
-@@ -5132,8 +5255,21 @@ static int validate_beacon_tx_rate(struc
+@@ -5132,8 +5286,21 @@ static int validate_beacon_tx_rate(struct cfg80211_registered_device *rdev,
  			return -EINVAL;
  	}
  
@@ -296,7 +333,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -EINVAL;
  
  	if (rate &&
-@@ -5152,6 +5288,10 @@ static int validate_beacon_tx_rate(struc
+@@ -5152,6 +5319,10 @@ static int validate_beacon_tx_rate(struct cfg80211_registered_device *rdev,
  	    !wiphy_ext_feature_isset(&rdev->wiphy,
  				     NL80211_EXT_FEATURE_BEACON_RATE_HE))
  		return -EINVAL;
@@ -307,3 +344,6 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	return 0;
  }
+-- 
+2.7.4
+
