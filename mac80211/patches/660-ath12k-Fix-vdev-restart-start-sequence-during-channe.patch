@@ -29,9 +29,9 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 
 Index: b/drivers/net/wireless/ath/ath12k/mac.c
 ===================================================================
---- a/drivers/net/wireless/ath/ath12k/mac.c	2022-08-23 10:49:43.378985500 +0530
-+++ b/drivers/net/wireless/ath/ath12k/mac.c	2022-08-23 10:53:25.996918793 +0530
-@@ -7941,9 +7941,88 @@ static int ath12k_mac_vdev_start(struct
+--- a/drivers/net/wireless/ath/ath12k/mac.c	2022-09-16 10:32:52.495508480 +0530
++++ b/drivers/net/wireless/ath/ath12k/mac.c	2022-09-16 10:33:48.403031724 +0530
+@@ -8098,9 +8098,88 @@ static int ath12k_mac_vdev_start(struct
  }
  
  static int ath12k_mac_vdev_restart(struct ath12k_vif *arvif,
@@ -122,7 +122,7 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
  }
  
  struct ath12k_mac_change_chanctx_arg {
-@@ -8068,19 +8147,23 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -8225,19 +8304,23 @@ ath12k_mac_update_vif_chan(struct ath12k
  	struct ath12k_vif *arvif, *tx_arvif;
  	struct cfg80211_chan_def *chandef = NULL;
  	int ret;
@@ -153,7 +153,7 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
  		arvif = (void *)vifs[i].vif->drv_priv;
  
  		if (vifs[i].vif->type == NL80211_IFTYPE_MONITOR)
-@@ -8097,41 +8180,56 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -8254,46 +8337,64 @@ ath12k_mac_update_vif_chan(struct ath12k
  		if (WARN_ON(!arvif->is_started))
  			continue;
  
@@ -198,11 +198,24 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
 +						   trans_vdev_index);
  
 -		ret = ath12k_mac_setup_bcn_tmpl(arvif);
- 		if (ret)
+-		if (ret)
 -			ath12k_warn(ab, "failed to update bcn tmpl during csa: %d\n",
 -				    ret);
+-
+-		params.vdev_id = arvif->vdev_id;
+-		params.aid = arvif->aid;
+-		params.bssid = arvif->bssid;
+-		if (arvif->vif->mbssid_tx_vif) {
+-			tx_arvif = (void *)arvif->vif->mbssid_tx_vif->drv_priv;
+-			params.tx_bssid = tx_arvif->bssid;
+-			params.profile_idx = arvif->vif->bss_conf.bssid_index;
+-			params.profile_count = tx_arvif->nontransmitting_vif_count;
++		if (ret) {
 +			ath12k_warn(ab, "failed to restart vdev:%d: %d\n",
 +				    tx_arvif->vdev_id, ret);
++			goto restart_fail;
+ 		}
+-		ret = ath12k_wmi_vdev_up(arvif->ar, &params);
 +	}
 +
 +	for (i = 0; i < n_vifs; i++) {
@@ -218,20 +231,29 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
 +		ret = ath12k_vdev_restart_sequence(arvif,
 +						   vifs[i].new_ctx,
 +						   vif_down_failed_map, i);
- 
--		params.vdev_id = arvif->vdev_id;
--		params.aid = arvif->aid;
--		params.bssid = arvif->bssid;
--		if (arvif->vif->mbssid_tx_vif) {
--			tx_arvif = (void *)arvif->vif->mbssid_tx_vif->drv_priv;
--			params.tx_bssid = tx_arvif->bssid;
--			params.profile_idx = arvif->vif->bss_conf.bssid_index;
--			params.profile_count = tx_arvif->nontransmitting_vif_count;
--		}
--		ret = ath12k_wmi_vdev_up(arvif->ar, &params);
++
  		if (ret) {
 -			ath12k_warn(ab, "failed to bring vdev up %d: %d\n",
 +			ath12k_warn(ab, "failed to bring up vdev %d: %d\n",
  				    arvif->vdev_id, ret);
  			continue;
  		}
+ 	}
+ 
++restart_fail:
+ 	/* Restart the internal monitor vdev on new channel */
+ 	if (!monitor_vif &&
+ 	    test_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags)) {
+Index: b/drivers/net/wireless/ath/ath12k/wmi.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/wmi.h	2022-09-16 10:32:52.215510869 +0530
++++ b/drivers/net/wireless/ath/ath12k/wmi.h	2022-09-16 10:33:07.427381128 +0530
+@@ -2810,7 +2810,7 @@ struct wmi_ssid {
+ 	u32 ssid[8];
+ } __packed;
+ 
+-#define ATH12K_VDEV_SETUP_TIMEOUT_HZ (3 * HZ)
++#define ATH12K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
+ 
+ struct wmi_vdev_start_request_cmd {
+ 	u32 tlv_header;
