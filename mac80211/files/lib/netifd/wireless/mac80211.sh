@@ -453,7 +453,7 @@ mac80211_hostapd_setup_base() {
 			vht160_hw=0
 			case "$htmode" in
 				VHT160|HE160|EHT160|EHT320)
-					[ "$(($vht_cap & 12))" -eq 8 -a 1 -le "$vht160" ] && \
+					[ "$(($vht_cap & 12))" -eq 4 -a 1 -le "$vht160" ] && \
 					vht160_hw=1
 					[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
 					;;
@@ -843,7 +843,7 @@ find_phy() {
 	delta=$(($radio_idx - $first_phy_idx))
 
 	[ -n "$path" ] && {
-		sleep 1
+		sleep 2
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
 				*$path)
