@@ -72,8 +72,10 @@ define KernelPackage/mac80211
   TITLE:=Linux 802.11 Wireless Networking Stack
   DEPENDS+= @TARGET_ipq95xx||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
-	+!TARGET_ipq95xx:kmod-qca-nss-drv-wifi-meshmgr +!TARGET_ipq95xx:kmod-qca-nss-drv
+	+!TARGET_ipq95xx:kmod-qca-nss-drv-wifi-meshmgr +!TARGET_ipq95xx:kmod-qca-nss-drv +TARGET_ipq95xx:kmod-qca-nss-ppe +TARGET_ipq95xx:kmod-qca-nss-ppe-vp
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe:kmod-qca-nss-ppe
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -91,6 +93,15 @@ define KernelPackage/mac80211/config
 		  This option enables support for NSS in boards
 		  like AP148.
     endif
+
+    if PACKAGE_kmod-qca-nss-ppe-vp
+	config PACKAGE_MAC80211_PPE_SUPPORT
+		bool "Enable PPE support for IPQ platform"
+		default y
+		help
+		  This option enables support for PPE in boards
+		  like RDP433
+     endif
 
 	config PACKAGE_MAC80211_DEBUGFS
 		bool "Export mac80211 internals in DebugFS"
@@ -500,6 +511,7 @@ ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
 endif
 
 config-$(CONFIG_PACKAGE_MAC80211_NSS_SUPPORT) += MAC80211_NSS_SUPPORT
+config-$(CONFIG_PACKAGE_MAC80211_PPE_SUPPORT) += MAC80211_PPE_SUPPORT
 config-$(CONFIG_PACKAGE_MAC80211_MESSAGE_TRACING) += MAC80211_MESSAGE_TRACING ATH10K_TRACING ATH11K_TRACING ATH12K_TRACING
 config-$(CONFIG_PACKAGE_MAC80211_DEBUG_MENU) += MAC80211_DEBUG_MENU
 config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
@@ -548,7 +560,7 @@ config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS
 MAKE_OPTS:= -C "$(PKG_BUILD_DIR)" \
 	CROSS_COMPILE="$(KERNEL_CROSS)" \
 	ARCH="$(LINUX_KARCH)" \
-	EXTRA_CFLAGS="-I$(PKG_BUILD_DIR)/include -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-clients -Wall -Werror -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion" \
+	EXTRA_CFLAGS="-I$(PKG_BUILD_DIR)/include -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -Wall -Werror -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion" \
 	KLIB_BUILD="$(LINUX_DIR)" \
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \
