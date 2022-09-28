@@ -1,0 +1,179 @@
+From 28780d1c27bb667044842114ee95212dc13e5eec Mon Sep 17 00:00:00 2001
+From: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+Date: Wed, 28 Sep 2022 21:42:45 +0800
+Subject: [PATCH] mac80211: ajust the SAE/OWE association timeout
+
+WPA3 SAE/OWE association needs more time. So it needs to ajust the
+association related timeout.
+
+Signed-off-by: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+---
+ include/linux/ieee80211.h  |  1 +
+ net/mac80211/ieee80211_i.h |  1 +
+ net/mac80211/mlme.c        | 93 ++++++++++++++++++++++++++++++++++++++++------
+ 3 files changed, 84 insertions(+), 11 deletions(-)
+
+diff --git a/include/linux/ieee80211.h b/include/linux/ieee80211.h
+index cccaa6b..801caf3 100644
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -2323,6 +2323,7 @@ enum ieee80211_sa_query_action {
+ #define WLAN_AKM_SUITE_TDLS		0x000FAC07
+ #define WLAN_AKM_SUITE_SAE		0x000FAC08
+ #define WLAN_AKM_SUITE_FT_OVER_SAE	0x000FAC09
++#define WLAN_AKM_SUITE_OWE		0x000FAC12
+ 
+ #define WLAN_MAX_KEY_LEN		32
+ 
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index e3482a2..616b6bb 100644
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -391,6 +391,7 @@ struct ieee80211_mgd_assoc_data {
+ 
+ 	struct ieee80211_vht_cap ap_vht_cap;
+ 
++	u32 akm_suite;
+ 	size_t ie_len;
+ 	u8 ie[];
+ };
+diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
+index 03e13fc..5edfa0a 100644
+--- a/net/mac80211/mlme.c
++++ b/net/mac80211/mlme.c
+@@ -40,6 +40,9 @@
+ #define IEEE80211_ASSOC_TIMEOUT		(HZ / 5)
+ #define IEEE80211_ASSOC_TIMEOUT_LONG	(HZ / 2)
+ #define IEEE80211_ASSOC_TIMEOUT_SHORT	(HZ / 10)
++#define IEEE80211_ASSOC_TIMEOUT_SAE	(HZ)
++#define IEEE80211_ASSOC_TIMEOUT_LONG_SAE	(HZ * 2)
++#define IEEE80211_ASSOC_TIMEOUT_SHORT_SAE	((HZ*2) / 3)
+ #define IEEE80211_ASSOC_MAX_TRIES	3
+ 
+ static int max_nullfunc_tries = 2;
+@@ -3806,17 +3809,26 @@ static int ieee80211_do_assoc(struct ieee80211_sub_if_data *sdata)
+ 	ieee80211_send_assoc(sdata);
+ 
+ 	if (!ieee80211_hw_check(&local->hw, REPORTS_TX_ACK_STATUS)) {
+-		assoc_data->timeout = jiffies + IEEE80211_ASSOC_TIMEOUT;
+-		assoc_data->timeout_started = true;
+-		run_again(sdata, assoc_data->timeout);
++		if (assoc_data->akm_suite == WLAN_AKM_SUITE_OWE ||
++				assoc_data->akm_suite == WLAN_AKM_SUITE_SAE)
++			assoc_data->timeout = jiffies + IEEE80211_ASSOC_TIMEOUT_SAE;
++		else
++			assoc_data->timeout = jiffies + IEEE80211_ASSOC_TIMEOUT;
+ 	} else {
+-		assoc_data->timeout =
+-			round_jiffies_up(jiffies +
+-					 IEEE80211_ASSOC_TIMEOUT_LONG);
+-		assoc_data->timeout_started = true;
+-		run_again(sdata, assoc_data->timeout);
++		if (assoc_data->akm_suite == WLAN_AKM_SUITE_OWE ||
++				assoc_data->akm_suite == WLAN_AKM_SUITE_SAE)
++			assoc_data->timeout =
++				round_jiffies_up(jiffies +
++						 IEEE80211_ASSOC_TIMEOUT_LONG_SAE);
++		else
++			assoc_data->timeout =
++				round_jiffies_up(jiffies +
++						 IEEE80211_ASSOC_TIMEOUT_LONG);
+ 	}
+ 
++	assoc_data->timeout_started = true;
++	run_again(sdata, assoc_data->timeout);
++
+ 	return 0;
+ }
+ 
+@@ -3864,8 +3876,13 @@ void ieee80211_sta_work(struct ieee80211_sub_if_data *sdata)
+ 			   (ieee80211_is_assoc_req(fc) ||
+ 			    ieee80211_is_reassoc_req(fc))) {
+ 			if (status_acked) {
+-				ifmgd->assoc_data->timeout =
+-					jiffies + IEEE80211_ASSOC_TIMEOUT_SHORT;
++				if (ifmgd->assoc_data->akm_suite == WLAN_AKM_SUITE_OWE ||
++						ifmgd->assoc_data->akm_suite == WLAN_AKM_SUITE_SAE)
++					ifmgd->assoc_data->timeout =
++						jiffies + IEEE80211_ASSOC_TIMEOUT_SHORT_SAE;
++				else
++					ifmgd->assoc_data->timeout =
++						jiffies + IEEE80211_ASSOC_TIMEOUT_SHORT;
+ 				run_again(sdata, ifmgd->assoc_data->timeout);
+ 			} else {
+ 				ifmgd->assoc_data->timeout = jiffies - 1;
+@@ -4588,9 +4605,12 @@ int ieee80211_mgd_assoc(struct ieee80211_sub_if_data *sdata,
+ 	struct ieee80211_mgd_assoc_data *assoc_data;
+ 	const struct cfg80211_bss_ies *beacon_ies;
+ 	struct ieee80211_supported_band *sband;
+-	const u8 *ssidie, *ht_ie, *vht_ie;
++	const u8 *ssidie, *ht_ie, *vht_ie, *rsn_ie;
+ 	int i, err;
+ 	bool override = false;
++	size_t rsn_ie_len;
++	u32 akm_suite;
++	u16 cnt;
+ 
+ 	assoc_data = kzalloc(sizeof(*assoc_data) + req->ie_len, GFP_KERNEL);
+ 	if (!assoc_data)
+@@ -4867,6 +4887,57 @@ int ieee80211_mgd_assoc(struct ieee80211_sub_if_data *sdata,
+ 			   corrupt_type);
+ 	}
+ 
++	rcu_read_lock();
++	rsn_ie = ieee80211_bss_get_ie(req->bss, WLAN_EID_RSN);
++	if (rsn_ie) {
++		rsn_ie_len = *(rsn_ie + 1);
++		/* skip element id and length */
++		rsn_ie += 2;
++
++		/* skip version */
++		if (rsn_ie_len < 2) {
++			rcu_read_unlock();
++			kfree(assoc_data);
++			return -EINVAL;
++		}
++		rsn_ie +=  2;
++		rsn_ie_len -= 2;
++
++		/* skip group cipher suite */
++		if (rsn_ie_len < 4) {
++			rcu_read_unlock();
++			return 0;
++		}
++		rsn_ie +=  4;
++		rsn_ie_len -= 4;
++
++		/* skip pairwise cipher suite */
++		if (rsn_ie_len < 2) {
++			rcu_read_unlock();
++			return 0;
++		}
++		cnt = get_unaligned_le16(rsn_ie);
++		rsn_ie += (2 + cnt * 4);
++		rsn_ie_len -= (2 + cnt * 4);
++
++		/* get akm suite */
++		if (rsn_ie_len < 2) {
++			rcu_read_unlock();
++			return 0;
++		}
++		cnt = get_unaligned_le16(rsn_ie);
++		rsn_ie += 2;
++		for (i=0; i<cnt; i++)
++		{
++			rsn_ie += (i * 4);
++			memcpy(&akm_suite, rsn_ie, sizeof(u32));
++			if (akm_suite == WLAN_AKM_SUITE_OWE ||
++					akm_suite == WLAN_AKM_SUITE_SAE)
++				assoc_data->akm_suite = akm_suite;
++		}
++	}
++	rcu_read_unlock();
++
+ 	return 0;
+  err_clear:
+ 	eth_zero_addr(ifmgd->bssid);
+-- 
+2.7.4
+
