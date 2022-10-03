@@ -636,11 +636,13 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "he_spr_non_srg_obss_pd_max_offset=$he_spr_non_srg_obss_pd_max_offset" "$N"
 		}
 		config_get enable_color mac80211 enable_color 1
-                if [ $enable_color -eq 1 ]; then
-                        bsscolor=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
-                        bsscolor=$(($bsscolor % 63))
-                        bsscolor=$(($bsscolor + 1))
-                fi
+		if [ $enable_color -eq 1 ]; then
+			bsscolor=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
+			[ -z "$bsscolor" ] && bsscolor=0
+			[ "$bsscolor" != "0" ] && bsscolor=${bsscolor#0}
+			bsscolor=$(($bsscolor % 63))
+			bsscolor=$(($bsscolor + 1))
+		fi
 
 		[ -n "$bsscolor" ] && append base_cfg "he_bss_color=$bsscolor" "$N"
 
@@ -843,7 +845,6 @@ find_phy() {
 	delta=$(($radio_idx - $first_phy_idx))
 
 	[ -n "$path" ] && {
-		sleep 2
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			case "$(readlink -f /sys/class/ieee80211/$phy/device)" in
 				*$path)
@@ -1407,7 +1408,8 @@ drv_mac80211_setup() {
 
 	find_phy $1 || {
 		echo "Could not find PHY for device '$1'"
-		wireless_set_retry 0
+		sleep 1
+		wireless_set_retry 1
 		return 1
 	}
 	# workaround for buggy hostapd.sh in premium profile
