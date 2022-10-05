@@ -4,15 +4,15 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=mac80211
 
-PKG_BACKPORTS_VERSION:=83f664bbc583
+PKG_BACKPORTS_VERSION:=42a95ce7
 PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git
 PKG_BACKPORTS_BRANCH:=master
 
-PKG_KERNEL_VERSION:=f40abb4788
+PKG_KERNEL_VERSION:=ef7197996efe
 PKG_KERNEL_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=ath12k-bringup-extras
 
-PKG_VERSION:=20220404
+PKG_VERSION:=20220822
 PKG_SOURCE:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION).tar.bz2
 PKG_SUBDIR:=backports-$(PKG_VERSION)-$(LINUX_VERSION)-$(PKG_KERNEL_VERSION)
 PKG_RELEASE:=1
@@ -20,6 +20,8 @@ PKG_BUILD_ID:=1
 
 PKG_BUILD_DIR:=$(KERNEL_BUILD_DIR)/$(PKG_SUBDIR)-$(BUILD_VARIANT)/$(PKG_SUBDIR)
 PKG_BUILD_PARALLEL:=1
+
+PKG_BUILD_MLO_SUPPORT:=1
 
 PKG_DRIVERS = ath9k-common ath9k ath9k-htc ath10k ath11k ath12k ath
 
@@ -246,6 +248,23 @@ else
   endef
 endif
 
+ifeq ($(PKG_BUILD_MLO_SUPPORT),1)
+  define backports_mlo_support
+	$(info Backports mlo support enabled)
+	sed -i 's/struct ieee80211_tx_info \*info;/ktime_t ack_hwtstamp;/' \
+			$(1)/patches/0097-skb-list/mac80211-status.patch
+	sed -i 's/struct sk_buff \*skb;/u8 n_rates;/' \
+			$(1)/patches/0097-skb-list/mac80211-status.patch
+	sed -i '13s/.*/ /' \
+			$(1)/patches/0097-skb-list/mac80211-status.patch
+	sed -i '58,75d' $(1)/patches/0099-netlink-range/mac80211.patch
+  endef
+else
+  define backports_mlo_support
+	$(info Backports mlo support disabled)
+  endef
+endif
+
 getLocalBackport ?= $(shell wget $(SERVER_PATH)/$(PKG_SOURCE) -P $(TOPDIR)/dl/);
 ifeq ($(FORCED_BACKPORTS),false)
 $(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(call getLocalBackport))
@@ -264,8 +283,9 @@ define DownloadBackports
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit db3bdcb9 && \
-	git revert --no-edit c8ffcd122 && git revert --no-edit 48a54f6bc && \
+	git revert --no-edit bde292c07b && \
+	git revert --no-edit 4dc84c06a && git revert --no-edit 1241e329c && \
+	git revert --no-edit db3bdcb9 && git revert --no-edit 48a54f6bc && \
 	git revert --no-edit b55379e34 && git revert --no-edit 47c662486 && \
 	git revert --no-edit 36b0cefe9 && git revert --no-edit dfcb63ce && \
 	git revert --no-edit e72aeb9e && git revert --no-edit de1352ead8 && \
@@ -276,7 +296,9 @@ define DownloadBackports
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
-	git revert --no-edit 49432781 && \
+	git revert --no-edit 49432781 && git revert --no-edit 8afac3a8)
+	$(call backports_mlo_support,$(TMP_DIR)/dl/$(PKG_NAME)-source)
+	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
 
