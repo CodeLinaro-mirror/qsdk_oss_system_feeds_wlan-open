@@ -178,13 +178,19 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		.elem_len	= 1,
  		.elem_size	= sizeof(u8),
  		.array_type	= NO_ARRAY,
-@@ -2797,6 +2798,108 @@ static void ath12k_host_cap_parse_mlo(st
- 	req->mlo_chip_info[0].valid_mlo_link_id[1] = 1;
+@@ -2755,28 +2756,106 @@ static int ath12k_qmi_send_qdss_config(s
+ 	return 0;
  }
  
+-static void ath12k_host_cap_parse_mlo(struct qmi_wlanfw_host_cap_req_msg_v01 *req)
 +static int ath12k_qmi_fill_mlo_host_caps(struct ath12k_base *ab,
 +					 struct qmi_wlanfw_host_cap_req_msg_v01 *req)
-+{
+ {
+-	req->mlo_capable_valid = 1;
+-	req->mlo_capable = 1;
+-	req->mlo_chip_id_valid = 1;
+-	req->mlo_chip_id = 0;
+-	req->mlo_group_id_valid = 1;
 +	struct wlfw_host_mlo_chip_info_s_v01 *info;
 +	struct ath12k_hw_group *ag = ab->ag;
 +	struct ath12k_base *partner_ab;
@@ -214,7 +220,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	req->mlo_group_id = ag->id;
 +	req->mlo_group_id_valid = true;
 +
-+	req->max_mlo_peer = ATH12K_MAX_MLO_PEER;
++	req->max_mlo_peer = ab->hw_params->max_mlo_peer;
 +	req->max_mlo_peer_valid = true;
 +
 +	req->mlo_num_chips = ag->num_chip;
@@ -233,7 +239,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +		info->chip_id = partner_ab->chip_id;
 +
 +		/* TODO: Need to get the phy count */
-+		info->num_local_links = 1;
++		info->num_local_links = partner_ab->hw_params->num_local_link;
 +
 +		ath12k_dbg(ab, ATH12K_DBG_QMI, "MLO chip id %d num_link %d\n",
 +			    partner_ab->chip_id, info->num_local_links);
@@ -269,7 +275,21 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	req->max_mlo_peer = 0;
 +	req->max_mlo_peer_valid = 0;
 +
-+	req->mlo_group_id = 0;
+ 	req->mlo_group_id = 0;
+-	req->max_mlo_peer_valid = 1;
+-	/* Max peer number generally won't change for the same device
+-	 * but needs to be synced with host driver.
+-	 */
+-	req->max_mlo_peer = 32;
+-	req->mlo_num_chips_valid = 1;
+-	req->mlo_num_chips = 1;
+-	req->mlo_chip_info_valid = 1;
+-	req->mlo_chip_info[0].chip_id = 0;
+-	req->mlo_chip_info[0].num_local_links = 2;
+-	req->mlo_chip_info[0].hw_link_id[0] = 0;
+-	req->mlo_chip_info[0].hw_link_id[1] = 1;
+-	req->mlo_chip_info[0].valid_mlo_link_id[0] = 1;
+-	req->mlo_chip_info[0].valid_mlo_link_id[1] = 1;
 +	req->mlo_group_id_valid = 0;
 +
 +	req->mlo_chip_id = 0;
@@ -282,25 +302,24 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	mutex_unlock(&ag->mutex_lock);
 +
 +	return ret;
-+}
-+
- static int ath12k_qmi_host_cap_send(struct ath12k_base *ab)
- {
- 	struct qmi_wlanfw_host_cap_req_msg_v01 req;
-@@ -2842,6 +2945,12 @@ static int ath12k_qmi_host_cap_send(stru
- 		ath12k_host_cap_parse_mlo(&req);
- 	}
+ }
  
+ static int ath12k_qmi_host_cap_send(struct ath12k_base *ab)
+@@ -2820,8 +2899,12 @@ static int ath12k_qmi_host_cap_send(stru
+ 		 */
+ 		req.nm_modem |= SLEEP_CLOCK_SELECT_INTERNAL_BIT;
+ 		req.nm_modem |= PLATFORM_CAP_PCIE_GLOBAL_RESET;
++	}
+ 
+-		ath12k_host_cap_parse_mlo(&req);
 +	ret = ath12k_qmi_fill_mlo_host_caps(ab, &req);
 +	if (ret < 0) {
 +		ath12k_warn(ab, "Failed to get MLO capability,err = %d\n", ret);
 +		goto out;
-+	}
-+
+ 	}
+ 
  	ret = qmi_txn_init(&ab->qmi.handle, &txn,
- 			   qmi_wlanfw_host_cap_resp_msg_v01_ei, &resp);
- 	if (ret < 0)
-@@ -3025,6 +3134,29 @@ out:
+@@ -3007,6 +3090,29 @@ out:
  	return ret;
  }
  
@@ -330,7 +349,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  void ath12k_qmi_free_target_mem_chunk(struct ath12k_base *ab)
  {
  	int i;
-@@ -3033,8 +3165,13 @@ void ath12k_qmi_free_target_mem_chunk(st
+@@ -3015,8 +3121,13 @@ void ath12k_qmi_free_target_mem_chunk(st
  		if (ab->bus_params.fixed_mem_region) {
  			if (!ab->qmi.target_mem[i].v.ioaddr)
  				continue;
@@ -346,7 +365,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		} else {
  			if (!ab->qmi.target_mem[i].v.addr)
  				continue;
-@@ -3096,6 +3233,79 @@ static int ath12k_qmi_alloc_target_mem_c
+@@ -3078,6 +3189,79 @@ static int ath12k_qmi_alloc_target_mem_c
  	return 0;
  }
  
@@ -426,7 +445,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab)
  {
  	struct device *dev = ab->dev;
-@@ -3120,12 +3330,14 @@ static int ath12k_qmi_assign_target_mem_
+@@ -3102,12 +3286,14 @@ static int ath12k_qmi_assign_target_mem_
  	host_ddr_sz = (res.end - res.start) + 1;
  
  	for (i = 0, idx = 0; i < ab->qmi.mem_seg_count; i++) {
@@ -446,7 +465,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		}
  
  		switch (ab->qmi.target_mem[i].type) {
-@@ -3187,12 +3399,26 @@ static int ath12k_qmi_assign_target_mem_
+@@ -3169,12 +3355,26 @@ static int ath12k_qmi_assign_target_mem_
  			sz += ab->qmi.target_mem[i].size;
  			idx++;
  			break;
@@ -473,7 +492,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	}
  	ab->host_ddr_fixed_mem_off = sz;
  	ab->qmi.mem_seg_count = idx;
-@@ -4249,6 +4475,7 @@ static void ath12k_qmi_msg_mem_request_c
+@@ -4231,6 +4431,7 @@ static void ath12k_qmi_msg_mem_request_c
  	for (i = 0; i < qmi->mem_seg_count ; i++) {
  		ab->qmi.target_mem[i].type = msg->mem_seg[i].type;
  		ab->qmi.target_mem[i].size = msg->mem_seg[i].size;
@@ -481,7 +500,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi mem seg type %d size %d\n",
  			   msg->mem_seg[i].type, msg->mem_seg[i].size);
  	}
-@@ -4563,6 +4790,7 @@ static void ath12k_qmi_driver_event_work
+@@ -4545,6 +4746,7 @@ static void ath12k_qmi_driver_event_work
  	int ret;
  
  	spin_lock(&qmi->event_lock);
@@ -500,7 +519,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  struct qmi_wlanfw_m3_dump_upload_done_req_msg_v01 {
  	u32 pdev_id;
-@@ -251,6 +260,7 @@ enum ath12k_qmi_target_mem {
+@@ -251,6 +251,7 @@ enum ath12k_qmi_target_mem {
  	BDF_MEM_REGION_TYPE = 0x2,
  	M3_DUMP_REGION_TYPE = 0x3,
  	CALDB_MEM_REGION_TYPE = 0x4,
@@ -508,7 +527,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	PAGEABLE_MEM_REGION_TYPE = 0x9,
  };
  
-@@ -400,6 +410,11 @@ enum qmi_wlanfw_mem_type_enum_v01 {
+@@ -400,6 +401,11 @@ enum qmi_wlanfw_mem_type_enum_v01 {
  	QMI_WLANFW_MEM_M3_V01 = 3,
  	QMI_WLANFW_MEM_CAL_V01 = 4,
  	QMI_WLANFW_MEM_DPD_V01 = 5,
@@ -572,3 +591,43 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	u32 phy_id;
  	u32 supported_flags;
  	u32 supported_bands;
+--- a/drivers/net/wireless/ath/ath12k/hw.c
++++ b/drivers/net/wireless/ath/ath12k/hw.c
+@@ -1016,6 +1016,8 @@ static const struct ath12k_hw_params ath
+ 		.credit_flow = false,
+ 		.wakeup_mhi = false,
+ 		.alloc_cacheable_memory = true,
++		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
++		.num_local_link = 1,
+ 	},
+ 	{
+ 		.name = "wcn7850 hw2.0",
+@@ -1082,6 +1084,8 @@ static const struct ath12k_hw_params ath
+ 		.credit_flow = false,
+ 		.wakeup_mhi = false,
+ 		.alloc_cacheable_memory = false,
++		.max_mlo_peer = 32,
++		.num_local_link = 2,
+ 	},
+ 	{
+ 		.name = "qcn9274 hw2.0",
+@@ -1148,6 +1152,8 @@ static const struct ath12k_hw_params ath
+ 		.credit_flow = false,
+ 		.wakeup_mhi = false,
+ 		.alloc_cacheable_memory = true,
++		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
++		.num_local_link = 1,
+ 	},
+ };
+ 
+--- a/drivers/net/wireless/ath/ath12k/hw.h
++++ b/drivers/net/wireless/ath/ath12k/hw.h
+@@ -203,6 +203,8 @@ struct ath12k_hw_params {
+ 	bool credit_flow;
+ 	bool wakeup_mhi;
+ 	bool alloc_cacheable_memory;
++	u16 max_mlo_peer;
++	u8 num_local_link;
+ };
+ 
+ /* BRINGUP: move to dp.h */
