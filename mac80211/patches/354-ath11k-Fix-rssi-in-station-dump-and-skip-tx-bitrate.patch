@@ -1,0 +1,310 @@
+From eb01ba308a11a3b2d0750ef16d30e549c7c128bf Mon Sep 17 00:00:00 2001
+From: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
+Date: Tue, 11 Oct 2022 22:58:15 +0530
+Subject: [PATCH] Fix rssi in station dump and skip tx bitrate update for mgmt
+ frames
+
+Fix signal and signal average in station dump by using real
+noise floor and appropriate bandwidth offset. In this way
+signal strength in station matches the rssi_in_dbm in htt stats
+Tx bitrate in station dump was dropping to legacy rate
+randomly, this is because the tx rate was updated for
+management packet as well. Skip tx bitrate update for
+management packets based on the tid.
+
+Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
+---
+ drivers/net/wireless/ath/ath11k/core.h  |   2 +
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 163 ++++++++++++------------
+ drivers/net/wireless/ath/ath11k/mac.c   |   8 +-
+ drivers/net/wireless/ath/ath11k/wmi.c   |   6 +-
+ 4 files changed, 94 insertions(+), 85 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 0fb2e80..446f6ff 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -593,6 +593,7 @@ struct ath11k_sta {
+ 	/*bytes count for bit error rate computation*/
+ 	u32 ber_succ_bytes;
+ 	u32 ber_fail_bytes;
++	u32 last_tx_pkt_bw;
+ 	struct work_struct tid_config_wk;
+ 	struct ath11k_tid_qos_config tid_cfg[ATH11K_TID_MAX];
+ 	struct completion disassoc_comp;
+@@ -789,6 +790,7 @@ struct ath11k {
+ 	u32 txpower_scale;
+ 	u32 power_scale;
+ 	u32 chan_tx_pwr;
++	s32 chan_noise_floor;
+ 	u32 num_stations;
+ 	u32 max_num_stations;
+ 	bool monitor_conf_enabled;
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 5946c5d..b72e31d 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1589,95 +1589,96 @@ ath11k_update_per_peer_tx_stats(struct ath11k *ar,
+ 	ru_start = user_rate->ru_start;
+ 	ru_tone = user_rate->ru_end;
+ 
+-	/* Note: If host configured fixed rates and in some other special
+-	 * cases, the broadcast/management frames are sent in different rates.
+-	 * Firmware rate's control to be skipped for this?
++	/* PPDU stats reported for mgmt packet doesn't have valid tx bytes.
++	 * So skip peer stats update for mgmt packets.
+ 	 */
++	if (tid < HTT_PPDU_STATS_NON_QOS_TID) {
+ 
+-	if (flags == WMI_RATE_PREAMBLE_HE && mcs > 11) {
+-		ath11k_warn(ab, "Invalid HE mcs %d peer stats",  mcs);
+-		return;
+-	}
++		/* Note: If host configured fixed rates and in some other special
++		 * cases, the broadcast/management frames are sent in different rates.
++		 * Firmware rate's control to be skipped for this?
++		 */
+ 
+-	if (flags == WMI_RATE_PREAMBLE_HE && mcs > ATH11K_HE_MCS_MAX) {
+-		ath11k_warn(ab, "Invalid HE mcs %d peer stats",  mcs);
+-		return;
+-	}
++		if (flags == WMI_RATE_PREAMBLE_HE && mcs > 11) {
++			ath11k_warn(ab, "Invalid HE mcs %d peer stats",  mcs);
++			return;
++		}
+ 
+-	if (flags == WMI_RATE_PREAMBLE_VHT && mcs > ATH11K_VHT_MCS_MAX) {
+-		ath11k_warn(ab, "Invalid VHT mcs %d peer stats",  mcs);
+-		return;
+-	}
++		if (flags == WMI_RATE_PREAMBLE_HE && mcs > ATH11K_HE_MCS_MAX) {
++			ath11k_warn(ab, "Invalid HE mcs %d peer stats",  mcs);
++			return;
++		}
+ 
+-	if (flags == WMI_RATE_PREAMBLE_HT && (mcs > ATH11K_HT_MCS_MAX || nss < 1)) {
+-		ath11k_warn(ab, "Invalid HT mcs %d nss %d peer stats",
+-			    mcs, nss);
+-		return;
+-	}
++		if (flags == WMI_RATE_PREAMBLE_VHT && mcs > ATH11K_VHT_MCS_MAX) {
++			ath11k_warn(ab, "Invalid VHT mcs %d peer stats",  mcs);
++			return;
++		}
+ 
+-	if (flags == WMI_RATE_PREAMBLE_CCK || flags == WMI_RATE_PREAMBLE_OFDM) {
+-		ret = ath11k_mac_hw_ratecode_to_legacy_rate(mcs,
+-							    flags,
+-							    &rate_idx,
+-							    &rate);
+-		if (ret < 0)
++		if (flags == WMI_RATE_PREAMBLE_HT && (mcs > ATH11K_HT_MCS_MAX || nss < 1)) {
++			ath11k_warn(ab, "Invalid HT mcs %d nss %d peer stats",
++				    mcs, nss);
+ 			return;
+-	}
++		}
+ 
+-	rcu_read_lock();
+-	spin_lock_bh(&ab->base_lock);
+-	peer = ath11k_peer_find_by_id(ab, usr_stats->peer_id);
++		if (flags == WMI_RATE_PREAMBLE_CCK || flags == WMI_RATE_PREAMBLE_OFDM) {
++			ret = ath11k_mac_hw_ratecode_to_legacy_rate(mcs,
++								    flags,
++								    &rate_idx,
++								    &rate);
++			if (ret < 0)
++				return;
++		}
+ 
+-	if (!peer || !peer->sta) {
+-		spin_unlock_bh(&ab->base_lock);
+-		rcu_read_unlock();
+-		return;
+-	}
++		rcu_read_lock();
++		spin_lock_bh(&ab->base_lock);
++		peer = ath11k_peer_find_by_id(ab, usr_stats->peer_id);
+ 
+-	sta = peer->sta;
+-	arsta = (struct ath11k_sta *)sta->drv_priv;
++		if (!peer || !peer->sta) {
++			spin_unlock_bh(&ab->base_lock);
++			rcu_read_unlock();
++			return;
++		}
+ 
+-	memset(&arsta->txrate, 0, sizeof(arsta->txrate));
++		sta = peer->sta;
++		arsta = (struct ath11k_sta *)sta->drv_priv;
+ 
+-	switch (flags) {
+-	case WMI_RATE_PREAMBLE_OFDM:
+-		arsta->txrate.legacy = rate;
+-		break;
+-	case WMI_RATE_PREAMBLE_CCK:
+-		arsta->txrate.legacy = rate;
+-		break;
+-	case WMI_RATE_PREAMBLE_HT:
+-		arsta->txrate.mcs = mcs + 8 * (nss - 1);
+-		arsta->txrate.flags = RATE_INFO_FLAGS_MCS;
+-		if (sgi)
+-			arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+-		break;
+-	case WMI_RATE_PREAMBLE_VHT:
+-		arsta->txrate.mcs = mcs;
+-		arsta->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
+-		if (sgi)
+-			arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+-		break;
+-	case WMI_RATE_PREAMBLE_HE:
+-		arsta->txrate.mcs = mcs;
+-		arsta->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
+-		arsta->txrate.he_dcm = dcm;
+-		arsta->txrate.he_gi = ath11k_he_gi_to_nl80211_he_gi(sgi);
+-		arsta->txrate.he_ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(
+-						(user_rate->ru_end -
+-						 user_rate->ru_start) + 1);
+-		break;
+-	}
++		memset(&arsta->txrate, 0, sizeof(arsta->txrate));
++
++		switch (flags) {
++		case WMI_RATE_PREAMBLE_OFDM:
++			arsta->txrate.legacy = rate;
++			break;
++		case WMI_RATE_PREAMBLE_CCK:
++			arsta->txrate.legacy = rate;
++			break;
++		case WMI_RATE_PREAMBLE_HT:
++			arsta->txrate.mcs = mcs + 8 * (nss - 1);
++			arsta->txrate.flags = RATE_INFO_FLAGS_MCS;
++			if (sgi)
++				arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++			break;
++		case WMI_RATE_PREAMBLE_VHT:
++			arsta->txrate.mcs = mcs;
++			arsta->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
++			if (sgi)
++				arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++			break;
++		case WMI_RATE_PREAMBLE_HE:
++			arsta->txrate.mcs = mcs;
++			arsta->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
++			arsta->txrate.he_dcm = dcm;
++			arsta->txrate.he_gi = ath11k_he_gi_to_nl80211_he_gi(sgi);
++			arsta->txrate.he_ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(
++							(user_rate->ru_end -
++							 user_rate->ru_start) + 1);
++			break;
++		}
+ 
+-	arsta->txrate.nss = nss;
+-	arsta->txrate.bw = ath11k_mac_bw_to_mac80211_bw(bw);
+-	arsta->tx_duration += tx_duration;
+-	memcpy(&arsta->last_txrate, &arsta->txrate, sizeof(struct rate_info));
++		arsta->txrate.nss = nss;
++		arsta->txrate.bw = ath11k_mac_bw_to_mac80211_bw(bw);
++		arsta->tx_duration += tx_duration;
++		memcpy(&arsta->last_txrate, &arsta->txrate, sizeof(struct rate_info));
+ 
+-	/* PPDU stats reported for mgmt packet doesn't have valid tx bytes.
+-	 * So skip peer stats update for mgmt packets.
+-	 */
+-	if (tid < HTT_PPDU_STATS_NON_QOS_TID) {
+ 		memset(peer_stats, 0, sizeof(*peer_stats));
+ 		peer_stats->succ_pkts = succ_pkts;
+ 		peer_stats->succ_bytes = succ_bytes;
+@@ -1705,12 +1706,12 @@ ath11k_update_per_peer_tx_stats(struct ath11k *ar,
+ 
+ 		if (unlikely(ath11k_debugfs_is_extd_tx_stats_enabled(ar)))
+ 			ath11k_debugfs_sta_add_tx_stats(arsta, peer_stats, rate_idx);
++
++		spin_unlock_bh(&ab->base_lock);
++		rcu_read_unlock();
+ 	}
+ 
+ 	usr_stats->rate_stats_updated = true;
+-
+-	spin_unlock_bh(&ab->base_lock);
+-	rcu_read_unlock();
+ }
+ 
+ static void ath11k_htt_update_ppdu_stats(struct ath11k *ar,
+@@ -3478,13 +3479,15 @@ static void ath11k_dp_rx_update_peer_su_stats(struct ath11k *ar,
+ 					      struct hal_rx_mon_ppdu_info *ppdu_info)
+ {
+ 	struct ath11k_rx_peer_stats *rx_stats = arsta->rx_stats;
+-	u32 num_msdu;
++	u32 num_msdu, bw_offset;
+ 
+ 	if (!rx_stats)
+ 		return;
+ 
++	arsta->last_tx_pkt_bw = ppdu_info->bw;
++	bw_offset = arsta->last_tx_pkt_bw * 3;
+ 	arsta->rssi_comb = ppdu_info->rssi_comb;
+-	ewma_avg_rssi_add(&arsta->avg_rssi, ppdu_info->rssi_comb);
++	ewma_avg_rssi_add(&arsta->avg_rssi, ppdu_info->rssi_comb + bw_offset);
+ 
+ 	if (!ath11k_debugfs_is_extd_rx_stats_enabled(ar))
+ 		return;
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index e9962cf..06c2766 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -10736,6 +10736,8 @@ static void ath11k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ {
+ 	struct ath11k_sta *arsta = (struct ath11k_sta *)sta->drv_priv;
+ 	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
++	struct ath11k *ar = arsta->arvif->ar;
++	u32 bw_offset = 0;
+ 
+ 	sinfo->rx_duration = arsta->rx_duration;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
+@@ -10764,11 +10766,11 @@ static void ath11k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ 	sinfo->txrate.flags = arsta->txrate.flags;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
+ 
+-	/* TODO: Use real NF instead of default one. */
+-	sinfo->signal = arsta->rssi_comb + ATH11K_DEFAULT_NOISE_FLOOR;
++	bw_offset = arsta->last_tx_pkt_bw * 3;
++	sinfo->signal = arsta->rssi_comb + ar->chan_noise_floor + bw_offset;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
+ 
+-	sinfo->signal_avg = ewma_avg_rssi_read(&arsta->avg_rssi) + ATH11K_DEFAULT_NOISE_FLOOR;
++	sinfo->signal_avg = ewma_avg_rssi_read(&arsta->avg_rssi) + ar->chan_noise_floor;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL_AVG);
+ 
+ 	if (arvif->ar->ab->nss.enabled)
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
+index f597fbf..fcec04b 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -6876,10 +6876,12 @@ static int ath11k_pull_wds_addr_ev(struct ath11k_base *ab, struct sk_buff *skb,
+ 	return 0;
+ }
+ 
+-static void ath11k_wmi_pull_pdev_stats_base(const struct wmi_pdev_stats_base *src,
++static void ath11k_wmi_pull_pdev_stats_base(struct ath11k *ar,
++					    const struct wmi_pdev_stats_base *src,
+ 					    struct ath11k_fw_stats_pdev *dst)
+ {
+ 	dst->ch_noise_floor = src->chan_nf;
++	ar->chan_noise_floor = src->chan_nf;
+ 	dst->tx_frame_count = src->tx_frame_count;
+ 	dst->rx_frame_count = src->rx_frame_count;
+ 	dst->rx_clear_count = src->rx_clear_count;
+@@ -7057,7 +7059,7 @@ int ath11k_wmi_pull_fw_stats(struct ath11k_base *ab, struct sk_buff *skb,
+ 		if (!dst)
+ 			continue;
+ 
+-		ath11k_wmi_pull_pdev_stats_base(&src->base, dst);
++		ath11k_wmi_pull_pdev_stats_base(ar, &src->base, dst);
+ 		ath11k_wmi_pull_pdev_stats_tx(&src->tx, dst);
+ 		ath11k_wmi_pull_pdev_stats_rx(&src->rx, dst);
+ 		list_add_tail(&dst->list, &stats->pdevs);
+-- 
+2.17.1
+
