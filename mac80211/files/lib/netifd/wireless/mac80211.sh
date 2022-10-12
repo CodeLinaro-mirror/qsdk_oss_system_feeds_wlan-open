@@ -1050,16 +1050,18 @@ mac80211_setup_supplicant_noctl() {
 	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs"
 	wpa_supplicant_run "$ifname"
 
-	case "$htmode" in
-		VHT20|HT20|HE20|EHT20)
-			centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "20")")";;
-		HT40*|VHT40|HE40|EHT40)
-			centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")";;
-		VHT80|HE80|EHT80)
-			centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")";;
-		VHT160|HE160|EHT160)
-			centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")";;
-	esac
+	if [ ! $channel = "acs_survey" ] && [ ! $channel -eq 0 ];then
+		case "$htmode" in
+			VHT20|HT20|HE20|EHT20)
+				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "20")")";;
+			HT40*|VHT40|HE40|EHT40)
+				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")";;
+			VHT80|HE80|EHT80)
+				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")";;
+			VHT160|HE160|EHT160)
+				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")";;
+		esac
+	fi
 
 	while true;
 	do
@@ -1071,12 +1073,16 @@ mac80211_setup_supplicant_noctl() {
 			continue
 		fi
 
+		wpa_state="$(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)"
 		if [ $centre_freq -gt 5240 ] && [ $centre_freq -lt 5745 ]; then
-			wpa_state="$(wpa_cli -i $ifname status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)"
 			cac_state="$(wpa_cli -i $ifname status 2> /dev/null | grep cac | cut -d'=' -f 2)"
 			if [ $wpa_state = "SCANNING" ] && [ $cac_state = "inprogress" ]; then
 				break;
 			fi
+		fi
+
+		if [ $wpa_state = "INACTIVE" ]; then
+			break;
 		fi
 		usleep 100000
 	done
