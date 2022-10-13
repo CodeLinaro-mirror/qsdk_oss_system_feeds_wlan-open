@@ -1507,6 +1507,19 @@ drv_mac80211_setup() {
 
 	wireless_set_up
 
+	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
+
+	if [ "$enable_smp_affinity" -eq 1 ]; then
+                [ -f "/lib/smp_affinity_settings.sh" ] && {
+                        . /lib/smp_affinity_settings.sh
+                        enable_smp_affinity_wifi
+                }
+                [ -f "/lib/update_smp_affinity.sh" ] && {
+                        . /lib/update_smp_affinity.sh
+                        enable_smp_affinity_wigig
+                }
+        fi
+
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
 			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
