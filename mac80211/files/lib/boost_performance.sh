@@ -207,6 +207,9 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
 				#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 
 				;;
@@ -249,6 +252,9 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
 				;;
 				#rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 			*)
