@@ -698,6 +698,7 @@ endef
 
 define KernelPackage/ath12k/install
 	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
 endef
 
 $(eval $(call KernelPackage,cfg80211))
