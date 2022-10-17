@@ -65,7 +65,7 @@ P_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/mac80211/patches"
 I_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/"
 CC_remove = "-fstack-protector-strong  -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security"
 KBUILD_CFLAGS += "-Wno-error=implicit-function-declaration"
-
+LC_ALL = "C"
 
 
 do_download() {
@@ -101,17 +101,7 @@ do_download() {
 }
 
 do_patch() {
-	for i in ${P_DIR}/* ; do
-	cat ${i} | patch -f -p1 -d ${T_DIR}
-	if [ $? != 0 ] ; then
-		echo "Patch failed!  Please fix $i!"
-		exit 1
-	fi
-	done
-	if [ "`find ${T_DIR}/ '(' -name '*.rej' -o -name '.*.rej' ')' -print`" ] ; then
-		echo "Aborting.  Reject files found."
-		exit 1
-	fi
+	ls ${I_DIR}/mac80211/patches | xargs -I % sh -c 'patch -d${T_DIR} -f -p1 < ${I_DIR}/mac80211/patches/%'
 	find ${T_DIR}/ '(' -name '*.orig' -o -name '.*.orig' ')' -exec rm -f {} \;
 	tar -C ${T_DIR} -xf ${DL_DIR}/linux-firmware-8afadbe.tar.gz
 	rm -rf ${T_DIR}/include/linux/ssb ${T_DIR}/include/linux/bcma ${T_DIR}/include/net/bluetooth
