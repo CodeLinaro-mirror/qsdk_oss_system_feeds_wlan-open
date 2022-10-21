@@ -9,7 +9,6 @@ KERNEL_VERSION = "/5.4.164+yocto"
 PKG_KERNEL_SRC_URL = "https://git.codelinaro.org/clo/qsdk/kvalo/ath.git"
 PKG_KERNEL_VERSION = "f40abb4788"
 SRC_URI[md5sum] = "21113fbd338eed6070c7f9b4c8939b43"
-#SRCREV = "8afadbe553017bec1e442b5a9fba859b54fd33fb"
 V_mac80211_config =" \
 	\nCPTCFG_CFG80211=m \
 	\nCPTCFG_MAC80211=m \
@@ -65,7 +64,7 @@ P_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/mac80211/patches"
 I_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/"
 CC_remove = "-fstack-protector-strong  -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security"
 KBUILD_CFLAGS += "-Wno-error=implicit-function-declaration"
-
+LC_ALL = "C"
 
 
 do_download() {
@@ -101,30 +100,23 @@ do_download() {
 }
 
 do_patch() {
-	for i in ${P_DIR}/* ; do
-	cat ${i} | patch -f -p1 -d ${T_DIR}
-	if [ $? != 0 ] ; then
-		echo "Patch failed!  Please fix $i!"
-		exit 1
-	fi
-	done
-	if [ "`find ${T_DIR}/ '(' -name '*.rej' -o -name '.*.rej' ')' -print`" ] ; then
-		echo "Aborting.  Reject files found."
-		exit 1
-	fi
+	ls ${I_DIR}/mac80211/patches | xargs -I % sh -c 'patch -d${T_DIR} -f -p1 < ${I_DIR}/mac80211/patches/%'
 	find ${T_DIR}/ '(' -name '*.orig' -o -name '.*.orig' ')' -exec rm -f {} \;
 	tar -C ${T_DIR} -xf ${DL_DIR}/linux-firmware-8afadbe.tar.gz
 	rm -rf ${T_DIR}/include/linux/ssb ${T_DIR}/include/linux/bcma ${T_DIR}/include/net/bluetooth
 	rm -rf ${T_DIR}/include/linux/cordic.h  ${T_DIR}/include/linux/crc8.h ${T_DIR}/include/linux/eeprom_93cx6.h ${T_DIR}/include/linux/wl12xx.h ${T_DIR}/include/linux/spi/libertas_spi.h ${T_DIR}/include/net/ieee80211.h
 
 }
-
+CC_remove  = "${@bb.utils.contains('TUNE_ARCH','arm',' -mfloat-abi=hard -mcpu=cortex-a7 ','',d)}"
+ARCH = "${@bb.utils.contains('TUNE_ARCH','arm','arm','arm64',d)}"
+K_DIR = "${@bb.utils.contains('TUNE_ARCH','arm','ipq95xx-poky-linux-gnueabi','ipq95xx_64-poky-linux',d)}"
 do_compile() {
-	echo "${V_mac80211_config}" > ${T_DIR}/.config
+	echo -e "${V_mac80211_config}" > ${T_DIR}/.config
+	sed -i 's/-e//g' ${T_DIR}/.config
 	cat ${T_DIR}/.config
-	make  -C ${T_DIR} CC="gcc" LD="${LD}"  ARCH="arm64" EXTRA_CFLAGS="-I${T_DIR}/include/ -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-function-declaration" MODPROBE=true     KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/ipq95xx_64-poky-linux/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= olddefconfig
+	make  -C ${T_DIR} CC="gcc" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include/ -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-function-declaration" MODPROBE=true     KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= olddefconfig
 	rm -rf ${T_DIR}/modules
-make -C ${T_DIR} CC="${CC}" LD="${LD}"  ARCH="arm64" EXTRA_CFLAGS="-I${T_DIR}/include -Wall -Werror -Wno-incompatible-pointer-types -Wno-unused-variable -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-fallthrough" KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/ipq95xx_64-poky-linux/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= modules
+make -C ${T_DIR} CC="${CC}" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include -Wall -Werror -Wno-incompatible-pointer-types -Wno-unused-variable -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-fallthrough" KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= modules
 	cp ${T_DIR}/compat/compat.ko ${T_DIR}/drivers/net/wireless/ath/ath12k/ath12k.ko  ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_pci.ko ${T_DIR}/drivers/net/wireless/ath/ath.ko ${T_DIR}/net/mac80211/mac80211.ko ${T_DIR}/net/wireless/cfg80211.ko ./
 
 
