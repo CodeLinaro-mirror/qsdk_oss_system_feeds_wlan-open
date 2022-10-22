@@ -1,0 +1,61 @@
+From 43f1c9324ac99dfd710857da527bbe129c01eb5c Mon Sep 17 00:00:00 2001
+From: Sidhanta Sahu <quic_sidhanta@quicinc.com>
+Date: Thu, 1 Sep 2022 10:47:46 -0700
+Subject: [PATCH] mac80211: Avoid creating more than one transmitted vif in
+ 6GHz
+
+Currently, firmware crashes when more than one vif is set to
+beaconing in 6GHz band. In 6GHz, only one interface should be
+set as transmitted vif and other vifs as non-transmitted vif.
+In 6GHz band, more than one tx vif is not allowed.
+Avoid creating multiple interfaces as transmitted vif when a
+transmitted vif already exists.
+
+Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
+---
+ net/mac80211/cfg.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -1222,6 +1222,29 @@ static int ieee80211_assign_beacon(struc
+ 	return changed;
+ }
+ 
++static int ieee80211_checkif_txvif_exists(struct ieee80211_sub_if_data *sdata)
++{
++	struct ieee80211_sub_if_data *if_sdata;
++	int txvif_count = 0;
++	bool is_6g = (sdata->vif.bss_conf.chandef.chan->band == NL80211_BAND_6GHZ);
++	bool is_nontransmitted;
++	bool enable_beacon;
++
++	if (!is_6g)
++		return 0;
++
++	/* In 6GHz, do not allow to create second tx-vif */
++	list_for_each_entry(if_sdata, &sdata->local->interfaces, list) {
++		is_nontransmitted = if_sdata->vif.bss_conf.nontransmitted;
++		enable_beacon = if_sdata->vif.bss_conf.enable_beacon;
++		if (txvif_count >= 1 && enable_beacon && !is_nontransmitted)
++			return -EINVAL;
++		txvif_count++;
++	}
++
++	return 0;
++}
++
+ static int ieee80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
+ 			      struct cfg80211_ap_settings *params)
+ {
+@@ -1416,6 +1439,10 @@ static int ieee80211_start_ap(struct wip
+ 		changed |= BSS_CHANGED_UNSOL_BCAST_PROBE_RESP;
+ 	}
+ 
++	err = ieee80211_checkif_txvif_exists(sdata);
++	if (err < 0)
++		goto error;
++
+ 	err = drv_start_ap(sdata->local, sdata, link_conf);
+ 	if (err) {
+ 		old = sdata_dereference(link->u.ap.beacon, sdata);

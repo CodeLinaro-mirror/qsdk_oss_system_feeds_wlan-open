@@ -1,0 +1,51 @@
+From c32e6f7a98c3f07139bcd9cfc847820f1811fa91 Mon Sep 17 00:00:00 2001
+From: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+Date: Tue, 30 Aug 2022 10:51:15 +0530
+Subject: [PATCH] ath12k: Add warning to detect buffer overflow
+
+In mesh setup, ath12k receives SKB with header length 36
+greater than valid native wifi header length 30.
+This causes buffer overflow in ath12k_dp_rx_h_undecap_nwifi()
+when copying the header to local variable decap_hdr.
+
+To prevent the overflow, dropping the frame in rx path and
+added warning , dumped the SKB to investigate the frame.
+
+Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -2852,10 +2852,12 @@ static int ath12k_dp_rx_process_msdu(str
+ 	struct hal_rx_desc *rx_desc, *lrx_desc;
+ 	struct ath12k_skb_rxcb *rxcb;
+ 	struct sk_buff *last_buf;
+-	u8 l3_pad_bytes;
++	u8 l3_pad_bytes, decap_type;
+ 	u16 msdu_len;
+ 	int ret;
+ 	u32 hal_rx_desc_sz = ar->ab->hw_params->hal_desc_sz;
++	struct ieee80211_hdr *hdr;
++	u32 hdr_len;
+ 
+ 	last_buf = ath12k_dp_rx_get_msdu_last_buf(msdu_list, msdu);
+ 	if (!last_buf) {
+@@ -2900,6 +2902,19 @@ static int ath12k_dp_rx_process_msdu(str
+ 			goto free_out;
+ 		}
+ 	}
++
++	decap_type = ath12k_dp_rx_h_decap_type(ab, rx_desc);
++	if (decap_type == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
++		hdr = (struct ieee80211_hdr *)msdu->data;
++		hdr_len = ieee80211_hdrlen(hdr->frame_control);
++		if (unlikely(hdr_len > DP_MAX_NWIFI_HDR_LEN)) {
++			ab->soc_stats.invalid_rbm++;
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "",
++					msdu->data, msdu->len);
++			ret = -EINVAL;
++			goto free_out;
++		}
++	}
+ 
+ 	ath12k_dp_rx_h_mpdu(ar, msdu, rx_desc, rx_status, fast_rx);
+ 	if (*fast_rx)
