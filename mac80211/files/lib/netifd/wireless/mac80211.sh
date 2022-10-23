@@ -6,7 +6,8 @@
 [ -e /lib/wifi/wpa_supplicant.sh ] && . /lib/wifi/wpa_supplicant.sh
 
 init_wireless_driver "$@"
-is_sphy_mband=0
+
+TMP_CFG_FILE="/tmp/wifi_cfg.txt"
 
 MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh_max_peer_links
 	       mesh_max_retries mesh_ttl mesh_element_ttl mesh_hwmp_max_preq_retries
@@ -119,7 +120,7 @@ drv_mac80211_init_device_config() {
 drv_mac80211_init_iface_config() {
 	hostapd_common_add_bss_config
 
-	config_add_string 'macaddr:macaddr' ifname
+	config_add_string 'macaddr:macaddr' ifname mld
 
 	config_add_boolean ftm_responder wds extsta powersave
 	config_add_int maxassoc
@@ -520,6 +521,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ] || [ "$htmode" == "EHT320" ]; then
 		enable_be=1;
+		config_get mlo_capable $2 mlo_capable
+		if [ -n "$mlo_capable" ] && [ $mlo_capable -eq 1 ]; then
+			append base_cfg "mlo=1" "$N"
+		fi
 	fi
 
 	case "$htmode" in
@@ -996,17 +1001,43 @@ mac80211_iw_interface_add() {
 	}
 
 	[ "$rc" != 0 ] && wireless_setup_failed INTERFACE_CREATION_FAILED
+
 	return $rc
 }
 
+mac80211_get_mld_idx() {
+
+	config_load wireless
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	index=0
+	for _mld in $_mlds
+	do
+		if [ "$1" == "$_mld" ]; then
+			echo "$index"
+			return;
+		else
+			index=$((index+1))
+		fi
+	done
+	echo "$index"
+}
 mac80211_prepare_vif() {
 	json_get_vars vif
 	json_select config
 
-	json_get_vars ifname mode ssid wds extsta powersave macaddr
+	json_get_vars ifname mode ssid wds extsta powersave macaddr mld
 
 	if [ $is_sphy_mband -eq 1 ]; then
 		wdev=${1:11:1}
+                if [ -n "$mld" ]; then
+			ml_idx=$(mac80211_get_mld_idx $mld)
+			ifname="wlan$ml_idx"
+		fi
+
 		[ -n "$ifname" ] || ifname="wlan${wdev#wlan}${if_idx:+-$if_idx}"
 	else
 		for wdev in $(list_phy_interfaces "$phy"); do
@@ -1418,27 +1449,35 @@ get_freq() {
 mac80211_interface_cleanup() {
 	local phy="$1"
 	local wdev=wlan${2:11:1}
+	local device="$2"
 
-	if [ "$is_sphy_mband" -eq 1 ]; then
+	if [ ${#device} -eq 12 ]; then
 		if [ `ls /sys/class/ieee80211/${phy}/device/net/${wdev} 2>/dev/null | wc -c` -eq 0 ]; then
-
-			#Ensure the interface belongs to the phy being passed
-			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
-			if [ "$phy_name" != "$phy" ]; then
-				return
-			fi
-			[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
-				hostapd_cli -iglobal raw REMOVE ${wdev}
-				rm /var/run/hostapd-${wdev}.lock
-				rm /var/run/hostapd/${wdev}
-			}
-			[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
-				wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
-				rm /var/run/wpa_supplicant-${wdev}.lock
-			}
-
-			ifconfig "$wdev" down 2>/dev/null
-			iw dev "$wdev" del
+			for wdev in $(list_phy_interfaces "$phy"); do
+				#Ensure the interface belongs to the phy being passed
+				phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+				if [ "$phy_name" != "$phy" ]; then
+					return
+				fi
+				[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
+					hostapd_cli -iglobal raw REMOVE ${wdev}
+					rm /var/run/hostapd-${wdev}.lock
+					rm /var/run/hostapd/${wdev}
+				}
+				[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
+					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+					rm /var/run/wpa_supplicant-${wdev}.lock
+				}
+				if [ -f $TMP_CFG_FILE ]; then
+					killall hostapd
+					rm -rf $TMP_CFG_FILE
+					# in case of MLO, hostapd starts as single instance
+					# remove existing config files
+					rm -rf /var/run/hostapd*.conf
+				fi
+				ifconfig "$wdev" down 2>/dev/null
+				iw dev "$wdev" del
+			done
 		fi
 	else
 		for wdev in $(list_phy_interfaces "$phy"); do
@@ -1520,7 +1559,127 @@ mac80211_map_config_ifaces_to_json() {
 	reset_cb
 }
 
+mac80211_update_mld_iface_config() {
+	vif_name=$1
+	mld_name=$2
+	local _ifaces
+	local _iface
+
+	# Get the following from section wifi-mld
+	config_get mld_ssid "$mld_name" ssid
+	config_get mld_encryption "$mld_name" encryption
+	config_get mld_key "$mld_name" key
+	config_get mld_sae "$mld_name" sae_pwe
+
+	json_get_keys _ifaces interfaces
+	json_select interfaces
+	for _iface in $_ifaces; do
+		json_select "$_iface"
+		json_select config
+		json_get_vars mld
+		if [ $mld = $mld_name ]; then
+			json_add_string "ssid" "$mld_ssid"
+			uci_set wireless "$vif_name" ssid "$mld_ssid"
+			json_add_string "encryption" "$mld_encryption"
+			uci_set wireless "$vif_name" encryption "$mld_encryption"
+			if [ -n "$mld_key" ]; then
+				json_add_string "key" "$mld_key"
+				uci_set wireless "$vif_name" key "$mld_key"
+			fi
+
+			if [ -n "$mld_sae" ]; then
+				json_add_int "sae_pwe" "$mld_pwe"
+				uci_set wireless "$vif_name" sae_pwe "$mld_sae"
+			fi
+		fi
+		json_select ..
+		json_select ..
+
+	done
+	uci commit wireless
+	json_select ..
+}
+
+mac80211_update_mld_configs() {
+	local iflist
+	config_load wireless
+
+	mac80211_update_mld_cfg() {
+		append iflist $1
+	}
+	config_foreach mac80211_update_mld_cfg wifi-iface
+
+	for name in $iflist
+	do
+		config_get mld_name $name mld
+		if [ -n "$mld_name" ]; then
+			mac80211_update_mld_iface_config $name $mld_name
+		fi
+	done
+}
+
+mac80211_update_tmp_cfg_file() {
+	local _mlds
+	local _devices_up
+	local _ifaces
+	config_load wireless
+
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	mac80211_get_wifi_ifaces() {
+		append _ifaces $1
+	}
+	config_foreach mac80211_get_wifi_ifaces wifi-iface
+
+	mac80211_get_active_wifi_devices()  {
+		config_get disabled "$1" disabled
+		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+			radio_up_count=$((radio_up_count+1))
+		fi
+	}
+	config_foreach mac80211_get_active_wifi_devices wifi-device
+
+	for _mld in $_mlds
+	do
+		for _ifname in $_ifaces
+		do
+
+			config_get mld_name $_ifname mld
+			if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+				mld_vaps_count=$((mld_vaps_count+1))
+			fi
+		done
+	done
+	echo "radio_up_count=$radio_up_count mld_vaps_count=$mld_vaps_count" > $TMP_CFG_FILE
+	echo "hostapd_cfg_updated=$hostapd_cfg_updated" >> $TMP_CFG_FILE
+}
+mac80211_export_mld_info() {
+
+	if [ -f $TMP_CFG_FILE ]; then
+		source $TMP_CFG_FILE
+		radio_up_count=$radio_up_count
+		mld_vaps_count=$mld_vaps_count
+		hostapd_cfg_updated=$hostapd_cfg_updated
+	else
+		mac80211_update_tmp_cfg_file
+		mac80211_update_mld_configs
+	fi
+}
 drv_mac80211_setup() {
+
+	local device=$1
+	# Note: In case of single wiphy, the device name would be radio#idx_band#bid
+	#       where idx is 0 and bid is [0 - 2] when there is one phy and 3 bands.
+	#       similarly it can be extended when there are multiple phy and multiple
+	#       bands.
+	if [ ${#device} -eq 12 ]; then
+		local is_sphy_mband=1
+		mac80211_export_mld_info
+	fi
+
 	json_select config
 	json_get_vars \
 		phy macaddr path \
@@ -1541,15 +1700,6 @@ drv_mac80211_setup() {
 	json_get_values basic_rate_list basic_rate
 	json_select ..
 
-	local device=$1
-
-	# Note: In case of single wiphy, the device name would be radio#idx_band#bid
-	#	where idx is 0 and bid is [0 - 2] when there is one phy and 3 bands.
-	#	similarly it can be extended when there are multiple phy and multiple
-	#	bands.
-	if [ ${#device} -eq 12 ]; then
-		is_sphy_mband=1
-	fi
 	find_phy $1 || {
 		echo "Could not find PHY for device '$1'"
 		sleep 1
@@ -1633,6 +1783,14 @@ drv_mac80211_setup() {
 		[ -f "$file" ] && echo "$board_file" > "$file"
 	}
 
+	[ "$is_sphy_mband" -eq 1 ] && {
+		if [ "$mld_vaps_count" -gt 1 ] && [ "$radio_up_count" -gt 1 ]; then
+			hostapd_add_bss=0
+		else
+			hostapd_add_bss=1
+		fi
+	}
+
 	for_each_interface "mesh" mac80211_setup_vif
 	[ -n "$hostapd_ctrl" ] && {
 		if [ "$is_sphy_mband" -eq 1 ]; then
@@ -1640,12 +1798,21 @@ drv_mac80211_setup() {
 		else
 			ifname="wlan${phy#phy}"
 		fi
-
-		[ -f "/var/run/hostapd-$ifname.lock" ] &&
-			rm /var/run/hostapd-$ifname.lock
-		# let hostapd manage interface $ifname
-		hostapd_cli -iglobal raw ADD bss_config=$ifname:$hostapd_conf_file
-		touch /var/run/hostapd-$ifname.lock
+		if [ -z "$is_sphy_mband" ] || [ "$hostapd_add_bss" -eq 1 ]; then
+			[ -f "/var/run/hostapd-$ifname.lock" ] &&
+				rm /var/run/hostapd-$ifname.lock
+			# let hostapd manage interface $ifname
+			hostapd_cli -iglobal raw ADD bss_config=$ifname:$hostapd_conf_file
+			touch /var/run/hostapd-$ifname.lock
+		else
+			mac80211_export_mld_info
+			hostapd_cfg_updated=$((hostapd_cfg_updated+1))
+			if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
+				config=$(ls /var/run/hostapd*.conf)
+				/usr/sbin/hostapd -S -P /var/run/wifi-$phy.pid -B $config
+			fi
+			sed -i "s/hostapd_cfg_updated=.*/hostapd_cfg_updated=${hostapd_cfg_updated}/g" $TMP_CFG_FILE
+		fi
 	}
 
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
