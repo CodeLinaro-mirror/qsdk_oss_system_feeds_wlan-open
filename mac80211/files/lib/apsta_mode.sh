@@ -32,6 +32,8 @@ hostapd_vht_he_eht_oper_chwidth() {
 			ap_vht_he_eht_oper_chwidth=2;;
 		"80+80")
 			ap_vht_he_eht_oper_chwidth=3;;
+		"320" )
+			ap_vht_he_eht_oper_chwidth=9;;
 		"20"|"40"|*)
 			ap_vht_he_eht_oper_chwidth=0;;
 	esac
@@ -105,6 +107,20 @@ hostapd_vht_he_eht_oper_centr_freq_seg0_idx() {
 					36|40|44|48|52|56|60|64) ap_vht_he_eht_oper_centr_freq_seg0_idx=50;;
 					100|104|108|112|116|120|124|128) ap_vht_he_eht_oper_centr_freq_seg0_idx=114;;
 				esac
+			fi
+		;;
+                "9" )
+			if [ $freq -ge 5955 ] && [ $freq -le 7115 ]; then
+				case "$sta_channel" in
+					1|5|9|13|17|21|25|29|33|37|41|45) ap_vht_he_eht_oper_centr_freq_seg0_idx=31;;
+					49|53|57|61|65|69|73|77) ap_vht_he_eht_oper_centr_freq_seg0_idx=63;;
+					81|85|89|93|97|101|105|109) ap_vht_he_eht_oper_centr_freq_seg0_idx=95;;
+					113|117|121|125|129|133|137|141) ap_vht_he_eht_oper_centr_freq_seg0_idx=127;;
+					145|149|153|157|161|165|169|173) ap_vht_he_eht_oper_centr_freq_seg0_idx=159;;
+					177|181|185|189|193|197|201|205|209|213|217|221) ap_vht_he_eht_oper_centr_freq_seg0_idx=191;;
+				esac
+			elif [ $freq -ge 5500 ] && [ $freq -le 5730 ]; then
+				ap_vht_he_eht_oper_centr_freq_seg0_idx=130
 			fi
 	esac
 }
