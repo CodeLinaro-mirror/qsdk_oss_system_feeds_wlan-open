@@ -24,6 +24,6 @@ boot()
 	ath12k="/etc/modules.d/ath12k"
 	if [ -e $ath12k ];
 	then
-		sed -i 's/ath12k/ath12k dyndbg=+p/' $ath12k
+		sed -i '1s/.*/ath12k dyndbg=+p/' $ath12k
 	fi
 }
