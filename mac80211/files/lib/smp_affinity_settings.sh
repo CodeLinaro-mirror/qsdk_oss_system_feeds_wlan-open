@@ -323,10 +323,13 @@ enable_affinity_al02_c4() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	# assign 4th tcl completion ring and
-	# lmac,reo err,release interrupts are mapped to one core alone
+	# assign lmac,reo err,release interrupts are mapped to one core alone
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	# assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	# Enable smp affinity for PCIE attach
 	#pci 2
@@ -349,11 +352,13 @@ enable_affinity_al02_c4() {
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	# assign 4th tcl completion ring and
-	# lmac,reo err,release interrupts are mapped to one core alone
+	# assign lmac,reo err,release interrupts are mapped to one core alone
         irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
+	# assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#pci 4
 	#assign 4 rx interrupts to each cores from reverse
@@ -374,10 +379,13 @@ enable_affinity_al02_c4() {
 	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#assign 4th tcl completion ring and
-	#lmac,reo err,release interrupts are mapped to one core alone
+	#assign lmac,reo err,release interrupts are mapped to one core alone
 	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	# assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#For monitor interrupts
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -409,10 +417,13 @@ enable_affinity_al02_c6() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	# assign 4th tcl completion ring and
-	# lmac,reo err,release interrupts are mapped to one core alone
+	# assign lmac,reo err,release interrupts are mapped to one core alone
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	# assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#pci 4
 	#assign 4 rx interrupts to each cores from reverse
@@ -433,10 +444,13 @@ enable_affinity_al02_c6() {
 	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#assign 4th tcl completion ring and
-	#lmac,reo err,release interrupts are mapped to one core alone
+	#assign lmac,reo err,release interrupts are mapped to one core alone
 	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	# assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign affinity for 2 GHz Alder
 	#assign 4 rx interrupts to each cores
