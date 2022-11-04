@@ -1,0 +1,122 @@
+From ceb2fcfd062fc4ab8180019b00e62fc292ece4d2 Mon Sep 17 00:00:00 2001
+From: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+Date: Fri, 4 Nov 2022 10:23:58 +0530
+Subject: [PATCH] ath12k: Add warning to detect buffer overflow
+
+During Mesh 4 node testing, ath12k receives
+SKB with header length greater than the MAX
+native wifi header length. Because of which,
+buffer overflow happens during undecap wifi.
+
+To prevent overflow, added warning before
+decap and stopped processing the SKB. Also,
+dumped the msdu data for debugging purpose.
+
+Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 57 +++++++++++++++++++++++--
+ 1 file changed, 54 insertions(+), 3 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -2886,10 +2886,12 @@ static int ath12k_dp_rx_process_msdu(str
+ 	struct hal_rx_desc *rx_desc, *lrx_desc;
+ 	struct ath12k_skb_rxcb *rxcb;
+ 	struct sk_buff *last_buf;
+-	u8 l3_pad_bytes;
++	u8 l3_pad_bytes, decap_type;
+ 	u16 msdu_len;
+ 	int ret;
+ 	u32 hal_rx_desc_sz = ar->ab->hw_params.hal_desc_sz;
++	struct ieee80211_hdr *hdr;
++	u32 hdr_len;
+ 
+ 	last_buf = ath12k_dp_rx_get_msdu_last_buf(msdu_list, msdu);
+ 	if (!last_buf) {
+@@ -2935,6 +2937,21 @@ static int ath12k_dp_rx_process_msdu(str
+ 		}
+ 	}
+ 
++	decap_type = ath12k_dp_rx_h_decap_type(ab, rx_desc);
++	if (decap_type == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
++		hdr = (struct ieee80211_hdr *)msdu->data;
++		hdr_len = ieee80211_hdrlen(hdr->frame_control);
++		if (unlikely(hdr_len > DP_MAX_NWIFI_HDR_LEN)) {
++			ab->soc_stats.invalid_rbm++;
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "msdu data",
++					msdu->data, msdu->len);
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "rx_desc",
++					rx_desc, sizeof(*rx_desc));
++			ret = -EINVAL;
++			goto free_out;
++		}
++	}
++
+ 	ath12k_dp_rx_h_mpdu(ar, msdu, rx_desc, rx_status, fast_rx);
+ 	if (*fast_rx)
+ 		return 0;
+@@ -3942,12 +3959,14 @@ static int ath12k_dp_rx_h_null_q_desc(st
+ 	struct ath12k_base *ab = ar->ab;
+ 	u16 msdu_len, peer_id;
+ 	struct hal_rx_desc *desc = (struct hal_rx_desc *)msdu->data;
+-	u8 l3pad_bytes;
++	u8 l3pad_bytes, decap_type;
+ 	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
+ 	u32 hal_rx_desc_sz = ar->ab->hw_params.hal_desc_sz;
+ 	bool fast_rx;
+ 	struct ath12k_sta *arsta = NULL;
+ 	struct ath12k_peer *peer = NULL;
++	struct ieee80211_hdr *hdr;
++	u32 hdr_len;
+ 
+ 	msdu_len = ath12k_dp_rx_h_msdu_len(ab, desc);
+ 	peer_id = ath12k_dp_rx_h_peer_id(ab, desc);
+@@ -3999,6 +4018,19 @@ static int ath12k_dp_rx_h_null_q_desc(st
+ 		skb_put(msdu, hal_rx_desc_sz + l3pad_bytes + msdu_len);
+ 		skb_pull(msdu, hal_rx_desc_sz + l3pad_bytes);
+ 	}
++	decap_type = ath12k_dp_rx_h_decap_type(ab, desc);
++	if (decap_type == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
++		hdr = (struct ieee80211_hdr *)msdu->data;
++		hdr_len = ieee80211_hdrlen(hdr->frame_control);
++		if (unlikely(hdr_len > DP_MAX_NWIFI_HDR_LEN)) {
++			ab->soc_stats.invalid_rbm++;
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "msdu_data",
++					msdu->data, msdu->len);
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "rx_desc",
++					desc, sizeof(*desc));
++			return -EINVAL;
++		}
++	}
+ 	ath12k_dp_rx_h_ppdu(ar, desc, status);
+ 	fast_rx = false;
+ 	ath12k_dp_rx_h_mpdu(ar, msdu, desc, status, &fast_rx);
+@@ -4099,7 +4131,7 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+ {
+ 	struct ath12k_base *ab = ar->ab;
+ 	u16 msdu_len, peer_id;
+-	u8 l3pad_bytes;
++	u8 l3pad_bytes, decap_type;
+ 	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
+ 	struct hal_rx_desc *rx_desc = (struct hal_rx_desc*)msdu->data;
+ 	u32 hal_rx_desc_sz = ar->ab->hw_params.hal_desc_sz;
+@@ -4125,6 +4157,19 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+ 	skb_put(msdu, hal_rx_desc_sz + l3pad_bytes + msdu_len);
+ 	skb_pull(msdu, hal_rx_desc_sz + l3pad_bytes);
+ 
++	decap_type = ath12k_dp_rx_h_decap_type(ab, rx_desc);
++	if (decap_type == DP_RX_DECAP_TYPE_NATIVE_WIFI) {
++		hdr = (struct ieee80211_hdr *)msdu->data;
++		hdr_len = ieee80211_hdrlen(hdr->frame_control);
++		if (unlikely(hdr_len > DP_MAX_NWIFI_HDR_LEN)) {
++			ab->soc_stats.invalid_rbm++;
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "msdu_data",
++					msdu->data, msdu->len);
++			ath12k_dbg_dump(ab, ATH12K_DBG_DATA, NULL, "rx_desc",
++					rx_desc, sizeof(*rx_desc));
++			return true;
++		}
++	}
+ 	ath12k_dp_rx_h_ppdu(ar, rx_desc, status);
+ 
+ 	ath12k_dp_rx_h_mpdu(ar, msdu, rx_desc, status, &fast_rx);
