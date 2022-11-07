@@ -60,10 +60,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.c
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.h
 
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Kconfig
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/Kconfig
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Kconfig
+--- a/drivers/net/wireless/ath/ath12k/Kconfig
++++ b/drivers/net/wireless/ath/ath12k/Kconfig
 @@ -62,3 +62,11 @@ config ATH12K_PKTLOG
  	log uses ring buffer to dump the data. The buffer size,
  	frame filters can be altered by debugfs entries.
@@ -76,31 +74,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/K
 +		Enable ath12k PPE-DS support
 +
 +		Say Y to enable PPE DS Support. If unsure, say N.
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Makefile
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/Makefile
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Makefile
-@@ -20,7 +20,7 @@ ath12k-y += core.o \
- 	    wow.o \
- 	    mhi.o \
- 	    pci.o \
--	    dp_mon.o
-+	    dp_mon.o \
- 
- ath12k-$(CPTCFG_ATH12K_DEBUGFS) += debugfs.o debugfs_htt_stats.o debugfs_sta.o
- ath12k-$(CPTCFG_NL80211_TESTMODE) += testmode.o
-@@ -30,6 +30,7 @@ ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spec
- ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
- ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
- ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
-+ath12k-$(CPTCFG_ATH12K_PPE_DS_SUPPORT) += ppe.o
- 
- # for tracing framework to find trace.h
- CFLAGS_trace.o := -I$(src)
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -18,6 +18,7 @@
  #include "debug.h"
  #include "hif.h"
@@ -120,9 +95,9 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
  
  bool ath12k_mgmt_rx_reordering = false;
-@@ -1075,8 +1080,19 @@ static int ath12k_core_pdev_init(struct
- 		goto err_spectral_deinit;
- 	}
+@@ -1077,8 +1082,19 @@ static int ath12k_core_pdev_init(struct
+ 
+ 	ath12k_sawf_init(ab);
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	ret = ath12k_dp_ppeds_start(ab);
@@ -140,7 +115,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  err_spectral_deinit:
  	ath12k_spectral_deinit(ab);
  err_thermal_unregister:
-@@ -1086,6 +1102,9 @@ err_thermal_unregister:
+@@ -1088,6 +1104,9 @@ err_thermal_unregister:
  
  static void ath12k_core_pdev_deinit(struct ath12k_base *ab)
  {
@@ -149,8 +124,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
 +#endif
  	ath12k_spectral_deinit(ab);
  	ath12k_thermal_unregister(ab);
- }
-@@ -1364,7 +1383,11 @@ static int ath12k_core_hw_group_start(st
+ 	ath12k_sawf_deinit(ab);
+@@ -1367,7 +1386,11 @@ static int ath12k_core_hw_group_start(st
  			goto pdev_cleanup;
  		}
  		ath12k_hif_irq_enable(ab);
@@ -163,7 +138,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  		ath12k_config_qdss(ab);
  
  		if (ath12k_en_fwlog == true) {
-@@ -1470,6 +1493,20 @@ int ath12k_core_qmi_firmware_ready(struc
+@@ -1473,6 +1496,20 @@ int ath12k_core_qmi_firmware_ready(struc
  		goto err_firmware_stop;
  	}
  
@@ -184,14 +159,12 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	ret = ath12k_dp_alloc(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to init DP: %d\n", ret);
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
-@@ -26,6 +26,10 @@
- #include "dbring.h"
- #include "spectral.h"
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -28,6 +28,10 @@
  #include "pktlog.h"
+ #include "sawf.h"
+ #include "vendor.h"
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +#include <ppe_ds_wlan.h>
 +#include <ppe_vp_public.h>
@@ -199,7 +172,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -232,6 +236,7 @@ enum ath12k_dev_flags {
+@@ -234,6 +238,7 @@ enum ath12k_dev_flags {
  	ATH12K_FLAG_QMI_FW_READY_COMPLETE,
  	ATH12K_FLAG_HW_GROUP_ATTACHED,
  	ATH12K_FLAG_FTM_SEGMENTED,
@@ -207,7 +180,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  };
  
  enum ath12k_monitor_flags {
-@@ -1105,6 +1110,28 @@ struct ath12k_soc_dp_stats {
+@@ -1109,6 +1114,28 @@ struct ath12k_soc_dp_stats {
  	struct ath12k_dp_ring_bp_stats bp_stats;
  };
  
@@ -236,9 +209,9 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  struct ath12k_reg_freq {
           u32 start_freq;
           u32 end_freq;
-@@ -1309,6 +1336,20 @@ struct ath12k_base {
- 
- 	struct vendor_info id;
+@@ -1315,6 +1342,20 @@ struct ath12k_base {
+ 	u32 max_msduq_per_tid;
+ 	u32 default_msduq_per_tid;
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	ppe_ds_wlan_handle_t *ppeds_handle;
@@ -257,24 +230,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	int userpd_id;
  
  	/* must be last */
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/debug.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
-@@ -28,6 +28,9 @@ enum ath12k_debug_mask {
- 	ATH12K_DBG_DP_RX	= 0x00004000,
- 	ATH12K_DBG_OFFSET	= 0x00008000,
- 	ATH12K_DBG_RX_REO	= 0x00010000,
-+
-+	/* keep last*/
-+	ATH12K_DBG_PPE		= 0x80000000,
- 	ATH12K_DBG_ANY		= 0xffffffff,
- };
- 
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debugfs.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/debugfs.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debugfs.c
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
 @@ -2054,6 +2054,90 @@ static const struct file_operations fops
  	.write = ath12k_write_rx_hash_ix3,
  };
@@ -378,10 +335,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  	return 0;
  }
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
 @@ -13,6 +13,12 @@
  #include "dp_rx.h"
  #include "peer.h"
@@ -764,10 +719,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  	return 0;
  free:
  	ath12k_dp_cc_cleanup(ab);
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.h
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
 @@ -41,6 +41,15 @@ struct dp_rxdma_ring {
  	int bufs_max;
  };
@@ -992,10 +945,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
 +void ath12k_dp_ppeds_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp);
 +#endif
  #endif
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_rx.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -2747,7 +2747,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	u32 err_bitmap;
  	u8 tid;
@@ -1102,10 +1053,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  int ath12k_dp_rx_htt_setup(struct ath12k_base *ab)
  {
  	struct ath12k_dp *dp = &ab->dp;
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_rx.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.h
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.h
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -12,6 +12,35 @@
  
  #define DP_MAX_NWIFI_HDR_LEN	30
@@ -1153,10 +1102,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
 +				 enum ath12k_routing_pkt_type pkt_type,
 +				 u32 meta_data);
  #endif /* ATH12K_DP_RX_H */
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_tx.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.c
+--- a/drivers/net/wireless/ath/ath12k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -10,6 +10,7 @@
  #include "debugfs_sta.h"
  #include "hw.h"
@@ -1201,7 +1148,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
  				       struct ath12k_tx_desc_info *tx_desc,
  				       u8 ring_id)
-@@ -984,6 +1014,120 @@ static inline bool ath12k_dp_tx_completi
+@@ -1024,6 +1054,120 @@ static inline bool ath12k_dp_tx_completi
  	return true;
  }
  
@@ -1322,10 +1269,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
  				    int budget)
  {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_tx.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.h
+--- a/drivers/net/wireless/ath/ath12k/dp_tx.h
++++ b/drivers/net/wireless/ath/ath12k/dp_tx.h
 @@ -220,7 +220,11 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  		 bool gsn_valid, int mcbc_gsn);
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
@@ -1339,10 +1284,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  int ath12k_dp_tx_htt_h2t_ppdu_stats_req(struct ath12k *ar, u32 mask);
  int
  ath12k_dp_tx_htt_h2t_ext_stats_req(struct ath12k *ar, u8 type,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.c
+--- a/drivers/net/wireless/ath/ath12k/hal.c
++++ b/drivers/net/wireless/ath/ath12k/hal.c
 @@ -4,6 +4,7 @@
   * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
   */
@@ -1463,10 +1406,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  void ath12k_hal_srng_get_shadow_config(struct ath12k_base *ab,
  				       u32 **cfg, u32 *len)
  {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.h
+--- a/drivers/net/wireless/ath/ath12k/hal.h
++++ b/drivers/net/wireless/ath/ath12k/hal.h
 @@ -139,11 +139,6 @@ struct ath12k_base;
  #define HAL_TCL_PPE2TCL1_RING_BASE_LSB		0x00000c48
  #define HAL_TCL_PPE2TCL1_RING_HP		0x00002038
@@ -1573,10 +1514,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  
  static inline
  u32 *ath12k_hal_srng_src_get_next_entry_nolock(struct ath12k_base *ab,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_desc.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal_desc.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_desc.h
+--- a/drivers/net/wireless/ath/ath12k/hal_desc.h
++++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -923,53 +923,6 @@ struct hal_reo_dest_ring {
   *		this ring has looped around the ring.
   */
@@ -1656,10 +1595,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  } __packed;
  
  struct hal_mon_buf_ring {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_rx.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal_rx.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_rx.c
+--- a/drivers/net/wireless/ath/ath12k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath12k/hal_rx.c
 @@ -835,6 +835,20 @@ void ath12k_hal_reo_init_cmd_ring(struct
  	}
  }
@@ -1689,10 +1626,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  	ath12k_hal_reo_ring_ctrl_hash_ix2_setup(ab, ring_hash_map);
  	ath12k_hal_reo_ring_ctrl_hash_ix3_setup(ab, ring_hash_map);
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_rx.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal_rx.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_rx.h
+--- a/drivers/net/wireless/ath/ath12k/hal_rx.h
++++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -959,6 +959,10 @@ enum ath12k_eht_ru_size {
  	ATH12K_EHT_RU_INVALID,
  };
@@ -1704,10 +1639,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab, u32 *reo_desc,
  				       struct hal_reo_status *status);
  void ath12k_hal_reo_flush_queue_status(struct ath12k_base *ab, u32 *reo_desc,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_tx.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal_tx.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_tx.c
+--- a/drivers/net/wireless/ath/ath12k/hal_tx.c
++++ b/drivers/net/wireless/ath/ath12k/hal_tx.c
 @@ -99,6 +99,16 @@ void ath12k_hal_tx_configure_bank_regist
  			   bank_config);
  }
@@ -1725,10 +1658,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  void ath12k_hal_tx_config_rbm_mapping(struct ath12k_base *ab,u8 ring_num,
  				      u8 rbm_id, int ring_type)
  {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_tx.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal_tx.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal_tx.h
+--- a/drivers/net/wireless/ath/ath12k/hal_tx.h
++++ b/drivers/net/wireless/ath/ath12k/hal_tx.h
 @@ -182,6 +182,22 @@ struct hal_tx_fes_status_end {
  /* STA mode will have MCAST_PKT_CTRL instead of DSCP_TID_MAP bitfield */
  #define HAL_TX_BANK_CONFIG_DSCP_TIP_MAP_ID	GENMASK(22, 17)
@@ -1752,10 +1683,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  void ath12k_hal_tx_set_dscp_tid_map(struct ath12k_base *ab, int id);
  int ath12k_hal_reo_cmd_send(struct ath12k_base *ab, struct hal_srng *srng,
  			    enum hal_reo_cmd_type type,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hif.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hif.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hif.h
+--- a/drivers/net/wireless/ath/ath12k/hif.h
++++ b/drivers/net/wireless/ath/ath12k/hif.h
 @@ -8,6 +8,7 @@
  #define ATH12K_HIF_H
  
@@ -1821,10 +1750,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  static inline int ath12k_hif_map_service_to_pipe(struct ath12k_base *ab, u16 service_id,
  						 u8 *ul_pipe, u8 *dl_pipe)
  {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hw.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hw.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hw.c
+--- a/drivers/net/wireless/ath/ath12k/hw.c
++++ b/drivers/net/wireless/ath/ath12k/hw.c
 @@ -158,6 +158,10 @@ static const struct ath12k_hw_ops ipq533
  #define ATH12K_TX_MON_RING_MASK_0 0x1
  #define ATH12K_TX_MON_RING_MASK_1 0x2
@@ -1896,10 +1823,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  };
  
  static const struct ath12k_hw_hal_params ath12k_hw_hal_params_wcn7850 = {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hw.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hw.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hw.h
+--- a/drivers/net/wireless/ath/ath12k/hw.h
++++ b/drivers/net/wireless/ath/ath12k/hw.h
 @@ -73,6 +73,7 @@
  #define ATH12K_HW_DEFAULT_QUEUE		0
  
@@ -1937,10 +1862,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/h
  	u32 pcie_qserdes_sysclk_en_sel;
  	u32 pcie_pcs_osc_dtct_config_base;
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,6 +23,7 @@
  #include "testmode.h"
  #include "peer.h"
@@ -1949,7 +1872,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -6616,7 +6617,11 @@ static int ath12k_mac_station_add(struct
+@@ -6673,7 +6674,11 @@ static int ath12k_mac_station_add(struct
  		}
  	}
  
@@ -1962,7 +1885,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	if (ret) {
  		ath12k_warn(ab, "failed to setup dp for peer %pM on vdev %i (%d)\n",
  			    arsta->addr, arvif->vdev_id, ret);
-@@ -8952,6 +8957,16 @@ static int ath12k_mac_radio_start(struct
+@@ -9009,6 +9014,16 @@ static int ath12k_mac_radio_start(struct
  		}
  	}
  
@@ -1979,7 +1902,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
  	/* TODO: Do we need to enable ANI? */
-@@ -13929,6 +13944,10 @@ static const struct ieee80211_ops ath12k
+@@ -14024,6 +14039,10 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1990,10 +1913,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/pci.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.c
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
 @@ -14,6 +14,7 @@
  #include "hif.h"
  #include "mhi.h"
@@ -2110,10 +2031,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
  };
  
  static int ath12k_pci_probe(struct pci_dev *pdev,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/pci.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.h
+--- a/drivers/net/wireless/ath/ath12k/pci.h
++++ b/drivers/net/wireless/ath/ath12k/pci.h
 @@ -68,6 +68,12 @@
  #define QRTR_PCI_DOMAIN_NR_MASK		GENMASK(7, 4)
  #define QRTR_PCI_BUS_NUMBER_MASK	GENMASK(3, 0)
@@ -2139,10 +2058,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
 +void ath12k_pci_ppeds_irq_disable(struct ath12k_base *ab, enum ppeds_irq_type type);
 +#endif
  #endif /* ATH12K_PCI_H */
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.c
-===================================================================
 --- /dev/null
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.c
++++ b/drivers/net/wireless/ath/ath12k/ppe.c
 @@ -0,0 +1,856 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
@@ -3000,10 +2917,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
 +	ath12k_dp_srng_cleanup(ab, &dp->reo2ppe_ring);
 +	ath12k_dp_srng_cleanup(ab, &dp->ppeds_comp_ring.ppe_wbm2sw_ring);
 +}
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.h
-===================================================================
 --- /dev/null
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.h
++++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -0,0 +1,41 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
@@ -3046,11 +2961,9 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
 +irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
 +#endif
 +#endif
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -1409,6 +1409,88 @@ int ath12k_wmi_send_peer_delete_cmd(stru
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -1411,6 +1411,88 @@ int ath12k_wmi_send_peer_delete_cmd(stru
  	return ret;
  }
  
@@ -3139,11 +3052,9 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  int ath12k_wmi_send_pdev_set_regdomain(struct ath12k *ar,
  				       struct pdev_set_regdomain_params *param)
  {
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -414,6 +414,15 @@ enum wmi_tlv_cmd_id {
+--- a/drivers/net/wireless/ath/ath12k/wmi.h
++++ b/drivers/net/wireless/ath/ath12k/wmi.h
+@@ -416,6 +416,15 @@ enum wmi_tlv_cmd_id {
  	WMI_PEER_REORDER_QUEUE_REMOVE_CMDID,
  	WMI_PEER_SET_RX_BLOCKSIZE_CMDID,
  	WMI_PEER_ANTDIV_INFO_REQ_CMDID,
@@ -3159,15 +3070,15 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  	WMI_BCN_TX_CMDID = WMI_TLV_CMD(WMI_GRP_MGMT),
  	WMI_PDEV_SEND_BCN_CMDID,
  	WMI_BCN_TMPL_CMDID,
-@@ -2030,6 +2039,7 @@ enum wmi_tlv_tag {
+@@ -2038,6 +2047,7 @@ enum wmi_tlv_tag {
  	WMI_TAG_TPC_STATS_RATES_ARRAY,
  	WMI_TAG_TPC_STATS_CTL_PWR_TABLE_EVENT,
  	WMI_TAG_BCN_TMPL_ML_PARAMS_CMD = 0x3E6,
 +	WMI_TAG_PEER_CONFIG_PPEDS_ROUTING = 0x3EA,
+ 	WMI_TAG_SAWF_SERVICE_CLASS_CFG_CMD_FIXED_PARAM = 0x40A,
+ 	WMI_TAG_SAWF_SERVICE_CLASS_DISABLE_CMD_FIXED_PARAM = 0x40B,
  	WMI_TAG_BCN_TMPL_ML_INFO_CMD = 0x436,
- 	WMI_TAG_CTRL_PATH_CMD_FIXED_PARAM = 0x442,
- 	WMI_TAG_CTRL_PATH_EVENT_FIXED_PARAM,
-@@ -3124,6 +3134,25 @@ struct channel_param {
+@@ -3137,6 +3147,25 @@ struct channel_param {
  	u8  reg_class_id;
  } __packed;
  
@@ -3193,7 +3104,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  enum wmi_phy_mode {
  	MODE_11A        = 0,
  	MODE_11G        = 1,   /* 11b/g Mode */
-@@ -3329,6 +3358,27 @@ struct pdev_set_regdomain_params {
+@@ -3346,6 +3375,27 @@ struct pdev_set_regdomain_params {
  	u32 pdev_id;
  };
  
@@ -3221,7 +3132,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  struct rx_reorder_queue_remove_params {
  	u8 *peer_macaddr;
  	u16 vdev_id;
-@@ -3578,6 +3628,16 @@ struct wmi_pdev_set_regdomain_cmd {
+@@ -3595,6 +3645,16 @@ struct wmi_pdev_set_regdomain_cmd {
  	__le32 dfs_domain;
  } __packed;
  
@@ -3238,7 +3149,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  struct wmi_peer_set_param_cmd {
  	__le32 tlv_header;
  	__le32 vdev_id;
-@@ -8130,6 +8190,8 @@ int ath12k_wmi_peer_rx_reorder_queue_set
+@@ -8239,6 +8299,8 @@ int ath12k_wmi_peer_rx_reorder_queue_set
  int
  ath12k_wmi_rx_reord_queue_remove(struct ath12k *ar,
  				 struct rx_reorder_queue_remove_params *param);
@@ -3247,7 +3158,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  int ath12k_wmi_send_pdev_set_regdomain(struct ath12k *ar,
  				       struct pdev_set_regdomain_params *param);
  int ath12k_wmi_pull_fw_stats(struct ath12k_base *ab, struct sk_buff *skb,
-@@ -8217,4 +8279,10 @@ int
+@@ -8329,4 +8391,10 @@ int
  ath12k_mgmt_rx_reo_init_context(struct ath12k_base *ab);
  int
  ath12k_mgmt_rx_reo_deinit_context(struct ath12k_base *ab);
@@ -3258,19 +3169,15 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
 +					 u32 src_info, bool ppe_routing_enable);
 +#endif
  #endif
-Index: backports-20220822-5.4.213-ef7197996efe/local-symbols
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/local-symbols
-+++ backports-20220822-5.4.213-ef7197996efe/local-symbols
+--- a/local-symbols
++++ b/local-symbols
 @@ -143,3 +143,4 @@ ATH12K_DEBUGFS=
  ATH12K_TRACING=
  ATH12K_SPECTRAL=
  ATH12K_PKTLOG=
 +ATH12K_PPE_DS_SUPPORT=
-Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/iface.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/iface.c
-+++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/iface.c
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
 @@ -781,7 +781,9 @@ void ieee80211_stop_mbssid(struct ieee80
  static int ieee80211_stop(struct net_device *dev)
  {
@@ -3291,3 +3198,27 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/iface.c
  	sdata->wdev.iftype = type;
  
  	sdata->control_port_protocol = cpu_to_be16(ETH_P_PAE);
+--- a/drivers/net/wireless/ath/ath12k/Makefile
++++ b/drivers/net/wireless/ath/ath12k/Makefile
+@@ -32,6 +32,7 @@ ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spec
+ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
+ ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
+ ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
++ath12k-$(CPTCFG_ATH12K_PPE_DS_SUPPORT) += ppe.o
+ 
+ # for tracing framework to find trace.h
+ CFLAGS_trace.o := -I$(src)
+--- a/drivers/net/wireless/ath/ath12k/debug.h
++++ b/drivers/net/wireless/ath/ath12k/debug.h
+@@ -28,7 +28,10 @@ enum ath12k_debug_mask {
+ 	ATH12K_DBG_DP_RX	= 0x00004000,
+ 	ATH12K_DBG_OFFSET	= 0x00008000,
+ 	ATH12K_DBG_RX_REO	= 0x00010000,
+-	ATH12K_DBG_SAWF		= 0x80000000,
++
++	/* keep last*/
++	ATH12K_DBG_SAWF		= 0x40000000,
++	ATH12K_DBG_PPE          = 0x80000000,
+ 	ATH12K_DBG_ANY		= 0xffffffff,
+ };
+ 
