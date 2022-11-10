@@ -14,11 +14,9 @@ Add get_txpower to get the Tx power from FW and return it accordingly.
 Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 
-Index: b/drivers/net/wireless/ath/ath12k/core.c
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/core.c	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/core.c	2022-11-02 11:08:38.365268840 +0530
-@@ -303,6 +303,55 @@ bool ath12k_core_hw_group_start_ready(st
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -303,6 +303,57 @@ bool ath12k_core_hw_group_start_ready(st
  	return (ag->num_started == ag->num_chip);
  }
  
@@ -54,13 +52,15 @@ Index: b/drivers/net/wireless/ath/ath12k/core.c
 +
 +void ath12k_fw_stats_init(struct ath12k *ar)
 +{
-+	INIT_LIST_HEAD(&ar->fw_stats_pdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.vdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.pdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.bcn);
 +	init_completion(&ar->fw_stats_complete);
 +}
 +
 +void ath12k_fw_stats_reset(struct ath12k *ar)
 +{
-+	ath12k_fw_stats_pdevs_free(&ar->fw_stats_pdevs);
++	ath12k_fw_stats_pdevs_free(&ar->fw_stats.pdevs);
 +	ath12k_fw_stats_vdevs_free(&ar->fw_stats.vdevs);
 +}
 +
@@ -74,10 +74,8 @@ Index: b/drivers/net/wireless/ath/ath12k/core.c
  int ath12k_core_suspend(struct ath12k_base *ab)
  {
  	int ret;
-Index: b/drivers/net/wireless/ath/ath12k/core.h
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/core.h	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/core.h	2022-11-02 11:08:38.381268720 +0530
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -609,9 +609,6 @@ struct ath12k_debug {
  	struct dentry *debugfs_pdev;
  	struct ath12k_dbg_htt_stats htt_stats;
@@ -88,20 +86,19 @@ Index: b/drivers/net/wireless/ath/ath12k/core.h
  	u32 extd_rx_stats;
  	u32 pktlog_filter;
  	u32 pktlog_mode;
-@@ -806,6 +803,12 @@ struct ath12k {
+@@ -806,6 +803,11 @@ struct ath12k {
  	struct wmi_tpc_stats_event *tpc_stats;
  	struct completion tpc_complete;
  	bool tpc_request;
 +
 +	/* fw pdev_stats can be requested by get_txpower mac ops too */
-+	struct list_head fw_stats_pdevs;
 +	struct ath12k_fw_stats fw_stats;
 +	struct completion fw_stats_complete;
 +	bool fw_stats_done;
  };
  
  struct ath12k_band_cap {
-@@ -1227,6 +1230,11 @@ void ath12k_core_put_hw_group(struct ath
+@@ -1227,6 +1229,11 @@ void ath12k_core_put_hw_group(struct ath
  
  const struct firmware *ath12k_core_firmware_request(struct ath12k_base *ab,
  						    const char *filename);
@@ -113,10 +110,8 @@ Index: b/drivers/net/wireless/ath/ath12k/core.h
  
  static inline const char *ath12k_scan_state_str(enum ath12k_scan_state state)
  {
-Index: b/drivers/net/wireless/ath/ath12k/debugfs.c
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/debugfs.c	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/debugfs.c	2022-11-02 11:08:38.381268720 +0530
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
 @@ -54,86 +54,28 @@ static const char *htt_bp_lmac_ring[HTT_
  	"MONITOR_DEST_RING",
  };
@@ -374,10 +369,8 @@ Index: b/drivers/net/wireless/ath/ath12k/debugfs.c
  }
  
  int ath12k_pktlog_rx_filter_setting(struct ath12k *ar,
-Index: b/drivers/net/wireless/ath/ath12k/debugfs.h
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/debugfs.h	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/debugfs.h	2022-11-02 11:08:38.381268720 +0530
+--- a/drivers/net/wireless/ath/ath12k/debugfs.h
++++ b/drivers/net/wireless/ath/ath12k/debugfs.h
 @@ -208,7 +208,8 @@ int ath12k_debugfs_register(struct ath12
  void ath12k_debugfs_unregister(struct ath12k *ar);
  int ath12k_debugfs_create(void);
@@ -399,10 +392,8 @@ Index: b/drivers/net/wireless/ath/ath12k/debugfs.h
  {
  }
  
-Index: b/drivers/net/wireless/ath/ath12k/mac.c
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/mac.c	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/mac.c	2022-11-02 11:08:51.205172112 +0530
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -7371,7 +7371,7 @@ static int ath12k_mac_vdev_create(struct
  	/* Send vdev stats offload commands to firmware before first vdev
  	 * creation. ie., when num_created_vdevs = 0
@@ -427,7 +418,7 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
 +
 +	spin_lock_bh(&ar->data_lock);
 +	ar->fw_stats_done = false;
-+	ath12k_fw_stats_pdevs_free(&ar->fw_stats_pdevs);
++	ath12k_fw_stats_pdevs_free(&ar->fw_stats.pdevs);
 +	spin_unlock_bh(&ar->data_lock);
 +
 +	reinit_completion(&ar->fw_stats_complete);
@@ -489,7 +480,7 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
 +	}
 +
 +	spin_lock_bh(&ar->data_lock);
-+	pdev = list_first_entry_or_null(&ar->fw_stats_pdevs,
++	pdev = list_first_entry_or_null(&ar->fw_stats.pdevs,
 +					struct ath12k_fw_stats_pdev,
 +					list);
 +	if (!pdev) {
@@ -539,16 +530,14 @@ Index: b/drivers/net/wireless/ath/ath12k/mac.c
  		ret = ath12k_debugfs_register(ar);
  		if (ret) {
  			ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
-Index: b/drivers/net/wireless/ath/ath12k/wmi.c
-===================================================================
---- a/drivers/net/wireless/ath/ath12k/wmi.c	2022-11-02 11:08:38.389268660 +0530
-+++ b/drivers/net/wireless/ath/ath12k/wmi.c	2022-11-02 11:08:38.385268690 +0530
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -6702,7 +6702,7 @@ void ath12k_wmi_fw_stats_fill(struct ath
  	spin_lock_bh(&ar->data_lock);
  
  	if (stats_id == WMI_REQUEST_PDEV_STAT) {
 -		pdev = list_first_entry_or_null(&fw_stats->pdevs,
-+		pdev = list_first_entry_or_null(&ar->fw_stats_pdevs,
++		pdev = list_first_entry_or_null(&ar->fw_stats.pdevs,
  						struct ath12k_fw_stats_pdev, list);
  		if (!pdev) {
  			ath12k_warn(ar->ab, "failed to get pdev stats\n");
@@ -586,7 +575,7 @@ Index: b/drivers/net/wireless/ath/ath12k/wmi.c
 +	 * debugfs fw stats. Therfore, processing it separately.
 +	 */
 +	if (stats.stats_id == WMI_REQUEST_PDEV_STAT) {
-+		list_splice_tail_init(&stats.pdevs, &ar->fw_stats_pdevs);
++		list_splice_tail_init(&stats.pdevs, &ar->fw_stats.pdevs);
 +		ar->fw_stats_done = true;
 +		goto complete;
 +	}
