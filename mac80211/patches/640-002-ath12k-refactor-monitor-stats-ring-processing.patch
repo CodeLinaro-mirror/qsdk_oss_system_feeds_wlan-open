@@ -43,11 +43,24 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	dma_addr_t paddr;
 -	u32 cookie, buf_id;
 +	u64 cookie;
-+	u32 buf_id;
++	int buf_id;
  
  	srng = &ab->hal.srng_list[buf_ring->refill_buf_ring.ring_id];
  	spin_lock_bh(&srng->lock);
-@@ -2043,135 +2049,6 @@ ath12k_dp_mon_tx_parse_mon_status(struct
+@@ -1284,8 +1290,11 @@ int ath12k_dp_mon_buf_replenish(struct a
+ 				   buf_ring->bufs_max * 3, GFP_ATOMIC);
+ 		spin_unlock_bh(&buf_ring->idr_lock);
+ 
+-		if (unlikely(buf_id < 0))
++		if (unlikely(buf_id < 0)) {
++			ath12k_warn(ab, "idr allocation failed with ret %d code\n",
++                                    buf_id);
+ 			goto fail_dma_unmap;
++		}
+ 
+ 		mon_buf = (struct hal_mon_buf_ring *)
+ 			   ath12k_hal_srng_src_get_next_entry(ab, srng);
+@@ -2043,135 +2052,6 @@ ath12k_dp_mon_tx_parse_mon_status(struct
  	return tlv_status;
  }
  
@@ -183,7 +196,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  static void
  ath12k_dp_mon_rx_update_peer_rate_table_stats(struct ath12k_rx_peer_stats *rx_stats,
  					      struct hal_rx_mon_ppdu_info *ppdu_info,
-@@ -2481,6 +2358,167 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
+@@ -2481,6 +2361,172 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
  		ath12k_dp_mon_rx_update_user_stats(ar, ppdu_info, i);
  }
  
@@ -240,8 +253,12 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +			break;
 +
 +		if (u32_get_bits(mon_dst_desc->info0, HAL_MON_DEST_INFO0_EMPTY_DESC)) {
++			/* Empty descriptor is intended for drop statistics, HW doesn't
++			 * consume any buffer in this case. Instead of replenishing the
++			 * new buffer, just move to the next entry in the destination ring
++			 */
 +			ab->soc_stats.mon_drop_desc++;
-+			goto move_next;
++			goto next_entry;
 +		}
 +
 +		cookie = mon_dst_desc->cookie;
@@ -278,6 +295,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +		__skb_queue_tail(&skb_list, skb);
 +move_next:
 +		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
++next_entry:
 +		ath12k_hal_srng_dst_get_next_entry(ab, srng);
 +		num_buffs_reaped++;
 +	}
@@ -351,7 +369,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  int ath12k_dp_mon_rx_process_stats(struct ath12k *ar, int mac_id,
  				   struct napi_struct *napi, int *budget)
  {
-@@ -2513,12 +2551,16 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2513,12 +2559,16 @@ int ath12k_dp_mon_rx_process_stats(struc
  	ath12k_hal_srng_access_begin(ab, srng);
  
  	while (likely(*budget)) {
@@ -369,7 +387,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		cookie = mon_dst_desc->cookie;
  		buf_id = u32_get_bits(cookie, DP_RXDMA_BUF_COOKIE_BUF_ID);
  
-@@ -2541,11 +2583,15 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2541,11 +2591,15 @@ int ath12k_dp_mon_rx_process_stats(struc
  					  HAL_MON_DEST_INFO0_END_REASON);
  		if ((end_reason == HAL_MON_FLUSH_DETECTED) ||
  		    (end_reason == HAL_MON_PPDU_TRUNCATED)) {
@@ -386,7 +404,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		__skb_queue_tail(&skb_list, skb);
  move_next:
  		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
-@@ -2559,23 +2605,27 @@ move_next:
+@@ -2559,23 +2613,27 @@ move_next:
  	if (!num_buffs_reaped)
  		return 0;
  
@@ -419,7 +437,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				   ppdu_info->peer_id);
  			goto next_skb;
  		}
-@@ -2593,6 +2643,7 @@ move_next:
+@@ -2593,6 +2651,7 @@ move_next:
  next_skb:
  		spin_unlock_bh(&ab->base_lock);
  		rcu_read_unlock();
