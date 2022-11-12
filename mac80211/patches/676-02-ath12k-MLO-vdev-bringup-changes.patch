@@ -1,4 +1,4 @@
-From a702555221a5d4b84eb5d9a8f61f7fa201b6bd1d Mon Sep 17 00:00:00 2001
+From 3aca73b1f849abd2e6b1d86396b0446bca8046dd Mon Sep 17 00:00:00 2001
 From: Sriram R <quic_srirrama@quicinc.com>
 Date: Tue, 11 Oct 2022 13:11:24 +0530
 Subject: [PATCH] ath12k: MLO vdev bringup changes
@@ -21,14 +21,14 @@ required to achieve the same.
 
 Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.h |   3 +
- drivers/net/wireless/ath/ath12k/mac.c  | 165 ++++++++++++++++++++++++-
- drivers/net/wireless/ath/ath12k/wmi.c  |  79 +++++++++++-
- drivers/net/wireless/ath/ath12k/wmi.h  |  48 +++++++
- 4 files changed, 286 insertions(+), 9 deletions(-)
+ drivers/net/wireless/ath/ath12k/core.h |   4 +
+ drivers/net/wireless/ath/ath12k/mac.c  | 198 +++++++++++++++++++++++--
+ drivers/net/wireless/ath/ath12k/wmi.c  |  79 +++++++++-
+ drivers/net/wireless/ath/ath12k/wmi.h  |  48 ++++++
+ 4 files changed, 309 insertions(+), 20 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 0b047c9..f53eefa 100644
+index f5b8ffb..f00faa6 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -333,6 +333,7 @@ struct ath12k_link_vif {
@@ -48,12 +48,42 @@ index 0b047c9..f53eefa 100644
  };
  
  struct ath12k_vif_iter {
+@@ -991,6 +994,7 @@ struct ath12k_hw {
+ 	bool regd_updated;
+ 	u8 supported_band_mask;
+ 	u8 num_radio;
++	struct ath12k_link_vif *scan_arvif;
+ 	struct ath12k radio[0] __aligned(sizeof(void *));
+ };
+ 
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 02204df..9c53858 100644
+index bf6338b..a2fa7b0 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -3891,7 +3891,10 @@ static void ath12k_mac_bss_info_changed(struct ath12k *ar,
- 	if (changed & BSS_CHANGED_BSSID && !is_zero_ether_addr(info->bssid))
+@@ -1494,7 +1494,7 @@ static int ath12k_mac_setup_bcn_tmpl_non_ema(struct ath12k_link_vif *arvif)
+ 	}
+ 
+ 	bcn = ieee80211_beacon_get_template(tx_arvif->ar->ah->hw, ahvif->vif,
+-					    &offs, 0);
++					    &offs, arvif->link_id);
+ 	if (!bcn) {
+ 		ath12k_warn(arvif->ar->ab,
+ 			    "failed to get beacon template from mac80211\n");
+@@ -1607,7 +1607,7 @@ static void ath12k_control_beaconing(struct ath12k_link_vif *arvif,
+ 
+ 	ahvif->aid = 0;
+ 
+-	ether_addr_copy(arvif->bssid, info->bssid);
++	ether_addr_copy(arvif->bssid, info->addr);
+ 
+ 	params.vdev_id = arvif->vdev_id;
+ 	params.aid = ahvif->aid;
+@@ -3888,10 +3888,13 @@ static void ath12k_mac_bss_info_changed(struct ath12k *ar,
+ 		ahvif->u.ap.hidden_ssid = info->hidden_ssid;
+ 	}
+ 
+-	if (changed & BSS_CHANGED_BSSID && !is_zero_ether_addr(info->bssid))
++	if (changed & BSS_CHANGED_BSSID && info->bssid && !is_zero_ether_addr(info->bssid))
  		ether_addr_copy(arvif->bssid, info->bssid);
  
 -	if (changed & BSS_CHANGED_BEACON_ENABLED) {
@@ -72,7 +102,45 @@ index 02204df..9c53858 100644
  	arvif->is_created = false;
  	arvif->ar = NULL;
  
-@@ -7886,6 +7890,15 @@ static int ath12k_mac_setup_vdev_create_params(struct ath12k_link_vif *arvif,
+@@ -4241,7 +4245,7 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
+ }
+ 
+ static struct ath12k_link_vif *
+-ath12k_mac_get_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
++ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
+ {
+ 	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+ 	struct ath12k_link_vif *arvif;
+@@ -4519,7 +4523,7 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
+ 	}
+ 
+ 	/* TODO ML vif handling */
+-	arvif = ath12k_mac_get_link_vif(ah, vif, 0);  
++	arvif = ath12k_mac_assign_link_vif(ah, vif, 0);  
+ 	/* If the vif is already assigned to a specific vdev of an ar,
+ 	 * check whether its already started, vdev which is started
+ 	 * are not allowed to switch to a new radio.
+@@ -4529,6 +4533,9 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
+ 	 * delete-create vdev's for the same ar, in case the request is
+ 	 * always on the same band for the vif
+ 	 */
++	if (!arvif)
++		return -ENOMEM;
++
+ 	if (arvif->is_created) {
+ 		if (ar != arvif->ar && arvif->is_started) {
+ 			mutex_unlock(&ah->conf_mutex);
+@@ -4553,6 +4560,9 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
+ 		}
+ 		mutex_unlock(&ar->conf_mutex);
+ 	}
++
++	ah->scan_arvif = arvif;
++
+ 	mutex_unlock(&ah->conf_mutex);
+ 
+ 	mutex_lock(&ar->conf_mutex);
+@@ -7886,6 +7896,15 @@ static int ath12k_mac_setup_vdev_create_params(struct ath12k_link_vif *arvif,
  	}
  
  	params->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
@@ -88,7 +156,16 @@ index 02204df..9c53858 100644
  	return 0;
  }
  
-@@ -8094,6 +8107,7 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -8009,7 +8028,7 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	struct ath12k_vif *ahvif = arvif->ahvif;
+ 	struct ieee80211_hw *hw = ar->ah->hw;
+ 	struct vdev_create_params vdev_param = {0};
+-	struct peer_create_params peer_param;
++	struct peer_create_params peer_param = {0};
+ 	struct ieee80211_bss_conf *link_conf;
+ 	u32 param_id, param_value;
+ 	u16 nss;
+@@ -8094,6 +8113,7 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	}
  
  	ar->num_created_vdevs++;
@@ -96,15 +173,33 @@ index 02204df..9c53858 100644
  	arvif->is_created = true;
  	ath12k_dbg(ab, ATH12K_DBG_MAC, "vdev %pM created, vdev_id %d\n",
  		   link_addr, arvif->vdev_id);
-@@ -8512,6 +8526,7 @@ static void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
- 			kfree(arvif);
+@@ -8484,6 +8504,9 @@ err_vdev_del:
  
- 		ahvif->link[link_id] = NULL;
-+		ahvif->links_map &= ~BIT(link_id);
+ 	/* TODO: recal traffic pause state based on the available vdevs */
+ 
++	ahvif->link[arvif->link_id] = NULL;
++	ahvif->links_map &= ~BIT(arvif->link_id);
++
+ 	mutex_unlock(&ar->conf_mutex);
+ }
+ 
+@@ -8506,12 +8529,13 @@ static void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
+ 		if (arvif == NULL)
+ 			continue;
+ 
++		if (WARN_ON(arvif->link_id != link_id))
++			continue;
++
+ 		ath12k_mac_remove_link_interface(hw, arvif);
+ 
+ 		if (arvif != &ahvif->deflink)
+ 			kfree(arvif);
+-
+-		ahvif->link[link_id] = NULL;
  	}
  
  	mutex_unlock(&ah->conf_mutex);
-@@ -8649,6 +8664,16 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
+@@ -8649,6 +8673,16 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
  	return ret;
  }
  
@@ -121,15 +216,16 @@ index 02204df..9c53858 100644
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
  {
-@@ -8750,6 +8775,50 @@ static int ath12k_mac_set_6g_nonht_dup_conf(struct ath12k_link_vif *arvif,
+@@ -8750,6 +8784,55 @@ static int ath12k_mac_set_6g_nonht_dup_conf(struct ath12k_link_vif *arvif,
  	return ret;
  }
  
 +static void
-+ath12k_mac_mlo_get_vdev_args(struct ath12k_vif *ahvif,
++ath12k_mac_mlo_get_vdev_args(struct ath12k_link_vif *arvif,
 +			     struct wmi_ml_arg *ml_arg)
 +{
-+	struct ath12k_link_vif *arvif;
++	struct ath12k_vif *ahvif = arvif->ahvif;
++	struct ath12k_link_vif *arvif_p;
 +	u16 links_map;
 +	u8 link_id;
 +	struct wmi_ml_partner_info *partner_info;
@@ -151,19 +247,23 @@ index 02204df..9c53858 100644
 +	partner_info = ml_arg->partner_info;
 +
 +	for_each_set_bit(link_id, &links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
-+		arvif = ahvif->link[link_id];
++		arvif_p = ahvif->link[link_id];
 +
-+		if (WARN_ON(arvif == NULL))
++		if (WARN_ON(arvif_p == NULL))
 +			continue;
 +
-+		link_conf = rcu_dereference(arvif->ahvif->vif->link_conf[arvif->link_id]);
++		if (arvif == arvif_p)
++			continue;
++
++		link_conf = rcu_dereference(ahvif->vif->link_conf[arvif_p->link_id]);
 +
 +		if (!link_conf)
 +			continue;
 +
-+		partner_info->vdev_id = arvif->vdev_id;
-+		partner_info->hw_link_id = arvif->ar->pdev->hw_link_id;
++		partner_info->vdev_id = arvif_p->vdev_id;
++		partner_info->hw_link_id = arvif_p->ar->pdev->hw_link_id;
 +		ether_addr_copy(partner_info->addr, link_conf->addr);
++		ml_arg->num_partner_links++;
 +		partner_info++;
 +	}
 +	rcu_read_unlock();
@@ -172,17 +272,17 @@ index 02204df..9c53858 100644
  static int
  ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
  			      const struct cfg80211_chan_def *chandef,
-@@ -8817,6 +8886,9 @@ ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
+@@ -8817,6 +8900,9 @@ ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
 +	if (!restart)
-+		ath12k_mac_mlo_get_vdev_args(ahvif, &arg.ml);
++		ath12k_mac_mlo_get_vdev_args(arvif, &arg.ml);
 +
  	ath12k_dbg(ab, ATH12K_DBG_MAC,
  		   "mac vdev %d start center_freq %d phymode %s\n",
  		   arg.vdev_id, arg.channel.freq,
-@@ -9024,6 +9096,72 @@ static int ath12k_vdev_restart_sequence(struct ath12k_link_vif *arvif,
+@@ -9024,6 +9110,72 @@ static int ath12k_vdev_restart_sequence(struct ath12k_link_vif *arvif,
  	return ret;
  }
  
@@ -219,7 +319,7 @@ index 02204df..9c53858 100644
 +		 * option is to take a backup if link info, anyways this function would
 +		 * change after FW support for dynamic add
 +		 */
-+		if (WARN_ON(ahvif->vif->link_conf[link_id]))
++		if (WARN_ON(!ahvif->vif->link_conf[link_id]))
 +			continue;
 +
 +		mutex_lock(&ar->conf_mutex);
@@ -255,7 +355,22 @@ index 02204df..9c53858 100644
  struct ath12k_mac_change_chanctx_arg {
  	struct ieee80211_chanctx_conf *ctx;
  	struct ieee80211_vif_chanctx_switch *vifs;
-@@ -9969,9 +10107,16 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
+@@ -9957,7 +10109,13 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
+ 
+ 	mutex_lock(&ah->conf_mutex);
+ 
+-	arvif = ath12k_mac_get_link_vif(ah, vif, link_id);
++	/* clear any scan arvifs since its always attached to link 0 by default */
++	if (ah->scan_arvif && vif->valid_links) {
++		ath12k_mac_remove_link_interface(hw, ah->scan_arvif);
++		ah->scan_arvif = NULL;
++	}
++
++	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
+ 	if (!arvif) {
+ 		ath12k_err(NULL, "unable to allocate link vif\n");
+ 		return -ENOMEM;
+@@ -9969,9 +10127,8 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  			mutex_unlock(&ah->conf_mutex);
  			return -EINVAL;
  		}
@@ -263,19 +378,11 @@ index 02204df..9c53858 100644
 -		ar = arvif->ar;
 -		/* Note below case not expected for MLO/not handled now */
 +	} else if (vif->valid_links){
-+		/* Note: a vdev could be created during scan without ML params
-+		 * hence always create a new vdev for MLD case.
-+		 */
-+		ath12k_mac_remove_link_interface(hw, arvif);
-+		ar = ath12k_mac_assign_vif_to_vdev(hw, arvif, ctx);
-+		if (!ar) {
-+			mutex_unlock(&ah->conf_mutex);
-+			return -EINVAL;
-+		}
++		/* not expected to be here */
  	} else {
  		ar = ath12k_get_ar_by_ctx(hw, ctx);
  		if (!ar) {
-@@ -10072,6 +10217,14 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
+@@ -10072,6 +10229,14 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  		goto out;
  	}
  
@@ -290,7 +397,17 @@ index 02204df..9c53858 100644
  	ret = ath12k_mac_vdev_start(arvif, &ctx->def, ctx->radar_enabled);
  	if (ret) {
  		ath12k_warn(ab, "failed to start vdev %i addr %pM on freq %d: %d\n",
-@@ -10137,7 +10290,8 @@ ath12k_mac_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
+@@ -10109,8 +10274,7 @@ ath12k_mac_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
+ 	struct ath12k_base *ab;
+ 	struct ath12k *ar;
+ 	int ret;
+-	/* TODO tmp, link_id passed through func */
+-	u8 link_id = 0;
++	u8 link_id = link_conf->link_id;
+ 
+ 	mutex_lock(&ah->conf_mutex);
+ 	/* The vif is expected to be attached to an ar's VDEV.
+@@ -10137,7 +10301,8 @@ ath12k_mac_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
  		   "mac chanctx unassign ptr %pK vdev_id %i\n",
  		   ctx, arvif->vdev_id);
  
@@ -300,7 +417,7 @@ index 02204df..9c53858 100644
  
  	if (ab->hw_params->vdev_start_delay &&
  	    ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR &&
-@@ -11483,6 +11637,7 @@ static const struct ieee80211_ops ath12k_ops = {
+@@ -11583,6 +11748,7 @@ static const struct ieee80211_ops ath12k_ops = {
  	.config                         = ath12k_mac_op_config,
  	.link_info_changed              = ath12k_mac_op_bss_info_changed,
  	.vif_cfg_changed		= ath12k_mac_op_vif_cfg_changed,
@@ -309,7 +426,7 @@ index 02204df..9c53858 100644
  	.hw_scan                        = ath12k_mac_op_hw_scan,
  	.cancel_hw_scan                 = ath12k_mac_op_cancel_hw_scan,
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 16fad9e..4112065 100644
+index 6501801..1088036 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -773,18 +773,23 @@ int ath12k_wmi_vdev_create(struct ath12k *ar, u8 *macaddr,
@@ -436,7 +553,7 @@ index 16fad9e..4112065 100644
  	if (restart)
  		ret = ath12k_wmi_cmd_send(wmi, skb,
  					  WMI_VDEV_RESTART_REQUEST_CMDID);
-@@ -7859,7 +7930,7 @@ ath12k_wmi_process_csa_switch_count_event(struct ath12k_base *ab,
+@@ -7904,7 +7975,7 @@ ath12k_wmi_process_csa_switch_count_event(struct ath12k_base *ab,
  				    vdev_ids[i]);
  			continue;
  		}
