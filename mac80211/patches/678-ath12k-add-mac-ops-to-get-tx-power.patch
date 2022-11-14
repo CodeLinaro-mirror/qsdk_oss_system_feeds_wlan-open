@@ -16,7 +16,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -229,6 +229,55 @@ bool ath12k_core_hw_group_start_ready(st
+@@ -229,6 +229,57 @@ bool ath12k_core_hw_group_start_ready(st
  	return (ag->num_started == ag->num_chip);
  }
  
@@ -52,13 +52,15 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 +
 +void ath12k_fw_stats_init(struct ath12k *ar)
 +{
-+	INIT_LIST_HEAD(&ar->fw_stats_pdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.vdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.pdevs);
++	INIT_LIST_HEAD(&ar->fw_stats.bcn);
 +	init_completion(&ar->fw_stats_complete);
 +}
 +
 +void ath12k_fw_stats_reset(struct ath12k *ar)
 +{
-+	ath12k_fw_stats_pdevs_free(&ar->fw_stats_pdevs);
++	ath12k_fw_stats_pdevs_free(&ar->fw_stats.pdevs);
 +	ath12k_fw_stats_vdevs_free(&ar->fw_stats.vdevs);
 +}
 +
@@ -74,7 +76,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	int ret;
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -648,9 +648,6 @@ struct ath12k_debug {
+@@ -662,9 +662,6 @@ struct ath12k_debug {
  	struct dentry *debugfs_pdev;
  	struct ath12k_dbg_htt_stats htt_stats;
  	u32 extd_tx_stats;
@@ -84,20 +86,18 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	u32 extd_rx_stats;
  	u32 pktlog_filter;
  	u32 pktlog_mode;
-@@ -849,6 +846,12 @@ struct ath12k {
+@@ -863,6 +860,10 @@ struct ath12k {
  
  	struct completion mlo_setup_done;
  	u32 mlo_setup_status;
 +
-+	/* fw pdev_stats can be requested by get_txpower mac ops too */
-+	struct list_head fw_stats_pdevs;
 +	struct ath12k_fw_stats fw_stats;
 +	struct completion fw_stats_complete;
 +	bool fw_stats_done;
  };
  
  struct ath12k_band_cap {
-@@ -1296,6 +1299,11 @@ void ath12k_core_put_hw_group(struct ath
+@@ -1311,6 +1312,11 @@ void ath12k_core_put_hw_group(struct ath
  
  const struct firmware *ath12k_core_firmware_request(struct ath12k_base *ab,
  						    const char *filename);
@@ -347,7 +347,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	mutex_unlock(&ar->conf_mutex);
  
  	return simple_read_from_buffer(ubuf, count, ppos, buf, len);
-@@ -1223,7 +1156,7 @@ void ath12k_debugfs_fw_stats_init(struct
+@@ -1291,7 +1224,7 @@ void ath12k_debugfs_fw_stats_init(struct
  	struct dentry *fwstats_dir = debugfs_create_dir("fw_stats",
  							ar->debug.debugfs_pdev);
  
@@ -356,7 +356,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  
  	/* all stats debugfs files created are under "fw_stats" directory
  	 * created per PDEV
-@@ -1237,11 +1170,6 @@ void ath12k_debugfs_fw_stats_init(struct
+@@ -1305,11 +1238,6 @@ void ath12k_debugfs_fw_stats_init(struct
  	debugfs_create_file("en_vdev_stats_ol", 0600, fwstats_dir, ar,
  			    &fops_vdev_stats_offload);
  
@@ -393,7 +393,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8036,7 +8036,7 @@ static int ath12k_mac_vdev_create(struct
+@@ -8420,7 +8420,7 @@ static int ath12k_mac_vdev_create(struct
  	/* Send vdev stats offload commands to firmware before first vdev
  	 * creation. ie., when num_created_vdevs = 0
  	 */
@@ -402,7 +402,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  		ret = ath12k_dp_tx_htt_h2t_vdev_stats_ol_req(ar, 0);
  		if (ret) {
  			ath12k_warn(ar->ab, "failed to request vdev stats offload: %d\n", ret);
-@@ -11472,6 +11472,106 @@ static void ath12k_mac_op_sta_statistics
+@@ -12000,6 +12000,106 @@ static void ath12k_mac_op_sta_statistics
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
  }
  
@@ -417,7 +417,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 +
 +	spin_lock_bh(&ar->data_lock);
 +	ar->fw_stats_done = false;
-+	ath12k_fw_stats_pdevs_free(&ar->fw_stats_pdevs);
++	ath12k_fw_stats_pdevs_free(&ar->fw_stats.pdevs);
 +	spin_unlock_bh(&ar->data_lock);
 +
 +	reinit_completion(&ar->fw_stats_complete);
@@ -479,7 +479,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 +	}
 +
 +	spin_lock_bh(&ar->data_lock);
-+	pdev = list_first_entry_or_null(&ar->fw_stats_pdevs,
++	pdev = list_first_entry_or_null(&ar->fw_stats.pdevs,
 +					struct ath12k_fw_stats_pdev,
 +					list);
 +	if (!pdev) {
@@ -509,7 +509,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  static const struct ieee80211_ops ath12k_ops = {
  	.tx				= ath12k_mac_op_tx,
  	.start                          = ath12k_mac_op_start,
-@@ -11511,6 +11611,7 @@ static const struct ieee80211_ops ath12k
+@@ -12041,6 +12141,7 @@ static const struct ieee80211_ops ath12k
  #ifdef CPTCFG_ATH12K_DEBUGFS
  	.sta_add_debugfs		= ath12k_debugfs_sta_op_add,
  #endif
@@ -517,7 +517,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -12126,6 +12227,11 @@ static int ath12k_mac_hw_register(struct
+@@ -12656,6 +12757,11 @@ static int ath12k_mac_hw_register(struct
  			goto err_unregister_hw;
  		}
  
@@ -531,16 +531,16 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  			ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6734,7 +6734,7 @@ void ath12k_wmi_fw_stats_fill(struct ath
+@@ -6861,7 +6861,7 @@ void ath12k_wmi_fw_stats_fill(struct ath
  	spin_lock_bh(&ar->data_lock);
  
  	if (stats_id == WMI_REQUEST_PDEV_STAT) {
 -		pdev = list_first_entry_or_null(&fw_stats->pdevs,
-+		pdev = list_first_entry_or_null(&ar->fw_stats_pdevs,
++		pdev = list_first_entry_or_null(&ar->fw_stats.pdevs,
  						struct ath12k_fw_stats_pdev, list);
  		if (!pdev) {
  			ath12k_warn(ar->ab, "failed to get pdev stats\n");
-@@ -7796,7 +7796,52 @@ static void ath12k_peer_assoc_conf_event
+@@ -7923,7 +7923,52 @@ static void ath12k_peer_assoc_conf_event
  
  static void ath12k_update_stats_event(struct ath12k_base *ab, struct sk_buff *skb)
  {
@@ -574,7 +574,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 +	 * debugfs fw stats. Therfore, processing it separately.
 +	 */
 +	if (stats.stats_id == WMI_REQUEST_PDEV_STAT) {
-+		list_splice_tail_init(&stats.pdevs, &ar->fw_stats_pdevs);
++		list_splice_tail_init(&stats.pdevs, &ar->fw_stats.pdevs);
 +		ar->fw_stats_done = true;
 +		goto complete;
 +	}
