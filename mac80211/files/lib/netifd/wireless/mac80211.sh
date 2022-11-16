@@ -113,6 +113,7 @@ drv_mac80211_init_device_config() {
 	       max_amsdu \
                dsss_cck_40
 	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs
+	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
 }
 
 drv_mac80211_init_iface_config() {
@@ -588,7 +589,11 @@ mac80211_hostapd_setup_base() {
 		he_mu_beamformer:1 \
 		he_twt_required:0 \
 		he_spr_sr_control:0 \
-		multiple_bssid ema
+		multiple_bssid ema \
+		he_ul_mumimo \
+		eht_ulmumimo_80mhz \
+		eht_ulmumimo_160mhz \
+		eht_ulmumimo_320mhz
 
 
 		append base_cfg "ieee80211ax=1" "$N"
@@ -605,6 +610,16 @@ mac80211_hostapd_setup_base() {
 		he_spr_sr_control:${he_phy_cap:14:2}:0x1:$he_spr_sr_control \
 		he_twt_required:${he_mac_cap:0:2}:0x6:$he_twt_required
 
+		if [ -n "$he_ul_mumimo" ]; then
+			if [ $he_ul_mumimo -eq 0 ]; then
+				append base_cfg "he_ul_mumimo=0" "$N"
+			elif [  $he_ul_mumimo -gt 0 ]; then
+				append base_cfg "he_ul_mumimo=1" "$N"
+			fi
+		else
+			append base_cfg "he_ul_mumimo=-1" "$N"
+		fi
+
 		append base_cfg "he_default_pe_duration=4" "$N"
 
 		if [ "$enable_be" != "0" ]; then
@@ -614,6 +629,37 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "eht_su_beamformer=1" "$N"
 			append base_cfg "eht_mu_beamformer=1" "$N"
 			append base_cfg "eht_su_beamformee=1" "$N"
+
+			if [ -n "$eht_ulmumimo_80mhz" ]; then
+				if [ $eht_ulmumimo_80mhz -eq 0 ]; then
+					append base_cfg "eht_ulmumimo_80mhz=0" "$N"
+				elif [  $eht_ulmumimo_80mhz -gt 0 ]; then
+					append base_cfg "eht_ulmumimo_80mhz=1" "$N"
+				fi
+			else
+				append base_cfg "eht_ulmumimo_80mhz=-1" "$N"
+			fi
+
+			if [ -n "$eht_ulmumimo_160mhz" ]; then
+				if [ $eht_ulmumimo_160mhz -eq 0 ]; then
+					append base_cfg "eht_ulmumimo_160mhz=0" "$N"
+				elif [  $eht_ulmumimo_160mhz -gt 0 ]; then
+					append base_cfg "eht_ulmumimo_160mhz=1" "$N"
+				fi
+			else
+				append base_cfg "eht_ulmumimo_160mhz=-1" "$N"
+			fi
+
+			if [ -n "$eht_ulmumimo_320mhz" ]; then
+				if [ $eht_ulmumimo_320mhz -eq 0 ]; then
+					append base_cfg "eht_ulmumimo_320mhz=0" "$N"
+				elif [  $eht_ulmumimo_320mhz -gt 0 ]; then
+					append base_cfg "eht_ulmumimo_320mhz=1" "$N"
+				fi
+			else
+				append base_cfg "eht_ulmumimo_320mhz=-1" "$N"
+			fi
+
 			if [ -n $ru_punct_bitmap ] && [ $ru_punct_bitmap -gt 0 ]; then
 				append base_cfg "ru_punct_bitmap=$ru_punct_bitmap" "$N"
 			fi
@@ -1485,7 +1531,12 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 \
 		htmode band multiple_bssid noscan \
 		ru_punct_bitmap \
-		disable_csa_dfs
+		disable_csa_dfs \
+		he_ul_mumimo \
+		eht_ulmumimo_80mhz \
+		eht_ulmumimo_160mhz \
+		eht_ulmumimo_320mhz
+
 
 	json_get_values basic_rate_list basic_rate
 	json_select ..
