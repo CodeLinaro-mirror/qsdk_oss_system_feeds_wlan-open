@@ -1528,7 +1528,7 @@ drv_mac80211_setup() {
 
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
-			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file
+			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file $band
 			echo "$!" >> /tmp/apsta_mode.pid
 		}
 	fi

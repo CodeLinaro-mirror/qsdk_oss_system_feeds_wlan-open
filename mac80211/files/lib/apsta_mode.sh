@@ -18,6 +18,7 @@
 sta_intf="$1"
 ap_intf="$2"
 hostapd_conf="$3"
+oper_band="$4"
 dfs_log=1
 
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
@@ -185,7 +186,7 @@ hostapd_adjust_config() {
 	fi
 	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac" > /dev/ttyMSM0
 	hostapd_cli -i $ap_intf set channel $sta_channel 2> /dev/null
-	if [ $sta_channel -ge 36 ]; then
+	if [ $sta_channel -ge 36 ] || [ $wifi_gen == 6 ] || [ $wifi_gen == 7 ]; then
 		hostapd_cli -i $ap_intf set hw_mode a 2> /dev/null
 	else
 		hostapd_cli -i $ap_intf set hw_mode g 2> /dev/null
@@ -295,7 +296,7 @@ hostapd_is_6ghz_band() {
 
 ap_freq=$(iw $ap_intf info 2> /dev/null | grep channel | cut -d' ' -f 3 | cut -b 2-5)
 wifi_6gband=$(hostapd_is_6ghz_band $ap_freq)
-if [ $wifi_6gband == true ]; then
+if [ $wifi_6gband == true ] || [ $oper_band == 3 ]; then
 cat > /lib/repeater_6g_ch_sw.sh << EOF
 #!/bin/sh
 
