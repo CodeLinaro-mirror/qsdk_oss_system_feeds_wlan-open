@@ -1,0 +1,109 @@
+From 8d3df0c886f4393fa8e1dacd2a3532f8d913ad97 Mon Sep 17 00:00:00 2001
+From: Sriram R <quic_srirrama@quicinc.com>
+Date: Wed, 23 Nov 2022 14:26:24 +0530
+Subject: [PATCH] mac80211: use link conf and link sta
+
+Use link conf and link sta for link specific operations.
+The link conf is replaced in start ap.
+Link sta is updated with NSS during link station add.
+
+Also, moved the condition for link bss address validation
+to differentiate link bss address from ML address.
+
+Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
+---
+ net/mac80211/cfg.c | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -1265,37 +1265,37 @@ static int ieee80211_start_ap(struct wip
+ 	}
+ 
+ 	if (params->he_cap) {
+-		memcpy(&sdata->vif.bss_conf.he_cap_elem, params->he_cap,
++		memcpy(&link_conf->he_cap_elem, params->he_cap,
+ 		       sizeof(*params->he_cap));
+-		sdata->vif.bss_conf.he_su_beamformer =
++		link_conf->he_su_beamformer =
+ 			params->he_cap->phy_cap_info[3] &
+ 			IEEE80211_HE_PHY_CAP3_SU_BEAMFORMER;
+-		sdata->vif.bss_conf.he_su_beamformee =
++		link_conf->he_su_beamformee =
+ 			params->he_cap->phy_cap_info[4] &
+ 			IEEE80211_HE_PHY_CAP4_SU_BEAMFORMEE;
+-		sdata->vif.bss_conf.he_mu_beamformer =
++		link_conf->he_mu_beamformer =
+ 			params->he_cap->phy_cap_info[4] &
+ 			IEEE80211_HE_PHY_CAP4_MU_BEAMFORMER;
+-		sdata->vif.bss_conf.he_full_ul_mumimo =
++		link_conf->he_full_ul_mumimo =
+ 			params->he_cap->phy_cap_info[2] &
+ 			IEEE80211_HE_PHY_CAP2_UL_MU_FULL_MU_MIMO;
+ 	}
+ 
+ 	if (params->eht_cap) {
+-		if (!sdata->vif.bss_conf.he_support)
++		if (!link_conf->he_support)
+ 			return -EOPNOTSUPP;
+ 
+-		sdata->vif.bss_conf.eht_support = true;
+-		sdata->vif.bss_conf.eht_su_beamformer =
++		link_conf->eht_support = true;
++		link_conf->eht_su_beamformer =
+ 				params->eht_cap->fixed.phy_cap_info[0] &
+ 				IEEE80211_EHT_PHY_CAP0_SU_BEAMFORMER;
+-		sdata->vif.bss_conf.eht_su_beamformee =
++		link_conf->eht_su_beamformee =
+ 				params->eht_cap->fixed.phy_cap_info[0] &
+ 				IEEE80211_EHT_PHY_CAP0_SU_BEAMFORMEE;
+-		sdata->vif.bss_conf.eht_mu_beamformer =
++		link_conf->eht_mu_beamformer =
+ 				params->eht_cap->fixed.phy_cap_info[7] &
+ 				IEEE80211_EHT_PHY_CAP7_MU_BEAMFORMER_80MHZ;
+-		sdata->vif.bss_conf.eht_80mhz_full_bw_ul_mumimo =
++		link_conf->eht_80mhz_full_bw_ul_mumimo =
+ 				params->eht_cap->fixed.phy_cap_info[7] &
+ 				IEEE80211_EHT_PHY_CAP7_NON_OFDMA_UL_MU_MIMO_80MHZ;
+ 		ieee80211_eht_op_ie_to_bss_conf(&sdata->vif, params->eht_oper);
+@@ -1811,6 +1811,15 @@ static int sta_link_apply_parameters(str
+ 			link_sta->pub->ru_punct_bitmap = params->ru_punct_bitmap;
+ 	}
+ 
++	/* update nss if not done already for the link sta,
++	 * for the deflink the nss will be updated once the assoc
++	 * flag is set through set station. For the non-deflink sta
++	 * we would reach here only during assoc, so we would have all
++	 * caps to calculate the nss.
++	 */
++	if (&sta->deflink != link_sta)
++		ieee80211_sta_set_rx_nss(link_sta);
++
+ 	if (params->opmode_notif_used) {
+ 		/* returned value is only needed for rc update, but the
+ 		 * rc isn't initialized here yet, so ignore it
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -6192,9 +6192,6 @@ void __ieee80211_tx_skb_tid_band(struct
+ 		link = 0;
+ 	} else if (link_id >= 0) {
+ 		link = link_id;
+-	} else if (memcmp(sdata->vif.addr, hdr->addr2, ETH_ALEN) == 0) {
+-		/* address from the MLD */
+-		link = IEEE80211_LINK_UNSPECIFIED;
+ 	} else {
+ 		/* otherwise must be addressed from a link */
+ 		rcu_read_lock();
+@@ -6209,7 +6206,11 @@ void __ieee80211_tx_skb_tid_band(struct
+ 		}
+ 		rcu_read_unlock();
+ 
+-		if (WARN_ON_ONCE(link == ARRAY_SIZE(sdata->vif.link_conf)))
++		/* address from the MLD */
++		if (memcmp(sdata->vif.addr, hdr->addr2, ETH_ALEN) == 0)
++			link = IEEE80211_LINK_UNSPECIFIED;
++
++		else if (WARN_ON_ONCE(link == ARRAY_SIZE(sdata->vif.link_conf)))
+ 			link = ffs(sdata->vif.valid_links) - 1;
+ 	}
+ 
