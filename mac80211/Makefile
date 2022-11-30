@@ -677,7 +677,10 @@ ifeq ($(CONFIG_LINUX_5_4),y)
 endif
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/devcoredump
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
+	$(INSTALL_DIR) $(1)/lib/wifi/sawf
 	$(INSTALL_DATA) ./files/lib/wifi/mac80211.sh $(1)/lib/wifi
+	$(INSTALL_DATA) ./files/lib/wifi/def_service_classes.json $(1)/lib/wifi/sawf/
+	$(INSTALL_DATA) ./files/lib/wifi/service_classes.json $(1)/lib/wifi/sawf/
 	$(INSTALL_BIN) ./files/lib/netifd/wireless/mac80211.sh $(1)/lib/netifd/wireless
 	$(INSTALL_BIN) ./files/lib/performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
