@@ -186,7 +186,7 @@ hostapd_adjust_config() {
 	fi
 	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac" > /dev/ttyMSM0
 	hostapd_cli -i $ap_intf set channel $sta_channel 2> /dev/null
-	if [ $sta_channel -ge 36 ] || [ $wifi_gen == 6 ] || [ $wifi_gen == 7 ]; then
+	if [ $sta_channel -ge 36 ] || [ $oper_band == 3 ]; then
 		hostapd_cli -i $ap_intf set hw_mode a 2> /dev/null
 	else
 		hostapd_cli -i $ap_intf set hw_mode g 2> /dev/null
