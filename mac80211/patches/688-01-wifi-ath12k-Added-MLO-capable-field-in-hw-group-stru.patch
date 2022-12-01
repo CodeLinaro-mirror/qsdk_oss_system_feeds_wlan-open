@@ -53,7 +53,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  #define ATH12K_MON_TIMER_INTERVAL  10
  #define ATH12K_RESET_TIMEOUT_HZ			(20 * HZ)
-@@ -1030,6 +1029,7 @@ struct ath12k_hw_group {
+@@ -1031,6 +1030,7 @@ struct ath12k_hw_group {
  	u8 num_probed;
  	u8 num_started;
  	u8 num_hw;
@@ -63,7 +63,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	struct ath12k_base *ab[ATH12K_MAX_SOCS];
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -13036,11 +13036,10 @@ int ath12k_mac_allocate(struct ath12k_hw
+@@ -13066,11 +13066,10 @@ int ath12k_mac_allocate(struct ath12k_hw
  	for (i = 0; i < ag->num_chip; i++)
  		total_radio += ag->ab[i]->num_radios;
  
@@ -80,26 +80,35 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		num_radios = 1;
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -2833,8 +2833,17 @@ static int ath12k_qmi_fill_mlo_host_caps
+@@ -2833,14 +2833,25 @@ static int ath12k_qmi_fill_mlo_host_caps
  
  	mutex_lock(&ag->mutex_lock);
  
+-	if (ag->id == ATH12K_INVALID_GRP_ID || !ab->qmi.num_radios) {
+-		ath12k_dbg(ab, ATH12K_DBG_QMI, "Skip MLO cap send for chip id %d\n",
 +	if (!ag->mlo_capable) {
 +		ath12k_dbg(ab, ATH12K_DBG_QMI, "Skip MLO cap send for chip id %d since it's not MLO capable\n",
-+			   ab->chip_id);
+ 			   ab->chip_id);
+ 		mutex_unlock(&ag->mutex_lock);
+ 		return 0;
+ 	}
+ 
++	if (ag->id == ATH12K_INVALID_GRP_ID || !ab->qmi.num_radios) {
++		ag->mlo_capable = false;
++
++		ath12k_dbg(ab, ATH12K_DBG_QMI, "Skip MLO cap send for chip id %d due to group_id %d qmi num_radio %d\n",
++			   ab->chip_id, ag->id, ab->qmi.num_radios);
 +		mutex_unlock(&ag->mutex_lock);
 +		return 0;
 +	}
 +
- 	if (ag->id == ATH12K_INVALID_GRP_ID) {
--		ath12k_dbg(ab, ATH12K_DBG_QMI, "Skip MLO cap send for chip id %d\n",
-+		ag->mlo_capable = false;
+ 	if (ab->chip_id == ATH12K_INVALID_CHIP_ID) {
++		ath12k_err(ab, "failed to send MLO cap send due to Invalid chip id\n");
 +
-+		ath12k_dbg(ab, ATH12K_DBG_QMI, "Skip MLO cap send for chip id %d due to invalid group\n",
- 			   ab->chip_id);
- 		mutex_unlock(&ag->mutex_lock);
- 		return 0;
-@@ -2872,8 +2881,7 @@ static int ath12k_qmi_fill_mlo_host_caps
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -2872,8 +2883,7 @@ static int ath12k_qmi_fill_mlo_host_caps
  
  		info->chip_id = partner_ab->chip_id;
  
@@ -109,7 +118,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  		ath12k_dbg(ab, ATH12K_DBG_QMI, "MLO chip id %d num_link %d\n",
  			    partner_ab->chip_id, info->num_local_links);
-@@ -2889,6 +2897,10 @@ static int ath12k_qmi_fill_mlo_host_caps
+@@ -2889,6 +2899,10 @@ static int ath12k_qmi_fill_mlo_host_caps
  		}
  	}
  
@@ -120,11 +129,29 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	req->mlo_chip_info_valid = true;
  
  	ath12k_dbg(ab, ATH12K_DBG_QMI, "MLO host cap chosen\n");
-@@ -2918,6 +2930,7 @@ chip_cleanup:
+@@ -2918,6 +2932,7 @@ chip_cleanup:
  	req->mlo_capable = 0;
  	req->mlo_capable_valid = 0;
  
 +	ag->mlo_capable = false;
  out:
  	mutex_unlock(&ag->mutex_lock);
+ 
+@@ -3027,11 +3042,15 @@ static int ath12k_qmi_phy_cap_send(struc
+ 	if (ret < 0)
+ 		goto out;
+ 
+-	if (resp.resp.result != QMI_RESULT_SUCCESS_V01)
++	if (resp.resp.result != QMI_RESULT_SUCCESS_V01) {
++		ret = -EOPNOTSUPP;
+ 		goto out;
++	}
+ 
+-	if (!resp.num_phy_valid)
++	if (!resp.num_phy_valid) {
++		ret = -ENODATA;
+ 		goto out;
++	}
+ 
+ 	ab->qmi.num_radios = resp.num_phy;
  
