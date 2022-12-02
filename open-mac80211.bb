@@ -2,10 +2,9 @@ SUMMARY = "cfg80211 interface configuration utility"
 LICENSE = "GPL-2.0 WITH Linux-syscall-note"
 SECTION = "console/network"
 LIC_FILES_CHKSUM = "file://${DL_DIR}/mac80211-kernel/COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
-PKG_NAME = "kernel"
+PKG_NAME = "open-mac80211"
 SRC_URI = "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/snapshot/linux-firmware-8afadbe.tar.gz"
 
-KERNEL_VERSION = "/5.4.164+yocto"
 PKG_KERNEL_SRC_URL = "https://git.codelinaro.org/clo/qsdk/kvalo/ath.git"
 PKG_KERNEL_VERSION = "f40abb4788"
 SRC_URI[md5sum] = "21113fbd338eed6070c7f9b4c8939b43"
@@ -50,22 +49,20 @@ V_mac80211_config =" \
 	\nCPTCFG_ATH11K_CFR=y \
 	\nCPTCFG_MAC80211_LEDS=y \
 "
-
+inherit module
+DEPENDS +="linux-ipq libnl pkgconfig-native virtual/kernel"
 addtask download before do_unpack after do_fetch
 PKG_BACKPORTS_SOURCE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git"
 PKG_BACKPORTS_VERSION = "83f664bbc583"
 PKG_VERSION = "20220404"
-SUBDIR = "backports-${PKG_VERSION}-5.4.164-${PKG_KERNEL_VERSION}"
-DEPENDS += "linux-ipq libnl pkgconfig-native"
-LINUX_SRC = "tmp/work/aarch64-poky-linux/linux-libc-headers/5.4-r0/linux-5.4/"
+SUBDIR = "backports-${PKG_VERSION}-${PKG_KERNEL_VERSION}"
 
-T_DIR = "${TOPDIR}/target-aarch64_cortex-a53+neon-vfpv4_musl/linux-ipq95xx_64/${SUBDIR}-default/${SUBDIR}"
+T_DIR = "${S}/../../${SUBDIR}"
 P_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/mac80211/patches"
 I_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/"
 CC_remove = "-fstack-protector-strong  -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security"
 KBUILD_CFLAGS += "-Wno-error=implicit-function-declaration"
 LC_ALL = "C"
-
 
 do_download() {
 	if [ ! -f ${DL_DIR}/${SUBDIR}.tar.bz2 ];then
@@ -100,7 +97,7 @@ do_download() {
 }
 
 do_patch() {
-	ls ${I_DIR}/mac80211/patches | xargs -I % sh -c 'patch -d${T_DIR} -f -p1 < ${I_DIR}/mac80211/patches/%'
+	ls ${I_DIR}/mac80211/patches | xargs -I % sh -c 'echo "applying patch "%;patch -d${T_DIR} -f -p1 < ${I_DIR}/mac80211/patches/%'
 	find ${T_DIR}/ '(' -name '*.orig' -o -name '.*.orig' ')' -exec rm -f {} \;
 	tar -C ${T_DIR} -xf ${DL_DIR}/linux-firmware-8afadbe.tar.gz
 	rm -rf ${T_DIR}/include/linux/ssb ${T_DIR}/include/linux/bcma ${T_DIR}/include/net/bluetooth
@@ -111,37 +108,30 @@ CC_remove  = "${@bb.utils.contains('TUNE_ARCH','arm',' -mfloat-abi=hard -mcpu=co
 ARCH = "${@bb.utils.contains('TUNE_ARCH','arm','arm','arm64',d)}"
 K_DIR = "${@bb.utils.contains('TUNE_ARCH','arm','ipq95xx-poky-linux-gnueabi','ipq95xx_64-poky-linux',d)}"
 do_compile() {
+	LINUX_IPQ_VERSION=`echo ${PREFERRED_VERSION_linux-yocto} | awk -F% '{print $1}'`
 	echo -e "${V_mac80211_config}" > ${T_DIR}/.config
 	sed -i 's/-e//g' ${T_DIR}/.config
 	cat ${T_DIR}/.config
-	make  -C ${T_DIR} CC="gcc" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include/ -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-function-declaration" MODPROBE=true     KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= olddefconfig
+	make  -C ${T_DIR} CC="gcc" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include/ -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-function-declaration" MODPROBE=true     KLIB=/lib/modules/${KERNEL_VERSION} KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/${LINUX_IPQ_VERSION}-${PR}/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= olddefconfig
 	rm -rf ${T_DIR}/modules
-make -C ${T_DIR} CC="${CC}" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include -Wall -Werror -Wno-incompatible-pointer-types -Wno-unused-variable -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-fallthrough" KLIB=/lib/modules/5.4.164  KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/5.4-r0/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= modules
+make -C ${T_DIR} CC="${CC}" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include -Wall -Werror -Wno-incompatible-pointer-types -Wno-unused-variable -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-fallthrough" KLIB=/lib/modules/${KERNEL_VERSION}  KLIB_BUILD=${TOPDIR}/tmp/work/${K_DIR}/linux-ipq/${LINUX_IPQ_VERSION}-${PR}/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= modules
 	cp ${T_DIR}/compat/compat.ko ${T_DIR}/drivers/net/wireless/ath/ath12k/ath12k.ko  ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_pci.ko ${T_DIR}/drivers/net/wireless/ath/ath.ko ${T_DIR}/net/mac80211/mac80211.ko ${T_DIR}/net/wireless/cfg80211.ko ./
 
 
 }
 
 do_install() {
-	install -m 0755 -d ${D}${base_libdir}/modules${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 *.ko ${D}${base_libdir}/modules${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0755 -d ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 compat${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 cfg80211${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 mac80211${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 ath${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 ath11k${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 ath11k_ahb${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 ath11k_pci${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
+	install -m 0644 ath12k${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
 	install -d ${D}${includedir}/open-mac80211
 }
 
-FILES_${PN} += "/lib \
-/lib/modules \
-/lib/modules/5.4.164+yocto \
-/lib/modules/5.4.164+yocto/kernel \
-/lib/modules/5.4.164+yocto/kernel/drivers \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211 \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/ath.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/ath11k.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/ath11k_ahb.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/ath11k_pci.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/ath12k.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/cfg80211.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/compat.ko \
-/lib/modules/5.4.164+yocto/kernel/drivers/mac80211/mac80211.ko \
-"
 S = "${WORKDIR}/git/${PKG_NAME}"
 inherit pkgconfig
