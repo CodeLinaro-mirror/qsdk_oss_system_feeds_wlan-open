@@ -69,7 +69,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		mutex_unlock(&ag->mutex_lock);
  		return 0;
  	}
-@@ -4188,9 +4189,49 @@ ath12k_qmi_driver_event_post(struct ath1
+@@ -4188,9 +4189,77 @@ ath12k_qmi_driver_event_post(struct ath1
  	return 0;
  }
  
@@ -111,16 +111,44 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	return true;
 +}
 +
++static struct ath12k_base *
++ath12k_qmi_hw_group_find_blocked_chip(struct ath12k_hw_group *ag)
++{
++	struct ath12k_base *ab;
++	struct ath12k_qmi *qmi;
++	bool block;
++	int i;
++
++	lockdep_assert_held(&ag->mutex_lock);
++
++	for (i = 0; i < ag->num_chip; i++) {
++		ab = ag->ab[i];
++		if (!ab)
++			continue;
++
++		qmi = &ab->qmi;
++
++		spin_lock(&qmi->event_lock);
++		block = ath12k_qmi_get_event_block(qmi);
++		spin_unlock(&qmi->event_lock);
++
++		if (block)
++			return ab;
++	}
++
++	return NULL;
++}
++
  static int ath12k_qmi_event_server_arrive(struct ath12k_qmi *qmi)
  {
 -	struct ath12k_base *ab = qmi->ab;
-+	struct ath12k_base *ab = qmi->ab, *first_ab;
++	struct ath12k_base *ab = qmi->ab, *block_ab;
 +	struct ath12k_hw_group *ag = ab->ag;
 +	bool host_cap_ready;
  	int ret;
  
  	ret = ath12k_qmi_fw_ind_register_send(ab);
-@@ -4199,6 +4240,28 @@ static int ath12k_qmi_event_server_arriv
+@@ -4199,6 +4268,29 @@ static int ath12k_qmi_event_server_arriv
  		return ret;
  	}
  
@@ -133,8 +161,9 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	mutex_lock(&ag->mutex_lock);
 +	host_cap_ready = ath12k_qmi_hw_group_host_cap_ready(ag);
 +	if (host_cap_ready) {
-+		first_ab = ag->ab[0];
-+		ath12k_qmi_trigger_host_cap(first_ab);
++		block_ab = ath12k_qmi_hw_group_find_blocked_chip(ag);
++		if (block_ab)
++			ath12k_qmi_trigger_host_cap(block_ab);
 +	}
 +	mutex_unlock(&ag->mutex_lock);
 +
@@ -149,7 +178,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	ret = ath12k_qmi_host_cap_send(ab);
  	if (ret < 0) {
  		ath12k_warn(ab, "qmi failed to send host cap QMI:%d\n", ret);
-@@ -4842,7 +4905,6 @@ static void ath12k_qmi_driver_event_work
+@@ -4842,7 +4934,6 @@ static void ath12k_qmi_driver_event_work
  				}
  				set_bit(ATH12K_FLAG_QMI_FW_READY_COMPLETE,
  					&ab->dev_flags);
@@ -157,7 +186,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  			}
  
  			break;
-@@ -4857,6 +4919,11 @@ static void ath12k_qmi_driver_event_work
+@@ -4857,6 +4948,11 @@ static void ath12k_qmi_driver_event_work
  		case ATH12K_QMI_EVENT_M3_DUMP_UPLOAD_REQ:
  			ath12k_qmi_event_m3_dump_upload_req(qmi, event->data);
  			break;
@@ -169,7 +198,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		default:
  			ath12k_warn(ab, "invalid event type: %d", event->type);
  			break;
-@@ -4874,6 +4941,7 @@ int ath12k_qmi_init_service(struct ath12
+@@ -4874,6 +4970,7 @@ int ath12k_qmi_init_service(struct ath12
  	memset(&ab->qmi.target, 0, sizeof(struct target_info));
  	memset(&ab->qmi.target_mem, 0, sizeof(struct target_mem_chunk));
  	ab->qmi.ab = ab;
