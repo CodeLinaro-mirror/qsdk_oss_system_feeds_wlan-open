@@ -21,11 +21,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  drivers/net/wireless/ath/ath12k/wmi.h  |  47 +++++
  4 files changed, 448 insertions(+), 27 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 08c8022..672a900 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -359,6 +359,8 @@ struct ath12k_link_vif {
+@@ -360,6 +360,8 @@ struct ath12k_link_vif {
  	struct work_struct update_obss_color_notify_work;
  	u8 link_id;
  	struct ath12k_vif *ahvif;
@@ -34,7 +32,7 @@ index 08c8022..672a900 100644
  };
  
  struct ath12k_vif {
-@@ -865,6 +867,8 @@ struct ath12k {
+@@ -866,6 +868,8 @@ struct ath12k {
  	struct ath12k_fw_stats fw_stats;
  	struct completion fw_stats_complete;
  	bool fw_stats_done;
@@ -43,11 +41,9 @@ index 08c8022..672a900 100644
  };
  
  struct ath12k_band_cap {
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 9a72f9f..4f25481 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9596,12 +9596,19 @@ static int ath12k_vdev_restart_sequence(struct ath12k_link_vif *arvif,
+@@ -9848,12 +9848,19 @@ static int ath12k_vdev_restart_sequence(
  	memcpy(&arvif->chanctx, new_ctx, sizeof(*new_ctx));
  	spin_unlock_bh(&ar->data_lock);
  
@@ -69,7 +65,7 @@ index 9a72f9f..4f25481 100644
  
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to restart vdev %d: %d\n",
-@@ -9612,6 +9619,7 @@ static int ath12k_vdev_restart_sequence(struct ath12k_link_vif *arvif,
+@@ -9864,6 +9871,7 @@ static int ath12k_vdev_restart_sequence(
  		return ret;
  	}
  
@@ -77,7 +73,7 @@ index 9a72f9f..4f25481 100644
  	if (!arvif->is_up)
  		return -EOPNOTSUPP;
  
-@@ -9865,6 +9873,50 @@ static void ath12k_mac_update_rx_channel(struct ath12k *ar,
+@@ -10118,6 +10126,50 @@ static void ath12k_mac_update_rx_channel
          rcu_read_unlock();
  }
  
@@ -128,7 +124,7 @@ index 9a72f9f..4f25481 100644
  static void
  ath12k_mac_update_vif_chan_extras(struct ath12k *ar,
  				  struct ieee80211_vif_chanctx_switch *vifs,
-@@ -10022,6 +10074,134 @@ ath12k_mac_update_vif_chan(struct ath12k *ar,
+@@ -10274,6 +10326,140 @@ ath12k_mac_update_vif_chan(struct ath12k
  				    arvif->vdev_id, ret);
  		}
  	}
@@ -158,8 +154,10 @@ index 9a72f9f..4f25481 100644
 +
 +	for (i = 0; i < n_vifs; i++) {
 +		ahvif = (void *)vifs[i].vif->drv_priv;
-+		/* TODO retrieve link for channel switch */
-+		arvif = &ahvif->deflink;
++		arvif = ahvif->link[vifs[i].link_conf->link_id];
++
++		if (WARN_ON(!arvif))
++			continue;
 +
 +		ath12k_dbg(ab, ATH12K_DBG_MAC,
 +			   "mac chanctx switch vdev_id %i freq %u->%u width %d->%d\n",
@@ -225,7 +223,11 @@ index 9a72f9f..4f25481 100644
 +
 +	for (i = 0; i < n_vifs; i++) {
 +		ahvif = (void *)vifs[i].vif->drv_priv;
-+		arvif = &ahvif->deflink;
++		arvif = ahvif->link[vifs[i].link_conf->link_id];
++
++		if (WARN_ON(!arvif))
++			continue;
++
 +		vdev_idx = -1;
 +
 +		if (ahvif->vif->mbssid_tx_vif && arvif == tx_arvif)
@@ -263,7 +265,7 @@ index 9a72f9f..4f25481 100644
  
  	ath12k_mac_update_vif_chan_extras(ar, vifs, n_vifs);
  }
-@@ -10053,7 +10233,7 @@ ath12k_mac_update_active_vif_chan(struct ath12k *ar,
+@@ -10305,7 +10491,7 @@ ath12k_mac_update_active_vif_chan(struct
  						   ath12k_mac_change_chanctx_fill_iter,
  						   &arg);
  
@@ -272,7 +274,7 @@ index 9a72f9f..4f25481 100644
  
  	kfree(arg.vifs);
  out:
-@@ -10924,7 +11104,7 @@ ath12k_mac_op_switch_vif_chanctx(struct ieee80211_hw *hw,
+@@ -11200,7 +11386,7 @@ ath12k_mac_op_switch_vif_chanctx(struct
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac chanctx switch n_vifs %d mode %d\n",
  		   n_vifs, mode);
@@ -281,7 +283,7 @@ index 9a72f9f..4f25481 100644
  
  	mutex_unlock(&ar->conf_mutex);
  
-@@ -13088,6 +13268,7 @@ static int ath12k_mac_setup(struct ath12k_hw *ah, u8 link_id,
+@@ -13364,6 +13550,7 @@ static int ath12k_mac_setup(struct ath12
  	init_completion(&ar->scan.completed);
  	init_completion(&ar->thermal.wmi_sync);
  	init_completion(&ar->mlo_setup_done);
@@ -289,11 +291,9 @@ index 9a72f9f..4f25481 100644
  
  	INIT_DELAYED_WORK(&ar->scan.timeout, ath12k_scan_timeout_work);
  	INIT_WORK(&ar->regd_update_work, ath12k_regd_update_work);
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 44c8de9..2f385ac 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -956,55 +956,55 @@ int ath12k_wmi_vdev_down(struct ath12k *ar, u8 vdev_id)
+@@ -956,55 +956,55 @@ int ath12k_wmi_vdev_down(struct ath12k *
  }
  
  static void ath12k_wmi_put_wmi_channel(struct wmi_channel *chan,
@@ -371,7 +371,7 @@ index 44c8de9..2f385ac 100644
  }
  
  int ath12k_wmi_vdev_start(struct ath12k *ar, struct wmi_vdev_start_req_arg *arg,
-@@ -1067,7 +1067,7 @@ int ath12k_wmi_vdev_start(struct ath12k *ar, struct wmi_vdev_start_req_arg *arg,
+@@ -1067,7 +1067,7 @@ int ath12k_wmi_vdev_start(struct ath12k
  	ptr = skb->data + sizeof(*cmd);
  	chan = ptr;
  
@@ -380,7 +380,7 @@ index 44c8de9..2f385ac 100644
  
  	chan->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_CHANNEL,
  						  sizeof(*chan));
-@@ -9388,6 +9388,111 @@ static void ath12k_wmi_event_teardown_complete(struct ath12k_base *ab,
+@@ -9389,6 +9389,111 @@ static void ath12k_wmi_event_teardown_co
  	kfree(tb);
  }
  
@@ -492,7 +492,7 @@ index 44c8de9..2f385ac 100644
  static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -9534,6 +9639,9 @@ static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
+@@ -9535,6 +9640,9 @@ static void ath12k_wmi_tlv_op_rx(struct
  	case WMI_MLO_TEARDOWN_COMPLETE_EVENTID:
  		ath12k_wmi_event_teardown_complete(ab, skb);
  		break;
@@ -502,7 +502,7 @@ index 44c8de9..2f385ac 100644
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -9991,3 +10099,84 @@ int ath12k_wmi_mlo_teardown(struct ath12k *ar)
+@@ -9992,3 +10100,84 @@ int ath12k_wmi_mlo_teardown(struct ath12
  
  	return ret;
  }
@@ -587,8 +587,6 @@ index 44c8de9..2f385ac 100644
 +
 +	return ret;
 +}
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
-index 3a4b0a1..686c905 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -1919,6 +1919,7 @@ enum wmi_tlv_tag {
@@ -607,7 +605,7 @@ index 3a4b0a1..686c905 100644
  	WMI_TLV_SERVICE_5_9GHZ_SUPPORT = 247,
  	WMI_TLV_SERVICE_SRG_SRP_SPATIAL_REUSE_SUPPORT = 249,
  
-@@ -6346,6 +6348,48 @@ struct wmi_mlo_teardown_complete_fixed_param {
+@@ -6346,6 +6348,48 @@ struct wmi_mlo_teardown_complete_fixed_p
  	u32 status;
  } __packed;
  
@@ -656,7 +654,7 @@ index 3a4b0a1..686c905 100644
  #define ATH12K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
-@@ -6514,4 +6558,7 @@ int ath12k_wmi_mlo_setup(struct ath12k *ar,
+@@ -6514,4 +6558,7 @@ int ath12k_wmi_mlo_setup(struct ath12k *
  			 struct wmi_mlo_setup_params *mlo_params);
  int ath12k_wmi_mlo_ready(struct ath12k *ar);
  int ath12k_wmi_mlo_teardown(struct ath12k *ar);
@@ -664,6 +662,3 @@ index 3a4b0a1..686c905 100644
 +int ath12k_wmi_pdev_multiple_vdev_restart(struct ath12k *ar,
 +					  struct wmi_pdev_multiple_vdev_restart_req_arg *arg);
  #endif
--- 
-2.17.1
-
