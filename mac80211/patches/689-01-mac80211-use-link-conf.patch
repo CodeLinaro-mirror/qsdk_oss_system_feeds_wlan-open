@@ -17,7 +17,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -1265,37 +1265,37 @@ static int ieee80211_start_ap(struct wip
+@@ -1333,40 +1333,40 @@ static int ieee80211_start_ap(struct wip
  	}
  
  	if (params->he_cap) {
@@ -65,8 +65,12 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		link_conf->eht_80mhz_full_bw_ul_mumimo =
  				params->eht_cap->fixed.phy_cap_info[7] &
  				IEEE80211_EHT_PHY_CAP7_NON_OFDMA_UL_MU_MIMO_80MHZ;
- 		ieee80211_eht_op_ie_to_bss_conf(&sdata->vif, params->eht_oper);
-@@ -1811,6 +1811,15 @@ static int sta_link_apply_parameters(str
+-		ieee80211_eht_op_ie_to_bss_conf(&sdata->vif, params->eht_oper);
++		ieee80211_eht_op_ie_to_bss_conf(link_conf, params->eht_oper);
+ 	}
+ 
+ 	mutex_lock(&local->mtx);
+@@ -1893,6 +1893,15 @@ static int sta_link_apply_parameters(str
  			link_sta->pub->ru_punct_bitmap = params->ru_punct_bitmap;
  	}
  
@@ -84,7 +88,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		 * rc isn't initialized here yet, so ignore it
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -6192,9 +6192,6 @@ void __ieee80211_tx_skb_tid_band(struct
+@@ -6229,9 +6229,6 @@ void __ieee80211_tx_skb_tid_band(struct
  		link = 0;
  	} else if (link_id >= 0) {
  		link = link_id;
@@ -94,7 +98,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	} else {
  		/* otherwise must be addressed from a link */
  		rcu_read_lock();
-@@ -6209,7 +6206,11 @@ void __ieee80211_tx_skb_tid_band(struct
+@@ -6246,7 +6243,11 @@ void __ieee80211_tx_skb_tid_band(struct
  		}
  		rcu_read_unlock();
  
@@ -107,3 +111,52 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			link = ffs(sdata->vif.valid_links) - 1;
  	}
  
+--- a/net/mac80211/eht.c
++++ b/net/mac80211/eht.c
+@@ -79,7 +79,7 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(stru
+ 	link_sta->pub->bandwidth = ieee80211_sta_cur_vht_bw(link_sta);
+ }
+ 
+-void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_vif *vif,
++void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_bss_conf *link_conf,
+ 				     const struct ieee80211_eht_operation *op_ie)
+ {
+ 	struct ieee80211_eht_operation_info *eht_oper_info;
+@@ -90,12 +90,12 @@ void ieee80211_eht_op_ie_to_bss_conf(str
+ 	if (op_ie->params && IEEE80211_EHT_OPER_INFO_PRESENT) {
+ 		eht_oper_info = op_ie->optional;
+ 
+-		vif->bss_conf.eht_oper.chan_width =
++		link_conf->eht_oper.chan_width =
+ 				u8_get_bits(eht_oper_info->control,
+ 					    IEEE80211_EHT_OPER_CHAN_WIDTH);
+-		vif->bss_conf.eht_oper.ccfs0 = eht_oper_info->ccfs0;
+-		vif->bss_conf.eht_oper.ccfs1 = eht_oper_info->ccfs1;
+-		vif->bss_conf.eht_oper.present_bm =
++		link_conf->eht_oper.ccfs0 = eht_oper_info->ccfs0;
++		link_conf->eht_oper.ccfs1 = eht_oper_info->ccfs1;
++		link_conf->eht_oper.present_bm =
+ 				u8_get_bits(eht_oper_info->control,
+ 					    IEEE80211_EHT_OPER_DISABLED_SUBCHANNEL_BITMAP_PRESENT);
+ 	}
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -2594,6 +2594,6 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(stru
+ 				    const struct ieee80211_eht_cap_elem *eht_cap_ie_elem,
+ 				    u8 eht_cap_len,
+ 				    struct link_sta_info *link_sta);
+-void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_vif *vif,
++void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_bss_conf *link_conf,
+ 				     const struct ieee80211_eht_operation *op_ie);
+ #endif /* IEEE80211_I_H */
+--- a/net/mac80211/mesh.c
++++ b/net/mac80211/mesh.c
+@@ -784,7 +784,7 @@ ieee80211_mesh_update_bss_params(struct
+ 		eht_oper = (void *)(cap->data + 1);
+ 
+ 	if (eht_oper)
+-		ieee80211_eht_op_ie_to_bss_conf(&sdata->vif, eht_oper);
++		ieee80211_eht_op_ie_to_bss_conf(&sdata->vif.bss_conf, eht_oper);
+ }
+ 
+ /**
