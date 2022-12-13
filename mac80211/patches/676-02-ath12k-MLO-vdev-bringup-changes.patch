@@ -117,7 +117,45 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
  	struct ath12k_link_vif *arvif;
-@@ -4524,7 +4529,7 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -4263,16 +4268,22 @@ ath12k_mac_get_link_vif( struct ath12k_h
+ 		arvif =  &ahvif->deflink;
+ 	} else {
+ 		/* first link vif is fetched from deflink*/
+-		if (!ahvif->links_map)
++		if (!ahvif->links_map) {
+ 			arvif = &ahvif->deflink;
+-		else
++		} else {
+ 			arvif = (struct ath12k_link_vif *)
+ 					kzalloc(sizeof(struct ath12k_link_vif),
+ 						GFP_KERNEL);
+ 
+-		if (arvif == NULL)
+-			return NULL;
++			if (arvif == NULL)
++				return NULL;
+ 
++			INIT_LIST_HEAD(&arvif->list);
++			INIT_WORK(&arvif->update_obss_color_notify_work,
++				  ath12k_update_obss_color_notify_work);
++			INIT_WORK(&arvif->update_bcn_template_work,
++				  ath12k_update_bcn_template_work);
++		}
+ 	}
+ 
+ 	ahvif->link[link_id] = arvif;
+@@ -4293,10 +4304,6 @@ ath12k_mac_get_link_vif( struct ath12k_h
+ 		       sizeof(arvif->bitrate_mask.control[i].eht_mcs));
+ 	}
+ 	
+-	INIT_LIST_HEAD(&arvif->list);
+-	INIT_WORK(&arvif->update_obss_color_notify_work, ath12k_update_obss_color_notify_work);
+-	INIT_WORK(&arvif->update_bcn_template_work, ath12k_update_bcn_template_work);
+-
+ 	return arvif;
+ }
+ 
+@@ -4524,7 +4531,7 @@ static int ath12k_mac_op_hw_scan(struct
  	}
  
  	/* TODO ML vif handling */
@@ -126,7 +164,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	/* If the vif is already assigned to a specific vdev of an ar,
  	 * check whether its already started, vdev which is started
  	 * are not allowed to switch to a new radio.
-@@ -4534,6 +4539,9 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -4534,6 +4541,9 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -136,7 +174,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
  			mutex_unlock(&ah->conf_mutex);
-@@ -4558,6 +4566,9 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -4558,6 +4568,9 @@ static int ath12k_mac_op_hw_scan(struct
  		}
  		mutex_unlock(&ar->conf_mutex);
  	}
@@ -146,7 +184,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	mutex_unlock(&ah->conf_mutex);
  
  	mutex_lock(&ar->conf_mutex);
-@@ -7892,6 +7903,15 @@ static int ath12k_mac_setup_vdev_create_
+@@ -7892,6 +7905,15 @@ static int ath12k_mac_setup_vdev_create_
  	}
  
  	params->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
@@ -162,7 +200,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	return 0;
  }
  
-@@ -8015,7 +8035,7 @@ static int ath12k_mac_vdev_create(struct
+@@ -8015,7 +8037,7 @@ static int ath12k_mac_vdev_create(struct
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_hw *hw = ar->ah->hw;
  	struct vdev_create_params vdev_param = {0};
@@ -171,7 +209,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
  	u16 nss;
-@@ -8100,6 +8120,7 @@ static int ath12k_mac_vdev_create(struct
+@@ -8100,6 +8122,7 @@ static int ath12k_mac_vdev_create(struct
  	}
  
  	ar->num_created_vdevs++;
@@ -179,7 +217,19 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	arvif->is_created = true;
  	ath12k_dbg(ab, ATH12K_DBG_MAC, "vdev %pM created, vdev_id %d\n",
  		   link_addr, arvif->vdev_id);
-@@ -8486,6 +8507,9 @@ err_vdev_del:
+@@ -8370,6 +8393,11 @@ static int ath12k_mac_op_add_interface(s
+ 
+ 	ahvif->deflink.ahvif = ahvif;
+ 	ahvif->deflink.link_id = 0;
++	INIT_LIST_HEAD(&ahvif->deflink.list);
++	INIT_WORK(&ahvif->deflink.update_obss_color_notify_work,
++		  ath12k_update_obss_color_notify_work);
++	INIT_WORK(&ahvif->deflink.update_bcn_template_work,
++		  ath12k_update_bcn_template_work);
+ 
+ 	ahvif->key_cipher = INVALID_CIPHER;
+ 
+@@ -8486,6 +8514,9 @@ err_vdev_del:
  
  	/* TODO: recal traffic pause state based on the available vdevs */
  
@@ -189,7 +239,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	mutex_unlock(&ar->conf_mutex);
  }
  
-@@ -8508,12 +8532,13 @@ static void ath12k_mac_op_remove_interfa
+@@ -8508,12 +8539,13 @@ static void ath12k_mac_op_remove_interfa
  		if (arvif == NULL)
  			continue;
  
@@ -205,7 +255,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	mutex_unlock(&ah->conf_mutex);
-@@ -8651,6 +8676,16 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -8651,6 +8683,16 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -222,7 +272,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
  {
-@@ -8752,6 +8787,55 @@ static int ath12k_mac_set_6g_nonht_dup_c
+@@ -8752,6 +8794,55 @@ static int ath12k_mac_set_6g_nonht_dup_c
  	return ret;
  }
  
@@ -278,7 +328,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static int
  ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
  			      const struct cfg80211_chan_def *chandef,
-@@ -8819,6 +8903,9 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -8819,6 +8910,9 @@ ath12k_mac_vdev_start_restart(struct ath
  
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  
@@ -288,7 +338,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_dbg(ab, ATH12K_DBG_MAC,
  		   "mac vdev %d start center_freq %d phymode %s\n",
  		   arg.vdev_id, arg.channel.freq,
-@@ -9026,6 +9113,72 @@ static int ath12k_vdev_restart_sequence(
+@@ -9026,6 +9120,72 @@ static int ath12k_vdev_restart_sequence(
  	return ret;
  }
  
@@ -361,7 +411,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  struct ath12k_mac_change_chanctx_arg {
  	struct ieee80211_chanctx_conf *ctx;
  	struct ieee80211_vif_chanctx_switch *vifs;
-@@ -9959,7 +10112,13 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -9964,7 +10124,13 @@ ath12k_mac_op_assign_vif_chanctx(struct
  
  	mutex_lock(&ah->conf_mutex);
  
@@ -376,7 +426,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
  		return -ENOMEM;
-@@ -9971,9 +10130,8 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -9976,9 +10142,8 @@ ath12k_mac_op_assign_vif_chanctx(struct
  			mutex_unlock(&ah->conf_mutex);
  			return -EINVAL;
  		}
@@ -388,7 +438,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	} else {
  		ar = ath12k_get_ar_by_ctx(hw, ctx);
  		if (!ar) {
-@@ -10074,6 +10232,14 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -10079,6 +10244,14 @@ ath12k_mac_op_assign_vif_chanctx(struct
  		goto out;
  	}
  
@@ -403,7 +453,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ret = ath12k_mac_vdev_start(arvif, &ctx->def, ctx->radar_enabled);
  	if (ret) {
  		ath12k_warn(ab, "failed to start vdev %i addr %pM on freq %d: %d\n",
-@@ -10111,8 +10277,7 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -10116,8 +10289,7 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  	struct ath12k_base *ab;
  	struct ath12k *ar;
  	int ret;
@@ -413,7 +463,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	mutex_lock(&ah->conf_mutex);
  	/* The vif is expected to be attached to an ar's VDEV.
-@@ -10139,7 +10304,8 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -10144,7 +10316,8 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  		   "mac chanctx unassign ptr %pK vdev_id %i\n",
  		   ctx, arvif->vdev_id);
  
@@ -423,7 +473,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	if (ab->hw_params->vdev_start_delay &&
  	    ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR &&
-@@ -10152,7 +10318,9 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -10157,7 +10330,9 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  			goto out;
  
  		arvif->is_started = false;
@@ -434,7 +484,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	ret = ath12k_mac_vdev_stop(arvif);
-@@ -10162,6 +10330,11 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -10167,6 +10342,11 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  
  	arvif->is_started = false;
  
@@ -446,7 +496,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (ab->hw_params->vdev_start_delay &&
  	    ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR)
  		ath12k_wmi_vdev_down(ar, arvif->vdev_id);
-@@ -10171,8 +10344,12 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -10176,8 +10356,12 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  	    test_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags))
  		ath12k_mac_monitor_stop(ar);
  
@@ -459,7 +509,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	mutex_unlock(&ah->conf_mutex);
  }
  
-@@ -11485,6 +11662,7 @@ static const struct ieee80211_ops ath12k
+@@ -11490,6 +11674,7 @@ static const struct ieee80211_ops ath12k
  	.config                         = ath12k_mac_op_config,
  	.link_info_changed              = ath12k_mac_op_bss_info_changed,
  	.vif_cfg_changed		= ath12k_mac_op_vif_cfg_changed,
