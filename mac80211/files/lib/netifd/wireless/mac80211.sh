@@ -1308,7 +1308,7 @@ mac80211_setup_vif() {
 			json_get_vars key
 			if [ -n "$key" ]; then
 				wireless_vif_parse_encryption
-				freq="$(get_freq "$phy" "$channel")"
+				freq="$(get_freq "$phy" "$channel" "$device")"
 				mac80211_setup_supplicant_noctl || failed=1
 			else
 				json_get_vars mesh_id mcast_rate
@@ -1347,7 +1347,7 @@ mac80211_setup_vif() {
 					*) mesh_htmode="NOHT" ;;
 				esac
 
-				freq="$(get_freq "$phy" "$channel")"
+				freq="$(get_freq "$phy" "$channel" "$device")"
 				iw dev "$ifname" mesh join "$mesh_id" freq $freq $mesh_htmode \
 					${ru_punct_bitmap:+ru-puncturing-bitmap $ru_punct_bitmap} \
 					${mcval:+mcast-rate $mcval} \
@@ -1363,7 +1363,7 @@ mac80211_setup_vif() {
 		adhoc)
 			wireless_vif_parse_encryption
 			if [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ]; then
-				freq="$(get_freq "$phy" "$channel")"
+				freq="$(get_freq "$phy" "$channel" "$device")"
 				mac80211_setup_supplicant_noctl || failed=1
 			else
 				mac80211_setup_adhoc
@@ -1448,37 +1448,35 @@ get_freq() {
 
 mac80211_interface_cleanup() {
 	local phy="$1"
-	local wdev=wlan${2:11:1}
 	local device="$2"
 
 	if [ ${#device} -eq 12 ]; then
-		if [ `ls /sys/class/ieee80211/${phy}/device/net/${wdev} 2>/dev/null | wc -c` -eq 0 ]; then
-			for wdev in $(list_phy_interfaces "$phy"); do
-				#Ensure the interface belongs to the phy being passed
-				phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
-				if [ "$phy_name" != "$phy" ]; then
-					return
-				fi
-				[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
-					hostapd_cli -iglobal raw REMOVE ${wdev}
-					rm /var/run/hostapd-${wdev}.lock
-					rm /var/run/hostapd/${wdev}
-				}
-				[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
-					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
-					rm /var/run/wpa_supplicant-${wdev}.lock
-				}
-				if [ -f $TMP_CFG_FILE ]; then
-					killall hostapd
-					rm -rf $TMP_CFG_FILE
-					# in case of MLO, hostapd starts as single instance
-					# remove existing config files
-					rm -rf /var/run/hostapd*.conf
-				fi
-				ifconfig "$wdev" down 2>/dev/null
-				iw dev "$wdev" del
-			done
-		fi
+		local dev_wlan=wlan${2:11:1}
+		for wdev in $(list_phy_interfaces "$phy"); do
+			if [[ $wdev != *"$dev_wlan"* ]]; then
+				continue
+			fi
+			#Ensure the interface belongs to the phy being passed
+			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+			if [ "$phy_name" != "$phy" ]; then
+				continue
+			fi
+			[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
+				hostapd_cli -iglobal raw REMOVE ${wdev}
+				rm /var/run/hostapd-${wdev}.lock
+				rm /var/run/hostapd/${wdev}
+			}
+			[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
+				wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+				rm /var/run/wpa_supplicant-${wdev}.lock
+			}
+			if [ -f $TMP_CFG_FILE ]; then
+				killall hostapd
+				rm -rf $TMP_CFG_FILE
+			fi
+			ifconfig "$wdev" down 2>/dev/null
+			iw dev "$wdev" del
+		done
 	else
 		for wdev in $(list_phy_interfaces "$phy"); do
 			#Ensure the interface belongs to the phy being passed
@@ -1629,6 +1627,10 @@ mac80211_update_tmp_cfg_file() {
 	}
 	config_foreach mac80211_get_wifi_mlds wifi-mld
 
+	if [ -z $_mlds ]; then
+		return
+	fi
+
 	mac80211_get_wifi_ifaces() {
 		append _ifaces $1
 	}
@@ -1665,8 +1667,8 @@ mac80211_export_mld_info() {
 		hostapd_cfg_updated=$hostapd_cfg_updated
 	else
 		mac80211_update_tmp_cfg_file
-		mac80211_update_mld_configs
 	fi
+	mac80211_update_mld_configs
 }
 drv_mac80211_setup() {
 
@@ -1805,11 +1807,16 @@ drv_mac80211_setup() {
 			hostapd_cli -iglobal raw ADD bss_config=$ifname:$hostapd_conf_file
 			touch /var/run/hostapd-$ifname.lock
 		else
-			mac80211_export_mld_info
 			hostapd_cfg_updated=$((hostapd_cfg_updated+1))
 			if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
-				config=$(ls /var/run/hostapd*.conf)
+				config=$(ls /var/run/hostapd-phy${phy#phy}_band*.conf)
 				/usr/sbin/hostapd -S -P /var/run/wifi-$phy.pid -B $config
+				ret="$?"
+				wireless_add_process "$(cat /var/run/wifi-$phy.pid)" "/usr/sbin/hostapd" 1
+				[ "$ret" != 0 ] && {
+					wireless_setup_failed HOSTAPD_START_FAILED
+					return
+				}
 			fi
 			sed -i "s/hostapd_cfg_updated=.*/hostapd_cfg_updated=${hostapd_cfg_updated}/g" $TMP_CFG_FILE
 		fi
