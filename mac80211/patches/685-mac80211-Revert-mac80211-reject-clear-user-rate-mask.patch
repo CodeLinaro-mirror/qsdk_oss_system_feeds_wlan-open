@@ -1,0 +1,50 @@
+From f7082761b35cde6e22d591d2ea7809e9fe706a91 Mon Sep 17 00:00:00 2001
+From: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
+Date: Tue, 20 Dec 2022 13:19:46 +0530
+Subject: [PATCH] mac80211: Revert "mac80211: validate user rate mask before
+ configuring driver"
+
+Ben reported that when the user rate mask is rejected for not
+matching any basic rate, the driver had already been configured.
+This is clearly an oversight in my original change, fix this by
+doing the validation before calling the driver.
+
+Change-Id: Ia474f80ebdc1f392068a62f2613b4aed40796b22
+Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
+---
+ net/mac80211/cfg.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
+index c22dacb..deb08a1 100644
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -3397,6 +3397,12 @@ static int ieee80211_set_bitrate_mask(struct wiphy *wiphy,
+ 	if (!ieee80211_sdata_running(sdata))
+ 		return -ENETDOWN;
+ 
++	if (ieee80211_hw_check(&local->hw, HAS_RATE_CONTROL)) {
++		ret = drv_set_bitrate_mask(local, sdata, mask);
++		if (ret)
++			return ret;
++	}
++
+ 	/*
+ 	 * If active validate the setting and reject it if it doesn't leave
+ 	 * at least one basic rate usable, since we really have to be able
+@@ -3412,12 +3418,6 @@ static int ieee80211_set_bitrate_mask(struct wiphy *wiphy,
+ 			return -EINVAL;
+ 	}
+ 
+-	if (ieee80211_hw_check(&local->hw, HAS_RATE_CONTROL)) {
+-		ret = drv_set_bitrate_mask(local, sdata, mask);
+-		if (ret)
+-			return ret;
+-	}
+-
+ 	for (i = 0; i < NUM_NL80211_BANDS; i++) {
+ 		struct ieee80211_supported_band *sband = wiphy->bands[i];
+ 		int j;
+-- 
+2.17.1
+
