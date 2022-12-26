@@ -1,5 +1,85 @@
 #!/bin/sh
+[ -e /lib/functions.sh ] && . /lib/functions.sh
 append DRIVERS "mac80211"
+
+MLD_VAP_DETAILS="/tmp/wifi_mld_cfg.txt"
+
+update_mld_vap_details() {
+	local _mlds
+	local _devices_up
+	local _ifaces
+	config_load wireless
+	mld_vaps_count=0
+	radio_up_count=0
+
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	if [ -z "$_mlds" ]; then
+		return
+	fi
+
+	mac80211_get_wifi_ifaces() {
+		append _ifaces $1
+	}
+	config_foreach mac80211_get_wifi_ifaces wifi-iface
+
+	mac80211_get_active_wifi_devices()  {
+		config_get disabled "$1" disabled
+		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+			radio_up_count=$((radio_up_count+1))
+		fi
+	}
+	config_foreach mac80211_get_active_wifi_devices wifi-device
+
+	for _mld in $_mlds
+	do
+		for _ifname in $_ifaces
+		do
+			config_get mld_name $_ifname mld
+
+			if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+				mld_vaps_count=$((mld_vaps_count+1))
+			fi
+		done
+	done
+	echo "radio_up_count=$radio_up_count mld_vaps_count=$mld_vaps_count" > $MLD_VAP_DETAILS
+}
+
+pre_wifi_updown() {
+	has_updated_cfg=$(ls /var/run/hostapd-*-updated-cfg 2>/dev/null | wc -l)
+	if [ "$has_updated_cfg" -gt 1 ]; then
+		rm -rf /var/run/hostapd-*updated-cfg
+		rm -rf /var/run/hostapd*.conf
+	fi
+	if [ -f "$MLD_VAP_DETAILS" ]; then
+		rm -rf $MLD_VAP_DETAILS
+	fi
+
+	update_mld_vap_details
+}
+
+post_wifi_updown() {
+	:
+}
+
+pre_wifi_reload_legacy() {
+	:
+}
+
+post_wifi_reload_legacy() {
+	:
+}
+
+pre_wifi_config() {
+	:
+}
+
+post_wifi_config() {
+	:
+}
 
 lookup_phy() {
 	[ -n "$phy" ] && {
