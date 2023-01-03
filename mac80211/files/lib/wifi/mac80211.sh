@@ -2,7 +2,7 @@
 [ -e /lib/functions.sh ] && . /lib/functions.sh
 append DRIVERS "mac80211"
 
-MLD_VAP_DETAILS="/tmp/wifi_mld_cfg.txt"
+MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
 
 update_mld_vap_details() {
 	local _mlds
@@ -52,7 +52,6 @@ pre_wifi_updown() {
 	has_updated_cfg=$(ls /var/run/hostapd-*-updated-cfg 2>/dev/null | wc -l)
 	if [ "$has_updated_cfg" -gt 1 ]; then
 		rm -rf /var/run/hostapd-*updated-cfg
-		rm -rf /var/run/hostapd*.conf
 	fi
 	if [ -f "$MLD_VAP_DETAILS" ]; then
 		rm -rf $MLD_VAP_DETAILS

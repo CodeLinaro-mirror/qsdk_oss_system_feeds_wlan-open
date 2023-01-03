@@ -7,7 +7,7 @@
 
 init_wireless_driver "$@"
 
-MLD_VAP_DETAILS="/tmp/wifi_mld_cfg.txt"
+MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
 
 MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh_max_peer_links
 	       mesh_max_retries mesh_ttl mesh_element_ttl mesh_hwmp_max_preq_retries
@@ -1048,6 +1048,7 @@ mac80211_prepare_vif() {
 			else
 				ifname="$mld_ifname"
 			fi
+			[ -n "$ifname" ] || [ -n "$if_idx" ] || if_idx=1
 		else
 			if [ $mld_vaps_count -gt 0 ]; then
 				[ -n "$if_idx" ] || if_idx=1
@@ -1314,11 +1315,14 @@ mac80211_setup_vif() {
 	json_get_vars mode
 	json_get_var vif_txpower txpower
 
-	ifconfig "$ifname" up || {
-		wireless_setup_vif_failed IFUP_ERROR
-		json_select ..
-		return
-	}
+	if [ "$mode" != "ap" ] || \
+	   ( [[ "$mode" = "ap" ]] &&  [ $hostapd_started -eq 1 ] ) ; then
+		ifconfig "$ifname" up || {
+			wireless_setup_vif_failed IFUP_ERROR
+			json_select ..
+			return
+		}
+	fi
 
 	set_default vif_txpower "$txpower"
 	[ -z "$vif_txpower" ] || iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
@@ -1783,6 +1787,8 @@ drv_mac80211_setup() {
 
 	for_each_interface "mesh" mac80211_setup_vif
 	[ -n "$hostapd_ctrl" ] && {
+		hostapd_started=1
+
 		if [ "$is_sphy_mband" -eq 1 ]; then
 			ifname="wlan${device:11:1}"
 		else
@@ -1809,6 +1815,8 @@ drv_mac80211_setup() {
 					wireless_setup_failed HOSTAPD_START_FAILED
 					return
 				}
+			else
+				 hostapd_started=0
 			fi
 		fi
 	}
