@@ -707,9 +707,11 @@ mac80211_hostapd_setup_base() {
 			fi
 		fi
 
-		if [ "$has_ap" -gt 1 ]; then
-			[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "mbssid=1" "$N"
-			[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
+		if [ -z $mlo_capable ] || [ $mlo_capable -eq 0 ]; then
+			if [ "$has_ap" -gt 1 ]; then
+				[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "mbssid=1" "$N"
+				[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
+			fi
 		fi
 	fi
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
