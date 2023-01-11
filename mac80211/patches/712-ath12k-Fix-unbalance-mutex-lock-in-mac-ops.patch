@@ -1,0 +1,71 @@
+From 40db919e9da15bab8653b3b92ccc9e6fdb1802cd Mon Sep 17 00:00:00 2001
+From: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+Date: Wed, 11 Jan 2023 21:44:00 +0530
+Subject: [PATCH] ath12k: Fix unbalance mutex lock in mac ops
+
+Mutex lock/unlock is unbalanced in multipe
+driver mac ops handlers during error cases.
+
+Fix this by adding proper mutex lock/unlock
+statement.
+
+Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index afd3628..8496383 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -5611,6 +5611,8 @@ static int ath12k_mac_op_sta_state(struct ieee80211_hw *hw,
+ 		if (ret) {
+ 			ath12k_warn(ar->ab, "failed to clear all peer keys for vdev %i: %d\n",
+ 					arvif->vdev_id, ret);
++			mutex_unlock(&ar->conf_mutex);
++			mutex_unlock(&ah->conf_mutex);
+ 			return ret;
+ 		}
+ 	} else if (old_state == IEEE80211_STA_ASSOC &&
+@@ -5698,7 +5700,6 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+ 					struct ieee80211_sta *sta,
+ 					u32 changed)
+ {
+-	struct ath12k_hw *ah = hw->priv;
+ 	struct ath12k *ar;
+ 	struct ath12k_sta *arsta = (struct ath12k_sta *)sta->drv_priv;
+ 	struct ath12k_vif *arvif = (void *)vif->drv_priv;
+@@ -5719,7 +5720,6 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+ 	peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->link_addr);
+ 	if (!peer) {
+ 		spin_unlock_bh(&ar->ab->base_lock);
+-		mutex_unlock(&ah->conf_mutex);
+ 		ath12k_warn(ar->ab, "mac sta rc update failed to find peer %pM on vdev %i\n",
+ 			    sta->link_addr, arvif->vdev_id);
+ 		return;
+@@ -10447,7 +10447,8 @@ ath12k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
+ 			num_rates != 1) {
+ 		ath12k_warn(ar->ab,
+ 				"Setting HE UL MCS Fixed Rate range is not supported\n");
+-		return -EINVAL;
++		ret = -EINVAL;
++		goto out;
+ 	}
+ 
+ 	/* mac80211 doesn't support sending a fixed HT/VHT MCS alone, rather it
+@@ -10482,8 +10483,10 @@ ath12k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
+ 	} else {
+ 		rate = WMI_FIXED_RATE_NONE;
+ 
+-		if (!ath12k_mac_check_fixed_rate_settings_for_mumimo(arvif, vht_mcs_mask, he_mcs_mask))
+-			return -EINVAL;
++		if (!ath12k_mac_check_fixed_rate_settings_for_mumimo(arvif, vht_mcs_mask, he_mcs_mask)) {
++			ret = -EINVAL;
++			goto out;
++		}
+ 
+ 		if (!ath12k_mac_validate_fixed_rate_settings(ar, band, mask))
+ 			ath12k_warn(ar->ab,
+-- 
+2.17.1
+
