@@ -1,6 +1,6 @@
-From 163bfbc1a204c20280206c1a216721d04603d64c Mon Sep 17 00:00:00 2001
+From ff3c4e5421e88cd8b5ec3ec0f9ab9c170ac5ecbb Mon Sep 17 00:00:00 2001
 From: Sriram R <quic_srirrama@quicinc.com>
-Date: Sat, 12 Nov 2022 17:52:58 +0530
+Date: Thu, 5 Jan 2023 17:16:43 +0530
 Subject: [PATCH] ath12k: changes for handling multi link sta
 
 Add support to create and maintain multi link sta in driver and send
@@ -40,15 +40,15 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp.c    |   7 +
  drivers/net/wireless/ath/ath12k/dp.h    |  35 +
  drivers/net/wireless/ath/ath12k/dp_rx.c |  16 +
- drivers/net/wireless/ath/ath12k/mac.c   | 862 ++++++++++++++++++------
+ drivers/net/wireless/ath/ath12k/mac.c   | 868 ++++++++++++++++++------
  drivers/net/wireless/ath/ath12k/peer.c  | 161 ++++-
  drivers/net/wireless/ath/ath12k/peer.h  |  28 +
  drivers/net/wireless/ath/ath12k/wmi.c   |  82 ++-
  drivers/net/wireless/ath/ath12k/wmi.h   |  39 ++
- 9 files changed, 1012 insertions(+), 234 deletions(-)
+ 9 files changed, 1017 insertions(+), 235 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index f00faa6..52571f3 100644
+index cb41fc5..99fbcb5 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -52,6 +52,9 @@ extern unsigned int ath12k_mlo_capable;
@@ -94,7 +94,7 @@ index f00faa6..52571f3 100644
   };
  #define ATH12K_HALF_20MHZ_BW 10
  #define ATH12K_5G_MIN_CENTER 4900
-@@ -995,6 +1008,7 @@ struct ath12k_hw {
+@@ -992,6 +1005,7 @@ struct ath12k_hw {
  	u8 supported_band_mask;
  	u8 num_radio;
  	struct ath12k_link_vif *scan_arvif;
@@ -181,7 +181,7 @@ index f079f9d..b5ffb2f 100644
  			   struct ath12k_ext_irq_grp *irq_grp,
  			   int budget);
 diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index dc48c0c..9f5da2e 100644
+index e8c8c2b..4798e49 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -1003,6 +1003,11 @@ int ath12k_dp_rx_peer_tid_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_
@@ -209,7 +209,7 @@ index dc48c0c..9f5da2e 100644
  	case HTT_T2H_MSG_TYPE_PPDU_STATS_IND:
  		ath12k_htt_pull_ppdu_stats(ab, skb);
  		break;
-@@ -3228,6 +3239,11 @@ int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, const u8 *peer_mac, int vdev
+@@ -3213,6 +3224,11 @@ int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, const u8 *peer_mac, int vdev
  		return -ENOENT;
  	}
  
@@ -222,10 +222,10 @@ index dc48c0c..9f5da2e 100644
  		rx_tid = &peer->rx_tid[i];
  		rx_tid->ab = ab;
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index a2fa7b0..0394e4c 100644
+index aafc39e..95d992d 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -1650,7 +1650,7 @@ static void ath12k_peer_assoc_h_basic(struct ath12k *ar,
+@@ -1664,7 +1664,7 @@ static void ath12k_peer_assoc_h_basic(struct ath12k *ar,
  	else
  		aid = sta->aid;
  
@@ -234,7 +234,7 @@ index a2fa7b0..0394e4c 100644
  	arg->vdev_id = arvif->vdev_id;
  	arg->peer_associd = aid;
  	arg->auth_flag = true;
-@@ -2077,7 +2077,7 @@ static void ath12k_peer_assoc_h_vht(struct ath12k *ar,
+@@ -2091,7 +2091,7 @@ static void ath12k_peer_assoc_h_vht(struct ath12k *ar,
  	if (!user_rate_valid) {
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  			   "Setting vht range MCS value to peer supported nss:%d for peer %pM\n",
@@ -243,7 +243,7 @@ index a2fa7b0..0394e4c 100644
  		vht_mcs_mask[sta->deflink.rx_nss - 1] = vht_mcs_mask[vht_nss - 1];
  	}
  
-@@ -2135,7 +2135,7 @@ static void ath12k_peer_assoc_h_vht(struct ath12k *ar,
+@@ -2149,7 +2149,7 @@ static void ath12k_peer_assoc_h_vht(struct ath12k *ar,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac vht peer %pM max_mpdu %d flags 0x%x nss_override 0x%x\n",
@@ -252,7 +252,7 @@ index a2fa7b0..0394e4c 100644
  		   arg->peer_bw_rxnss_override);
  }
  
-@@ -2364,7 +2364,7 @@ static void ath12k_peer_assoc_h_he(struct ath12k *ar,
+@@ -2378,7 +2378,7 @@ static void ath12k_peer_assoc_h_he(struct ath12k *ar,
  	if (!user_rate_valid) {
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  			   "Setting he range MCS value to peer supported nss:%d for peer %pM\n",
@@ -261,7 +261,7 @@ index a2fa7b0..0394e4c 100644
  		he_mcs_mask[sta->deflink.rx_nss - 1] = he_mcs_mask[he_nss - 1];
  	}
  
-@@ -2445,7 +2445,7 @@ static void ath12k_peer_assoc_h_he(struct ath12k *ar,
+@@ -2459,7 +2459,7 @@ static void ath12k_peer_assoc_h_he(struct ath12k *ar,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac he peer %pM nss %d mcs cnt %d nss_override 0x%x\n",
@@ -270,7 +270,7 @@ index a2fa7b0..0394e4c 100644
  		   arg->peer_he_mcs_count,
  		   arg->peer_bw_rxnss_override);
  }
-@@ -2707,7 +2707,7 @@ static void ath12k_peer_assoc_h_eht(struct ath12k *ar,
+@@ -2721,7 +2721,7 @@ static void ath12k_peer_assoc_h_eht(struct ath12k *ar,
  	if (!user_rate_valid) {
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  				"Setting eht range MCS value to peer supported nss:%d for peer %pM\n",
@@ -279,7 +279,7 @@ index a2fa7b0..0394e4c 100644
  		eht_mcs_mask[sta->deflink.rx_nss - 1] = eht_mcs_mask[eht_nss - 1];
  	}
  
-@@ -2779,7 +2779,7 @@ static void ath12k_peer_assoc_h_eht(struct ath12k *ar,
+@@ -2793,7 +2793,7 @@ static void ath12k_peer_assoc_h_eht(struct ath12k *ar,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac he peer %pM nss %d mcs cnt %d ru_punct_bitmap 0x%x\n",
@@ -288,7 +288,7 @@ index a2fa7b0..0394e4c 100644
  }
  
  static void ath12k_peer_assoc_h_smps(struct ath12k_link_sta *arsta,
-@@ -2856,7 +2856,50 @@ static void ath12k_peer_assoc_h_qos(struct ath12k *ar,
+@@ -2870,7 +2870,50 @@ static void ath12k_peer_assoc_h_qos(struct ath12k *ar,
  	}
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac peer %pM qos %d\n",
@@ -340,7 +340,7 @@ index a2fa7b0..0394e4c 100644
  }
  
  static int ath12k_peer_assoc_qos_ap(struct ath12k *ar,
-@@ -2899,26 +2942,26 @@ static int ath12k_peer_assoc_qos_ap(struct ath12k *ar,
+@@ -2913,26 +2956,26 @@ static int ath12k_peer_assoc_qos_ap(struct ath12k *ar,
  
  	params.param = WMI_AP_PS_PEER_PARAM_UAPSD;
  	params.value = uapsd;
@@ -371,7 +371,7 @@ index a2fa7b0..0394e4c 100644
  	if (ret)
  		goto err;
  
-@@ -3125,7 +3168,7 @@ static void ath12k_peer_assoc_h_phymode(struct ath12k *ar,
+@@ -3139,7 +3182,7 @@ static void ath12k_peer_assoc_h_phymode(struct ath12k *ar,
  	}
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac peer %pM phymode %s\n",
@@ -380,7 +380,7 @@ index a2fa7b0..0394e4c 100644
  
  	arg->peer_phymode = phymode;
  	WARN_ON(phymode == MODE_UNKNOWN);
-@@ -3155,6 +3198,7 @@ static void ath12k_peer_assoc_prepare(struct ath12k *ar,
+@@ -3169,6 +3212,7 @@ static void ath12k_peer_assoc_prepare(struct ath12k *ar,
  	ath12k_peer_assoc_h_eht(ar, arvif, arsta, arg);
  	ath12k_peer_assoc_h_qos(ar, arvif, arsta, arg);
  	ath12k_peer_assoc_h_smps(arsta, arg);
@@ -388,7 +388,7 @@ index a2fa7b0..0394e4c 100644
  
  	arsta->peer_nss = arg->peer_nss;
  
-@@ -4851,7 +4895,7 @@ static int ath12k_mac_set_key(struct ath12k *ar, enum set_key_cmd cmd,
+@@ -4872,7 +4916,7 @@ static int ath12k_mac_set_key(struct ath12k *ar, enum set_key_cmd cmd,
  	}
  
  	if (sta)
@@ -397,7 +397,7 @@ index a2fa7b0..0394e4c 100644
  	else if (ahvif->vdev_type == WMI_VDEV_TYPE_STA)
  		peer_addr = link_conf->bssid;
  	else
-@@ -5090,24 +5134,24 @@ ath12k_mac_set_peer_vht_fixed_rate(struct ath12k_link_vif *arvif,
+@@ -5111,24 +5155,24 @@ ath12k_mac_set_peer_vht_fixed_rate(struct ath12k_link_vif *arvif,
  
  	if (!nss) {
  		ath12k_warn(ar->ab, "No single VHT Fixed rate found to set for %pM",
@@ -426,7 +426,7 @@ index a2fa7b0..0394e4c 100644
  
  	return ret;
  }
-@@ -5140,7 +5184,7 @@ ath12k_mac_set_peer_he_fixed_rate(struct ath12k_link_vif *arvif,
+@@ -5161,7 +5205,7 @@ ath12k_mac_set_peer_he_fixed_rate(struct ath12k_link_vif *arvif,
  
  	if (!nss) {
  		ath12k_warn(ar->ab, "No single HE Fixed rate found to set for %pM",
@@ -435,7 +435,7 @@ index a2fa7b0..0394e4c 100644
  		return -EINVAL;
  	}
  
-@@ -5150,19 +5194,19 @@ ath12k_mac_set_peer_he_fixed_rate(struct ath12k_link_vif *arvif,
+@@ -5171,19 +5215,19 @@ ath12k_mac_set_peer_he_fixed_rate(struct ath12k_link_vif *arvif,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "Setting Fixed HE Rate for peer %pM. Device will not switch to any other selected rates",
@@ -458,7 +458,7 @@ index a2fa7b0..0394e4c 100644
  
  	return ret;
  }
-@@ -5250,7 +5294,7 @@ ath12k_mac_set_peer_eht_fixed_rate(struct ath12k_link_vif *arvif,
+@@ -5271,7 +5315,7 @@ ath12k_mac_set_peer_eht_fixed_rate(struct ath12k_link_vif *arvif,
  
  	if (!nss) {
  		ath12k_warn(ar->ab, "No single EHT Fixed rate found to set for %pM",
@@ -467,7 +467,7 @@ index a2fa7b0..0394e4c 100644
  		return -EINVAL;
  	}
  
-@@ -5260,38 +5304,40 @@ ath12k_mac_set_peer_eht_fixed_rate(struct ath12k_link_vif *arvif,
+@@ -5281,38 +5325,40 @@ ath12k_mac_set_peer_eht_fixed_rate(struct ath12k_link_vif *arvif,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "Setting Fixed EHT Rate for peer %pM. Device will not switch to any other selected rates",
@@ -518,7 +518,7 @@ index a2fa7b0..0394e4c 100644
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -5301,6 +5347,11 @@ static int ath12k_station_assoc(struct ath12k *ar,
+@@ -5322,6 +5368,11 @@ static int ath12k_station_assoc(struct ath12k *ar,
  	if (WARN_ON(ath12k_mac_vif_chan(vif, &def, link_id)))
  		return -EPERM;
  
@@ -530,7 +530,7 @@ index a2fa7b0..0394e4c 100644
  	band = def.chan->band;
  	mask = &arvif->bitrate_mask;
  
-@@ -5313,13 +5364,13 @@ static int ath12k_station_assoc(struct ath12k *ar,
+@@ -5334,13 +5385,13 @@ static int ath12k_station_assoc(struct ath12k *ar,
  	ret = ath12k_wmi_send_peer_assoc_cmd(ar, &peer_arg);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to run peer assoc for STA %pM vdev %i: %d\n",
@@ -546,7 +546,7 @@ index a2fa7b0..0394e4c 100644
  		return -ETIMEDOUT;
  	}
  
-@@ -5361,7 +5412,7 @@ static int ath12k_station_assoc(struct ath12k *ar,
+@@ -5382,7 +5433,7 @@ static int ath12k_station_assoc(struct ath12k *ar,
  	if (reassoc)
  		return 0;
  
@@ -555,7 +555,7 @@ index a2fa7b0..0394e4c 100644
  				     &sta->deflink.ht_cap,
  				     le16_to_cpu(sta->deflink.he_6ghz_capa.capa));
  	if (ret) {
-@@ -5381,21 +5432,35 @@ static int ath12k_station_assoc(struct ath12k *ar,
+@@ -5402,21 +5453,35 @@ static int ath12k_station_assoc(struct ath12k *ar,
  		ret = ath12k_peer_assoc_qos_ap(ar, arvif, arsta);
  		if (ret) {
  			ath12k_warn(ar->ab, "failed to set qos params for STA %pM for vdev %i: %d\n",
@@ -597,7 +597,7 @@ index a2fa7b0..0394e4c 100644
  	int ret = 0;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -5403,6 +5468,8 @@ static int ath12k_station_disassoc(struct ath12k *ar,
+@@ -5424,6 +5489,8 @@ static int ath12k_station_disassoc(struct ath12k *ar,
  	if (!arvif)
  		return -EINVAL;
  
@@ -606,7 +606,7 @@ index a2fa7b0..0394e4c 100644
  	if (!sta->wme) {
  		arvif->num_legacy_stations--;
  		ret = ath12k_recalc_rtscts_prot(arvif);
-@@ -5413,6 +5480,69 @@ static int ath12k_station_disassoc(struct ath12k *ar,
+@@ -5434,6 +5501,69 @@ static int ath12k_station_disassoc(struct ath12k *ar,
  	return 0;
  }
  
@@ -676,7 +676,20 @@ index a2fa7b0..0394e4c 100644
  static void ath12k_sta_rc_update_wk(struct work_struct *wk)
  {
  	struct ath12k *ar;
-@@ -5478,64 +5608,64 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
+@@ -5452,9 +5582,11 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
+ 	const struct cfg80211_bitrate_mask *mask;
+ 	struct peer_assoc_params peer_arg;
+ 	enum wmi_phy_mode peer_phymode;
++	struct ath12k_sta *ahsta;
+ 
+ 	arsta = container_of(wk, struct ath12k_link_sta, update_wk);
+-	sta = container_of((void *)arsta, struct ieee80211_sta, drv_priv);
++	ahsta = arsta->ahsta;
++	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
+ 	arvif = arsta->arvif;
+ 	ahvif = arvif->ahvif;
+ 	ar = arvif->ar;
+@@ -5499,64 +5631,64 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
  			 * followed by WMI_PEER_CHWIDTH
  			 */
  			ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac BW upgrade for sta %pM new BW %d, old BW %d\n",
@@ -757,7 +770,7 @@ index a2fa7b0..0394e4c 100644
  	}
  
  	if (changed & IEEE80211_RC_SUPP_RATES_CHANGED) {
-@@ -5580,14 +5710,14 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
+@@ -5601,14 +5733,14 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
  			 * than peer assoc
  			 */
  
@@ -774,7 +787,7 @@ index a2fa7b0..0394e4c 100644
  			ath12k_peer_assoc_prepare(ar, arvif, arsta,
  						  &peer_arg, true);
  
-@@ -5595,11 +5725,11 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
+@@ -5616,11 +5748,11 @@ static void ath12k_sta_rc_update_wk(struct work_struct *wk)
  			err = ath12k_wmi_send_peer_assoc_cmd(ar, &peer_arg);
  			if (err)
  				ath12k_warn(ar->ab, "failed to run peer assoc for STA %pM vdev %i: %d\n",
@@ -788,7 +801,7 @@ index a2fa7b0..0394e4c 100644
  		}
  	}
  err_rc_bw_changed:
-@@ -5628,14 +5758,14 @@ static void ath12k_sta_set_4addr_wk(struct work_struct *wk)
+@@ -5649,14 +5781,14 @@ static void ath12k_sta_set_4addr_wk(struct work_struct *wk)
  		ar = arvif->ar;
  
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
@@ -806,7 +819,7 @@ index a2fa7b0..0394e4c 100644
  	}
  }
  
-@@ -5680,6 +5810,69 @@ static void ath12k_mac_dec_num_stations(struct ath12k_link_vif *arvif,
+@@ -5701,6 +5833,70 @@ static void ath12k_mac_dec_num_stations(struct ath12k_link_vif *arvif,
  	ar->num_stations--;
  }
  
@@ -840,6 +853,7 @@ index a2fa7b0..0394e4c 100644
 +	kfree(arsta->rx_stats);
 +	arsta->rx_stats = NULL;
 +	ath12k_mac_ap_ps_recalc(ar);
++	ahsta->ahvif = NULL;
 +}
 +
 +static int ath12k_mac_station_remove(struct ath12k *ar,
@@ -876,7 +890,7 @@ index a2fa7b0..0394e4c 100644
  static int ath12k_mac_station_add(struct ath12k *ar,
  				  struct ath12k_link_vif *arvif,
  				  struct ath12k_link_sta *arsta)
-@@ -5689,7 +5882,7 @@ static int ath12k_mac_station_add(struct ath12k *ar,
+@@ -5710,7 +5906,7 @@ static int ath12k_mac_station_add(struct ath12k *ar,
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ath12k_sta *ahsta = arsta->ahsta;
  	struct ieee80211_sta *sta;
@@ -885,7 +899,7 @@ index a2fa7b0..0394e4c 100644
  	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -5713,18 +5906,19 @@ static int ath12k_mac_station_add(struct ath12k *ar,
+@@ -5734,18 +5930,19 @@ static int ath12k_mac_station_add(struct ath12k *ar,
  	}
  
  	peer_param.vdev_id = arvif->vdev_id;
@@ -908,7 +922,7 @@ index a2fa7b0..0394e4c 100644
  
  	if (ath12k_debugfs_is_extd_tx_stats_enabled(ar)) {
  		arsta->tx_stats = kzalloc(sizeof(*arsta->tx_stats), GFP_KERNEL);
-@@ -5742,20 +5936,20 @@ static int ath12k_mac_station_add(struct ath12k *ar,
+@@ -5763,20 +5960,20 @@ static int ath12k_mac_station_add(struct ath12k *ar,
  	ath12k_mac_ap_ps_recalc(ar);
  
  	if (ieee80211_vif_is_mesh(vif)) {
@@ -933,16 +947,17 @@ index a2fa7b0..0394e4c 100644
  		goto free_tx_stats;
  	}
  
-@@ -5769,6 +5963,8 @@ static int ath12k_mac_station_add(struct ath12k *ar,
+@@ -5790,6 +5987,9 @@ static int ath12k_mac_station_add(struct ath12k *ar,
  		}
  	}
  
 +	INIT_WORK(&arsta->update_wk, ath12k_sta_rc_update_wk);
 +
++	ahsta->ahvif = ahvif;
  	return 0;
  
  free_tx_stats:
-@@ -5777,7 +5973,7 @@ free_tx_stats:
+@@ -5798,7 +5998,7 @@ free_tx_stats:
  	kfree(arsta->wbm_tx_stats);
  	arsta->wbm_tx_stats = NULL;
  free_peer:
@@ -951,7 +966,7 @@ index a2fa7b0..0394e4c 100644
  free_rx_stats:
  	kfree(arsta->rx_stats);
  	arsta->rx_stats = NULL;
-@@ -5787,190 +5983,244 @@ exit:
+@@ -5808,190 +6008,244 @@ exit:
  	return ret;
  }
  
@@ -1333,7 +1348,7 @@ index a2fa7b0..0394e4c 100644
  	return ret;
  }
  
-@@ -5981,7 +6231,9 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
+@@ -6002,7 +6256,9 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
@@ -1343,7 +1358,7 @@ index a2fa7b0..0394e4c 100644
  	int ret = 0;
  	s16 txpwr;
  	/* TODO use link id from op after support is available */
-@@ -5991,6 +6243,7 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
+@@ -6012,6 +6268,7 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
  
  	/* TODO get arvif based on link id */
  	arvif = ahvif->link[link_id];
@@ -1351,7 +1366,7 @@ index a2fa7b0..0394e4c 100644
  
  	if (!arvif) {
  		ath12k_err(NULL, "unable to determine device to set sta txpwr\n");
-@@ -6022,7 +6275,7 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
+@@ -6043,7 +6300,7 @@ static int ath12k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -1360,7 +1375,7 @@ index a2fa7b0..0394e4c 100644
  					WMI_PEER_USE_FIXED_PWR, txpwr);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to set tx power for station ret: %d\n",
-@@ -6037,6 +6290,173 @@ out:
+@@ -6058,6 +6315,173 @@ out:
  	return ret;
  }
  
@@ -1534,7 +1549,7 @@ index a2fa7b0..0394e4c 100644
  static void ath12k_mac_op_sta_set_4addr(struct ieee80211_hw *hw,
  					struct ieee80211_vif *vif,
  					struct ieee80211_sta *sta, bool enabled)
-@@ -6085,12 +6505,12 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+@@ -6106,12 +6530,12 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
  
  	spin_lock_bh(&ar->ab->base_lock);
  
@@ -1549,7 +1564,7 @@ index a2fa7b0..0394e4c 100644
  		return;
  	}
  
-@@ -6098,7 +6518,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+@@ -6120,7 +6544,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac sta rc update for %pM changed %08x bw %d nss %d smps %d\n",
@@ -1558,7 +1573,7 @@ index a2fa7b0..0394e4c 100644
  		   sta->smps_mode);
  
  	spin_lock_bh(&ar->data_lock);
-@@ -6124,7 +6544,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+@@ -6146,7 +6570,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
  			break;
  		default:
  			ath12k_warn(ar->ab, "Invalid bandwidth %d in rc update for %pM\n",
@@ -1567,7 +1582,7 @@ index a2fa7b0..0394e4c 100644
  			bw = WMI_PEER_CHWIDTH_20MHZ;
  			break;
  		}
-@@ -6152,7 +6572,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
+@@ -6174,7 +6598,7 @@ static void ath12k_mac_op_sta_rc_update(struct ieee80211_hw *hw,
  			break;
  		default:
  			ath12k_warn(ar->ab, "Invalid smps %d in sta rc update for %pM\n",
@@ -1576,7 +1591,7 @@ index a2fa7b0..0394e4c 100644
  			smps = WMI_PEER_SMPS_PS_NONE;
  			break;
  		}
-@@ -11044,6 +11464,7 @@ static void ath12k_mac_set_bitrate_mask_iter(void *data,
+@@ -11085,6 +11509,7 @@ static void ath12k_mac_set_bitrate_mask_iter(void *data,
  static void ath12k_mac_disable_peer_fixed_rate(void *data,
  					       struct ieee80211_sta *sta)
  {
@@ -1584,7 +1599,7 @@ index a2fa7b0..0394e4c 100644
  	struct ath12k_sta *ahsta = (struct ath12k_sta *)sta->drv_priv;
  	struct ath12k_link_vif *arvif = data;
  	struct ath12k *ar;
-@@ -11057,17 +11478,19 @@ static void ath12k_mac_disable_peer_fixed_rate(void *data,
+@@ -11098,17 +11523,19 @@ static void ath12k_mac_disable_peer_fixed_rate(void *data,
  	if (!(BIT(link_id) & ahsta->links_map))
  		return;
  
@@ -1606,7 +1621,7 @@ index a2fa7b0..0394e4c 100644
  }
  
  static bool
-@@ -11773,6 +12196,7 @@ static const struct ieee80211_ops ath12k_ops = {
+@@ -11714,6 +12141,7 @@ static const struct ieee80211_ops ath12k_ops = {
  	.get_survey			= ath12k_mac_op_get_survey,
  	.flush				= ath12k_mac_op_flush,
  	.sta_statistics			= ath12k_mac_op_sta_statistics,
@@ -1895,7 +1910,7 @@ index 3a69bbd..f12c5c8 100644
  
  #endif /* _PEER_H_ */
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 1088036..ce84ec8 100644
+index 4112065..f4d8f5f 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -1183,9 +1183,14 @@ int ath12k_wmi_send_peer_create_cmd(struct ath12k *ar,
@@ -2053,7 +2068,7 @@ index 1088036..ce84ec8 100644
  	return ret;
  }
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
-index bb62cef..3a4b0a1 100644
+index c3b5fb9..a6d065e 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -3170,6 +3170,7 @@ struct peer_create_params {
