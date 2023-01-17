@@ -1040,7 +1040,8 @@ mac80211_prepare_vif() {
 
 	if [ $is_sphy_mband -eq 1 ]; then
 		wdev=${1:11:1}
-                if [ -n "$mld" ]; then
+		config_get mlo_caps $device mlo_capable
+		if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ] && [ -n "$mld" ]); then
 			config_get mld_ifname "$mld" ifname
 			if [ -z "$mld_ifname" ]; then
 				ml_idx=$(mac80211_get_mld_idx $mld)
@@ -1057,9 +1058,9 @@ mac80211_prepare_vif() {
 
 		[ -n "$ifname" ] || ifname="wlan${wdev#wlan}${if_idx:+-$if_idx}"
 
-		if [ -n "$mld" ]; then
+		if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ]) && [ -n "$mld" ]; then
 			uci_set wireless "$mld" ifname "$ifname"
-			uci commit
+			uci commit wireless
 		fi
 	else
 		for wdev in $(list_phy_interfaces "$phy"); do
@@ -1514,19 +1515,32 @@ mac80211_interface_cleanup() {
 	if [ ${#device} -eq 12 ]; then
 		local dev_wlan=wlan${2:11:1}
 		for wdev in $(list_phy_interfaces "$phy"); do
-			if [[ $wdev != *"$dev_wlan"* ]]; then
+			remove_ifnames=$(cat /var/run/hostapd-${phy}_band${device:11:1}.conf | grep wlan* | cut -d "=" -f2)
+			remove=0
+			for _if in $remove_ifnames
+			do
+				if [[  "$_if" ==  "${wdev}" ]]; then
+					remove=1
+				fi
+			done
+
+			if [ $remove -eq 0 ]; then
 				continue
 			fi
+
 			#Ensure the interface belongs to the phy being passed
 			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
 			if [ "$phy_name" != "$phy" ]; then
 				continue
 			fi
-			[ -f "/var/run/hostapd-${wdev}.lock" ] && { \
+
+			if ( [ -f "/var/run/hostapd-${wdev}.lock" ] || \
+			     [ -f "/var/run/hostapd-${dev_wlan}.lock" ] ); then
 				hostapd_cli -iglobal raw REMOVE ${wdev}
 				rm /var/run/hostapd-${wdev}.lock
 				rm /var/run/hostapd/${wdev}
-			}
+			fi
+
 			[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
 				wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
 				rm /var/run/wpa_supplicant-${wdev}.lock
@@ -1660,7 +1674,7 @@ mac80211_update_mld_iface_config() {
 			fi
 
 			if [ -n "$mld_sae" ]; then
-				json_add_int "sae_pwe" "$mld_pwe"
+				json_add_int "sae_pwe" "$mld_sae"
 				uci_set wireless "$vif_name" sae_pwe "$mld_sae"
 			fi
 		fi
@@ -1684,7 +1698,10 @@ mac80211_update_mld_configs() {
 	for name in $iflist
 	do
 		config_get mld_name $name mld
-		if [ -n "$mld_name" ]; then
+		config_get ml_device $name device
+		config_get mlcaps $ml_device mlo_capable
+
+		if ([ -n "$mlcaps" ] && [ "$mlcaps" -eq 1 ] && [ -n "$mld_name" ]); then
 			mac80211_update_mld_iface_config $name $mld_name
 		fi
 	done
@@ -1844,8 +1861,13 @@ drv_mac80211_setup() {
 			touch /var/run/hostapd-$device-updated-cfg
 			hostapd_cfg_updated=$(ls /var/run/hostapd-*-updated-cfg | wc -l)
 			if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
-				config=$(ls /var/run/hostapd-phy${phy#phy}_band*.conf)
-				/usr/sbin/hostapd -B -P /var/run/wifi-$phy.pid $config
+				bands_info=$(ls /var/run/hostapd*updated-cfg | grep -o band.)
+				for __band in $bands_info
+				do
+					append  config_files /var/run/hostapd-phy${phy#phy}_${__band}.conf
+				done
+
+				/usr/sbin/hostapd -B -P /var/run/wifi-$phy.pid $config_files
 				ret="$?"
 				wireless_add_process "$(cat /var/run/wifi-$phy.pid)" "/usr/sbin/hostapd" 1
 				[ "$ret" != 0 ] && {
