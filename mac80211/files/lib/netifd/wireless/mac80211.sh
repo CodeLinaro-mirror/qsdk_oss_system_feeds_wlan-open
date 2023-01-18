@@ -1426,6 +1426,33 @@ get_seg0_freq() {
 	fi
 }
 
+
+get_band_from_device_idx() {
+	i=$1
+	phy=$2
+
+	#fetch hw idx channels from phy info
+	hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+
+	for _b in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+		expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
+		expr_freq="$expr | awk '/Frequencies/,/valid /f'"
+
+		#fetch band channels from phy info
+		band_nchans=$(eval ${expr_freq} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
+		band_nchans=$(echo $band_nchans | tr -d ' ')
+		hw_nchans=$(echo $hw_nchans | tr -d ' ')
+
+		#check if the list is present in band info
+		if echo "$band_nchans" | grep -q "${hw_nchans}";
+		then
+			echo "$_b"
+			return
+		fi
+	done
+	echo ""
+}
+
 get_awk_string() {
 
 	local phy="$1"
@@ -1438,10 +1465,20 @@ get_awk_string() {
 		local totalCount=`iw phy $phy info | grep -i 'Band ' | wc -l`
 		local delta=$(($totalCount - $idx))
 
-		for _band in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
-			[ $idx -eq 0 ] && break
-			idx=$(($idx - 1))
-		done
+		no_hw_idx=$(iw phy ${phy} info | grep -e "channel list" | wc -l)
+		if [ $no_hw_idx -gt $totalCount ]; then
+			_band=$(get_band_from_device_idx $idx $phy)
+			if [ -z "$_band" ]; then
+				echo "band information not found in $phy info" > /dev/ttyMSM0
+				return
+			fi
+			delta=$(($no_hw_idx - $idx))
+		else
+			for _band in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+				[ $idx -eq 0 ] && break
+				idx=$(($idx - 1))
+			done
+		fi
 
 		if [ $delta -eq 1 ]; then
 			sedString="iw phy ${dev} info | awk '/Band ${_band}/,0'"
