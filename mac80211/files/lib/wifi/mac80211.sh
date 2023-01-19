@@ -39,8 +39,11 @@ update_mld_vap_details() {
 		for _ifname in $_ifaces
 		do
 			config_get mld_name $_ifname mld
+			config_get mldevice $_ifname device
+			config_get mlcaps  $mldevice mlo_capable
 
-			if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+			if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+			   [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
 				mld_vaps_count=$((mld_vaps_count+1))
 			fi
 		done
