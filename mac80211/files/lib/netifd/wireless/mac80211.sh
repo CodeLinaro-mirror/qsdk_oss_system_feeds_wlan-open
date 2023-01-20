@@ -113,7 +113,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs
+	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs use_ru_puncture_dfs
 	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
 }
 
@@ -272,7 +272,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
 	json_get_vars noscan he_mu_edca:-he_mu_edca=0 skip_unii1_dfs_switch
-	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs
+	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 
 	if [ "$band" != 3 ]; then
@@ -674,6 +674,7 @@ mac80211_hostapd_setup_base() {
 			if [ -n $ru_punct_acs_threshold ] && [ $ru_punct_acs_threshold -gt 0 ]; then
 				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N"
 			fi
+			[ -n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
 		fi
 
 		[ "$he_mu_edca" != "0" ] && {
