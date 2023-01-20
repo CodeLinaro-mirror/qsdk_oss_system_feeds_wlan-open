@@ -24,6 +24,13 @@ boot()
 	ath12k="/etc/modules.d/ath12k"
 	if [ -e $ath12k ];
 	then
-		sed -i '1s/.*/ath12k dyndbg=+p/' $ath12k
+		# Read first line only
+		content=$(head -n 1 $ath12k)
+
+		# If first line does not have "dyndbg" substr in it
+		if [[ $content != *"dyndbg"* ]];
+		then
+			sed -i '1s/ath12k/ath12k dyndbg=+p/' $ath12k
+		fi
 	fi
 }
