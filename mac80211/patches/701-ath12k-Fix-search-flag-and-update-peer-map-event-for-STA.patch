@@ -1,0 +1,85 @@
+From 72a571a99ee8f3e4c643cf6b026f94459d2921ac Mon Sep 17 00:00:00 2001
+From: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
+Date: Mon, 9 Jan 2023 20:11:44 +0530
+Subject: [PATCH] ath12k: Fix search flag and update peer map event for sta
+ mode
+
+During STA throughput measurement, majority of packets getting drop due to tcl
+ring full error and it reduces the performance. This is because of filling the
+incorrect ast_idx/ast_hash value to the tx_desc and vdev search type/flag.
+So that, add changes to correct the offset of ast_idx/ast_hash value from peer
+map event and update vdev search type as ADDRX and enabled the AST lookup in
+bank config to know the hw to use ast_idx/ast_hash from the tx desc.
+
+Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c    | 12 ++++++------
+ drivers/net/wireless/ath/ath12k/dp.h    |  2 ++
+ drivers/net/wireless/ath/ath12k/dp_rx.c |  6 ++++--
+ 3 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index 13a88e6..4553973 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -373,7 +373,10 @@ void ath12k_dp_tx_get_vdev_bank_config(struct ath12k_base *ab, struct ath12k_vif
+ 			FIELD_PREP(HAL_TX_BANK_CONFIG_EPD, 0);
+ 
+ 	/* only valid if idx_lookup_override is not set in tcl_data_cmd */
+-	*bank_config |= FIELD_PREP(HAL_TX_BANK_CONFIG_INDEX_LOOKUP_EN, 0);
++	if (arvif->vdev_type == WMI_VDEV_TYPE_STA)
++		*bank_config |= FIELD_PREP(HAL_TX_BANK_CONFIG_INDEX_LOOKUP_EN, 1);
++	else
++		*bank_config |= FIELD_PREP(HAL_TX_BANK_CONFIG_INDEX_LOOKUP_EN, 0);
+ 
+ 	*bank_config |= FIELD_PREP(HAL_TX_BANK_CONFIG_ADDRX_EN,
+ 				   arvif->hal_addr_search_flags & HAL_TX_ADDRX_EN) |
+@@ -1133,11 +1136,8 @@ static void ath12k_dp_update_vdev_search(struct ath12k_vif *arvif)
+ {
+ 	switch (arvif->vdev_type) {
+ 	case WMI_VDEV_TYPE_STA:
+-		/* TODO Verify the search type and flags since ast hash
+-		 * is not part of peer mapv3
+-		 */
+-		arvif->hal_addr_search_flags = HAL_TX_ADDRY_EN;
+-		arvif->search_type = HAL_TX_ADDR_SEARCH_DEFAULT;
++		arvif->hal_addr_search_flags = HAL_TX_ADDRX_EN;
++		arvif->search_type = HAL_TX_ADDR_SEARCH_INDEX;
+ 		break;
+ 	case WMI_VDEV_TYPE_AP:
+ 	case WMI_VDEV_TYPE_IBSS:
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index da77a82..95f408a 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -1315,6 +1315,8 @@ struct htt_t2h_version_conf_msg {
+ #define HTT_T2H_PEER_MAP_INFO1_MAC_ADDR_H16	GENMASK(15, 0)
+ #define HTT_T2H_PEER_MAP_INFO1_HW_PEER_ID	GENMASK(31, 16)
+ #define HTT_T2H_PEER_MAP_INFO2_AST_HASH_VAL	GENMASK(15, 0)
++#define HTT_T2H_PEER_MAP3_INFO2_HW_PEER_ID	GENMASK(15, 0)
++#define HTT_T2H_PEER_MAP3_INFO2_AST_HASH_VAL	GENMASK(31, 16)
+ #define HTT_T2H_PEER_MAP_INFO2_NEXT_HOP_M	BIT(16)
+ #define HTT_T2H_PEER_MAP_INFO2_NEXT_HOP_S	16
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 1e69915..87ac37d 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -2106,10 +2106,12 @@ void ath12k_dp_htt_htc_t2h_msg_handler(struct ath12k_base *ab,
+ 					 resp->peer_map_ev.info1);
+ 		ath12k_dp_get_mac_addr(resp->peer_map_ev.mac_addr_l32,
+ 				       peer_mac_h16, mac_addr);
+-		ast_hash = FIELD_GET(HTT_T2H_PEER_MAP_INFO2_AST_HASH_VAL,
++		ast_hash = FIELD_GET(HTT_T2H_PEER_MAP3_INFO2_AST_HASH_VAL,
+ 				     resp->peer_map_ev.info2);
++		hw_peer_id = FIELD_GET(HTT_T2H_PEER_MAP3_INFO2_HW_PEER_ID,
++				       resp->peer_map_ev.info2);
+ 		ath12k_peer_map_event(ab, vdev_id, peer_id, mac_addr, ast_hash,
+-				      peer_id);
++				      hw_peer_id);
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_PEER_UNMAP:
+ 	case HTT_T2H_MSG_TYPE_PEER_UNMAP2:
+-- 
+2.17.1
+
