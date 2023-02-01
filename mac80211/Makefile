@@ -72,9 +72,10 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
-  DEPENDS+= @TARGET_ipq95xx||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
+  DEPENDS+= @TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
-	+!TARGET_ipq95xx:kmod-qca-nss-drv-wifi-meshmgr +!TARGET_ipq95xx:kmod-qca-nss-drv +TARGET_ipq95xx:kmod-qca-nss-ppe +TARGET_ipq95xx:kmod-qca-nss-ppe-vp
+	+!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv-wifi-meshmgr +!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv +TARGET_ipq95xx:kmod-qca-nss-ppe +TARGET_ipq95xx:kmod-qca-nss-ppe-vp \
+	+TARGET_ipq53xx:kmod-qca-nss-ppe +TARGET_ipq53xx:kmod-qca-nss-ppe-vp
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe:kmod-qca-nss-ppe
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
@@ -442,7 +443,8 @@ define KernelPackage/ath11k
   DEPENDS+= +kmod-ath +TARGET_ipq_ipq807x:kmod-qrtr_mproc +TARGET_ipq_ipq807x_64:kmod-qrtr_mproc \
 	+TARGET_ipq_ipq60xx:kmod-qrtr_mproc +TARGET_ipq_ipq60xx_64:kmod-qrtr_mproc \
 	+TARGET_ipq_ipq50xx:kmod-qrtr_mproc +TARGET_ipq_ipq50xx_64:kmod-qrtr_mproc \
-	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT 
+	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT \
+	@!TARGET_ipq53xx
   FILES:= \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko \
 	$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko \
@@ -549,6 +551,7 @@ config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG ATH12K
 config-$(call config_package,ath9k) += ATH9K
 config-$(call config_package,ath9k-common) += ATH9K_COMMON
 config-$(CONFIG_TARGET_ar71xx) += ATH9K_AHB
+config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB
 config-$(CONFIG_PCI) += ATH9K_PCI
 config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 				      ATH_REG_DYNAMIC_USER_REG_HINTS \
