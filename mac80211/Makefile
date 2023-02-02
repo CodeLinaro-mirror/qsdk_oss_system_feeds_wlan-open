@@ -297,6 +297,8 @@ define DownloadBackports
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
+	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0073-netdevice-mtu-range.cocci && \
+	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0075-ndo-stats-64.cocci && \
 	git revert --no-edit 49432781 && git revert --no-edit 8afac3a8)
 	$(call backports_mlo_support,$(TMP_DIR)/dl/$(PKG_NAME)-source)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && \
