@@ -37,8 +37,6 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  drivers/net/wireless/ath/ath12k/hal.h     |   1 +
  6 files changed, 160 insertions(+), 39 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 296779e..8981310 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -938,6 +938,7 @@ struct ath12k_soc_dp_stats {
@@ -49,11 +47,9 @@ index 296779e..8981310 100644
  	struct ath12k_soc_dp_tx_err_stats tx_err;
  	struct ath12k_dp_ring_bp_stats bp_stats;
  };
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index a0c5cc6..3be7b96 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -819,6 +819,10 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -819,6 +819,10 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			"\nREO_CMD_CACHE_FLUSH Failure: %u\n",
  			soc_stats->reo_cmd_cache_error);
  
@@ -64,11 +60,9 @@ index a0c5cc6..3be7b96 100644
  	len += ath12k_debugfs_dump_soc_ring_bp_stats(ab, buf + len, size - len);
  
  	if (len > size)
-diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
-index 29706aa..13a88e6 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -1578,7 +1578,9 @@ int ath12k_dp_alloc(struct ath12k_base *ab)
+@@ -1578,7 +1578,9 @@ int ath12k_dp_alloc(struct ath12k_base *
  
  	INIT_LIST_HEAD(&dp->reo_cmd_list);
  	INIT_LIST_HEAD(&dp->reo_cmd_cache_flush_list);
@@ -78,8 +72,6 @@ index 29706aa..13a88e6 100644
  
  	dp->reo_cmd_cache_flush_count = 0;
  
-diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
-index 7170774..da77a82 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
 @@ -52,6 +52,14 @@ struct dp_reo_cache_flush_elem {
@@ -110,8 +102,6 @@ index 7170774..da77a82 100644
  	struct ath12k_hp_update_timer reo_cmd_timer;
  	struct ath12k_hp_update_timer tx_ring_timer[DP_TCL_NUM_RING_MAX];
  	struct ath12k_spt_info *spt_info;
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index a099bb5..c6e52ae 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -28,6 +28,9 @@
@@ -124,7 +114,7 @@ index a099bb5..c6e52ae 100644
  static enum hal_encrypt_type ath12k_dp_rx_h_enctype(struct ath12k_base *ab,
  						    struct hal_rx_desc *desc)
  {
-@@ -641,13 +644,63 @@ static int ath12k_dp_rx_pdev_srng_alloc(struct ath12k *ar)
+@@ -641,13 +644,62 @@ static int ath12k_dp_rx_pdev_srng_alloc(
  	return 0;
  }
  
@@ -155,7 +145,6 @@ index a099bb5..c6e52ae 100644
 +	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
 +	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
 +	cmd.upd0 |= HAL_REO_CMD_UPD0_VLD;
-+	cmd.upd1 |= HAL_REO_CMD_UPD1_VLD;
 +
 +	return ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
 +					HAL_REO_CMD_UPDATE_RX_QUEUE, &cmd,
@@ -188,41 +177,17 @@ index a099bb5..c6e52ae 100644
  	spin_lock_bh(&dp->reo_cmd_lock);
  	list_for_each_entry_safe(cmd, tmp, &dp->reo_cmd_list, list) {
  		list_del(&cmd->list);
-@@ -700,6 +753,23 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
- 	unsigned long tot_desc_sz, desc_sz;
- 	int ret;
- 
-+	/* Flush 1K Desc in one command instead of
-+	 * sending 11 cmd for single NON QOS TID
-+	 */
-+	if (rx_tid->tid != HAL_DESC_REO_NON_QOS_TID)
-+	{
-+		memset(&cmd, 0, sizeof(cmd));
-+		cmd.addr_lo = lower_32_bits(rx_tid->paddr);
-+		cmd.addr_hi = upper_32_bits(rx_tid->paddr);
-+		cmd.flag |= HAL_REO_CMD_FLG_NEED_STATUS |
-+			HAL_REO_CMD_FLG_FLUSH_FWD_ALL_MPDUS |
-+			HAL_REO_CMD_FLG_FLUSH_QUEUE_1K_DESC;
-+		ret = ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
-+						HAL_REO_CMD_FLUSH_CACHE,
-+						&cmd, ath12k_dp_reo_cmd_free);
-+		goto exit;
-+	}
+@@ -685,6 +737,9 @@ static void ath12k_dp_reo_cmd_free(struc
+ 	if (status != HAL_REO_CMD_SUCCESS)
+ 		ath12k_warn(dp->ab, "failed to flush rx tid hw desc, tid %d status %d\n",
+ 			    rx_tid->tid, status);
 +
- 	if (rx_tid->pending_desc_size)
- 		tot_desc_sz = rx_tid->pending_desc_size;
- 	else
-@@ -728,7 +798,8 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
- 	memset(&cmd, 0, sizeof(cmd));
- 	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
- 	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
--	cmd.flag |= HAL_REO_CMD_FLG_NEED_STATUS;
-+	cmd.flag |= HAL_REO_CMD_FLG_NEED_STATUS |
-+		HAL_REO_CMD_FLG_FLUSH_FWD_ALL_MPDUS;
- 	ret = ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
- 					HAL_REO_CMD_FLUSH_CACHE,
- 					&cmd, ath12k_dp_reo_cmd_free);
-@@ -741,8 +812,9 @@ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
++	ath12k_hal_reo_shared_qaddr_cache_clear(dp->ab);
++
+ 	if (rx_tid->vaddr) {
+ 		dma_unmap_single(dp->ab->dev, rx_tid->paddr, rx_tid->size,
+ 			 DMA_BIDIRECTIONAL);
+@@ -741,8 +796,9 @@ static void ath12k_dp_rx_tid_del_func(st
  				      enum hal_reo_cmd_status status)
  {
  	struct ath12k_base *ab = dp->ab;
@@ -233,7 +198,7 @@ index a099bb5..c6e52ae 100644
  
  	if (status == HAL_REO_CMD_DRAIN) {
  		ab->soc_stats.hal_reo_cmd_drain++;
-@@ -754,6 +826,30 @@ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
+@@ -754,6 +810,30 @@ static void ath12k_dp_rx_tid_del_func(st
  		return;
  	}
  
@@ -264,7 +229,7 @@ index a099bb5..c6e52ae 100644
  	elem = kzalloc(sizeof(*elem), GFP_ATOMIC);
  	if (!elem) {
  		 ath12k_warn(ab, "failed to alloc reo_cache_flush_elem, rx tid %d\n",
-@@ -776,12 +872,11 @@ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
+@@ -776,12 +856,11 @@ static void ath12k_dp_rx_tid_del_func(st
  			spin_unlock_bh(&dp->reo_cmd_lock);
  
  			if (ath12k_dp_reo_cache_flush(ab, &elem->data)) {
@@ -279,7 +244,7 @@ index a099bb5..c6e52ae 100644
  				break;
  			}
  			spin_lock_bh(&dp->reo_cmd_lock);
-@@ -817,52 +912,56 @@ static void ath12k_peer_rx_tid_qref_setup(struct ath12k_base *ab, u16 peer_id, u
+@@ -817,52 +896,56 @@ static void ath12k_peer_rx_tid_qref_setu
  	ath12k_hal_reo_shared_qaddr_cache_clear(ab);
  }
  
@@ -370,8 +335,6 @@ index a099bb5..c6e52ae 100644
  static int ath12k_dp_rx_link_desc_return(struct ath12k_base *ab,
  					 u32 *link_desc,
  					 enum hal_wbm_rel_bm_act action)
-diff --git a/drivers/net/wireless/ath/ath12k/hal.h b/drivers/net/wireless/ath/ath12k/hal.h
-index 1f127c5..0dcb1ce 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.h
 +++ b/drivers/net/wireless/ath/ath12k/hal.h
 @@ -843,6 +843,7 @@ enum hal_rx_buf_return_buf_manager {
@@ -382,6 +345,3 @@ index 1f127c5..0dcb1ce 100644
  
  /* Should be matching with HAL_REO_UPD_RX_QUEUE_INFO0_UPD_* feilds */
  #define HAL_REO_CMD_UPD0_RX_QUEUE_NUM		BIT(8)
--- 
-2.17.1
-
