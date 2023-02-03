@@ -1,0 +1,106 @@
+From 634cdce1107ec464ce395b127a3858e1e0b0f067 Mon Sep 17 00:00:00 2001
+From: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+Date: Wed, 8 Feb 2023 12:49:57 +0530
+Subject: [PATCH 1/2] mac80211: update sta max bandwith during peer assoc
+ prepare
+
+Currently, mac80211 sends STA bandwidth which is minimum of AP
+bandwidth and STA bandwidth during association.
+
+Driver needs the details of maximum sta bandwidth supported that
+was exchanged during association to set the nss & mcs rates which
+would be used during channel expansion.
+
+Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+---
+ include/net/mac80211.h | 1 +
+ net/mac80211/eht.c     | 1 +
+ net/mac80211/he.c      | 1 +
+ net/mac80211/ht.c      | 1 +
+ net/mac80211/rx.c      | 1 +
+ net/mac80211/vht.c     | 2 ++
+ 6 files changed, 7 insertions(+)
+
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 44b9dfc..20dbadc 100644
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -2234,6 +2234,7 @@ struct ieee80211_sta {
+ 	u8 max_sp;
+ 	u8 rx_nss;
+ 	enum ieee80211_sta_rx_bandwidth bandwidth;
++	enum ieee80211_sta_rx_bandwidth sta_max_bandwidth;
+ 	enum ieee80211_smps_mode smps_mode;
+ 	struct ieee80211_sta_rates __rcu *rates;
+ 	bool tdls;
+diff --git a/net/mac80211/eht.c b/net/mac80211/eht.c
+index 11657fe..2e5f168 100644
+--- a/net/mac80211/eht.c
++++ b/net/mac80211/eht.c
+@@ -110,6 +110,7 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(struct ieee80211_sub_if_data *sdata,
+ 
+ 	sta->cur_max_bandwidth = ieee80211_sta_cap_rx_bw(sta);
+ 	sta->sta.bandwidth = ieee80211_sta_cur_vht_bw(sta);
++	sta->sta.sta_max_bandwidth = sta->cur_max_bandwidth;
+ }
+ 
+ void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_vif *vif,
+diff --git a/net/mac80211/he.c b/net/mac80211/he.c
+index 533f9ff..1257125 100644
+--- a/net/mac80211/he.c
++++ b/net/mac80211/he.c
+@@ -162,6 +162,7 @@ ieee80211_he_cap_ie_to_sta_he_cap(struct ieee80211_sub_if_data *sdata,
+ 
+ 	sta->cur_max_bandwidth = ieee80211_sta_cap_rx_bw(sta);
+ 	sta->sta.bandwidth = ieee80211_sta_cur_vht_bw(sta);
++	sta->sta.sta_max_bandwidth = sta->cur_max_bandwidth;
+ 
+ 	if (sband->band == NL80211_BAND_6GHZ && he_6ghz_capa)
+ 		ieee80211_update_from_he_6ghz_capa(he_6ghz_capa, sta);
+diff --git a/net/mac80211/ht.c b/net/mac80211/ht.c
+index 695c554..ce41caa 100644
+--- a/net/mac80211/ht.c
++++ b/net/mac80211/ht.c
+@@ -270,6 +270,7 @@ bool ieee80211_ht_cap_ie_to_sta_ht_cap(struct ieee80211_sub_if_data *sdata,
+ 	sta->cur_max_bandwidth =
+ 		ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40 ?
+ 				IEEE80211_STA_RX_BW_40 : IEEE80211_STA_RX_BW_20;
++	sta->sta.sta_max_bandwidth = sta->cur_max_bandwidth;
+ 
+ 	if (sta->sdata->vif.type == NL80211_IFTYPE_AP ||
+ 	    sta->sdata->vif.type == NL80211_IFTYPE_AP_VLAN) {
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index ce37087..8a6fb0d 100644
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -3585,6 +3585,7 @@ ieee80211_rx_h_action(struct ieee80211_rx_data *rx)
+ 
+ 			/* set cur_max_bandwidth and recalc sta bw */
+ 			rx->sta->cur_max_bandwidth = max_bw;
++			rx->sta->sta.sta_max_bandwidth = rx->sta->cur_max_bandwidth;
+ 			new_bw = ieee80211_sta_cur_vht_bw(rx->sta);
+ 
+ 			if (rx->sta->sta.bandwidth == new_bw)
+diff --git a/net/mac80211/vht.c b/net/mac80211/vht.c
+index 0ce618e..378ca2e 100644
+--- a/net/mac80211/vht.c
++++ b/net/mac80211/vht.c
+@@ -299,6 +299,7 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
+ 	}
+ 
+ 	sta->sta.bandwidth = ieee80211_sta_cur_vht_bw(sta);
++	sta->sta.sta_max_bandwidth = sta->cur_max_bandwidth;
+ 
+ 	switch (vht_cap->cap & IEEE80211_VHT_CAP_MAX_MPDU_MASK) {
+ 	case IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454:
+@@ -638,6 +639,7 @@ u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
+ 		break;
+ 	}
+ 
++	sta->sta.sta_max_bandwidth = sta->cur_max_bandwidth;
+ 	new_bw = ieee80211_sta_cur_vht_bw(sta);
+ 	if (new_bw != sta->sta.bandwidth) {
+ 		sta->sta.bandwidth = new_bw;
+-- 
+2.17.1
+
