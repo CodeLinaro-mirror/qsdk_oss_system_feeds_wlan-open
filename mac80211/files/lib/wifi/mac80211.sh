@@ -91,6 +91,15 @@ config wifi-device  $devname
 	option hwmode   11${mode_11n}${mode_band}
 $dev_id
 $ht_capab
+EOF
+
+if [[ -n "$2" ]]; then
+cat <<EOF
+	option channels ${2}
+EOF
+fi
+
+cat <<EOF
 	# REMOVE THIS LINE TO ENABLE WIFI:
 	option disabled 1
 
@@ -103,6 +112,38 @@ $security
 
 EOF
 
+}
+
+mac80211_get_channel_list() {
+	dev=$1
+	n_hw_idx=$2
+	chan=$3
+	i=0
+	match_found=0
+
+	while [ $i -lt $n_hw_idx ]; do
+		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+		first_chan=$(echo $hw_nchans | awk '{print $1}')
+		higest_chan=$first_chan
+		for chidx in $hw_nchans; do
+			if [ $chidx -gt $higest_chan ]; then
+				higest_chan=$chidx;
+			fi
+			if [ "$chidx" == "$chan" ]; then
+				match_found=1
+			fi
+		done
+		if [ $match_found -eq 1 ]; then
+			break;
+		fi
+		i=$((i+1))
+	done
+
+	if [ $match_found -eq 1 ]; then
+		echo "$first_chan-$higest_chan";
+	else
+		echo ""
+	fi
 }
 
 mac80211_validate_num_channels() {
@@ -368,14 +409,16 @@ EOF
 					if [ $chan -eq 100 ]; then
 						chan=149
 					fi
-					mac80211_update_config_file $chan
+					chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $chan)
+					mac80211_update_config_file $chan $chan_list
 					if [ $is_swiphy ]; then
 						bandidx=$(($bandidx + 1))
 						devname=radio$devidx\_band$bandidx
 					fi
 				done
 			else
-				mac80211_update_config_file $channel
+				chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $channel)
+				mac80211_update_config_file $channel $chan_list
 				bandidx=$(($bandidx + 1))
 			fi
 		done
