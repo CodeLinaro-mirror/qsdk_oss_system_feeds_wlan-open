@@ -1,4 +1,4 @@
-From 51925c6e2fdc7dcfb58ba0a4cc169c204a7dafc1 Mon Sep 17 00:00:00 2001
+From cbddf40ff4043e10b96ac2bd90372271e8c1e606 Mon Sep 17 00:00:00 2001
 From: Vishal Kumar <quic_visk@quicinc.com>
 Date: Thu, 5 Jan 2023 10:57:00 +0530
 Subject: [PATCH] ath12k: RDP454 split phy bringup changes
@@ -12,10 +12,12 @@ into wiphy->sband[NL80211_BAND_5GHZ].
 Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/core.h |   2 +
- drivers/net/wireless/ath/ath12k/mac.c  | 149 +++++++++++++++++++------
- drivers/net/wireless/ath/ath12k/reg.c  |  13 +++
- 3 files changed, 131 insertions(+), 33 deletions(-)
+ drivers/net/wireless/ath/ath12k/mac.c  | 173 +++++++++++++++++++------
+ drivers/net/wireless/ath/ath12k/reg.c  |  13 ++
+ 3 files changed, 150 insertions(+), 38 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index b47fe0b..7c0f456 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -613,6 +613,7 @@ struct ath12k_sta {
@@ -34,9 +36,11 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  };
  
  #define ATH12K_FLUSH_TIMEOUT (5 * HZ)
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index a12f23c..b1aa3b6 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -693,8 +693,30 @@ struct ath12k_link_vif *ath12k_mac_get_a
+@@ -693,8 +693,30 @@ struct ath12k_link_vif *ath12k_mac_get_arvif_by_vdev_id(struct ath12k_base *ab,
  	return NULL;
  }
  
@@ -69,7 +73,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
-@@ -702,7 +724,8 @@ static struct ath12k *ath12k_mac_get_ar_
+@@ -702,7 +724,8 @@ static struct ath12k *ath12k_mac_get_ar_by_band(struct ieee80211_hw *hw,
  
  	ar = ah->radio;
  	for (i = 0; i < ah->num_radio; i++) {
@@ -79,7 +83,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  			return ar;
  		ar++;
  	}
-@@ -715,9 +738,7 @@ static struct ath12k *ath12k_get_ar_by_c
+@@ -715,9 +738,7 @@ static struct ath12k *ath12k_get_ar_by_ctx(struct ieee80211_hw *hw,
  	if (!ctx)
  		return NULL;
  
@@ -90,7 +94,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  }
  
  struct ath12k *ath12k_get_ar_by_vif(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-@@ -4609,9 +4630,14 @@ ath12k_mac_select_scan_device(struct iee
+@@ -4602,9 +4623,14 @@ ath12k_mac_select_scan_device(struct ieee80211_hw *hw,
  	ar = ah->radio;
  
  	for (i = 0; i < ah->num_radio; i++) {
@@ -107,7 +111,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  		ar++;
  	}
  
-@@ -12731,9 +12757,6 @@ static int ath12k_mac_op_get_survey(stru
+@@ -12735,9 +12761,6 @@ static int ath12k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
  		sband = NULL;
  	}
  
@@ -117,7 +121,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  	if (!sband) {
  		sband = hw->wiphy->bands[NL80211_BAND_5GHZ];
  		band = NL80211_BAND_5GHZ;
-@@ -12754,10 +12777,17 @@ static int ath12k_mac_op_get_survey(stru
+@@ -12758,10 +12781,17 @@ static int ath12k_mac_op_get_survey(struct ieee80211_hw *hw, int idx,
  		goto exit;
  	}
  
@@ -138,7 +142,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  	}
  
  	ar_survey = &ar->survey[idx];
-@@ -13019,7 +13049,13 @@ static int ath12k_mac_op_set_radar_backg
+@@ -13023,7 +13053,13 @@ static int ath12k_mac_op_set_radar_background(struct ieee80211_hw *hw,
  	int ret;
  	struct cfg80211_chan_def conf_def;
  
@@ -153,7 +157,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  
  	mutex_lock(&ar->conf_mutex);
  
-@@ -13139,25 +13175,45 @@ static void ath12k_mac_update_ch_list(st
+@@ -13143,25 +13179,57 @@ static void ath12k_mac_update_ch_list(struct ath12k *ar,
  	struct ieee80211_6ghz_channel *chan_6g;
          int i, j;
  
@@ -161,7 +165,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
 +	if (!(freq_low && freq_high) || !band)
  		return;
  
- 	if (band->band == NL80211_BAND_6GHZ) {
+-	if (band->band == NL80211_BAND_6GHZ) {
 -                for (i = 0; i < NL80211_REG_NUM_POWER_MODES; i++) {
 -                        chan_6g = band->chan_6g[i];
 -                        for (j = 0; j < chan_6g->n_channels; j++) {
@@ -172,6 +176,8 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
 -                }
 -                return;
 -        }
++	switch (band->band) {
++	case NL80211_BAND_6GHZ:
 +		for (i = 0; i < NL80211_REG_NUM_POWER_MODES; i++) {
 +			chan_6g = band->chan_6g[i];
 +
@@ -182,17 +188,27 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
 +						IEEE80211_CHAN_DISABLED;
 +		}
 +		ar->chan_info.num_channels = chan_6g->n_channels;
-+		return;
-+	}
- 
- 	for (i = 0; i < band->n_channels; i++) {
- 		if (band->channels[i].center_freq < freq_low ||
--		    band->channels[i].center_freq > freq_high)
-+		    band->channels[i].center_freq > freq_high) {
- 			band->channels[i].flags |= IEEE80211_CHAN_DISABLED;
-+		} else {
++		break;
++	case NL80211_BAND_5GHZ:
++		for (i = 0; i < band->n_channels; i++) {
++			if (band->channels[i].center_freq < freq_low ||
++			    band->channels[i].center_freq > freq_high) {
++				band->channels[i].flags |= IEEE80211_CHAN_DISABLED;
++			} else {
++				ar->chan_info.num_channels++;
++			}
++		}
++		break;
++	case NL80211_BAND_2GHZ:
++		for (i = 0; i < band->n_channels; i++) {
++			if (band->channels[i].center_freq < freq_low ||
++			    band->channels[i].center_freq > freq_high)
++				band->channels[i].flags |= IEEE80211_CHAN_DISABLED;
 +			ar->chan_info.num_channels++;
 +		}
++		break;
++	default:
++		break;
 +	}
 +}
 +
@@ -200,8 +216,11 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
 +					      struct ieee80211_supported_band *band)
 +{
 +	int i;
-+
-+	for (i = 0; i < band->n_channels; i++) {
+ 
+ 	for (i = 0; i < band->n_channels; i++) {
+-		if (band->channels[i].center_freq < freq_low ||
+-		    band->channels[i].center_freq > freq_high)
+-			band->channels[i].flags |= IEEE80211_CHAN_DISABLED;
 +		if (band->channels[i].center_freq >= ATH12K_MIN_5G_HIGH_BAND_FREQ &&
 +		    band->channels[i].center_freq <= ATH12K_MAX_5G_FREQ) {
 +			/* enable 5g high band channels */
@@ -211,7 +230,19 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  	}
  }
  
-@@ -13276,6 +13332,26 @@ static int ath12k_mac_setup_channels_rat
+@@ -13250,9 +13318,9 @@ static int ath12k_mac_setup_channels_rates(struct ath12k *ar,
+ 					     ab->reg_freq_2g.end_freq));
+ 
+ 		ah->supported_band_mask |= BIT(NL80211_BAND_2GHZ);
+-		ar->chan_info.low_freq = max(temp_reg_cap->low_2ghz_chan,
++		ar->chan_info.low_freq = min(temp_reg_cap->low_2ghz_chan,
+ 					     ab->reg_freq_2g.start_freq);
+-		ar->chan_info.high_freq = min(temp_reg_cap->high_2ghz_chan,
++		ar->chan_info.high_freq = max(temp_reg_cap->high_2ghz_chan,
+ 					      ab->reg_freq_2g.end_freq);
+ 	}
+ 
+@@ -13280,6 +13348,26 @@ static int ath12k_mac_setup_channels_rates(struct ath12k *ar,
                          band->channels = channels;
                          band->n_bitrates = ath12k_a_rates_size;
                          band->bitrates = ath12k_a_rates;
@@ -238,7 +269,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
                          ah->hw->wiphy->bands[NL80211_BAND_5GHZ] = band;
  
                          if (ar->ab->hw_params->single_pdev_only) {
-@@ -13622,7 +13698,8 @@ ath12k_setup_per_hw_chan(struct ath12k *
+@@ -13626,7 +13714,8 @@ ath12k_setup_per_hw_chan(struct ath12k *ar)
  	struct ieee80211_chans_per_hw *chans;
  	struct ieee80211_supported_band *band;
  	struct ath12k_pdev *pdev = ar->pdev;
@@ -248,7 +279,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  
  	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP) {
  		band = &ar->mac.sbands[NL80211_BAND_2GHZ];
-@@ -13632,16 +13709,24 @@ ath12k_setup_per_hw_chan(struct ath12k *
+@@ -13636,16 +13725,24 @@ ath12k_setup_per_hw_chan(struct ath12k *ar)
  		band = &ar->mac.sbands[NL80211_BAND_6GHZ];
  	}
  
@@ -278,9 +309,11 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  }
  static int ath12k_alloc_per_hw_chans(struct ath12k_hw *ah)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
+index bc14a11..f8b96e9 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
-@@ -181,6 +181,12 @@ int ath12k_reg_update_chan_list(struct a
+@@ -181,6 +181,12 @@ int ath12k_reg_update_chan_list(struct ath12k *ar)
  			    IEEE80211_CHAN_DISABLED)
  				continue;
  
@@ -293,7 +326,7 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  			num_channels++;
  		}
  	}
-@@ -210,6 +216,13 @@ int ath12k_reg_update_chan_list(struct a
+@@ -210,6 +216,13 @@ int ath12k_reg_update_chan_list(struct ath12k *ar)
  			if (channel->flags & IEEE80211_CHAN_DISABLED)
  				continue;
  
@@ -307,3 +340,6 @@ Signed-off-by: Vishal Kumar <quic_visk@quicinc.com>
  			/* TODO: Set to true/false based on some condition? */
  			ch->allow_ht = true;
  			ch->allow_vht = true;
+-- 
+2.17.1
+
