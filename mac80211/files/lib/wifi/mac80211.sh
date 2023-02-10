@@ -326,14 +326,14 @@ EOF
 		config_foreach check_mac80211_device wifi-device
 		[ "$found" -gt 0 ] && continue
 
-		no_sbands=$(iw phy ${dev} info | grep -i 'Band ' | wc -l)
+		no_sbands=$(iw phy ${dev} info | grep 'Band ' | wc -l)
 		if [ $no_sbands -gt 1 ]; then
 			is_swiphy=1
 		fi
 		no_hw_idx=$(iw phy ${dev} info | grep -e "channel list" | wc -l)
 
 		bandidx=0
-		for _band in `iw phy ${dev} info | grep -i 'Band ' | cut -d' ' -f 2`; do
+		for _band in `iw phy ${dev} info | grep 'Band ' | cut -d' ' -f 2`; do
 			[ ! -z $_band ] || continue
 
 			mode_11n=""

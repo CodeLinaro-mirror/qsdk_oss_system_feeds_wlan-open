@@ -1441,7 +1441,7 @@ get_band_from_device_idx() {
 	#fetch hw idx channels from phy info
 	hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
 
-	for _b in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+	for _b in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
 		expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
 		expr_freq="$expr | awk '/Frequencies/,/valid /f'"
 
@@ -1469,7 +1469,7 @@ get_awk_string() {
 		local idx=${2:11:1}
 		local dev=`ls /sys/class/ieee80211/`
 
-		local totalCount=`iw phy $phy info | grep -i 'Band ' | wc -l`
+		local totalCount=`iw phy $phy info | grep 'Band ' | wc -l`
 		local delta=$(($totalCount - $idx))
 
 		no_hw_idx=$(iw phy ${phy} info | grep -e "channel list" | wc -l)
@@ -1481,7 +1481,7 @@ get_awk_string() {
 			fi
 			delta=$(($no_hw_idx - $idx))
 		else
-			for _band in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+			for _band in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
 				[ $idx -eq 0 ] && break
 				idx=$(($idx - 1))
 			done
