@@ -105,7 +105,8 @@ drv_mac80211_init_device_config() {
 		rx_antenna_pattern \
 		tx_antenna_pattern
 	config_add_int vht_max_mpdu vht_link_adapt vht160 rx_stbc tx_stbc
-	config_add_int max_ampdu_length_exp ru_punct_bitmap ru_punct_acs_threshold
+	config_add_int max_ampdu_length_exp ru_punct_bitmap ru_punct_acs_threshold \
+		ccfs
 	config_add_boolean \
                ldpc \
                greenfield \
@@ -113,7 +114,7 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
-	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs
+	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs use_ru_puncture_dfs
 	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
 }
 
@@ -272,7 +273,7 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
 	json_get_vars noscan he_mu_edca:-he_mu_edca=0 skip_unii1_dfs_switch
-	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs
+	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 
 	if [ "$band" != 3 ]; then
@@ -579,7 +580,11 @@ mac80211_hostapd_setup_base() {
 			idx="$(mac80211_get_seg0 "320")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=137" "$N"
 			append base_cfg "eht_oper_chwidth=9" "$N"
-			append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ -n $ccfs ] && [ $ccfs -gt 0 ]; then
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$ccfs" "$N"
+			elif [ -z $ccfs ] || [ "$ccfs" -eq "0" ]; then
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			append base_cfg "he_oper_chwidth=2" "$N"
 			idx="$(mac80211_get_seg0 "160")"
 			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
@@ -628,7 +633,7 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "he_default_pe_duration=4" "$N"
 
 		if [ "$enable_be" != "0" ]; then
-			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0
+			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0 ccfs:0
 
 			append base_cfg "ieee80211be=1" "$N"
 			append base_cfg "eht_su_beamformer=1" "$N"
@@ -674,6 +679,7 @@ mac80211_hostapd_setup_base() {
 			if [ -n $ru_punct_acs_threshold ] && [ $ru_punct_acs_threshold -gt 0 ]; then
 				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N"
 			fi
+			[ -n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
 		fi
 
 		[ "$he_mu_edca" != "0" ] && {
@@ -1171,7 +1177,7 @@ mac80211_setup_supplicant_noctl() {
 	local cac_state
 
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
-	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs"
+	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	wpa_supplicant_run "$ifname"
 
 	if [ ! $channel = "acs_survey" ] && [ ! $channel -eq 0 ];then
@@ -1435,7 +1441,7 @@ get_band_from_device_idx() {
 	#fetch hw idx channels from phy info
 	hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
 
-	for _b in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+	for _b in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
 		expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
 		expr_freq="$expr | awk '/Frequencies/,/valid /f'"
 
@@ -1463,7 +1469,7 @@ get_awk_string() {
 		local idx=${2:11:1}
 		local dev=`ls /sys/class/ieee80211/`
 
-		local totalCount=`iw phy $phy info | grep -i 'Band ' | wc -l`
+		local totalCount=`iw phy $phy info | grep 'Band ' | wc -l`
 		local delta=$(($totalCount - $idx))
 
 		no_hw_idx=$(iw phy ${phy} info | grep -e "channel list" | wc -l)
@@ -1475,7 +1481,7 @@ get_awk_string() {
 			fi
 			delta=$(($no_hw_idx - $idx))
 		else
-			for _band in `iw phy $phy info | grep -i 'Band ' | cut -d' ' -f 2`; do
+			for _band in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
 				[ $idx -eq 0 ] && break
 				idx=$(($idx - 1))
 			done
@@ -1742,7 +1748,8 @@ drv_mac80211_setup() {
 		he_ul_mumimo \
 		eht_ulmumimo_80mhz \
 		eht_ulmumimo_160mhz \
-		eht_ulmumimo_320mhz
+		eht_ulmumimo_320mhz \
+		ccfs
 
 
 	json_get_values basic_rate_list basic_rate
