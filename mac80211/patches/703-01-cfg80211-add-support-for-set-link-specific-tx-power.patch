@@ -21,7 +21,7 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
 
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -4509,7 +4509,8 @@ struct cfg80211_ops {
+@@ -4562,7 +4562,8 @@ struct cfg80211_ops {
  	int	(*set_wiphy_params)(struct wiphy *wiphy, u32 changed);
  
  	int	(*set_tx_power)(struct wiphy *wiphy, struct wireless_dev *wdev,
@@ -29,11 +29,11 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
 +				enum nl80211_tx_power_setting type, int mbm,
 +				unsigned int link_id);
  	int	(*get_tx_power)(struct wiphy *wiphy, struct wireless_dev *wdev,
- 				int *dbm);
+ 				unsigned int link_id, int *dbm);
  
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -3657,6 +3657,7 @@ static int nl80211_set_wiphy(struct sk_b
+@@ -3792,6 +3792,7 @@ static int nl80211_set_wiphy(struct sk_b
  		struct wireless_dev *txp_wdev = wdev;
  		enum nl80211_tx_power_setting type;
  		int idx, mbm = 0;
@@ -41,7 +41,7 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
  
  		if (!(rdev->wiphy.features & NL80211_FEATURE_VIF_TXPOWER))
  			txp_wdev = NULL;
-@@ -3679,10 +3680,38 @@ static int nl80211_set_wiphy(struct sk_b
+@@ -3814,10 +3815,52 @@ static int nl80211_set_wiphy(struct sk_b
  			idx = NL80211_ATTR_WIPHY_TX_POWER_LEVEL;
  			mbm = nla_get_u32(info->attrs[idx]);
  		}
@@ -49,7 +49,7 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
 -		result = rdev_set_tx_power(rdev, txp_wdev, type, mbm);
 -		if (result)
 -			goto out;
-+		if (txp_wdev->valid_links) {
++		if (txp_wdev && txp_wdev->valid_links) {
 +			if (!info->attrs[NL80211_ATTR_MLO_LINK_ID]) {
 +				result = -EINVAL;
 +				goto out;
@@ -60,22 +60,36 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
 +				goto out;
 +			}
 +
-+			wdev_lock(wdev);
++			wdev_lock(txp_wdev);
 +			result = rdev_set_tx_power(rdev, txp_wdev, type, mbm, link_id);
 +			if (result) {
-+				wdev_unlock(wdev);
++				wdev_unlock(txp_wdev);
 +				goto out;
 +			}
-+			wdev_unlock(wdev);
++			wdev_unlock(txp_wdev);
 +		} else {
 +			if (!info->attrs[NL80211_ATTR_MLO_LINK_ID]) {
-+				wdev_lock(wdev);
-+				result = rdev_set_tx_power(rdev, txp_wdev, type, mbm, 0);
-+				if (result) {
-+					wdev_unlock(wdev);
-+					goto out;
++				if (txp_wdev) {
++					wdev_lock(txp_wdev);
++					result = rdev_set_tx_power(rdev, txp_wdev,
++								   type, mbm, 0);
++					if (result) {
++						wdev_unlock(txp_wdev);
++						goto out;
++					}
++					wdev_unlock(txp_wdev);
++				} else {
++					if (!rdev->wiphy.num_hw) {
++						result = rdev_set_tx_power(rdev, NULL,
++									   type, mbm, 0);
++
++						if (result)
++							goto out;
++					} else {
++						result = -EOPNOTSUPP;
++						goto out;
++					}
 +				}
-+				wdev_unlock(wdev);
 +			} else {
 +				result = -EINVAL;
 +				goto out;
@@ -105,7 +119,7 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
  }
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -1588,8 +1588,9 @@ DEFINE_EVENT(wiphy_wdev_evt, rdev_get_tx
+@@ -1590,22 +1590,25 @@ DEFINE_EVENT(wiphy_wdev_evt, rdev_get_tx
  
  TRACE_EVENT(rdev_set_tx_power,
  	TP_PROTO(struct wiphy *wiphy, struct wireless_dev *wdev,
@@ -117,6 +131,24 @@ Signed-off-by: Aaradhana Sahu <quic_aarasahu@quicinc.com>
  	TP_STRUCT__entry(
  		WIPHY_ENTRY
  		WDEV_ENTRY
+ 		__field(enum nl80211_tx_power_setting, type)
+ 		__field(int, mbm)
++		__field(unsigned int, link_id)
+ 	),
+ 	TP_fast_assign(
+ 		WIPHY_ASSIGN;
+ 		WDEV_ASSIGN;
+ 		__entry->type = type;
+ 		__entry->mbm = mbm;
++		__entry->link_id = link_id
+ 	),
+-	TP_printk(WIPHY_PR_FMT ", " WDEV_PR_FMT ", type: %u, mbm: %d",
+-		  WIPHY_PR_ARG, WDEV_PR_ARG,__entry->type, __entry->mbm)
++	TP_printk(WIPHY_PR_FMT ", " WDEV_PR_FMT ", type: %u, mbm: %d, link_id: %d"
++		  WIPHY_PR_ARG, WDEV_PR_ARG,__entry->type, __entry->mbm, __entry->link_id)
+ );
+ 
+ TRACE_EVENT(rdev_return_int_int,
 --- a/net/wireless/wext-compat.c
 +++ b/net/wireless/wext-compat.c
 @@ -952,7 +952,7 @@ static int cfg80211_wext_siwtxpower(stru
