@@ -103,7 +103,8 @@ drv_mac80211_init_device_config() {
 		rx_antenna_pattern \
 		tx_antenna_pattern
 	config_add_int vht_max_mpdu vht_link_adapt vht160 rx_stbc tx_stbc
-	config_add_int max_ampdu_length_exp ru_punct_bitmap ru_punct_acs_threshold
+	config_add_int max_ampdu_length_exp ru_punct_bitmap ru_punct_acs_threshold \
+		ccfs
 	config_add_boolean \
                ldpc \
                greenfield \
@@ -571,7 +572,11 @@ mac80211_hostapd_setup_base() {
 			idx="$(mac80211_get_seg0 "320")"
 			[ "$is_6ghz" == "1" ] && append base_cfg "op_class=137" "$N"
 			append base_cfg "eht_oper_chwidth=9" "$N"
-			append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			if [ -n $ccfs ] && [ $ccfs -gt 0 ]; then
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$ccfs" "$N"
+			elif [ -z $ccfs ] || [ "$ccfs" -eq "0" ]; then
+				append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+			fi
 			append base_cfg "he_oper_chwidth=2" "$N"
 			idx="$(mac80211_get_seg0 "160")"
 			append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
@@ -620,7 +625,7 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "he_default_pe_duration=4" "$N"
 
 		if [ "$enable_be" != "0" ]; then
-			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0
+			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0 ccfs:0
 
 			append base_cfg "ieee80211be=1" "$N"
 			append base_cfg "eht_su_beamformer=1" "$N"
@@ -1093,7 +1098,7 @@ mac80211_setup_supplicant_noctl() {
 	local cac_state
 
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
-	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs"
+	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	wpa_supplicant_run "$ifname"
 
 	if [ ! $channel = "acs_survey" ] && [ ! $channel -eq 0 ];then
@@ -1457,7 +1462,8 @@ drv_mac80211_setup() {
 		he_ul_mumimo \
 		eht_ulmumimo_80mhz \
 		eht_ulmumimo_160mhz \
-		eht_ulmumimo_320mhz
+		eht_ulmumimo_320mhz \
+		ccfs
 
 
 	json_get_values basic_rate_list basic_rate
