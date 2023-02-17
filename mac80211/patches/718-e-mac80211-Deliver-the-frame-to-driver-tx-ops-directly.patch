@@ -1,0 +1,53 @@
+From f37e9b4a68d32d03346cbfc3cb4178b186c8f2a4 Mon Sep 17 00:00:00 2001
+From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Date: Fri, 17 Feb 2023 03:08:29 -0800
+Subject: [PATCH 5/7] mac80211: Deliver the frame to driver tx ops
+ directly
+
+Deliver the frame to driver directly in the forwarding path
+to improve the throughput performance.
+
+Reset the fast xmit flag in ieee80211 datapath to ensure
+other features handled as normal through the ath12k_dp_tx
+function
+
+Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
+Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+---
+ net/mac80211/tx.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 56f1d53..46891b3 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -4615,6 +4615,7 @@ netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
+ #ifdef CPTCFG_MAC80211_NSS_SUPPORT
+ 	ieee80211_xmit_nss_fixup(skb, dev);
+ #endif
++	skb->fast_xmit = 0;
+ 
+ 	if (likely(!is_multicast_ether_addr(eth->h_dest)))
+ 		goto normal;
+@@ -4852,7 +4853,17 @@ void ieee80211_8023_xmit_ap(struct ieee80211_sub_if_data *sdata,
+ netdev_tx_t ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
+ 					    struct net_device *dev)
+ {
+-	return __ieee80211_subif_start_xmit_8023(skb, dev, 0, 0, NULL);
++	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
++	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
++
++	info->control.vif = &sdata->vif;
++
++	if (skb->fast_xmit) {
++		drv_tx(sdata->local, NULL,  skb);
++		return NETDEV_TX_OK;
++	} else {
++		return __ieee80211_subif_start_xmit_8023(skb, dev, 0, 0, NULL);
++	}
+ }
+ 
+ netdev_tx_t __ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
+-- 
+2.7.4
+
