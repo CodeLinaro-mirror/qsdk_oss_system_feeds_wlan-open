@@ -49,6 +49,7 @@ V_mac80211_config =" \
 	\nCPTCFG_ATH11K_CFR=y \
 	\nCPTCFG_MAC80211_LEDS=y \
 	\nCPTCFG_ATH12K_SPECTRAL=y \
+	\nCPTCFG_ATH12K_AHB=y \
 "
 inherit module
 DEPENDS +="linux-ipq libnl pkgconfig-native virtual/kernel"
