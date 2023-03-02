@@ -39,8 +39,11 @@ update_mld_vap_details() {
 		for _ifname in $_ifaces
 		do
 			config_get mld_name $_ifname mld
+			config_get mldevice $_ifname device
+			config_get mlcaps  $mldevice mlo_capable
 
-			if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+			if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+			   [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
 				mld_vaps_count=$((mld_vaps_count+1))
 			fi
 		done
@@ -78,6 +81,113 @@ pre_wifi_config() {
 
 post_wifi_config() {
 	:
+}
+
+mac80211_update_config_file() {
+cat <<EOF
+config wifi-device  $devname
+	option type     mac80211
+	option channel  ${1}
+	option hwmode   11${mode_11n}${mode_band}
+$dev_id
+$ht_capab
+EOF
+
+if [[ -n "$2" ]]; then
+cat <<EOF
+	option channels ${2}
+EOF
+fi
+
+cat <<EOF
+	# REMOVE THIS LINE TO ENABLE WIFI:
+	option disabled 1
+
+config wifi-iface
+	option device   $devname
+	option network  lan
+	option mode     ap
+	option ssid     OpenWrt
+$security
+
+EOF
+
+}
+
+mac80211_get_channel_list() {
+	dev=$1
+	n_hw_idx=$2
+	chan=$3
+	i=0
+	match_found=0
+
+	while [ $i -lt $n_hw_idx ]; do
+		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+		first_chan=$(echo $hw_nchans | awk '{print $1}')
+		higest_chan=$first_chan
+		for chidx in $hw_nchans; do
+			if [ $chidx -gt $higest_chan ]; then
+				higest_chan=$chidx;
+			fi
+			if [ "$chidx" == "$chan" ]; then
+				match_found=1
+			fi
+		done
+		if [ $match_found -eq 1 ]; then
+			break;
+		fi
+		i=$((i+1))
+	done
+
+	if [ $match_found -eq 1 ]; then
+		echo "$first_chan-$higest_chan";
+	else
+		echo ""
+	fi
+}
+
+mac80211_validate_num_channels() {
+	dev=$1
+	n_hw_idx=$2
+	efreq=$3
+	match_found=0
+	bandidx=$4
+	sub_matched=0
+	i=0
+
+	#fetch the band channel list
+	band_nchans=$(eval ${3} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
+	band_first_chan=$(echo $band_nchans | awk '{print $1}')
+
+	#entire band channel list without any separator
+	band_nchans=$(echo $band_nchans | tr -d ' ')
+
+	while [ $i -lt $n_hw_idx ]; do
+
+		#fetch the hw idx channel list
+		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+		first_chan=$(echo $hw_nchans | awk '{print $1}')
+		hw_nchans=$(echo $hw_nchans | tr -d ' ')
+
+		if [ "$band_nchans" = "$hw_nchans" ]; then
+			match_found=1
+		else
+			#check if subchannels matches
+			if echo "$band_nchans" | grep -q "${hw_nchans}";
+			then
+				sub_matched=$((sub_matched+1))
+				append chans $first_chan
+			fi
+		fi
+		i=$((i+1))
+	done
+	if [ $match_found -eq 0 ]; then
+		if [ $sub_matched -gt 1 ]; then
+                        echo "$chans"
+		fi
+	else
+		echo ""
+	fi
 }
 
 lookup_phy() {
@@ -216,12 +326,14 @@ EOF
 		config_foreach check_mac80211_device wifi-device
 		[ "$found" -gt 0 ] && continue
 
-		no_sbands=$(iw phy ${dev} info | grep -i 'Band ' | wc -l)
+		no_sbands=$(iw phy ${dev} info | grep 'Band ' | wc -l)
 		if [ $no_sbands -gt 1 ]; then
 			is_swiphy=1
 		fi
+		no_hw_idx=$(iw phy ${dev} info | grep -e "channel list" | wc -l)
+
 		bandidx=0
-		for _band in `iw phy ${dev} info | grep -i 'Band ' | cut -d' ' -f 2`; do
+		for _band in `iw phy ${dev} info | grep 'Band ' | cut -d' ' -f 2`; do
 			[ ! -z $_band ] || continue
 
 			mode_11n=""
@@ -238,6 +350,10 @@ EOF
 				expr="iw phy ${dev} info"
 			fi
 			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
+
+			if [ $no_hw_idx -gt $no_sbands ]; then
+				need_extraconfig=$(mac80211_validate_num_channels $dev $no_hw_idx "$expr_freq")
+			fi
 
 			eval $expr_freq | grep -q '5180 MHz' || \
 			eval $expr_freq | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
@@ -285,28 +401,26 @@ EOF
 			fi
 			if [ $is_swiphy ]; then
 				devname=radio$devidx\_band$bandidx
-				bandidx=$(($bandidx + 1))
 			else
 				devname=radio$devidx
 			fi
-			cat <<EOF
-config wifi-device  $devname
-        option type     mac80211
-        option channel  ${channel}
-        option hwmode   11${mode_11n}${mode_band}
-$dev_id
-$ht_capab
-        # REMOVE THIS LINE TO ENABLE WIFI:
-        option disabled 1
-
-config wifi-iface
-        option device   $devname
-        option network  lan
-        option mode     ap
-        option ssid     OpenWrt
-$security
-
-EOF
+			if [ -n "$need_extraconfig" ]; then
+				for chan in ${need_extraconfig} ; do
+					if [ $chan -eq 100 ]; then
+						chan=149
+					fi
+					chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $chan)
+					mac80211_update_config_file $chan $chan_list
+					if [ $is_swiphy ]; then
+						bandidx=$(($bandidx + 1))
+						devname=radio$devidx\_band$bandidx
+					fi
+				done
+			else
+				chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $channel)
+				mac80211_update_config_file $channel $chan_list
+				bandidx=$(($bandidx + 1))
+			fi
 		done
 
 	devidx=$(($devidx + 1))
@@ -354,19 +468,6 @@ start_lbd() {
 
 post_mac80211() {
 	local action=${1}
-
-	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
-
-	if [ "$enable_smp_affinity" -eq 1 ]; then
-		[ -f "/lib/smp_affinity_settings.sh" ] && {
-                        . /lib/smp_affinity_settings.sh
-                        enable_smp_affinity_wifi
-                }
-		[ -f "/lib/update_smp_affinity.sh" ] && {
-			. /lib/update_smp_affinity.sh
-			enable_smp_affinity_wigig
-		}
-	fi
 
 	case "${action}" in
 		enable)
