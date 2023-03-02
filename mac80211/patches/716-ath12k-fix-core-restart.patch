@@ -1,0 +1,90 @@
+From 4f3c3cbe4d0454ff6661f0d6d668fb773409d282 Mon Sep 17 00:00:00 2001
+From: Hari Chandrakanthan <quic_haric@quicinc.com>
+Date: Thu, 2 Mar 2023 13:14:20 +0530
+Subject: [PATCH] ath12k: fix core restart
+
+While reconfiguring the core, the wmi cmds are allowed to be sent to
+firmware in parallel and it leads to crash.
+
+To avoid this, change the ar->state to RESTARTING before reconfiguring
+the core and allow bss change wmi cmds only if ar->state is ON.
+
+Also if core restart fails, change the ar->state to OFF.
+
+Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.c | 29 ++++++++++++++++++++++-------
+ drivers/net/wireless/ath/ath12k/mac.c  |  3 ++-
+ 2 files changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index addeafe..99dd86f 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -1297,6 +1297,21 @@ void ath12k_core_halt(struct ath12k *ar)
+ 	idr_init(&ar->txmgmt_idr);
+ }
+ 
++static void ath12k_change_core_state(struct ath12k_base *ab, enum ath12k_state state) {
++	struct ath12k_pdev *pdev;
++	struct ath12k *ar;
++	int j;
++
++	for (j = 0; j < ab->num_radios; j++) {
++			pdev = &ab->pdevs[j];
++			ar = pdev->ar;
++			if(!ar)
++				ar->state = state;
++	}
++	ath12k_dbg(ab, ATH12K_DBG_BOOT, "ar state changed to %d\n", state);
++
++}
++
+ static void ath12k_core_restart(struct work_struct *work)
+ {
+ 	struct ath12k_base *ab = container_of(work, struct ath12k_base, restart_work);
+@@ -1360,13 +1375,6 @@ static void ath12k_core_restart(struct work_struct *work)
+ 		wake_up(&ab->wmi_ab.tx_credits_wq);
+ 		wake_up(&ab->peer_mapping_wq);
+ 
+-
+-		ret = ath12k_core_reconfigure_on_crash(ab);
+-		if (ret) {
+-			ath12k_err(ab, "failed to reconfigure driver on crash recovery\n");
+-			return;
+-		}
+-
+ 		for (j = 0; j < ab->num_radios; j++) {
+ 			pdev = &ab->pdevs[j];
+ 			ar = pdev->ar;
+@@ -1398,6 +1406,13 @@ static void ath12k_core_restart(struct work_struct *work)
+ 			mutex_unlock(&ar->conf_mutex);
+ 		}
+ 
++		ret = ath12k_core_reconfigure_on_crash(ab);
++		if (ret) {
++			ath12k_change_core_state(ab, ATH12K_STATE_OFF);
++			ath12k_err(ab, "failed to reconfigure driver on crash recovery\n");
++			return;
++		}
++
+ 		if (ab->is_reset) {
+ 			atomic_dec(&ab->reset_count);
+ 			complete(&ab->reset_complete);
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index ad6b9d1..687f646 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -4106,7 +4106,8 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+ 
+ 	mutex_lock(&ar->conf_mutex);
+ 
+-	ath12k_mac_bss_info_changed(ar, vif, info, changed);
++	if (ar->state == ATH12K_STATE_ON)
++		ath12k_mac_bss_info_changed(ar, vif, info, changed);
+ 
+ 	mutex_unlock(&ar->conf_mutex);
+ 	mutex_unlock(&ah->conf_mutex);
+-- 
+2.7.4
+
