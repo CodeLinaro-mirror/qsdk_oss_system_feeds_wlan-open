@@ -1,0 +1,63 @@
+From a13ea5342255f0dc7f8b4c12d8dd7e21f1dfaebd Mon Sep 17 00:00:00 2001
+From: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+Date: Sat, 4 Mar 2023 07:52:08 +0530
+Subject: [PATCH] mac80211: Fix EHT BSS operation
+
+EHT Operation Information present subfield will be 1 and
+will contain EHT operational parameter(2 bytes) when BSS channel width
+is different from channel width that the AP announces to non-EHT STA
+and when it has atleast one disabled subchannel.
+
+For instance, EHT AP operating in 80 MHz or 160 MHz will not include
+EHT Operational parameter and Opertaional Information subfield will be
+set to 0.
+ATH12K STA expects EHT operational params always and checks length as
+8 bytes and disables EHT in the above scenario. It disables EHT
+capability for the corresponding AP and fallsback to HE phymode.
+
+Fix the issue by changing the minimum fixed length to validate EHT operation
+IE to 5 and then incrementing the length depending upon the subfield.
+
+Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+
+diff --git a/include/linux/ieee80211.h b/include/linux/ieee80211.h
+index 51c14b1..6b623ba 100644
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -2029,6 +2029,7 @@ struct ieee80211_eht_cap_elem {
+ #define EHTOP_PARAMS_GROUP_ADDRESSED_BU_INDICATION_EXPONENT     BIT(4)
+ 
+ #define DISABLED_SUBCHANNEL_BITMAP_BYTES_SIZE 2
++#define IEEE80211_EHT_OPERATION_FIXED_LEN			5
+ 
+ /**
+  * struct ieee80211_eht_operation - eht operation element
+@@ -2928,7 +2929,11 @@ static inline bool
+ ieee80211_eht_oper_size_ok(const u8 *data, u8 len)
+ {
+ 	const struct ieee80211_eht_operation *elem = (const void *)data;
+-	u8 needed = sizeof(*elem);
++	u8 needed = IEEE80211_EHT_OPERATION_FIXED_LEN;
++
++	if (elem->ehtop_params &
++	    EHTOP_PARAMS_EHTOP_INFORMATION_PRESENT)
++		needed += 2;
+ 
+ 	if (elem->ehtop_params &
+ 	    EHTOP_PARAMS_DISABLED_SUBCHANNEL_BITMAP_PRESENT)
+diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
+index 18462f4..9fb4d0b 100644
+--- a/net/mac80211/mlme.c
++++ b/net/mac80211/mlme.c
+@@ -5244,7 +5244,7 @@ static int ieee80211_prep_channel(struct ieee80211_sub_if_data *sdata,
+ 		eht_oper_ie = cfg80211_find_ext_ie(WLAN_EID_EXT_EHT_OPERATION,
+ 						   ies->data, ies->len);
+ 		if (eht_oper_ie && eht_oper_ie[1] >=
+-		    1 + sizeof(struct ieee80211_eht_operation))
++		    1 + IEEE80211_EHT_OPERATION_FIXED_LEN)
+ 			eht_oper = (void *)(eht_oper_ie + 3);
+ 		else
+ 			eht_oper = NULL;
+-- 
+2.17.1
+
