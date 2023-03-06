@@ -1343,6 +1343,7 @@ mac80211_setup_vif() {
 			if [ -n "$key" ]; then
 				wireless_vif_parse_encryption
 				freq="$(get_freq "$phy" "$channel" "$device")"
+				freq_list="$(get_freq_list "$phy" "$channel" "$device")"
 				mac80211_setup_supplicant_noctl || failed=1
 			else
 				json_get_vars mesh_id mcast_rate
@@ -1515,6 +1516,27 @@ get_freq() {
 	else
 		eval $sedString | grep -E -m1 "(\* ${chan:-....} MHz${chan:+|\\[$chan\\]})" | grep MHz | awk '{print $2}'
 	fi
+}
+
+get_freq_list() {
+	local phy="$1"
+	local chan="$2"
+	local sedString="$(get_awk_string "$phy" "$3")"
+	local freq_list=""
+	local no_sbands=$(iw phy ${phy} info | grep 'Band ' | wc -l)
+	local no_hw_idx=$(iw phy ${phy} info | grep -e "channel list" | wc -l)
+
+	if [ $no_hw_idx -gt $no_sbands ] && [ $is_sphy_mband -eq 1 ]; then
+		local device="$3"
+		local idx=${3:11:1}
+		local chanList=$(iw phy ${phy} info | awk -v p1="$idx channel list" -v p2="$((idx+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+
+		for chidx in $chanList; do
+			local frqs=$(eval $sedString | grep -E -m1 "(\* ${chidx:-....} MHz${chidx:+|\\[$chidx\\]})" | grep MHz | awk '{print $2}')
+			freq_list="${freq_list}${frqs} "
+		done
+	fi
+	echo $freq_list
 }
 
 mac80211_interface_cleanup() {
