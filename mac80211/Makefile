@@ -290,14 +290,7 @@ define DownloadBackports
   $(DL_DIR)/$(FILE):
 	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
 	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
-	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION) && \
-	git revert --no-edit bde292c07b && \
-	git revert --no-edit 4dc84c06a && git revert --no-edit 1241e329c && \
-	git revert --no-edit db3bdcb9 && git revert --no-edit 48a54f6bc && \
-	git revert --no-edit b55379e34 && git revert --no-edit 47c662486 && \
-	git revert --no-edit 36b0cefe9 && git revert --no-edit dfcb63ce && \
-	git revert --no-edit e72aeb9e && git revert --no-edit de1352ead8 && \
-	git revert --no-edit fb5f6a0e && git revert --no-edit 74624944)
+	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION))
 
 	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
@@ -306,7 +299,7 @@ define DownloadBackports
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
 	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0073-netdevice-mtu-range.cocci && \
 	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0075-ndo-stats-64.cocci && \
-	git revert --no-edit 49432781 && git revert --no-edit 8afac3a8)
+	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0105-remove-const-from-rchan_callbacks.patch)
 	$(call backports_mlo_support,$(TMP_DIR)/dl/$(PKG_NAME)-source)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && \
 	./gentree.py --clean --copy-list ./copy-list.ath \
