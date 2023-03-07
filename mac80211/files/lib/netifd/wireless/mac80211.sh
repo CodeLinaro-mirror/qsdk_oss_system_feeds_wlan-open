@@ -925,7 +925,9 @@ find_phy() {
 	first_phy_idx=$(($first_phy_idx + 1))
 	done
 
-	delta=$(($radio_idx - $first_phy_idx))
+	if [ -z "$is_sphy_mband" ]; then
+		delta=$(($radio_idx - $first_phy_idx))
+	fi
 
 	[ -n "$path" ] && {
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
@@ -939,6 +941,7 @@ find_phy() {
 			esac
 		done
 	}
+
 	[ -n "$macaddr" ] && {
 		for phy in $(ls /sys/class/ieee80211 2>/dev/null); do
 			grep -i -q "$macaddr" "/sys/class/ieee80211/${phy}/macaddress" && return 0
@@ -1048,7 +1051,7 @@ mac80211_prepare_vif() {
 	json_get_vars ifname mode ssid wds extsta powersave macaddr mld
 
 	if [ $is_sphy_mband -eq 1 ]; then
-		wdev=${1:11:1}
+		wdev=$((${1:5:1} + ${1:11:1}))
 		config_get mlo_caps $device mlo_capable
 		if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ] && [ -n "$mld" ]); then
 			config_get mld_ifname "$mld" ifname
@@ -1491,9 +1494,9 @@ get_awk_string() {
 		fi
 
 		if [ $delta -eq 1 ]; then
-			sedString="iw phy ${dev} info | awk '/Band ${_band}/,0'"
+			sedString="iw phy ${phy} info | awk '/Band ${_band}/,0'"
 		else
-			sedString="iw phy ${dev} info | awk  '/Band ${_band}/{ f = 1; next } /Band /{ f = 0 } f'"
+			sedString="iw phy ${phy} info | awk  '/Band ${_band}/{ f = 1; next } /Band /{ f = 0 } f'"
 		fi
 	else
 		sedString="iw phy ${phy} info"
@@ -1854,7 +1857,7 @@ drv_mac80211_setup() {
 		hostapd_started=1
 
 		if [ "$is_sphy_mband" -eq 1 ]; then
-			ifname="wlan${device:11:1}"
+			ifname="wlan$((${device:5:1} + ${device:11:1}))"
 		else
 			ifname="wlan${phy#phy}"
 		fi
