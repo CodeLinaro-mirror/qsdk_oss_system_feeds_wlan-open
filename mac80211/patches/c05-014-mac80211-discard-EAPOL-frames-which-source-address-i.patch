@@ -1,0 +1,58 @@
+From d9590e213c03f5e3ea2684aa9cc3cfffdd990a7e Mon Sep 17 00:00:00 2001
+From: Wen Gong <wgong@codeaurora.org>
+Date: Tue, 7 Mar 2023 16:36:13 +0800
+Subject: [PATCH 11/16] mac80211: discard EAPOL frames which source address is
+ not bssid for STATION
+
+Sometimes it has EAPOL frames with invalid source address from attack
+point, it will indicate to upper stack. This fixs CVE-2020-26139.
+
+This patch is to drop the EAPOL frames if the source address is not
+same with the bssid of AP.
+
+Tested-on: QCA6174 hw3.2 PCI WLAN.RM.4.4.1-00110-QCARMSWP-1
+
+Change-Id: I1c1ef115361e700a5a6c3a76ede5a4f9771db699
+Signed-off-by: Wen Gong <wgong@codeaurora.org>
+---
+ net/mac80211/rx.c | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index a0b0441..0ae1562 100644
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -2658,15 +2658,27 @@ static bool ieee80211_frame_allowed(struct ieee80211_rx_data *rx, __le16 fc)
+ 	static const u8 pae_group_addr[ETH_ALEN] __aligned(2)
+ 		= { 0x01, 0x80, 0xC2, 0x00, 0x00, 0x03 };
+ 	struct ethhdr *ehdr = (struct ethhdr *) rx->skb->data;
++	struct ieee80211_sub_if_data *sdata = rx->sdata;
++	struct ieee80211_sta *sta;
+ 
+ 	/*
+ 	 * Allow EAPOL frames to us/the PAE group address regardless of
+ 	 * whether the frame was encrypted or not, and always disallow
+ 	 * all other destination addresses for them.
+ 	 */
+-	if (unlikely(ehdr->h_proto == rx->sdata->control_port_protocol))
+-		return ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
+-		       ether_addr_equal(ehdr->h_dest, pae_group_addr);
++	if (unlikely(ehdr->h_proto == rx->sdata->control_port_protocol)) {
++		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
++			sta = ieee80211_find_sta_by_ifaddr(&sdata->local->hw,
++							ehdr->h_source,
++							NULL);
++			return sta &&
++				(ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
++				 ether_addr_equal(ehdr->h_dest, pae_group_addr));
++		} else {
++			return ether_addr_equal(ehdr->h_dest, rx->sdata->vif.addr) ||
++				ether_addr_equal(ehdr->h_dest, pae_group_addr);
++		}
++	}
+ 
+ 	if (ieee80211_802_1x_port_control(rx) ||
+ 	    ieee80211_drop_unencrypted(rx, fc))
+-- 
+2.7.4
+

@@ -1,0 +1,43 @@
+From cd0aa3eeb91c07b273b1428ed3496fb85e3e1f8c Mon Sep 17 00:00:00 2001
+From: Balaji Pothunoori <bpothuno@codeaurora.org>
+Date: Tue, 7 Mar 2023 10:46:50 +0800
+Subject: [PATCH 03/17] mac80211: do not allow data traffic during hardware
+ restart
+
+Currently for the drivers which implement wake_tx_queue there
+is no way to pause mac80211 software queues. This is becasuse
+ieee80211_stop_queues has no effect on mac80211 software queues.
+
+Since tx queues are not paused/stopped in wake_tx_queue case,
+there are chances where the driver could get some data packets
+during the hardware restart. When such packets are sent to the
+target before WMI/HTT is intialised, target gets into state where
+it never recovers.
+
+Fixing this problem by not allowing data packets to the target
+when device state is off.
+
+Change-Id: Ib09e470270ba9c3acdc99051c56ed10e2786ca72
+Signed-off-by: Balaji Pothunoori <bpothuno@codeaurora.org>
+Signed-off-by: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+---
+ net/mac80211/tx.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 757f8b0..5706a63 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -1620,6 +1620,9 @@ static bool ieee80211_queue_skb(struct ieee80211_local *local,
+ 	if (!txqi)
+ 		return false;
+ 
++	if (unlikely(local->in_reconfig))
++		return false;
++
+ 	ieee80211_txq_enqueue(local, txqi, skb);
+ 
+ 	if (local->enable_tx_latency_stats)
+-- 
+2.7.4
+

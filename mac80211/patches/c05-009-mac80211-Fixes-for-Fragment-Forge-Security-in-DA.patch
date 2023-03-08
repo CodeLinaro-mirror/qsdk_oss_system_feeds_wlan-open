@@ -1,0 +1,148 @@
+From 6114291fc81e6b9240347ed155f005ba15ee765c Mon Sep 17 00:00:00 2001
+From: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+Date: Tue, 7 Mar 2023 15:43:02 +0800
+Subject: [PATCH 06/16] mac80211: Fixes for Fragment & Forge Security in DA
+
+By default the A-MSDU flag is not authenticated. It will cause to
+process a normal frames as A-MSDUs, or vice versa.
+This fix CVE-2020-24588.
+
+- AMSDU bit is not authenticated. In case if bit flip happens, first
+  AMSDU DA address would match to LLC. Drop the entire aggregate with
+  any DA matching with LLC header.
+
+- Subframes should be recieved with SA=TA. If SA does not matches with
+  TA we will drop the frame.
+
+- Subframes should be recieved with DA=RA. If DA does not matches with
+  RA we will drop the frame.
+
+- Do not allow eapol frames to be aggregated through AMSDU.
+
+Signed-off-by: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+---
+ net/mac80211/rx.c | 101 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 101 insertions(+)
+
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index 8be0bb0..63336e0 100644
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -2871,6 +2871,104 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
+ 	}
+ }
+ 
++bool ieee80211_rx_is_valid_amsdu(struct sk_buff *skb, struct ieee80211_hdr *hdr)
++{
++	__le16 fc = hdr->frame_control;
++	struct ethhdr *subfrm_hdr;
++	unsigned char *head_dst_mac = NULL;
++	unsigned char *head_src_mac = NULL;
++	int offset = 0, remaining, skb_data_len;
++	unsigned int subframe_len, len;
++	u8 padding;
++	u16 hdrlen = 0;
++	bool res = true;
++	bool last = false;
++	u16 ethertype;
++	u8* payload;
++
++	hdrlen = ieee80211_hdrlen(fc);
++	subfrm_hdr = (struct ethhdr *)(skb->data + hdrlen);
++	skb_data_len = skb->len - hdrlen;
++
++	/*
++	 * AMSDU bit is not authenticated. In case if bit flip happens, first AMSDU DA address
++	 * would match to LLC. Drop the entire aggregate with any DA matching with LLC header.
++	*/
++	if (ether_addr_equal(subfrm_hdr->h_dest, rfc1042_header)) {
++		printk("Received a invalid AMSDU! dest=%pM\n", subfrm_hdr->h_dest);
++		res = false;
++		goto exit;
++	}
++
++	/* do not allow eapol frames to be aggregated through AMSDU */
++	payload = (u8*)subfrm_hdr;
++	ethertype = (payload[6] << 8) | payload[7];
++	if (ethertype == ETH_P_PAE) {
++		printk("Received a EAPOL in a AMSDU! type=0x%x\n", ethertype);
++		res = false;
++		goto exit;
++	}
++
++	/* 802.11 spec 2012 8.3.2.2: an A-MSDU cannot be fragmented */
++	if (unlikely(ieee80211_is_frag(hdr))) {
++		res = false;
++		goto exit;
++	}
++
++	/* make sure to check all subframes are received match SA=TA
++	 * check.
++	*/
++	switch (fc & cpu_to_le16(IEEE80211_FCTL_TODS | IEEE80211_FCTL_FROMDS)) {
++	case cpu_to_le16(IEEE80211_FCTL_TODS):
++		/* head_dst_mac is in AMSU subframe */
++		head_src_mac = hdr->addr2;
++		break;
++	case cpu_to_le16(IEEE80211_FCTL_FROMDS):
++		head_dst_mac = hdr->addr1;
++		/* head_src_mac is in AMSU subframe */
++		break;
++	case cpu_to_le16(IEEE80211_FCTL_FROMDS | IEEE80211_FCTL_TODS):
++		/* ignore 4 addr and mesg originated frames from validation */
++		break;
++	/* NO TODS and FROMDS */
++	case cpu_to_le16(0):
++		head_dst_mac = hdr->addr1;
++		head_src_mac = hdr->addr2;
++		break;
++	}
++
++	while (!last) {
++		subfrm_hdr = (struct ethhdr *)(skb->data + hdrlen + offset);
++		/* Check the subframe's head */
++		if (head_dst_mac && !ether_addr_equal(head_dst_mac, subfrm_hdr->h_dest)) {
++			res = false;
++			goto exit;
++		}
++
++		if (head_src_mac && !ether_addr_equal(head_src_mac, subfrm_hdr->h_source)) {
++			res = false;
++			goto exit;
++		}
++
++		len = ntohs(subfrm_hdr->h_proto);
++		subframe_len = sizeof(struct ethhdr) + len;
++		padding = (4 - subframe_len) & 0x3;
++
++		remaining = skb_data_len - offset;
++		if (subframe_len > remaining) {
++			res = false;
++			goto exit;
++		}
++
++		offset += sizeof(struct ethhdr);
++		last = remaining <= subframe_len + padding;
++		offset += len + padding;
++	}
++
++exit:
++        return res;
++}
++
+ static ieee80211_rx_result debug_noinline
+ __ieee80211_rx_h_amsdu(struct ieee80211_rx_data *rx, u8 data_offset)
+ {
+@@ -2941,6 +3039,9 @@ ieee80211_rx_h_amsdu(struct ieee80211_rx_data *rx)
+ 	if (!(status->rx_flags & IEEE80211_RX_AMSDU))
+ 		return RX_CONTINUE;
+ 
++	if (unlikely(!ieee80211_rx_is_valid_amsdu(skb, hdr)))
++		return RX_DROP_UNUSABLE;
++
+ 	if (unlikely(!ieee80211_is_data(fc)))
+ 		return RX_CONTINUE;
+ 
+-- 
+2.7.4
+
