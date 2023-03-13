@@ -1,0 +1,282 @@
+From 642959241c8e5830ce68b0cb8a0ad818d8550e0c Mon Sep 17 00:00:00 2001
+From: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
+Date: Sun, 26 Mar 2023 00:38:33 +0530
+Subject: [PATCH] cfg80211: add support for mlo mon to set/add/del channel
+
+This change is to add support for mlo monitor with set, add, and
+del.
+
+To capture multiple channels in a single netdev execute following cmd
+iw phy0 interface add mon0 type monitor
+
+Either the channel can be set before IFUP or default channel will be
+configured.
+
+To stop capturing on a channel in mlo mode, set the current channel
+again to stop capturing it.
+
+For instance, if mon0 is capturing 2ghz(Channel : 6) and 5ghz (Channel :
+36), to stop capturing on 5ghz set channel 36 on mon0 to stop capturing
+it.
+
+Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
+---
+ include/net/cfg80211.h       | 17 +++++++++++++++++
+ include/uapi/linux/nl80211.h |  9 +++++++++
+ net/wireless/chan.c          | 22 ++++++++++++++++++++++
+ net/wireless/core.h          |  6 ++++++
+ net/wireless/nl80211.c       |  9 ++++++++-
+ net/wireless/rdev-ops.h      | 22 ++++++++++++++++++++++
+ net/wireless/trace.h         | 32 ++++++++++++++++++++++++++++++++
+ net/wireless/util.c          | 20 ++++++++++++++++++++
+ 8 files changed, 136 insertions(+), 1 deletion(-)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 6baa5493d30c..f3f1c78e408e 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -4569,6 +4569,12 @@ struct cfg80211_ops {
+ 	int	(*set_monitor_channel)(struct wiphy *wiphy,
+ 				       struct cfg80211_chan_def *chandef);
+ 
++	int	(*add_monitor_channel)(struct wiphy *wiphy,
++				       struct cfg80211_chan_def *chandef);
++
++	int	(*del_monitor_channel)(struct wiphy *wiphy,
++				       struct cfg80211_chan_def *chandef);
++
+ 	int	(*scan)(struct wiphy *wiphy,
+ 			struct cfg80211_scan_request *request);
+ 	void	(*abort_scan)(struct wiphy *wiphy, struct wireless_dev *wdev);
+@@ -8945,6 +8951,17 @@ bool cfg80211_per_hw_iface_comb_advertised(struct wiphy *wiphy);
+ int cfg80211_get_hw_idx_by_chan(struct wiphy *wiphy,
+ 				const struct ieee80211_channel *chan);
+ 
++/**
++ * cfg80211_get_hw_idx_by_freq - get the hw index by the frequency
++ *
++ * @wiphy: the wiphy
++ * @freq: Frequency for which the matching hw idx is required
++ *
++ * returns -1 in case the freq is not supported by any of the constituent
++ *	hw
++ */
++int cfg80211_get_hw_idx_by_freq(struct wiphy *wiphy, int freq);
++
+ /*
+  * cfg80211_stop_iface - trigger interface disconnection
+  *
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index cb637e3430d1..4f0cc041d7a2 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -2824,6 +2824,12 @@ enum nl80211_commands {
+  *      corresponds to the lowest 20MHZ channel. Each bit set to 1
+  *      indicates that radar is detected in that sub-channel.
+  *
++ * @NL80211_ATTR_ADD_MULTI_CHAN: Add channel to the radio, this is used
++ *  for monitor interface (u32).
++ *
++ * @NL80211_ATTR_DEL_MULTI_CHAN: Delete channel from the radio, this is used
++ *  for monitor interface (u32).
++ *
+  * @NL80211_ATTR_MAX: highest attribute number currently defined
+  * @__NL80211_ATTR_AFTER_LAST: internal use
+  */
+@@ -3380,6 +3386,9 @@ enum nl80211_attrs {
+ 	NL80211_ATTR_RADAR_BITMAP,
+ 
+ 	NL80211_ATTR_EHT_240MHZ_CAPABILITY,
++
++	NL80211_ATTR_ADD_MULTI_CHAN,
++	NL80211_ATTR_DEL_MULTI_CHAN,
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+ 	__NL80211_ATTR_AFTER_LAST,
+diff --git a/net/wireless/chan.c b/net/wireless/chan.c
+index d97663a7faa4..4e7363c4ad6d 100644
+--- a/net/wireless/chan.c
++++ b/net/wireless/chan.c
+@@ -1584,6 +1584,28 @@ int cfg80211_set_monitor_channel(struct cfg80211_registered_device *rdev,
+ 	return rdev_set_monitor_channel(rdev, chandef);
+ }
+ 
++int cfg80211_add_monitor_channel(struct cfg80211_registered_device *rdev,
++				 struct cfg80211_chan_def *chandef)
++{
++	if (!rdev->ops->add_monitor_channel)
++		return -EOPNOTSUPP;
++	if (!cfg80211_has_monitors_only(rdev))
++		return -EBUSY;
++
++	return rdev_add_monitor_channel(rdev, chandef);
++}
++
++int cfg80211_del_monitor_channel(struct cfg80211_registered_device *rdev,
++				 struct cfg80211_chan_def *chandef)
++{
++	if (!rdev->ops->del_monitor_channel)
++		return -EOPNOTSUPP;
++	if (!cfg80211_has_monitors_only(rdev))
++		return -EBUSY;
++
++	return rdev_del_monitor_channel(rdev, chandef);
++}
++
+ bool cfg80211_any_usable_channels(struct wiphy *wiphy,
+ 				  unsigned long sband_mask,
+ 				  u32 prohibited_flags)
+diff --git a/net/wireless/core.h b/net/wireless/core.h
+index 62101da72cda..9926c5b85935 100644
+--- a/net/wireless/core.h
++++ b/net/wireless/core.h
+@@ -519,6 +519,12 @@ static inline unsigned int elapsed_jiffies_msecs(unsigned long start)
+ int cfg80211_set_monitor_channel(struct cfg80211_registered_device *rdev,
+ 				 struct cfg80211_chan_def *chandef);
+ 
++int cfg80211_add_monitor_channel(struct cfg80211_registered_device *rdev,
++				 struct cfg80211_chan_def *chandef);
++
++int cfg80211_del_monitor_channel(struct cfg80211_registered_device *rdev,
++				 struct cfg80211_chan_def *chandef);
++
+ int ieee80211_get_ratemask(struct ieee80211_supported_band *sband,
+ 			   const u8 *rates, unsigned int n_rates,
+ 			   u32 *mask);
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 6e532c518242..420503b1a687 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -874,6 +874,8 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+ 			{ .type = NLA_BINARY,
+ 			  .len = NL80211_EHT240_MAX_CAPABILITY_LEN },
+ #endif
++	[NL80211_ATTR_ADD_MULTI_CHAN] = { .type = NLA_U32 },
++	[NL80211_ATTR_DEL_MULTI_CHAN] = { .type = NLA_U32 },
+ };
+ 
+ /* policy for the key attributes */
+@@ -3634,7 +3636,12 @@ static int __nl80211_set_channel(struct cfg80211_registered_device *rdev,
+ 	case NL80211_IFTYPE_MESH_POINT:
+ 		return cfg80211_set_mesh_channel(rdev, wdev, &chandef);
+ 	case NL80211_IFTYPE_MONITOR:
+-		return cfg80211_set_monitor_channel(rdev, &chandef);
++		if (info->attrs[NL80211_ATTR_ADD_MULTI_CHAN])
++			return cfg80211_add_monitor_channel(rdev, &chandef);
++		else if (info->attrs[NL80211_ATTR_DEL_MULTI_CHAN])
++			return cfg80211_del_monitor_channel(rdev, &chandef);
++		else
++			return cfg80211_set_monitor_channel(rdev, &chandef);
+ 	default:
+ 		break;
+ 	}
+diff --git a/net/wireless/rdev-ops.h b/net/wireless/rdev-ops.h
+index 9cd67230f496..62b61ad70437 100644
+--- a/net/wireless/rdev-ops.h
++++ b/net/wireless/rdev-ops.h
+@@ -442,6 +442,28 @@ rdev_set_monitor_channel(struct cfg80211_registered_device *rdev,
+ 	return ret;
+ }
+ 
++static inline int
++rdev_add_monitor_channel(struct cfg80211_registered_device *rdev,
++			 struct cfg80211_chan_def *chandef)
++{
++	int ret;
++	trace_rdev_add_monitor_channel(&rdev->wiphy, chandef);
++	ret = rdev->ops->add_monitor_channel(&rdev->wiphy, chandef);
++	trace_rdev_return_int(&rdev->wiphy, ret);
++	return ret;
++}
++
++static inline int
++rdev_del_monitor_channel(struct cfg80211_registered_device *rdev,
++			 struct cfg80211_chan_def *chandef)
++{
++	int ret;
++	trace_rdev_del_monitor_channel(&rdev->wiphy, chandef);
++	ret = rdev->ops->del_monitor_channel(&rdev->wiphy, chandef);
++	trace_rdev_return_int(&rdev->wiphy, ret);
++	return ret;
++}
++
+ static inline int rdev_scan(struct cfg80211_registered_device *rdev,
+ 			    struct cfg80211_scan_request *request)
+ {
+diff --git a/net/wireless/trace.h b/net/wireless/trace.h
+index 3dd07fdd6479..5da57d024e12 100644
+--- a/net/wireless/trace.h
++++ b/net/wireless/trace.h
+@@ -1244,6 +1244,38 @@ TRACE_EVENT(rdev_set_monitor_channel,
+ 		  WIPHY_PR_ARG, CHAN_DEF_PR_ARG)
+ );
+ 
++TRACE_EVENT(rdev_add_monitor_channel,
++	TP_PROTO(struct wiphy *wiphy,
++		 struct cfg80211_chan_def *chandef),
++	TP_ARGS(wiphy, chandef),
++	TP_STRUCT__entry(
++		WIPHY_ENTRY
++		CHAN_DEF_ENTRY
++	),
++	TP_fast_assign(
++		WIPHY_ASSIGN;
++		CHAN_DEF_ASSIGN(chandef);
++	),
++	TP_printk(WIPHY_PR_FMT ", " CHAN_DEF_PR_FMT,
++		  WIPHY_PR_ARG, CHAN_DEF_PR_ARG)
++);
++
++TRACE_EVENT(rdev_del_monitor_channel,
++	TP_PROTO(struct wiphy *wiphy,
++		 struct cfg80211_chan_def *chandef),
++	TP_ARGS(wiphy, chandef),
++	TP_STRUCT__entry(
++		WIPHY_ENTRY
++		CHAN_DEF_ENTRY
++	),
++	TP_fast_assign(
++		WIPHY_ASSIGN;
++		CHAN_DEF_ASSIGN(chandef);
++	),
++	TP_printk(WIPHY_PR_FMT ", " CHAN_DEF_PR_FMT,
++		  WIPHY_PR_ARG, CHAN_DEF_PR_ARG)
++);
++
+ TRACE_EVENT(rdev_auth,
+ 	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev,
+ 		 struct cfg80211_auth_request *req),
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index 6e5d7c247ccb..39be0dbee3b3 100644
+--- a/net/wireless/util.c
++++ b/net/wireless/util.c
+@@ -2278,6 +2278,26 @@ cfg80211_get_hw_idx_by_chan(struct wiphy *wiphy,
+ }
+ EXPORT_SYMBOL(cfg80211_get_hw_idx_by_chan);
+ 
++int
++cfg80211_get_hw_idx_by_freq(struct wiphy *wiphy, int freq)
++{
++	int i, j;
++	struct ieee80211_chans_per_hw *hw_chans;
++
++	if (freq <= 0)
++		return -1;
++
++	for (i = 0; i < wiphy->num_hw; i++) {
++		hw_chans = wiphy->hw_chans[i];
++		for (j = 0; j < hw_chans->n_chans; j++)
++			if (freq == hw_chans->chans[j].center_freq)
++				return i;
++	}
++
++	return -1;
++}
++EXPORT_SYMBOL(cfg80211_get_hw_idx_by_freq);
++
+ int cfg80211_iter_combinations(struct wiphy *wiphy,
+ 			       struct iface_combination_params *params,
+ 			       void (*iter)(const struct ieee80211_iface_combination *c,
+-- 
+2.38.0
+
