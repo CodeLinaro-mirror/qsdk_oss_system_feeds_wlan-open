@@ -27,7 +27,12 @@ update_mld_vap_details() {
 	config_foreach mac80211_get_wifi_ifaces wifi-iface
 
 	mac80211_get_active_wifi_devices()  {
+		if [ ${#1} -ne 12 ]; then
+			continue;
+		fi
+
 		config_get disabled "$1" disabled
+
 		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
 			radio_up_count=$((radio_up_count+1))
 		fi
