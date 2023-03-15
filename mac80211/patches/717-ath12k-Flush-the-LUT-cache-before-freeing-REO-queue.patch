@@ -1,0 +1,167 @@
+From 53949a7b740aaa021f2b460723d6da3398669e99 Mon Sep 17 00:00:00 2001
+From: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+Date: Thu, 9 Mar 2023 16:21:05 +0530
+Subject: [PATCH] ath12k: Flush the LUT cache before freeing REO queue
+
+For NON_QOS TID's, currently we will send 11 different
+FLUSH CACHE command to reo ring for each TID. So, if
+multiple clients are connected and disconnected
+continuously will result in a REO ring buffer full
+condition.
+
+Also, though we allocate maximum window size
+for all NON-QOS tid's, reo queue is updated only with
+the default size of 1, hence though we send 1K Flush
+cache, only base descriptor will be cleared in HW.
+Because of this, while we receive flush_cache status
+host will free all the allocated buffers but HW still
+have reference for ext and 1k desc in its cache, which
+leads to invalid access if that memory is allocated again
+to some other process.
+
+Fix this by adding below changes,
+- flush_q_1k_desc as 1 – This will flush Queue
+ Q1k and QEXT in one go. we need not give 11 cmd
+ for each tid of the peer.
+
+- Changes to implement the HW recipe to flush LUT
+ cache before freeing REO queue in SW.
+
+- Update ba_win_sz to the size we allocated during tid
+ delete so that while flush cache is sent, HW will use
+ the latest window size to flush the cache.
+
+Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c       |  1 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c    | 47 +++++++---------------
+ drivers/net/wireless/ath/ath12k/hal_desc.h |  1 +
+ drivers/net/wireless/ath/ath12k/hal_rx.c   |  3 ++
+ 4 files changed, 20 insertions(+), 32 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -1553,6 +1553,7 @@ static int ath12k_dp_reoq_lut_setup(stru
+ 		ath12k_warn(ab, "failed to allocate memory for reoq table");
+ 		return -ENOMEM;
+ 	}
++	memset(dp->reoq_lut.vaddr, 0, DP_REOQ_LUT_SIZE);
+ 
+ 	dp->ml_reoq_lut.vaddr = dma_alloc_coherent(ab->dev,
+ 						   DP_REOQ_LUT_SIZE,
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -661,8 +661,7 @@ static void ath12k_peer_rx_tid_qref_rese
+ 				(peer_id * (IEEE80211_NUM_TIDS + 1) + tid);
+ 
+ 	qref->info0 = FIELD_PREP(BUFFER_ADDR_INFO0_ADDR, 0);
+-	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, 0) |
+-		      FIELD_PREP(DP_REO_QREF_NUM, tid);
++	qref->info1 = FIELD_PREP(BUFFER_ADDR_INFO1_ADDR, 0);
+ }
+ 
+ static int ath12k_peer_rx_tid_delete_handler(struct ath12k_base *ab,
+@@ -678,6 +677,10 @@ static int ath12k_peer_rx_tid_delete_han
+ 	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
+ 	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
+ 	cmd.upd0 |= HAL_REO_CMD_UPD0_VLD;
++	cmd.upd0 |= HAL_REO_CMD_UPD0_BA_WINDOW_SIZE;
++	cmd.ba_window_size = (tid == HAL_DESC_REO_NON_QOS_TID) ?
++			      rx_tid->ba_win_sz : DP_BA_WIN_SZ_MAX;
++	cmd.upd1 |= HAL_REO_CMD_UPD1_VLD;
+ 
+ 	return ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
+ 					HAL_REO_CMD_UPDATE_RX_QUEUE, &cmd,
+@@ -759,43 +762,26 @@ static int ath12k_dp_reo_cache_flush(str
+ 				      struct dp_rx_tid *rx_tid)
+ {
+ 	struct ath12k_hal_reo_cmd cmd = {0};
+-	unsigned long tot_desc_sz, desc_sz;
+ 	int ret;
+ 
+-	if (rx_tid->pending_desc_size)
+-		tot_desc_sz = rx_tid->pending_desc_size;
+-	else
+-		tot_desc_sz = rx_tid->size;
+-	desc_sz = ath12k_hal_reo_qdesc_size(0, HAL_DESC_REO_NON_QOS_TID);
+-
+-	while (tot_desc_sz > desc_sz) {
+-		tot_desc_sz -= desc_sz;
+-		cmd.addr_lo = lower_32_bits(rx_tid->paddr + tot_desc_sz);
+-		cmd.addr_hi = upper_32_bits(rx_tid->paddr);
+-		ret = ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
+-						HAL_REO_CMD_FLUSH_CACHE, &cmd,
+-						NULL);
+-		if (ret)
+-		{
+-			/* If this fails with ring full condition, then
+-			 * no need to retry below as it is expected to
+-			 * fail within short time */
+-			rx_tid->pending_desc_size = tot_desc_sz + desc_sz;
+-			if (ret == -ENOBUFS)
+-				goto exit;
+-		}
+-	}
+-
+-	rx_tid->pending_desc_size = desc_sz;
+ 	memset(&cmd, 0, sizeof(cmd));
+ 	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
+ 	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
+-	cmd.flag |= HAL_REO_CMD_FLG_NEED_STATUS;
++	cmd.flag |= HAL_REO_CMD_FLG_NEED_STATUS |
++		HAL_REO_CMD_FLG_FLUSH_FWD_ALL_MPDUS;
++
++	/* For all NON_QOS tid, driver allocates max window
++	 * size of 1024. For this, driver can send flush 1K Desc
++	 * in one command instead of sending 11 cmd for
++	 * single NON_QOS tid(s).
++	 */
++	if (rx_tid->tid != HAL_DESC_REO_NON_QOS_TID)
++		cmd.flag |= HAL_REO_CMD_FLG_FLUSH_QUEUE_1K_DESC;
++
+ 	ret = ath12k_dp_tx_send_reo_cmd(ab, rx_tid,
+ 					HAL_REO_CMD_FLUSH_CACHE,
+ 					&cmd, ath12k_dp_reo_cmd_free);
+ 
+-exit:
+ 	return ret;
+ }
+ 
+@@ -832,6 +818,7 @@ static void ath12k_dp_rx_tid_del_func(st
+ 			ath12k_peer_rx_tid_qref_reset(ab,
+ 						      qelem->is_ml_peer ? qelem->ml_peer_id : qelem->peer_id,
+ 						      qelem->tid, qelem->is_ml_peer);
++			ath12k_hal_reo_shared_qaddr_cache_clear(ab);
+ 			update_rx_tid->vaddr = NULL;
+ 			update_rx_tid->paddr = 0;
+ 			update_rx_tid->size = 0;
+@@ -952,6 +939,7 @@ void ath12k_peer_rx_tid_delete(struct at
+ 		ath12k_peer_rx_tid_qref_reset(ab,
+ 					      elem->is_ml_peer ? elem->ml_peer_id : elem->peer_id,
+ 					      elem->tid, elem->is_ml_peer);
++		ath12k_hal_reo_shared_qaddr_cache_clear(ab);
+ 		rx_tid->vaddr = NULL;
+ 		rx_tid->paddr = 0;
+ 		rx_tid->size = 0;
+--- a/drivers/net/wireless/ath/ath12k/hal_desc.h
++++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
+@@ -1210,6 +1210,7 @@ struct hal_reo_flush_queue {
+ #define HAL_REO_FLUSH_CACHE_INFO0_FLUSH_WO_INVALIDATE	BIT(12)
+ #define HAL_REO_FLUSH_CACHE_INFO0_BLOCK_CACHE_USAGE	BIT(13)
+ #define HAL_REO_FLUSH_CACHE_INFO0_FLUSH_ALL		BIT(14)
++#define HAL_REO_FLUSH_CACHE_INFO0_FLUSH_QUEUE_1K_DESC	BIT(15)
+ 
+ struct hal_reo_flush_cache {
+ 	struct hal_reo_cmd_hdr cmd;
+--- a/drivers/net/wireless/ath/ath12k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath12k/hal_rx.c
+@@ -91,6 +91,9 @@ static int ath12k_hal_reo_cmd_flush_cach
+ 	if (cmd->flag & HAL_REO_CMD_FLG_FLUSH_ALL)
+ 		desc->info0 |= HAL_REO_FLUSH_CACHE_INFO0_FLUSH_ALL;
+ 
++	if (cmd->flag & HAL_REO_CMD_FLG_FLUSH_QUEUE_1K_DESC)
++		desc->info0 |= HAL_REO_FLUSH_CACHE_INFO0_FLUSH_QUEUE_1K_DESC;
++
+ 	return FIELD_GET(HAL_REO_CMD_HDR_INFO0_CMD_NUMBER, desc->cmd.info0);
+ }
+ 
