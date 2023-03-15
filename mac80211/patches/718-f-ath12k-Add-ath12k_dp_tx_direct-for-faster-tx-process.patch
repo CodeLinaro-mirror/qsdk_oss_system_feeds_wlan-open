@@ -205,3 +205,81 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 -- 
 2.7.4
 
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 0ce7f1c..b757823 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -7376,7 +7376,6 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 	struct ath11k_sta *arsta = NULL;
+ 	struct ieee80211_mgmt *mgmt;
+ 	u32 info_flags = info->flags;
+-	struct ieee80211_sta *sta = control->sta;
+ 	bool is_prb_rsp;
+ 	u16 frm_type = 0;
+ 	u8 tid, *qos_ctl;
+@@ -7384,6 +7383,9 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 	int ret;
+ 	u64 adjusted_tsf;
+ 
++	if (skb->fast_xmit)
++		info_flags |= IEEE80211_TX_CTL_HW_80211_ENCAP;
++
+ 	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
+ 		ieee80211_free_txskb(ar->hw, skb);
+ 		return;
+@@ -7444,13 +7446,13 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 		return;
+ 	}
+ 
+-	if (control->sta)
++	if (control && control->sta)
+ 		arsta = (struct ath11k_sta *)control->sta->drv_priv;
+ 
+ 	/* Must call mac80211 tx status handler, else when stats is disabled we free
+ 	 * the skb from driver. Own tx packets on monitor will also be disabled.
+ 	 */
+-	if ((info->flags & (IEEE80211_TX_CTL_REQ_TX_STATUS | IEEE80211_TX_INTFL_NL80211_FRAME_TX)) ||
++	if ((info_flags & (IEEE80211_TX_CTL_REQ_TX_STATUS | IEEE80211_TX_INTFL_NL80211_FRAME_TX)) ||
+ 	    info->ack_frame_id || vif->type == NL80211_IFTYPE_MESH_POINT ||
+ 	    test_bit(ATH11K_FLAG_MONITOR_VDEV_CREATED, &ar->monitor_flags))
+ 		skb_cb->flags |= ATH11K_SKB_TX_STATUS;
+@@ -7465,8 +7467,7 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 		/* sta specific config has high precedence over vif specific config
+ 		 * Hence overwrite sta specific config if it is present
+ 		 */
+-		if (sta) {
+-			arsta = (struct ath11k_sta *)sta->drv_priv;
++		if (arsta) {
+ 			if (arsta->tid_cfg[tid].noack == WMI_PEER_TID_CONFIG_NOACK)
+ 				noack = true;
+ 
+@@ -7480,9 +7481,8 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 
+ 	if (ar->ab->nss.enabled)
+ 		ret = ath11k_nss_tx(arvif, skb);
+-	else if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
+-		ret = ath11k_dp_tx_simple(ar, arvif, skb,
+-					  (control->sta) ? control->sta->drv_priv : NULL);
++	else if (info_flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
++		ret = ath11k_dp_tx_simple(ar, arvif, skb, arsta);
+ 	else
+ 		ret = ath11k_dp_tx(ar, arvif, arsta, skb);
+ 
+@@ -7493,13 +7493,10 @@ static void ath11k_mac_op_tx(struct ieee80211_hw *hw,
+ 		return;
+ 	}
+ 
+-	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar) && sta) {
+-		arsta = (struct ath11k_sta *)sta->drv_priv;
+-		if (arsta) {
+-			atomic_inc(&arsta->drv_tx_pkts.pkts_in);
+-			if (!ret)
+-				atomic_inc(&arsta->drv_tx_pkts.pkts_out);
+-		}
++	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar) && arsta) {
++		atomic_inc(&arsta->drv_tx_pkts.pkts_in);
++		if (!ret)
++			atomic_inc(&arsta->drv_tx_pkts.pkts_out);
+ 	}
+ }
+ 
