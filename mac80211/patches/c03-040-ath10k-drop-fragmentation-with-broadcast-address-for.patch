@@ -1,0 +1,92 @@
+From b6718637e21c5c1ffd9911ca53a5f949c7fb1d20 Mon Sep 17 00:00:00 2001
+From: Wen Gong <wgong@codeaurora.org>
+Date: Wed, 15 Mar 2023 15:11:55 +0800
+Subject: [PATCH] ath10k: drop fragmentation with broadcast address for PCIe
+
+It does not support broadcast address for fragmentation, and it should
+drop that packet. This fixes CVE-2020-26145. It only effect QCA6174/
+QCA9377 PCIe.
+
+Tested-on: QCA6174 hw3.2 PCI WLAN.RM.4.4.1-00110-QCARMSWP-1
+
+Change-Id: Iea5147f6e1588297281a22979468e7d4ec42da15
+Signed-off-by: Wen Gong <wgong@codeaurora.org>
+Signed-off-by: Long Cheng <quic_longchen@quicinc.com>
+---
+ drivers/net/wireless/ath/ath10k/htt.h    |  3 +++
+ drivers/net/wireless/ath/ath10k/htt_rx.c | 27 ++++++++++++++++++++++++---
+ 2 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
+index 32047c1..d28fd3c 100644
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -2330,6 +2330,9 @@ void ath10k_htt_rx_pktlog_completion_handler(struct ath10k *ar,
+ int ath10k_htt_txrx_compl_task(struct ath10k *ar, int budget);
+ u64 ath10k_htt_rx_h_get_pn(struct ath10k *ar, struct sk_buff *skb, u16 offset,
+                           enum htt_rx_mpdu_encrypt_type enctype);
++bool ath10k_htt_rx_h_frag_broadcast_check(struct ath10k *ar,
++                                         struct sk_buff *skb,
++                                         u16 offset);
+ int ath10k_htt_rx_hl_indication(struct ath10k *ar, int budget);
+ void ath10k_htt_set_tx_ops(struct ath10k_htt *htt);
+ void ath10k_htt_set_rx_ops(struct ath10k_htt *htt);
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 71f6e18..683757d 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1782,6 +1782,21 @@ u64 ath10k_htt_rx_h_get_pn(struct ath10k *ar, struct sk_buff *skb, u16 offset,
+        return pn;
+ }
+ 
++bool ath10k_htt_rx_h_frag_broadcast_check(struct ath10k *ar,
++					  struct sk_buff *skb,
++					  u16 offset)
++{
++	struct ieee80211_hdr *hdr;
++
++	hdr = (struct ieee80211_hdr *)(skb->data + offset);
++	if (is_broadcast_ether_addr(hdr->addr1)) {
++		ath10k_warn(ar, "broadcast address for fragment\n");
++		return false;
++	}
++
++	return true;
++}
++
+ static bool ath10k_htt_rx_h_frag_pn_check(struct ath10k *ar,
+                                          struct sk_buff *skb,
+                                          u16 peer_id,
+@@ -1855,7 +1870,7 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
+ 	bool is_decrypted;
+ 	bool is_mgmt;
+ 	u32 attention;
+-	bool frag_pn_check = true;
++	bool frag_pn_check = true, broad_cast_check = true;
+ 
+ 	if (skb_queue_empty(amsdu))
+ 		return;
+@@ -1964,12 +1979,18 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
+ 								      0,
+ 								      enctype);
+ 
+-		if (!frag_pn_check) {
++		if (frag && !fill_crypt_header)
++			broad_cast_check = ath10k_htt_rx_h_frag_broadcast_check(ar,
++                                                                               msdu,
++                                                                               0);
++
++		if (!frag_pn_check || !broad_cast_check) {
+ 			temp = msdu->prev;
+ 			__skb_unlink(msdu, amsdu);
+ 			dev_kfree_skb_any(msdu);
+ 			msdu = temp;
+-			ath10k_warn(ar, "invalid PN number for fragment\n");
++			ath10k_warn(ar, "invalid PN/broadcast for fragment %d %d\n",
++                                   frag_pn_check, broad_cast_check);
+ 			continue;
+ 		}
+ 
+-- 
+2.7.4
+

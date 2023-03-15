@@ -1,0 +1,56 @@
+From 2a0c275f10db2a991c6b1d316809ba4ea74626a7 Mon Sep 17 00:00:00 2001
+From: Wen Gong <wgong@codeaurora.org>
+Date: Wed, 15 Mar 2023 15:14:48 +0800
+Subject: [PATCH] ath10k: set flag for tkip michael mic verifyi for PCIe
+
+Recently it does not have tkip michael mic verify for PCIe, it has
+ieee80211_rx_h_michael_mic_verify in mac80211 which do the verify,
+but it has some check for the flag of ieee80211_rx_status, and ath10k
+do not meet its check.
+
+This patch is set the flag property to meet check of mac80211, this
+fixs CVE-2020-26141. It do the same as ath10k_htt_rx_proc_rx_ind_hl
+for SDIO which passed mic verify case. It only effect QCA6174/QCA9377
+PCIe.
+
+Tested-on: QCA6174 hw3.2 PCI WLAN.RM.4.4.1-00110-QCARMSWP-1
+
+Change-Id: I30b5b57911cbb1c1a680cdc1e780babe0afb9ef5
+Signed-off-by: Wen Gong <wgong@codeaurora.org>
+Signed-off-by: Long Cheng <quic_longchen@quicinc.com>
+---
+ drivers/net/wireless/ath/ath10k/htt_rx.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 683757d..2654ce9 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1995,6 +1995,11 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
+ 		}
+ 
+ 		ath10k_htt_rx_h_csum_offload(msdu);
++
++		if (frag && !fill_crypt_header &&
++		    enctype == HTT_RX_MPDU_ENCRYPT_TKIP_WPA)
++			status->flag &= ~RX_FLAG_MMIC_STRIPPED;
++
+ 		ath10k_htt_rx_h_undecap(ar, msdu, status, first_hdr, enctype,
+ 					is_decrypted);
+ 
+@@ -2012,6 +2017,12 @@ static void ath10k_htt_rx_h_mpdu(struct ath10k *ar,
+ 
+ 		hdr = (void *)msdu->data;
+ 		hdr->frame_control &= ~__cpu_to_le16(IEEE80211_FCTL_PROTECTED);
++
++		if (frag && !fill_crypt_header &&
++		    enctype == HTT_RX_MPDU_ENCRYPT_TKIP_WPA) {
++			ath10k_dbg(ar, ATH10K_DBG_HTT, "set tkip mic flag\n");
++			status->flag &= (~RX_FLAG_IV_STRIPPED & ~RX_FLAG_MMIC_STRIPPED);
++		}
+ 	}
+ }
+ 
+-- 
+2.7.4
+

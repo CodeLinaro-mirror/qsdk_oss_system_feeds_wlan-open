@@ -1,0 +1,109 @@
+From 114e906d2b41705c1f27a8eedf33690826da1842 Mon Sep 17 00:00:00 2001
+From: Wen Gong <wgong@codeaurora.org>
+Date: Wed, 15 Mar 2023 14:38:41 +0800
+Subject: [PATCH] ath10k: validate first subframe of amsdu before
+
+Validate amsdu list by checking if the first frame has a valid
+DA. In certain scenarios a proper msdu can be received as an amsdu when
+the A-MSDU present bit gets flipped and corresponding FCS corrected.
+Since this bit is unauthenticated the HW crypto engine can pass the frame
+to driver without any error indication. This could result in processing
+unintended subframes collected in the amsdu list.
+
+Comparing the non-aggregated msdu and an amsdu, the fields of the first
+subframe DA matches with the llc/snap header fields of normal msdu.
+In order to avoid processing such frames, add a validation to
+filter such amsdu frames where the first subframe header DA matches
+with the llc/snap header pattern.
+
+Tested-on: QCA6174 hw3.2 PCI WLAN.RM.4.4.1-00110-QCARMSWP-1
+
+Change-Id: Ifc368799aa7be2c8c23b422027c906d1a456ddb6
+Signed-off-by: Sriram R <srirrama@codeaurora.org>
+Signed-off-by: Wen Gong <wgong@codeaurora.org>
+Signed-off-by: Long Cheng <quic_longchen@quicinc.com>
+---
+ drivers/net/wireless/ath/ath10k/htt_rx.c | 60 ++++++++++++++++++++++++++++++++
+ 1 file changed, 60 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 800321c..ec4c8bc 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -1997,6 +1997,61 @@ static void ath10k_htt_rx_h_unchain(struct ath10k *ar,
+ 	ath10k_unchain_msdu(amsdu, unchain_cnt);
+ }
+ 
++static bool ath10k_htt_rx_validate_amsdu(struct ath10k *ar,
++					 struct sk_buff_head *amsdu)
++{
++	u8 *subframe_hdr;
++	struct sk_buff *first;
++	bool is_first, is_last;
++	struct htt_rx_desc *rxd;
++	struct ieee80211_hdr *hdr;
++	size_t hdr_len, crypto_len;
++	enum htt_rx_mpdu_encrypt_type enctype;
++	int bytes_aligned = ar->hw_params.decap_align_bytes;
++
++	first = skb_peek(amsdu);
++
++	rxd = (void *)first->data - sizeof(*rxd);
++	hdr = (void *)rxd->rx_hdr_status;
++
++	is_first = !!(rxd->msdu_end.common.info0 &
++		      __cpu_to_le32(RX_MSDU_END_INFO0_FIRST_MSDU));
++	is_last = !!(rxd->msdu_end.common.info0 &
++		     __cpu_to_le32(RX_MSDU_END_INFO0_LAST_MSDU));
++
++	/* Return in case of non-aggregated msdu */
++	if (is_first && is_last)
++		return true;
++
++	/* First msdu flag is not set for the first msdu of the list */
++	if (!is_first)
++		return false;
++
++	enctype = MS(__le32_to_cpu(rxd->mpdu_start.info0),
++		     RX_MPDU_START_INFO0_ENCRYPT_TYPE);
++
++	hdr_len = ieee80211_hdrlen(hdr->frame_control);
++	crypto_len = ath10k_htt_rx_crypto_param_len(ar, enctype);
++
++	subframe_hdr = (u8 *)hdr + round_up(hdr_len, bytes_aligned) +
++		       crypto_len;
++
++	/* Validate if the amsdu has a proper first subframe.
++	 * There are chances a normal msdu can be received as amsdu when
++	 * the unauthenticated amsdu flag of a QoS header
++	 * is flipped in non-SPP AMSDU's, in such cases the first
++	 * subframe has llc/snap header in place of a valid da.
++	 * return false if the da matches rfc1042 pattern
++	 */
++	if (ether_addr_equal(subframe_hdr, rfc1042_header))
++		return false;
++
++	/* FIXME: Validate if SA/DA of all subframes are proper and
++	 * corresponding to our peers/us
++	 */
++	return true;
++}
++
+ static bool ath10k_htt_rx_amsdu_allowed(struct ath10k *ar,
+ 					struct sk_buff_head *amsdu,
+ 					struct ieee80211_rx_status *rx_status)
+@@ -2015,6 +2070,11 @@ static bool ath10k_htt_rx_amsdu_allowed(struct ath10k *ar,
+ 		return false;
+ 	}
+ 
++	if (!ath10k_htt_rx_validate_amsdu(ar, amsdu)) {
++		ath10k_warn(ar, "received invalid amsdu\n");
++		return false;
++	}
++
+ 	return true;
+ }
+ 
+-- 
+2.7.4
+
