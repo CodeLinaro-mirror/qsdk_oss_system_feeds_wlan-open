@@ -21,8 +21,7 @@ type ipq806x_board_name &>/dev/null  || ipq806x_board_name() {
 }
 
 boost_performance() {
-	if [ -d "/sys/kernel/debug/ath11k" ]; then
-		local board=$(ipq806x_board_name)
+	local board=$(ipq806x_board_name)
 
 	if [ -e /sys/module/ath11k/parameters/nss_offload ];then
 		uni_dp=0
@@ -295,11 +294,56 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan3/queues/rx-0/rps_cpus
 
 				;;
+			ap-mi01.2)
+				tc qdisc replace dev eth4 root noqueue
+				tc qdisc replace dev eth5 root noqueue
+
+				ethtool -K eth4 gro off
+				ethtool -K eth4 gso off
+				ethtool -K eth5 gro off
+				ethtool -K eth5 gso off
+
+				ssdk_sh fdb learnCtrl set disable
+				ssdk_sh fdb entry flush 1
+
+				sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+				sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+				echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+
+				/etc/init.d/firewall stop
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+				#6G reo queues
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+
+				#For 5G reo queues
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+				#For 2G reo queues
+				echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+				tc qdisc replace dev wlan0 root noqueue
+                                tc qdisc replace dev wlan1 root noqueue
+                                tc qdisc replace dev wlan2 root noqueue
+				#no settings
+				;;
+
 			*)
 				#no settings
 				;;
 		esac
-	fi
 }
 
 boost_performance
