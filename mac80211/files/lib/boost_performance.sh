@@ -339,6 +339,47 @@ boost_performance() {
                                 tc qdisc replace dev wlan2 root noqueue
 				#no settings
 				;;
+			ap-mi01.6)
+                                tc qdisc replace dev eth4 root noqueue
+                                tc qdisc replace dev eth5 root noqueue
+
+                                ethtool -K eth4 gro off
+                                ethtool -K eth4 gso off
+                                ethtool -K eth5 gro off
+                                ethtool -K eth5 gso off
+
+                                ssdk_sh fdb learnCtrl set disable
+                                ssdk_sh fdb entry flush 1
+
+                                sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+                                sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+                                echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+
+                                /etc/init.d/firewall stop
+
+                                echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+                                #For 5G/6G reo queues
+                                echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+                                echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+                                #For 2G reo queues
+                                echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+                                echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+                                echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+                                echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+                                echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+                                tc qdisc replace dev wlan0 root noqueue
+                                tc qdisc replace dev wlan1 root noqueue
+                                tc qdisc replace dev wlan2 root noqueue
+                                #no settings
+                                ;;
 
 			*)
 				#no settings
