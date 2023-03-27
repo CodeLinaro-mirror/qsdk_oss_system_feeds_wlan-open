@@ -74,10 +74,11 @@ define KernelPackage/mac80211
   DEPENDS+= @TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
 	+!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv-wifi-meshmgr +!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv +TARGET_ipq95xx:kmod-qca-nss-ppe +TARGET_ipq95xx:kmod-qca-nss-ppe-vp \
-	+TARGET_ipq53xx:kmod-qca-nss-ppe +TARGET_ipq53xx:kmod-qca-nss-ppe-vp
+	+TARGET_ipq53xx:kmod-qca-nss-ppe +TARGET_ipq53xx:kmod-qca-nss-ppe-vp +TARGET_ipq95xx:kmod-qca-nss-ppe-ds +TARGET_ipq53xx:kmod-qca-nss-ppe-ds
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe:kmod-qca-nss-ppe
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-ds:kmod-qca-nss-ppe-ds
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -552,7 +553,8 @@ config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG ATH12K
 config-$(call config_package,ath9k) += ATH9K
 config-$(call config_package,ath9k-common) += ATH9K_COMMON
 config-$(CONFIG_TARGET_ar71xx) += ATH9K_AHB
-config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB
+config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB ATH12K_PPE_DS_SUPPORT MAC80211_PPE_SUPPORT
+config-$(CONFIG_TARGET_ipq95xx) += ATH12K_PPE_DS_SUPPORT MAC80211_PPE_SUPPORT
 config-$(CONFIG_PCI) += ATH9K_PCI
 config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 				      ATH_REG_DYNAMIC_USER_REG_HINTS \
