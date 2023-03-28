@@ -206,6 +206,10 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 
 				;;
@@ -249,6 +253,10 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
 				;;
 			ap-al02-c9)
 				#case for rdp454 (QCN9274 (2.4 and 5 Low) + QCN9274 (5 High and 6 GHz))
@@ -292,6 +300,10 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan3/queues/rx-0/rps_cpus
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				tc qdisc replace dev wlan2 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
 
 				;;
 			ap-mi01.2)
