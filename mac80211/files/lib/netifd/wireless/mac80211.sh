@@ -1227,7 +1227,9 @@ mac80211_prepare_vif() {
 		# All interfaces must have unique mac addresses
 		# which can either be explicitly set in the device
 		# section, or automatically generated
+		ifconfig "$ifname" down
 		ifconfig "$ifname" hw ether "$macaddr"
+		ifconfig "$ifname" up
 	fi
 
 	json_select ..
