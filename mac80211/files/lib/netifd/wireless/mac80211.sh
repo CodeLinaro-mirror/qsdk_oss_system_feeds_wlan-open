@@ -28,6 +28,10 @@ HE_MU_EDCA_PARAMS="he_mu_edca_ac_be_aifsn he_mu_edca_ac_be_aci he_mu_edca_ac_be_
 		   he_mu_edca_ac_vo_ecwmax he_mu_edca_ac_vo_timer"
 HE_MU_EDCA_PARAMS_DEFAULT="8 0 9 10 255 15 1 9 10 255 5 7 5 2 255 5 3 5 7 255"
 
+APLIST=
+STALIST=
+UMLIST=
+
 
 set_wifi_up() {
 	local vif="$1"
@@ -1107,6 +1111,7 @@ mac80211_prepare_vif() {
 	case "$mode" in
 		adhoc)
 			mac80211_iw_interface_add "$phy" "$ifname" adhoc || return
+			UMLIST="${UMLIST}$ifname "
 		;;
 		ap)
 			# Hostapd will handle recreating the interface and
@@ -1126,15 +1131,19 @@ mac80211_prepare_vif() {
 
 			[ -n "$ap_ifname" ] || ap_ifname=$ifname
 
+			APLIST="${APLIST}$ifname "
+
 			if [ $hwmode = "11ad" ]; then
 				set_wifi_up $vif $ifname
 			fi
 		;;
 		mesh)
 			mac80211_iw_interface_add "$phy" "$ifname" mp || return
+			STALIST="${STALIST}$ifname "
 		;;
 		monitor)
 			mac80211_iw_interface_add "$phy" "$ifname" monitor || return
+			UMLIST="${UMLIST}$ifname "
 		;;
 		sta)
 			extsta_path=/sys/module/mac80211/parameters/extsta
@@ -1151,6 +1160,7 @@ mac80211_prepare_vif() {
 			[ "$powersave" -gt 0 ] && powersave="on" || powersave="off"
 			iw "$ifname" set power_save "$powersave"
 			sta_ifname=$ifname
+			STALIST="${STALIST}$ifname "
 		;;
 	esac
 
@@ -1542,57 +1552,64 @@ get_freq_list() {
 	echo $freq_list
 }
 
+mac80211_vap_cleanup() {
+	local service=$1
+	local vaps="$2"
+	local phy=$3
+
+	for wdev in $vaps; do
+		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+		if [ "$phy_name" != "$phy" ]; then
+			continue;
+		fi
+
+		case $service in
+			"hostapd")
+				if ( [ -f "/var/run/hostapd-${wdev}.lock" ] || \
+					[ -f "/var/run/hostapd-${4}.lock" ] ); then
+					hostapd_cli -iglobal raw REMOVE ${wdev}
+					rm /var/run/hostapd-${wdev}.lock
+					rm /var/run/hostapd/${wdev}
+				fi
+
+				if [ -f "/var/run/wifi-$phy.pid" ]; then
+					pid=$(cat /var/run/wifi-$phy.pid)
+					kill -9 $pid
+					rm -rf  /var/run/wifi-$phy.pid
+					rm /var/run/hostapd/w*
+				fi
+			;;
+			"wpa_supplicant")
+				[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
+					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+					rm /var/run/wpa_supplicant-${wdev}.lock
+				}
+
+				[ -f "/var/run/wpa_supplicant-${wdev}.pid" ] && { \
+					kill -9 $(cat /var/run/wpa_supplicant-${wdev}.pid)
+					rm -rf /var/run/wpa_supplicant-${wdev}.pid
+				}
+
+			;;
+		esac
+		ifconfig "$wdev" down 2>/dev/null
+		iw dev "$wdev" del
+	done
+}
+
 mac80211_interface_cleanup() {
 	local phy="$1"
 	local device="$2"
 
 	if [ ${#device} -eq 12 ]; then
-		local dev_wlan=wlan${2:11:1}
-		for wdev in $(list_phy_interfaces "$phy"); do
-			remove_ifnames=$(cat /var/run/hostapd-${phy}_band${device:11:1}.conf | grep wlan* | cut -d "=" -f2)
-			remove=0
-			for _if in $remove_ifnames
-			do
-				if [[  "$_if" ==  "${wdev}" ]]; then
-					remove=1
-				fi
-			done
+		local dev_wlan=wlan$((${2:5:1} + ${2:11:1}))
+		local ap_ifnames="$(uci -q -P /var/state get wireless.${device}.aplist)"
+		local sta_ifnames="$(uci -q -P /var/state get wireless.${device}.splist)"
+		local adhoc_ifnames="$(uci -q -P /var/state get wireless.${device}.umlist)"
+		mac80211_vap_cleanup hostapd "$ap_ifnames" $phy $dev_wlan
+		mac80211_vap_cleanup wpa_supplicant "$sta_ifnames" $phy
+		mac80211_vap_cleanup none "$adhoc_ifnames" $phy
 
-			if [ $remove -eq 0 ]; then
-				continue
-			fi
-
-			#Ensure the interface belongs to the phy being passed
-			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
-			if [ "$phy_name" != "$phy" ]; then
-				continue
-			fi
-
-			if ( [ -f "/var/run/hostapd-${wdev}.lock" ] || \
-			     [ -f "/var/run/hostapd-${dev_wlan}.lock" ] ); then
-				hostapd_cli -iglobal raw REMOVE ${wdev}
-				rm /var/run/hostapd-${wdev}.lock
-				rm /var/run/hostapd/${wdev}
-			fi
-
-			[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
-				wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
-				rm /var/run/wpa_supplicant-${wdev}.lock
-			}
-
-			[ -f "/var/run/wpa_supplicant-${wdev}.pid" ] && { \
-				kill -9 $(cat /var/run/wpa_supplicant-${wdev}.pid)
-			}
-
-			if [ -f "/var/run/wifi-$phy.pid" ]; then
-				pid=$(cat /var/run/wifi-$phy.pid)
-				kill -9 $pid
-				rm -rf  /var/run/wifi-$phy.pid
-				rm /var/run/hostapd/w*
-			fi
-			ifconfig "$wdev" down 2>/dev/null
-			iw dev "$wdev" del
-		done
 	else
 		for wdev in $(list_phy_interfaces "$phy"); do
 			#Ensure the interface belongs to the phy being passed
@@ -1859,8 +1876,16 @@ drv_mac80211_setup() {
 		max_bssid=$((1 << max_bssid_ind))
 	fi
 
+	APLIST=
 	for_each_interface "ap" mac80211_prepare_vif ${device} ${multiple_bssid}
+	uci -q -P /var/state set wireless.${device}.aplist="${APLIST}"
+
+	STALIST=
+	UMLIST=
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
+	uci -q -P /var/state set wireless.${device}.splist="${STALIST}"
+	uci -q -P /var/state set wireless.${device}.umlist="${UMLIST}"
+
 	[ -n "$board_file" ] && {
 		file=/sys/class/net/$ifname/device/wil6210/board_file
 		[ -f "$file" ] && echo "$board_file" > "$file"
