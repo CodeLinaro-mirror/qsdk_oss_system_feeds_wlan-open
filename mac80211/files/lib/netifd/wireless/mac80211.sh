@@ -1206,7 +1206,14 @@ mac80211_prepare_vif() {
 	esac
 
 	case "$mode" in
-		monitor|mesh)
+		monitor)
+			if echo "$devname" | grep -q  "band"; then
+				[ "$auto_channel" -gt 0 ] || iw dev "$ifname" add channel "$channel" $htmode
+			else
+				[ "$auto_channel" -gt 0 ] || iw dev "$ifname" set channel "$channel" $htmode
+			fi
+		;;
+		mesh)
 			[ "$auto_channel" -gt 0 ] || iw dev "$ifname" set channel "$channel" $htmode
 		;;
 	esac
@@ -1464,13 +1471,33 @@ mac80211_setup_vif() {
 		monitor)
 			case "$htmode" in
 				VHT20|HT20|HE20|EHT20)
-					iw dev "$ifname" set freq "$freq" "20" ;;
+					if echo "$devname" | grep -q  "band"; then
+						iw dev "$ifname" add freq "$freq" "20"
+					else
+						iw dev "$ifname" set freq "$freq" "20"
+					fi
+					;;
 				HT40*|VHT40|HE40|EHT40)
-					iw dev "$ifname" set freq "$freq" "40" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")" ;;
+					if echo "$devname" | grep -q  "band"; then
+						iw dev "$ifname" add freq "$freq" "40" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")"
+					else
+						iw dev "$ifname" set freq "$freq" "40" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "40")")"
+					fi
+					;;
 				VHT80|HE80|EHT80)
-					iw dev "$ifname" set freq "$freq" "80" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")" ;;
+					if echo "$devname" | grep -q  "band"; then
+						iw dev "$ifname" add freq "$freq" "80" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")"
+					else
+						iw dev "$ifname" set freq "$freq" "80" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")"
+					fi
+					;;
 				VHT160|HE160|EHT160)
-					iw dev "$ifname" set freq "$freq" "160" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")" ;;
+					if echo "$devname" | grep -q  "band"; then
+						iw dev "$ifname" add freq "$freq" "160" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")"
+					else
+						iw dev "$ifname" set freq "$freq" "160" "$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")"
+					fi
+					;;
 			esac
 		;;
 	esac
