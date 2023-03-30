@@ -741,6 +741,32 @@ EOF
 	json_select ..
 }
 
+mac80211_wds_support_check() {
+	local phy="$1"
+
+	local platform=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
+	case "$platform" in
+		"IPQ8074" | "IPQ6018" | "IPQ5018")
+			frame_mode=$(cat /sys/module/ath11k/parameters/frame_mode)
+			;;
+		"IPQ9574")
+			local freq="$(get_freq "$phy" "$channel" "$device")"
+			local board_type=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}' | awk -F- '{print $3}')
+
+			if [ $board_type == "C6" ] && [ $freq -gt 2000 ] && [ $freq -lt 3000]; then
+				frame_mode=$(cat /sys/module/ath11k/parameters/frame_mode)
+			else
+				frame_mode=$(cat /sys/module/ath12k/parameters/frame_mode)
+			fi
+			;;
+		 "IPQ5332")
+			frame_mode=$(cat /sys/module/ath12k/parameters/frame_mode)
+			;;
+	esac
+
+	echo "$frame_mode"
+}
+
 mac80211_hostapd_setup_bss() {
 	local phy="$1"
 	local ifname="$2"
@@ -777,7 +803,15 @@ mac80211_hostapd_setup_bss() {
 	set_default ftm_responder 0
 	set_default start_disabled 0
 
-	[ "$wds" -gt 0 ] && append hostapd_cfg "wds_sta=1" "$N"
+	if [ "$wds" -gt 0 ]; then
+		frame_mode=$(mac80211_wds_support_check "$phy")
+
+		if [ $frame_mode -ne 1 ]; then
+			echo WDS is supported only in native wifi mode. Kindly update the config > /dev/ttyMSM0
+			return
+		fi
+		append hostapd_cfg "wds_sta=1" "$N"
+	fi
 	[ "$ftm_responder" -gt 0 ] && append hostapd_cfg "ftm_responder=1" "$N"
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
@@ -1150,7 +1184,14 @@ mac80211_prepare_vif() {
 			[ -e $extsta_path ] && echo $extsta > $extsta_path
 			local wdsflag=
 			staidx="$(($staidx + 1))"
-			[ "$wds" -gt 0 ] && wdsflag="4addr on"
+			if [ "$wds" -gt 0 ]; then
+				frame_mode=$(mac80211_wds_support_check "$phy")
+				if [ $frame_mode -ne 1 ]; then
+					echo WDS is supported only in native wifi mode. Kindly update the config > /dev/ttyMSM0
+					return
+				fi
+				wdsflag="4addr on"
+			fi
 			mac80211_iw_interface_add "$phy" "$ifname" managed "$wdsflag" || return
 			if [ "$wds" -gt 0 ]; then
 				iw "$ifname" set 4addr on
