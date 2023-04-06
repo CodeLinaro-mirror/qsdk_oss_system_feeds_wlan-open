@@ -25,8 +25,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp_rx.c            | 126 ++++++++++++++++-----
  3 files changed, 131 insertions(+), 28 deletions(-)
 
---- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
-+++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+Index: b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h	2023-04-10 11:11:13.293609856 +0530
++++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h	2023-04-10 11:11:13.289609891 +0530
 @@ -180,6 +180,25 @@ enum htt_tx_pdev_underrun_enum {
  	HTT_TX_PDEV_MAX_URRN_STATS                   = 3,
  };
@@ -53,8 +55,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #define HTT_TX_PDEV_MAX_FLUSH_REASON_STATS     71
  #define HTT_TX_PDEV_MAX_SIFS_BURST_STATS       9
  #define HTT_TX_PDEV_MAX_SIFS_BURST_HIST_STATS  10
---- a/drivers/net/wireless/ath/ath12k/dp.h
-+++ b/drivers/net/wireless/ath/ath12k/dp.h
+Index: b/drivers/net/wireless/ath/ath12k/dp.h
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/dp.h	2023-04-10 11:11:13.293609856 +0530
++++ b/drivers/net/wireless/ath/ath12k/dp.h	2023-04-10 11:11:46.309324896 +0530
 @@ -1519,6 +1519,7 @@ enum htt_ppdu_stats_gi {
  
  #define HTT_PPDU_STATS_USER_RATE_INFO0_USER_POS_M	GENMASK(3, 0)
@@ -97,9 +101,27 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  } __packed;
  
  #define HTT_PPDU_STATS_TX_INFO_FLAGS_RATECODE_M		GENMASK(7, 0)
---- a/drivers/net/wireless/ath/ath12k/dp_rx.c
-+++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1206,7 +1206,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
+@@ -1654,6 +1666,7 @@ struct htt_ppdu_stats_usr_cmpltn_cmn {
+ #define HTT_PPDU_STATS_ACK_BA_INFO_TID_NUM	GENMASK(31, 25)
+ 
+ #define HTT_PPDU_STATS_NON_QOS_TID	16
++#define HTT_PPDU_STATS_PPDU_ID			GENMASK(25, 0)
+ 
+ struct htt_ppdu_stats_usr_cmpltn_ack_ba_status {
+ 	u32 ppdu_id;
+Index: b/drivers/net/wireless/ath/ath12k/dp_rx.c
+===================================================================
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c	2023-04-10 11:11:13.293609856 +0530
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c	2023-04-10 11:11:13.293609856 +0530
+@@ -1196,6 +1196,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
+ 	struct htt_ppdu_user_stats *user_stats;
+ 	int cur_user;
+ 	u16 peer_id;
++	u32 ppdu_id;
+ 
+ 	ppdu_info = (struct htt_ppdu_stats_info *)data;
+ 
+@@ -1226,7 +1227,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
  		user_stats->is_valid_peer_id = true;
  		memcpy((void *)&user_stats->rate, ptr,
  		       sizeof(struct htt_ppdu_stats_user_rate));
@@ -108,7 +130,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	case HTT_PPDU_STATS_TAG_USR_COMPLTN_COMMON:
  		if (len < sizeof(struct htt_ppdu_stats_usr_cmpltn_cmn)) {
-@@ -1225,7 +1225,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
+@@ -1245,7 +1246,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
  		user_stats->is_valid_peer_id = true;
  		memcpy((void *)&user_stats->cmpltn_cmn, ptr,
  		       sizeof(struct htt_ppdu_stats_usr_cmpltn_cmn));
@@ -117,11 +139,20 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	case HTT_PPDU_STATS_TAG_USR_COMPLTN_ACK_BA_STATUS:
  		if (len <
-@@ -1246,7 +1246,10 @@ static int ath12k_htt_tlv_ppdu_stats_par
+@@ -1255,6 +1256,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
+ 			return -EINVAL;
+ 		}
+ 
++		ppdu_id = ((struct htt_ppdu_stats_usr_cmpltn_ack_ba_status *)ptr)->ppdu_id;
+ 		peer_id =
+ 		((struct htt_ppdu_stats_usr_cmpltn_ack_ba_status *)ptr)->sw_peer_id;
+ 		cur_user = ath12k_get_ppdu_user_index(&ppdu_info->ppdu_stats,
+@@ -1266,7 +1268,11 @@ static int ath12k_htt_tlv_ppdu_stats_par
  		user_stats->is_valid_peer_id = true;
  		memcpy((void *)&user_stats->ack_ba, ptr,
  		       sizeof(struct htt_ppdu_stats_usr_cmpltn_ack_ba_status));
 -		user_stats->tlv_flags |= BIT(tag);
++		ppdu_info->ppdu_id = FIELD_GET(HTT_PPDU_STATS_PPDU_ID, ppdu_id);
 +		ppdu_info->tlv_bitmap |= BIT(tag);
 +		break;
 +	case HTT_PPDU_STATS_TAG_SCH_CMD_STATUS:
@@ -129,7 +160,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	}
  	return 0;
-@@ -1257,11 +1260,17 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
+@@ -1277,11 +1283,17 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
  				       const void *ptr, void *data),
  			   void *data)
  {
@@ -147,7 +178,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	while (len > 0) {
  		if (len < sizeof(*tlv)) {
  			ath12k_err(ab, "htt tlv parse failure at byte %zd (%zu bytes left, %zu expected)\n",
-@@ -1279,7 +1288,7 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
+@@ -1299,7 +1311,7 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
  				   tlv_tag, ptr - begin, len, tlv_len);
  			return -EINVAL;
  		}
@@ -156,7 +187,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		if (ret == -ENOMEM)
  			return ret;
  
-@@ -1289,38 +1298,76 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
+@@ -1309,38 +1321,76 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
  	return 0;
  }
  
@@ -241,7 +272,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		succ_bytes = usr_stats->ack_ba.success_bytes;
  		succ_pkts = FIELD_GET(HTT_PPDU_STATS_ACK_BA_INFO_NUM_MSDU_M,
  				      usr_stats->ack_ba.info);
-@@ -1332,13 +1379,38 @@ ath12k_update_per_peer_tx_stats(struct a
+@@ -1352,13 +1402,38 @@ ath12k_update_per_peer_tx_stats(struct a
  		tx_duration = common->fes_duration_us;
  
  	user_rate = &usr_stats->rate;
@@ -286,7 +317,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	/* Note: If host configured fixed rates and in some other special
  	 * cases, the broadcast/management frames are sent in different rates.
-@@ -1419,18 +1491,17 @@ ath12k_update_per_peer_tx_stats(struct a
+@@ -1439,18 +1514,17 @@ ath12k_update_per_peer_tx_stats(struct a
  		arsta->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
  		arsta->txrate.he_dcm = dcm;
  		arsta->txrate.he_gi = ath12k_he_gi_to_nl80211_he_gi(sgi);
@@ -310,7 +341,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	default:
  		break;
-@@ -1450,6 +1521,7 @@ ath12k_update_per_peer_tx_stats(struct a
+@@ -1470,6 +1544,7 @@ ath12k_update_per_peer_tx_stats(struct a
  		peer_stats->succ_bytes = succ_bytes;
  		peer_stats->is_ampdu = is_ampdu;
  		peer_stats->duration = tx_duration;
@@ -318,7 +349,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		peer_stats->ba_fails =
  			HTT_USR_CMPLTN_LONG_RETRY(usr_stats->cmpltn_cmn.flags) +
  			HTT_USR_CMPLTN_SHORT_RETRY(usr_stats->cmpltn_cmn.flags);
-@@ -1464,12 +1536,12 @@ ath12k_update_per_peer_tx_stats(struct a
+@@ -1484,12 +1559,12 @@ ath12k_update_per_peer_tx_stats(struct a
  }
  
  static void ath12k_htt_update_ppdu_stats(struct ath12k *ar,
@@ -333,7 +364,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  }
  
  static
-@@ -1490,7 +1562,7 @@ struct htt_ppdu_stats_info *ath12k_dp_ht
+@@ -1510,7 +1585,7 @@ struct htt_ppdu_stats_info *ath12k_dp_ht
  						     typeof(*ppdu_info), list);
  			list_del(&ppdu_info->list);
  			ar->ppdu_stat_list_depth--;
