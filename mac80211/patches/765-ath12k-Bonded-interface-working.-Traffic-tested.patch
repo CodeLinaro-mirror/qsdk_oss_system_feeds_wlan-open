@@ -1,0 +1,1435 @@
+From 3a9420427cfbbeaa0a3e7e561badc1414b84d592 Mon Sep 17 00:00:00 2001
+From: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
+Date: Thu, 13 Apr 2023 22:14:23 -0700
+Subject: [PATCH] ath12k: Add support for Bond interface
+
+Add support for bonded interface to represent each wifi link with a separate
+netdevice. With the new code changes, there will be new interfaces in the system.
+
+wlan0 - Original netdevice that gets created as per ath12k control path
+        This netdevice will continue to exist and will be used for all
+        control path communications. All NL messages from userspace applications
+        are processed on the context of this device. This device will not be
+        exposed to the bridge anymore
+wlan0_b - This represents the bonded interface. No NL messages will be processed
+        on the context of this device. This device is purely meant for only
+        datapath. This device will be exposed to the bridge layer
+link0 - wlan_l0 (link netdevice)
+        Will be used for registering with PPE module during MLO DS operation
+link1 - wlan_l1 (link netdevice)
+        Will be used for registering with PPE module during MLO DS operation
+
+Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
+ drivers/net/wireless/ath/ath12k/Makefile   |   1 +
+ drivers/net/wireless/ath/ath12k/bondif.c   | 453 +++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.h   |  33 ++
+ drivers/net/wireless/ath/ath12k/core.h     |  16 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
+ drivers/net/wireless/ath/ath12k/mac.c      |  49 ++-
+ drivers/net/wireless/ath/ath12k/pci.c      |  20 +
+ drivers/net/wireless/ath/ath12k/ppe.c      |  23 +-
+ drivers/net/wireless/ath/ath12k/ppe.h      |  13 +-
+ drivers/net/wireless/ath/ath6kl/cfg80211.c |   2 +-
+ drivers/net/wireless/ath/wil6210/netdev.c  |   2 +-
+ include/net/cfg80211.h                     |   3 +-
+ include/net/mac80211.h                     |   6 +-
+ include/uapi/linux/nl80211.h               |   3 +
+ local-symbols                              |   2 +
+ net/mac80211/Kconfig                       |  18 +
+ net/mac80211/cfg.c                         |  30 +-
+ net/mac80211/chan.c                        |   8 +
+ net/mac80211/ieee80211_i.h                 |   5 +-
+ net/mac80211/iface.c                       |  16 +-
+ net/mac80211/main.c                        |   8 +-
+ net/mac80211/rx.c                          |  13 +
+ net/mac80211/util.c                        |   4 +
+ net/wireless/chan.c                        |   8 +
+ net/wireless/core.c                        |  35 +-
+ net/wireless/nl80211.c                     |   4 +
+ net/wireless/util.c                        |   4 +
+ 28 files changed, 753 insertions(+), 50 deletions(-)
+ create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
+ create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
+
+diff --git a/drivers/net/wireless/ath/ath12k/Kconfig b/drivers/net/wireless/ath/ath12k/Kconfig
+index e790048..bcf43d0 100644
+--- a/drivers/net/wireless/ath/ath12k/Kconfig
++++ b/drivers/net/wireless/ath/ath12k/Kconfig
+@@ -70,3 +70,12 @@ config ATH12K_PPE_DS_SUPPORT
+ 		Enable ath12k PPE-DS support
+ 
+ 		Say Y to enable PPE DS Support. If unsure, say N.
++
++config ATH12K_BONDED_DS_SUPPORT
++	bool "QTI ath12k bonded-ds support"
++	depends on ATH12K_DEBUGFS
++	depends on RELAY
++	help
++		Enable ath12k Bonded-DS support
++
++		Say Y to enable Bonded DS Support. If unsure, say N.
+diff --git a/drivers/net/wireless/ath/ath12k/Makefile b/drivers/net/wireless/ath/ath12k/Makefile
+index 98ecf02..a0fc6e6 100644
+--- a/drivers/net/wireless/ath/ath12k/Makefile
++++ b/drivers/net/wireless/ath/ath12k/Makefile
+@@ -31,6 +31,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
+ ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
+ ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
+ ath12k-$(CPTCFG_ATH12K_PPE_DS_SUPPORT) += ppe.o
++ath12k-$(CPTCFG_ATH12K_BONDED_DS_SUPPORT) += bondif.o
+ 
+ # for tracing framework to find trace.h
+ CFLAGS_trace.o := -I$(src)
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
+new file mode 100644
+index 0000000..6379aff
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath12k/bondif.c
+@@ -0,0 +1,453 @@
++// SPDX-License-Identifier: BSD-3-Clause-Clear
++/*
++ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#include <net/mac80211.h>
++#include <linux/module.h>
++#include <net/bonding.h>
++#include "core.h"
++#include "ppe.h"
++#include "bondif.h"
++#include "debug.h"
++#include "dp_tx.h"
++
++static const struct net_device_ops ieee80211_link_dataif_8023_ops;
++extern struct ath12k_link_vif *ath12k_mac_assign_link_vif( struct ath12k_hw *ah,
++					struct ieee80211_vif *vif, u8 link_id);
++extern int g_bonded_interface_model;
++
++static void ath12k_ieee80211_if_free(struct net_device *dev)
++{
++        free_percpu(dev->tstats);
++}
++
++static void ath12k_ieee80211_if_setup(struct net_device *dev)
++{
++        ether_setup(dev);
++        dev->priv_flags &= ~IFF_TX_SKB_SHARING;
++        dev->netdev_ops = &ieee80211_link_dataif_8023_ops;
++        netdev_set_priv_destructor(dev, ath12k_ieee80211_if_free);
++}
++
++static bool ath12k_dst_ppe_vp(struct net_device *dev,
++                                         struct sk_buff *skb, void *cb_data)
++{
++        if (unlikely(dev == NULL)) {
++                dev_kfree_skb_any(skb);
++                return false;
++        }
++
++        skb->dev = dev;
++        dev_queue_xmit(skb);
++
++        return true;
++}
++
++int ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++					    struct net_device *link_dev)
++{
++	struct ppe_vp_ai vpai;
++	struct ieee80211_ppe_vp_ds_params vp_params = {0};
++         struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++	int ret;
++	int ppe_vp_num = -1;
++
++         if (!g_bonded_interface_model)
++                 return -EINVAL;
++
++	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
++
++	vpai.type = PPE_VP_TYPE_SW_L2;
++	vpai.dst_cb = ath12k_dst_ppe_vp;
++	vpai.dst_cb_data = arvif;
++	vpai.src_cb = NULL;
++	vpai.src_cb_data = NULL;
++	vpai.queue_num = 0;
++	vpai.usr_type = PPE_VP_USER_TYPE_DS;
++	vpai.net_dev_type = PPE_VP_NET_DEV_TYPE_WIFI;
++	link_ndev_pvt = netdev_priv(link_dev);
++
++	vp_params.dev = link_dev;
++	ret = ath12k_mac_op_ppeds_attach_vdev(arvif, &vpai,  &ppe_vp_num, &vp_params);
++	if (!ret) {
++		arvif->ppe_vp_type = PPE_VP_USER_TYPE_DS;
++		link_ndev_pvt->ppe_vp_profile_idx = vp_params.ppe_vp_profile_idx;
++		link_ndev_pvt->vp_num = ppe_vp_num;
++		arvif->ppe_vp_num = ppe_vp_num;
++		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE,"Enabling DS index %d vp %d link_id %d %pM\n", vp_params.ppe_vp_profile_idx, ppe_vp_num, arvif->link_id, arvif->addr);
++		return ppe_vp_num;
++	} else {
++		ath12k_err(NULL, "Error in enabling DS for arvif %pM\n",arvif->addr);
++	}
++
++	return ppe_vp_num;
++}
++
++void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++{
++	struct ieee80211_ppe_vp_ds_params vp_params = {0};
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++
++        if (!g_bonded_interface_model)
++                 return;
++
++	link_ndev_pvt = netdev_priv(link_dev);
++	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
++	if (arvif->ppe_vp_num != -1) {
++		ath12k_mac_op_ppeds_detach_vdev (arvif, &vp_params);
++		if (arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
++			ppe_vp_free(arvif->ppe_vp_num);
++
++		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
++			   arvif->ppe_vp_num, link_dev->name);
++		arvif->ppe_vp_num = -1;
++	}
++}
++
++int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
++					  struct ieee80211_vif *vif,
++					  u16 old_links, u16 new_links,
++					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS])
++{
++         struct ath12k_hw *ah = hw->priv;
++ 	 struct ath12k_link_vif *arvif = NULL; 
++	 struct ath12k_base *ab = NULL;
++	 struct ath12k *ar = NULL;
++         u16  new_link_id;
++         struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
++	 struct net_device *cp_netdev = wdev->netdev;
++         struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++         struct net_device *link_ndev;
++	 struct ath12k_mld_dev *mldev = NULL;
++         u16 link_num;
++         struct net_device *bond_dev = NULL;
++         char name[20] = {0};
++         int ret = 0, chip_id = 0, pdev_id = 0;
++
++         if (!g_bonded_interface_model)
++                 return 0;
++
++	 if (!vif->bond_init) {
++		 mutex_init(&vif->bond_mutex);
++	 }
++
++         bond_dev = wdev->bond_netdev;
++	 mldev = bond_get_mlo_ctx(bond_dev);
++
++         new_link_id = new_links ^ old_links;
++         link_num =  ffs(new_link_id) - 1;
++	 /* TODO: Do this assignment only for the Add link case */
++	 arvif = ath12k_mac_assign_link_vif(ah, vif, link_num);
++	 if (arvif) {
++		 ab = arvif->ab;
++		 ar = arvif->ar;
++//		 chip_id = ab->chip_id;
++//		 pdev_id = ar->pdev->pdev_id;
++	 }
++
++         if (new_links > old_links)  {
++                 /* Add Link operation */
++                 snprintf(name, sizeof(name), "%s_l%d", cp_netdev->name, link_num);
++                 link_ndev = alloc_netdev_mqs(sizeof (struct ath12k_link_vif_pvt), name, NET_NAME_ENUM, ath12k_ieee80211_if_setup, 1, 1);
++                 if (!link_ndev) {
++                         ath12k_err(NULL, "ERR: link netdev allocation failed\n");
++			 //TODO: Graceful cleanup
++			 return -EINVAL;
++                 }
++
++                 memcpy(&link_ndev->perm_addr, wdev->links[link_num].addr, ETH_ALEN);
++                 link_ndev->dev_addr = &link_ndev->perm_addr;
++                 link_ndev_pvt = netdev_priv(link_ndev);
++		 memset(link_ndev_pvt, 0, sizeof(*link_ndev_pvt));
++                 link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
++		 link_ndev_pvt->arvif = arvif;
++		 link_ndev_pvt->hw = hw;
++		 link_ndev_pvt->link_ndev = link_ndev;
++		 link_ndev_pvt->is_started = false;
++		 arvif->ndev_pvt = link_ndev_pvt;
++		 mldev->vif = vif;
++		 mutex_lock(&vif->bond_mutex);
++                 vif->link_ndev[link_num] = link_ndev;
++		 mutex_unlock(&vif->bond_mutex);
++                 link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
++                 rtnl_lock();
++	         ret = register_netdevice(link_ndev);
++                 if (ret) {
++                         ath12k_err(NULL, "Error register link netdevice\n");
++			 //TODO: Graceful cleanup
++			 return -EINVAL;
++                 }
++		 ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
++		 ret = bond_enslave(bond_dev, link_ndev, NULL);
++                 rtnl_unlock();
++			
++                 if (ret) {
++                         ath12k_err(NULL, "Error bond enslave error\n");
++			 //TODO: Graceful exit
++			 return -EINVAL;
++		 }
++                 else
++                         ath12k_info(NULL, "Successfully register link_ndev(enslave) %s %px. \n", name, link_ndev );
++
++                 memcpy(&bond_dev->perm_addr, vif->addr, ETH_ALEN);
++		 bond_dev->dev_addr = &bond_dev->perm_addr;
++
++		 if (mldev && !mldev->mcast_dev_set) {
++			 mldev->mcast_dev_set = true;
++			 mldev->primary_chipid = chip_id;
++			 mldev->primary_pdevid = pdev_id;
++		 }
++		 if (mldev)
++			 mldev->link_dev[chip_id][pdev_id] =  link_ndev;
++
++         } else {
++                 /* Delete Link operation */
++		 mutex_lock(&vif->bond_mutex);
++                 link_ndev = vif->link_ndev[link_num];
++		 if (link_ndev) {
++                 	 ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
++			 bond_release(wdev->bond_netdev, link_ndev);
++			 unregister_netdevice(link_ndev);
++			 vif->link_ndev[link_num] = NULL;
++		 } else {
++                 	 ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
++		 }
++		 mutex_unlock(&vif->bond_mutex);
++	 	 if (vif->bond_init && new_links == 0) {
++			 vif->bond_init = 0;
++			 mutex_destroy(&vif->bond_mutex);
++		 }
++         }
++	ath12k_info(NULL, "%s:%d link changed for MLD %pM old 0x%x new 0x%x\n", __func__, __LINE__, vif->addr, old_links, new_links);
++	return 0;
++}
++
++
++static struct net_device *ath12k_mac_get_tx_link_netdev(struct ath12k_mld_dev *mldev, u8 *dst_mac_addr)
++{
++	struct net_device *ndev = NULL;
++	struct ieee80211_sta *sta= NULL;
++	struct ath12k_sta *ahsta;
++	sta = ieee80211_find_sta(mldev->vif, dst_mac_addr);
++
++	ahsta = (struct ath12k_sta *)sta->drv_priv;
++	if (sta) {
++		/* TODO: Use Primary Link */
++		ndev = mldev->vif->link_ndev[ahsta->assoc_link_id];
++	}
++	/* TODO: Verify what happens with NULL. Understand what is the fall back*/
++	return ndev;
++}
++
++int ath12k_dp_mlo_xmit_netdev(struct sk_buff *skb, struct net_device *bond_dev)
++{
++	struct net_device *link_dev = NULL;
++	struct ethhdr *eh = NULL;
++	struct ath12k_mld_dev *mldev = bond_get_mlo_ctx(bond_dev);
++	int is_mcast;
++	
++	eh = (struct ethhdr *)skb->data;
++	is_mcast = is_multicast_ether_addr(eh->h_dest);
++	if (is_mcast) {
++		uint8_t chip_id = mldev->primary_chipid;
++		uint8_t pdev_id = mldev->primary_pdevid;
++		link_dev = mldev->link_dev[chip_id][pdev_id];
++	} else {
++		link_dev = ath12k_mac_get_tx_link_netdev( mldev, eh->h_dest);
++	}
++
++	return link_dev->netdev_ops->ndo_start_xmit(skb, link_dev);
++}
++
++struct net_device *ath12k_dp_get_mlo_tx_netdev(void *bondctx, u8 *dst_mac_addr)
++{
++	struct ath12k_mld_dev *mldev = (struct ath12k_mld_dev *)bondctx;
++
++	return ath12k_mac_get_tx_link_netdev(mldev, dst_mac_addr);
++}
++
++int ieee80211_link_open(struct net_device *dev)
++{
++	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
++	arvif_pvt->is_started = true;
++	return 0;
++}
++
++int ieee80211_link_stop(struct net_device *dev)
++{
++	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
++	arvif_pvt->is_started = false;
++	return 0;
++}
++
++void ieee80211_link_uninit(struct net_device *dev)
++{
++}
++
++netdev_tx_t ieee80211_link_subif_start_xmit_8023(struct sk_buff *skb,
++					    struct net_device *dev)
++{
++	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
++	struct ath12k_link_vif *arvif = arvif_pvt->arvif; 
++	int ret;
++	int is_mcast;
++	struct ethhdr *eh = NULL;
++
++	eh = (struct ethhdr *)skb->data;
++	is_mcast = is_multicast_ether_addr(eh->h_dest);
++
++	if (!arvif_pvt->is_started) {
++		ath12k_err(NULL, "Dropping frames as arvif is not started\n");
++		ieee80211_free_txskb(arvif_pvt->hw, skb);
++		return NETDEV_TX_OK;
++	}
++	ret = ath12k_dp_tx_direct(arvif, skb);
++	if (unlikely(ret)) {
++		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
++			   "failed to transmit frame %d\n", ret);
++		ieee80211_free_txskb(arvif_pvt->hw, skb);
++		return ret;
++	}
++	return NETDEV_TX_OK;
++}
++
++void ieee80211_link_set_multicast_list(struct net_device *dev)
++{
++}
++
++int ieee80211_link_change_mac(struct net_device *dev, void *addr)
++{
++	return 0;
++}
++
++#if LINUX_VERSION_IS_GEQ(5,2,0)
++u16 ieee80211_link_netdev_select_queue(struct net_device *dev,
++					 struct sk_buff *skb,
++					 struct net_device *sb_dev)
++#elif LINUX_VERSION_IS_GEQ(4,19,0)
++u16 ieee80211_link_netdev_select_queue(struct net_device *dev,
++					 struct sk_buff *skb,
++					 struct net_device *sb_dev,
++					 select_queue_fallback_t fallback)
++#else
++u16 ieee80211_link_netdev_select_queue(struct net_device *dev,
++					 struct sk_buff *skb,
++					 void *accel_priv,
++					 select_queue_fallback_t fallback)
++#endif
++{
++	return smp_processor_id();
++}
++
++void
++ieee80211_link_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
++{
++	dev_fetch_sw_netstats(stats, dev->tstats);
++}
++static const struct net_device_ops ieee80211_link_dataif_8023_ops = {
++	.ndo_open		= ieee80211_link_open,
++	.ndo_stop		= ieee80211_link_stop,
++	.ndo_uninit		= ieee80211_link_uninit,
++	.ndo_start_xmit		= ieee80211_link_subif_start_xmit_8023,
++	.ndo_set_rx_mode	= ieee80211_link_set_multicast_list,
++	.ndo_set_mac_address	= ieee80211_link_change_mac,
++	.ndo_select_queue	= ieee80211_link_netdev_select_queue,
++	.ndo_get_stats64	= ieee80211_link_get_stats64,
++};
++
++extern const struct cfg80211_ops mac80211_dummy_config_ops;
++int ath12k_bond_dev_cb(struct wireless_dev *wdev, struct net_device *dev, bool is_register)
++{
++	struct mlo_bond_info *mlo_info = NULL;
++	struct ath12k_mld_dev *mldev = NULL;
++	struct wireless_dev *dummywdev = NULL;
++	int priv_size = 100;
++	char name[20] = {0};
++	struct wiphy *dummywiphy = NULL;
++	bool ret;
++
++         if (!g_bonded_interface_model)
++                 return 0;
++
++	if (is_register) {
++		if (wdev->bond_netdev && test_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state)) {
++			ath12k_info(NULL, "Bond device already registered\n");
++			return 0;
++		}
++		mlo_info = kmalloc(sizeof(struct mlo_bond_info), GFP_KERNEL); //TODO: Free
++		if (!mlo_info) {
++			ath12k_err(NULL, "ERR: Couldn't allocate mlo_info\n");
++			return -ENOMEM;
++		}
++		mldev = kmalloc(sizeof(struct ath12k_mld_dev), GFP_KERNEL); 
++		if (!mldev) {
++			ath12k_err(NULL, "ERR: Couldn't allocate mld_dev\n");
++			kfree(mlo_info);
++			return -ENOMEM;
++		}
++		dummywdev = kmalloc(sizeof(struct wireless_dev), GFP_KERNEL);
++		if (!mldev) {
++			ath12k_err(NULL, "ERR: Couldn't allocate mld_dev\n");
++			kfree(mlo_info);
++			kfree(mldev);
++			return -ENOMEM;
++		}
++		memset(dummywdev, 0, sizeof(struct wireless_dev));
++		dummywiphy = wiphy_new_nm(&mac80211_dummy_config_ops, priv_size, NULL);
++		if (!dummywiphy) {
++			kfree(mlo_info);
++			kfree(mldev);
++			kfree(dummywdev);
++			return -EINVAL;
++		}
++		dummywiphy->interface_modes = BIT(NL80211_IFTYPE_AP) | BIT(NL80211_IFTYPE_DUMMY);
++		mlo_info->wdev = dummywdev;
++		mldev->wdev = dummywdev;
++		mlo_info->wdev->wiphy = dummywiphy;
++		mlo_info->wdev->iftype = NL80211_IFTYPE_AP;
++		mlo_info->bond_mlo_ctx = (void *)mldev;
++		mlo_info->bond_mlo_xmit_netdev = ath12k_dp_mlo_xmit_netdev;
++		mlo_info->bond_get_mlo_tx_netdev = ath12k_dp_get_mlo_tx_netdev ;
++                snprintf(name, sizeof(name), "%s_b", dev->name);
++		wdev->bond_netdev = bond_create_mlo(&init_net, name, mlo_info);
++
++		if (wdev->bond_netdev) {
++			set_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state);
++			ath12k_info(NULL, "Successfully registered bond_netdev %s for netdevice %s\n", wdev->bond_netdev->name, dev->name);
++		} else {
++			ath12k_err(NULL, "ERR: Unnable to register Bonded interface\n");
++		}
++	} else {
++		//TODO: Cleanup all objects in the allocation path. dummy wdev, wiphy, mldev
++		if (!wdev->bond_netdev) {
++			ath12k_info(NULL, "No bond device exists in the ath12k driver for device %s\n", dev->name);
++			return 0;
++		}
++		mldev = bond_get_mlo_ctx(wdev->bond_netdev);
++		if (!test_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state)) {
++			ath12k_err(NULL, "bond interface destroyed already. Called for the second time.\n");
++			return 0;
++		}
++			
++		dummywiphy = mldev->wdev->wiphy;
++		dummywdev = mldev->wdev;
++
++		/* Returns true on success */
++		ret  = bond_destroy_mlo(wdev->bond_netdev);
++		if (ret) {
++			wdev->bond_netdev = NULL;
++			ath12k_info(NULL,"Successfully destroyed bond device\n");
++		} else {
++			ath12k_err(NULL, "Not able destroy bond device %s ret %d\n", wdev->bond_netdev->name, ret);
++			return -EINVAL;
++		}
++		//TODO: Free mlo_info
++		kfree(dummywdev);
++		wiphy_free(dummywiphy);
++		kfree(mldev);
++		clear_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state);
++	}
++	return 0;
++}
++EXPORT_SYMBOL(ath12k_bond_dev_cb);
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.h b/drivers/net/wireless/ath/ath12k/bondif.h
+new file mode 100644
+index 0000000..90fd831
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath12k/bondif.h
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: BSD-3-Clause-Clear
++/*
++ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++ 
++#ifndef __BONDIF_H
++#define __BONDIF_H
++
++#define MAX_MLO_CHIPS 3
++#define MAX_PDEV_PER_SOC 3
++void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev);
++int ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++					    struct net_device *link_dev);
++
++enum ath12k_bond_state {
++	ATH12K_BOND_SETUP_INPROGRESS,
++	ATH12K_BOND_REGISTERED,
++	ATH12K_BOND_LINK0_REGISTERED,
++	ATH12K_BOND_LINK1_REGISTERED,
++	ATH12K_BOND_LINK2_REGISTERED,
++
++};
++struct ath12k_mld_dev {
++	struct net_device *netdev;
++	struct ieee80211_vif *vif;
++	struct wireless_dev *wdev; //dummy one for bond registration. Optimize Bond MLO API.
++	struct net_device *link_dev[MAX_MLO_CHIPS][MAX_PDEV_PER_SOC];
++	int primary_chipid, primary_pdevid;
++	bool mcast_dev_set;
++	unsigned long bond_state;
++};
++
++#endif //__BONDIF_H
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index e7049fe..944ab80 100644
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -332,6 +332,17 @@ struct ath12k_vif_tcl_desc_template {
+ 	u32 info4;
+ };
+ 
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++struct ath12k_link_vif_pvt {
++        struct ath12k_link_vif *arvif;
++	struct net_device *link_ndev;
++	struct ieee80211_hw *hw;
++	bool is_started;
++	int ppe_vp_profile_idx;
++	int vp_num;
++};
++#endif
++
+ struct ath12k_link_vif {
+ 	struct ath12k_base *ab;
+ 	struct ath12k_dp *dp;
+@@ -384,6 +395,11 @@ struct ath12k_link_vif {
+ 	u32 tx_vdev_id;
+ 	u8 link_id;
+ 	struct ath12k_vif *ahvif;
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	struct ath12k_link_vif_pvt *ndev_pvt;
++	int ppe_vp_type;
++	int ppe_vp_num;
++#endif
+ 
+ 	bool mvr_processing;
+ };
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 82f2b8c..5194b07 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -2776,7 +2776,12 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
+ #endif
+ 				spin_unlock_bh(&ar->ab->base_lock);
+ 				ath12k_dp_rx_h_csum_offload(ar, msdu);
+-				msdu->dev = wdev->netdev;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++				if (wdev->bond_netdev)
++					msdu->dev = wdev->bond_netdev;
++				else
++#endif
++					msdu->dev = wdev->netdev;
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+ 				if (vp) {
+ 					if (likely(ppe_vp_tx_to_ppe(vp, msdu)))
+@@ -2797,6 +2802,14 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
+ 	}
+ 	spin_unlock_bh(&ar->ab->base_lock);
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (peer) {
++		wdev = ieee80211_vif_to_wdev(peer->vif);
++		if (wdev && wdev->bond_netdev)
++			msdu->dev = wdev->bond_netdev;
++	}
++#endif
++
+ 	*fast_rx = false;
+ 
+ 	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 3a68466..373a9d1 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -23,7 +23,9 @@
+ #include "testmode.h"
+ #include "peer.h"
+ #include "debugfs_sta.h"
+-#include "ppe.h"
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++#include "bondif.h"
++#endif
+ 
+ #define CHAN2G(_channel, _freq, _flags) { \
+ 	.band                   = NL80211_BAND_2GHZ, \
+@@ -51,9 +53,15 @@
+ 	.max_antenna_gain       = 0, \
+ 	.max_power              = 30, \
+ }
+-
+ static void ath12k_mac_remove_link_interface(struct ieee80211_hw *hw,
+ 					     struct ath12k_link_vif *arvif);
++
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
++					  struct ieee80211_vif *vif,
++					  u16 old_links, u16 new_links,
++					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS]);
++#endif
+ static const struct ieee80211_channel ath12k_2ghz_channels[] = {
+ 	CHAN2G(1, 2412, 0),
+ 	CHAN2G(2, 2417, 0),
+@@ -4721,8 +4729,12 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	arvif->is_created = false;
+ 
+ clean_up:
+-	arvif->ar = NULL;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (arvif->ndev_pvt)
++		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
++#endif
+ 
++	arvif->ar = NULL;
+ 	spin_lock_bh(&ar->data_lock);
+ 	list_del(&arvif->list);
+ 	spin_unlock_bh(&ar->data_lock);
+@@ -4770,7 +4782,7 @@ void ath12k_mac_unassign_link_vif(struct ath12k_link_vif *arvif)
+ 		kfree(arvif);
+ }
+ 
+-static struct ath12k_link_vif *
++struct ath12k_link_vif *
+ ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
+ {
+ 	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+@@ -6624,8 +6636,8 @@ static int ath12k_mac_station_add(struct ath12k *ar,
+ 		}
+ 	}
+ 
+-#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+-	ret = ath12k_dp_peer_setup(ar, arvif, arsta, vif->ppe_vp_num);
++#if defined(CPTCFG_ATH12K_PPE_DS_SUPPORT) && defined(CPTCFG_ATH12K_BONDED_DS_SUPPORT)
++	ret = ath12k_dp_peer_setup(ar, arvif, arsta, arvif->ppe_vp_num);
+ #else
+ 	ret = ath12k_dp_peer_setup(ar, arvif, arsta, -1);
+ #endif
+@@ -9468,6 +9480,9 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	struct peer_create_params peer_param = {0};
+ 	struct ieee80211_bss_conf *link_conf;
+ 	u32 param_id, param_value;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	struct net_device *link_ndev = NULL;
++#endif
+ 	u16 nss;
+ 	int i;
+ 	int ret, fbret, vdev_id;
+@@ -9526,6 +9541,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	arvif->dp = &ab->dp;
+ 	arvif->dev = ab->dev;
+ 	arvif->pdev_idx = ar->pdev_idx;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (arvif->ndev_pvt)
++		link_ndev = arvif->ndev_pvt->link_ndev ;
++#endif
+ 
+ 	switch (vif->type) {
+ 	case NL80211_IFTYPE_UNSPECIFIED:
+@@ -9617,6 +9636,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+ 				    arvif->vdev_id, ret);
+ 			goto err_peer_del;
+ 		}
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++		if (link_ndev)
++			ath12k_enable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
++#endif
+ 		break;
+ 	case WMI_VDEV_TYPE_STA:
+ 		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
+@@ -10196,15 +10219,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
+ 	return ret;
+ }
+ 
+-static int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
+-					  struct ieee80211_vif *vif,
+-					  u16 old_links, u16 new_links,
+-					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS])
++#ifndef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
++				   struct ieee80211_vif *vif,
++				   u16 old_links, u16 new_links,
++				   struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS])
+ {
+ 	ath12k_info(NULL,
+ 		    "link changed for MLD %pM old %d new %d\n", vif->addr, old_links, new_links);
+ 	return 0;
+ }
++#endif
+ 
+ static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
+ 				     struct ieee80211_chanctx_conf *ctx)
+@@ -13917,10 +13942,6 @@ static const struct ieee80211_ops ath12k_ops = {
+ #endif
+ 	.get_txpower			= ath12k_mac_op_get_txpower,
+ 	.set_radar_background		= ath12k_mac_op_set_radar_background,
+-#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+-	.ppeds_attach_vdev		= ath12k_mac_op_ppeds_attach_vdev,
+-	.ppeds_detach_vdev		= ath12k_mac_op_ppeds_detach_vdev,
+-#endif
+ };
+ 
+ static void ath12k_mac_update_ch_list(struct ath12k *ar,
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index 7ba262e..b0855aa 100644
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
+@@ -65,6 +65,16 @@ EXPORT_SYMBOL(ath12k_napi_poll_budget);
+ module_param_named(napi_budget, ath12k_napi_poll_budget, uint, 0644);
+ MODULE_PARM_DESC(napi_budget, "Napi budget processing per rx intr");
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++extern int ath12k_mlo_capable;
++extern int g_bonded_interface_model;
++extern bool ppe_vp_accel;
++extern unsigned int ath12k_ppe_ds_enabled;
++
++extern int ath12k_bond_dev_cb(struct wireless_dev *wdev, struct net_device *dev, bool is_register);
++extern int (*driver_bond_dev_cb)(struct wireless_dev *wdev, struct net_device *dev, bool is_register);
++#endif
++
+ static const struct pci_device_id ath12k_pci_id_table[] = {
+ 	{ PCI_VDEVICE(QCOM, QCN9274_DEVICE_ID) },
+ 	{ PCI_VDEVICE(QCOM, WCN7850_DEVICE_ID) },
+@@ -1363,7 +1373,17 @@ static int ath12k_pci_probe(struct pci_dev *pdev,
+ 	struct ath12k_pci *ab_pci;
+ 	u32 soc_hw_version_major, soc_hw_version_minor, addr;
+ 	int ret;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (ath12k_mlo_capable == 2) {
++		ath12k_mlo_capable = 1;
++		g_bonded_interface_model = ath12k_mlo_capable;
++		ppe_vp_accel = true;	
++		ath12k_ppe_ds_enabled = 1;
++		driver_bond_dev_cb = ath12k_bond_dev_cb; 
++	}
+ 
++	ath12k_info(NULL, "g_bonded_interface_model %d ath12k_mlo_capable %d \n", g_bonded_interface_model, ath12k_mlo_capable);
++#endif
+ 	ab = ath12k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH12K_BUS_PCI,
+ 			       &ath12k_pci_bus_params);
+ 	if (!ab) {
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
+index 8a0ff17..91bad0b 100644
+--- a/drivers/net/wireless/ath/ath12k/ppe.c
++++ b/drivers/net/wireless/ath/ath12k/ppe.c
+@@ -509,16 +509,12 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
+ 	return;
+ }
+ 
+-int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+-				struct ieee80211_vif *vif,
++int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
+ 				void *vp_arg, int *ppe_vp_num,
+ 				struct ieee80211_ppe_vp_ds_params *vp_params)
+ {
+-	struct ath12k_hw *ah = hw->priv;
+-	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+ 	//TODO: handle MLO
+-	struct ath12k_link_vif *arvif = &ahvif->link[0];
+-	struct ath12k *ar = ah->radio;
++	struct ath12k *ar = arvif->ar;
+ 	//TODO: Handle split phy
+ 	struct ath12k_base *ab = ar->ab;
+ 	struct ath12k_dp_ppe_vp_profile *vp_profile = NULL;
+@@ -537,7 +533,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (vif->type != NL80211_IFTYPE_AP) {
++	if (arvif->ahvif->vif->type != NL80211_IFTYPE_AP) {
+ 		return -EINVAL;
+ 	}
+ 
+@@ -562,7 +558,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+ 		goto dealloc_vp_profile;
+ 	}
+ 
+-	if (vif->type == NL80211_IFTYPE_STATION) {
++	if (arvif->ahvif->vif->type == NL80211_IFTYPE_STATION) {
+ 		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
+ 		if (ppe_vp_search_tbl_idx < 0) {
+ 			ath12k_err(ab,
+@@ -578,6 +574,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+ 	vp_profile->to_fw = 0;
+ 	vp_profile->use_ppe_int_pri = 0;
+ 	vp_profile->drop_prec_enable = 0;
++	vp_profile->arvif = arvif;
+ 
+ 	/* For the sta mode fill up the index reg number */
+ 	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
+@@ -600,15 +597,11 @@ vp_free:
+ 	return ret;
+ }
+ 
+-void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
+-				     struct ieee80211_vif *vif,
++void ath12k_mac_op_ppeds_detach_vdev(struct ath12k_link_vif *arvif,
+ 				     struct ieee80211_ppe_vp_ds_params *vp_params)
+ {
+-	struct ath12k_hw *ah = hw->priv;
+-	struct ath12k *ar = ah->radio;
++	struct ath12k *ar = arvif->ar;
+ 	struct ath12k_base *ab = ar->ab;
+-	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+-	struct ath12k_link_vif *arvif = &ahvif->link[0];
+ 	struct ath12k_dp_ppe_vp_profile *vp_profile;
+ 	int ppe_vp_profile_idx = -1;
+ 
+@@ -629,7 +622,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
+ 	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
+ 
+ 	/* For STA mode ast index table reg also needs to be cleaned */
+-	if (vif->type == NL80211_IFTYPE_STATION)
++	if (arvif->ahvif->vif->type == NL80211_IFTYPE_STATION)
+ 		ath12k_dp_ppeds_dealloc_vp_search_idx_tbl_entry(ab, vp_profile->search_idx_reg_num);
+ 
+ 	ath12k_dp_ppeds_dealloc_vp_tbl_entry(ab, vp_profile->ppe_vp_num_idx);
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
+index e0982ed..65db15e 100644
+--- a/drivers/net/wireless/ath/ath12k/ppe.h
++++ b/drivers/net/wireless/ath/ath12k/ppe.h
+@@ -14,6 +14,7 @@ struct ath12k_dp_ppe_vp_profile {
+         u8 drop_prec_enable;
+         u8 to_fw;
+         u8 use_ppe_int_pri;
++	struct ath12k_link_vif *arvif;	
+ };
+ 
+ #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+@@ -24,13 +25,11 @@ void ath12k_dp_ppeds_stop(struct ath12k_base *ab);
+ int ath12k_dp_ppeds_start(struct ath12k_base *ab);
+ int ath12k_ppeds_detach( struct ath12k_base *ab);
+ int ath12k_ppeds_attach( struct ath12k_base *ab);
+-int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+-				       struct ieee80211_vif *vif,
+-				       void *vp_arg, int *ppe_vp_num,
+-				       struct ieee80211_ppe_vp_ds_params *vp_params);
+-void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
+-				     struct ieee80211_vif *vif,
+-				     struct ieee80211_ppe_vp_ds_params *vp_params);
++int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
++                                void *vp_arg, int *ppe_vp_num,
++                                struct ieee80211_ppe_vp_ds_params *vp_params);
++void ath12k_mac_op_ppeds_detach_vdev(struct ath12k_link_vif *arvif,
++                                     struct ieee80211_ppe_vp_ds_params *vp_params);
+ void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
+ irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
+diff --git a/drivers/net/wireless/ath/ath6kl/cfg80211.c b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+index 972b9bb..bff3f67 100644
+--- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
++++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+@@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_add(struct ath6kl *ar, const char *name,
+ 
+ 	netdev_set_default_ethtool_ops(ndev, &ath6kl_ethtool_ops);
+ 
+-	if (cfg80211_register_netdevice(ndev))
++	if (cfg80211_register_netdevice(ndev, 0))
+ 		goto err;
+ 
+ 	ar->avail_idx_map &= ~BIT(fw_vif_idx);
+diff --git a/drivers/net/wireless/ath/wil6210/netdev.c b/drivers/net/wireless/ath/wil6210/netdev.c
+index 6539b39..f055cbc 100644
+--- a/drivers/net/wireless/ath/wil6210/netdev.c
++++ b/drivers/net/wireless/ath/wil6210/netdev.c
+@@ -432,7 +432,7 @@ int wil_vif_add(struct wil6210_priv *wil, struct wil6210_vif *vif)
+ 		if (rc)
+ 			return rc;
+ 	}
+-	rc = cfg80211_register_netdevice(ndev);
++	rc = cfg80211_register_netdevice(ndev, 0);
+ 	if (rc < 0) {
+ 		dev_err(&ndev->dev, "Failed to register netdev: %d\n", rc);
+ 		if (any_active && vif->mid != 0)
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index f3f1c78..87ce1fd 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -6053,6 +6053,7 @@ struct wireless_dev {
+ 	/* the remainder of this struct should be private to cfg80211 */
+ 	struct list_head list;
+ 	struct net_device *netdev;
++	struct net_device *bond_netdev;
+ 
+ 	u32 identifier;
+ 
+@@ -8736,7 +8737,7 @@ void cfg80211_unregister_wdev(struct wireless_dev *wdev);
+  *
+  * Requires the RTNL and wiphy mutex to be held.
+  */
+-int cfg80211_register_netdevice(struct net_device *dev);
++int cfg80211_register_netdevice(struct net_device *dev, bool mlo_bond_dev);
+ 
+ /**
+  * cfg80211_unregister_netdevice - unregister the given netdev
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 032fb7b..bb287a0 100644
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -1964,7 +1964,11 @@ struct ieee80211_vif {
+ 
+ 	bool txqs_stopped[IEEE80211_NUM_ACS];
+ 	bool noqueue_enable;
+-
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	bool bond_init;
++	struct mutex bond_mutex;
++	struct net_device *link_ndev[IEEE80211_MLD_MAX_NUM_LINKS];
++#endif
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+ 	int ppe_vp_num;
+ 	unsigned long ppe_vp_type;
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 4f0cc04..9a79f8f 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -3503,6 +3503,9 @@ enum nl80211_iftype {
+ 	NL80211_IFTYPE_P2P_DEVICE,
+ 	NL80211_IFTYPE_OCB,
+ 	NL80211_IFTYPE_NAN,
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	NL80211_IFTYPE_DUMMY,
++#endif
+ 
+ 	/* keep last */
+ 	NUM_NL80211_IFTYPES,
+diff --git a/local-symbols b/local-symbols
+index 17bedea..cd8ceae 100644
+--- a/local-symbols
++++ b/local-symbols
+@@ -67,6 +67,7 @@ MAC80211_DEBUG_COUNTERS=
+ MAC80211_STA_HASH_MAX_SIZE=
+ MAC80211_NSS_SUPPORT=
+ MAC80211_PPE_SUPPORT=
++MAC80211_BONDED_SUPPORT=
+ WLAN=
+ PCMCIA_RAYCS=
+ PCMCIA_WL3501=
+@@ -144,3 +145,4 @@ ATH12K_TRACING=
+ ATH12K_SPECTRAL=
+ ATH12K_PKTLOG=
+ ATH12K_PPE_DS_SUPPORT=
++ATH12K_BONDED_DS_SUPPORT=
+diff --git a/net/mac80211/Kconfig b/net/mac80211/Kconfig
+index 2599669..fd33a84 100644
+--- a/net/mac80211/Kconfig
++++ b/net/mac80211/Kconfig
+@@ -122,6 +122,24 @@ config MAC80211_PPE_SUPPORT
+ 
+ 	  If unsure, say N.
+ 
++config MAC80211_BONDED_SUPPORT
++	bool "QTI mac80211 bonded support"
++	depends on ATH12K
++	default n
++	---help---
++	  Enables Bonded support for ATH12K driver
++
++	  If unsure, say N.
++
++config MAC80211_BONDED_SUPPORT
++	bool "QTI mac80211 bonded support"
++	depends on ATH12K
++	default n
++	---help---
++	  Enables Bonded support for ATH12K driver
++
++	  If unsure, say N.
++
+ config MAC80211_NOINLINE
+ 	bool "Do not inline TX/RX handlers"
+ 	depends on MAC80211_DEBUG_MENU
+diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
+index bfc8f21..a819d1d 100644
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -194,7 +194,11 @@ static struct wireless_dev *ieee80211_add_iface(struct wiphy *wiphy,
+ 	struct ieee80211_sub_if_data *sdata;
+ 	int err;
+ 
+-	err = ieee80211_if_add(local, name, name_assign_type, &wdev, type, params);
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	err = ieee80211_if_add(local, name, name_assign_type, &wdev, type, params, true);
++#else
++	err = ieee80211_if_add(local, name, name_assign_type, &wdev, type, params, false);
++#endif
+ 	if (err)
+ 		return ERR_PTR(err);
+ 
+@@ -218,6 +222,26 @@ static int ieee80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
+ 	return 0;
+ }
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++static struct wireless_dev *ieee80211_dummy_add_iface(struct wiphy *wiphy,
++                                                const char *name,
++                                                unsigned char name_assign_type,
++                                                enum nl80211_iftype type,
++                                                struct vif_params *params)
++{
++	return NULL;
++}
++static int ieee80211_dummy_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
++{
++	return -EINVAL;
++}
++const struct cfg80211_ops mac80211_dummy_config_ops = {
++        .add_virtual_intf = ieee80211_dummy_add_iface,
++        .del_virtual_intf = ieee80211_dummy_del_iface,
++};
++EXPORT_SYMBOL(mac80211_dummy_config_ops);
++#endif
++
+ static int ieee80211_change_iface(struct wiphy *wiphy,
+ 				  struct net_device *dev,
+ 				  enum nl80211_iftype type,
+@@ -542,6 +566,10 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
+ 	}
+ 
+ 	switch (sdata->vif.type) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return 0;
++#endif
+ 	case NL80211_IFTYPE_STATION:
+ 		if (sdata->u.mgd.mfp != IEEE80211_MFP_DISABLED)
+ 			key->conf.flags |= IEEE80211_KEY_FLAG_RX_MGMT;
+diff --git a/net/mac80211/chan.c b/net/mac80211/chan.c
+index 3f09e33..5738277 100644
+--- a/net/mac80211/chan.c
++++ b/net/mac80211/chan.c
+@@ -294,6 +294,10 @@ ieee80211_get_chanctx_vif_max_required_bw(struct ieee80211_sub_if_data *sdata,
+ 			continue;
+ 
+ 		switch (vif->type) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++		case NL80211_IFTYPE_DUMMY:
++			return 0;
++#endif
+ 		case NL80211_IFTYPE_AP:
+ 		case NL80211_IFTYPE_AP_VLAN:
+ 			width = ieee80211_get_max_required_bw(sdata, link_id);
+@@ -1228,6 +1232,10 @@ ieee80211_link_chanctx_reservation_complete(struct ieee80211_link_data *link)
+ 	struct ieee80211_sub_if_data *sdata = link->sdata;
+ 
+ 	switch (sdata->vif.type) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return;
++#endif
+ 	case NL80211_IFTYPE_ADHOC:
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_MESH_POINT:
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index 9662836..bba43ea 100644
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -26,6 +26,9 @@
+ #include <linux/idr.h>
+ #include <linux/rhashtable.h>
+ #include <linux/rbtree.h>
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++#include <net/bonding.h>
++#endif
+ #include <net/ieee80211_radiotap.h>
+ #include <net/cfg80211.h>
+ #include <net/mac80211.h>
+@@ -1982,7 +1985,7 @@ void ieee80211_iface_exit(void);
+ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 		     unsigned char name_assign_type,
+ 		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
+-		     struct vif_params *params);
++		     struct vif_params *params, bool mlo_bond_dev);
+ int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
+ 			     enum nl80211_iftype type);
+ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index 7e0f579..b2cdeec 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -35,6 +35,7 @@ MODULE_PARM_DESC(nss_redirect, "module param to enable NSS Redirect; 1-enable, 0
+ 
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+ bool ppe_vp_accel = false;
++EXPORT_SYMBOL(ppe_vp_accel);
+ module_param(ppe_vp_accel, bool, 0644);
+ MODULE_PARM_DESC(ppe_vp_accel, "module param to enable PPE; 1-enable, 0-disable");
+ #endif
+@@ -738,7 +739,7 @@ static int ieee80211_stop(struct net_device *dev)
+ #endif
+ 
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+-	if (sdata->vif.ppe_vp_num != -1) {
++	if (ppe_vp_accel && sdata->vif.ppe_vp_num != -1) {
+ 		drv_ppeds_detach_vdev(sdata, &sdata->vif, &vp_params);
+ 		if (sdata->vif.ppe_vp_type != PPE_VP_USER_TYPE_DS)
+ 			ppe_vp_free(sdata->vif.ppe_vp_num);
+@@ -1368,6 +1369,11 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
+ 		/* cannot happen */
+ 		WARN_ON(1);
+ 		break;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return 0;
++		break;
++#endif
+ 	}
+ 
+ 	if (local->open_count == 0) {
+@@ -1945,6 +1951,10 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
+ 	case NUM_NL80211_IFTYPES:
+ 		WARN_ON(1);
+ 		break;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return;
++#endif
+ 	}
+ 
+ 	/* need to do this after the switch so vif.type is correct */
+@@ -2208,7 +2218,7 @@ static void ieee80211_assign_perm_addr(struct ieee80211_local *local,
+ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ 		     unsigned char name_assign_type,
+ 		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
+-		     struct vif_params *params)
++		     struct vif_params *params, bool mlo_bond_dev)
+ {
+ 	struct net_device *ndev = NULL;
+ 	struct ieee80211_sub_if_data *sdata = NULL;
+@@ -2381,7 +2391,7 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
+ #endif
+ 		}
+ 
+-		ret = cfg80211_register_netdevice(ndev);
++		ret = cfg80211_register_netdevice(ndev, mlo_bond_dev);
+ 		if (ret) {
+ 			free_netdev(ndev);
+ 			return ret;
+diff --git a/net/mac80211/main.c b/net/mac80211/main.c
+index 8a12504..67b4c41 100644
+--- a/net/mac80211/main.c
++++ b/net/mac80211/main.c
+@@ -1495,8 +1495,14 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
+ 	    !ieee80211_hw_check(hw, NO_AUTO_VIF)) {
+ 		struct vif_params params = {0};
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ 		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
+-					  NL80211_IFTYPE_STATION, &params);
++					  NL80211_IFTYPE_STATION, &params, true);
++#else
++		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
++					  NL80211_IFTYPE_STATION, &params, false);
++#endif
++
+ 		if (result)
+ 			wiphy_warn(local->hw.wiphy,
+ 				   "Failed to add default virtual iface\n");
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index 716b931..cef7c34 100644
+--- a/net/mac80211/rx.c
++++ b/net/mac80211/rx.c
+@@ -4802,6 +4802,9 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
+ 	struct sta_info *sta = rx->sta;
+ 	struct link_sta_info *link_sta;
+ 	struct sk_buff *skb = rx->skb;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	struct wireless_dev *wdev = NULL;
++#endif
+ 	void *sa = skb->data + ETH_ALEN;
+ 	void *da = skb->data;
+ 
+@@ -4852,6 +4855,12 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
+ 	stats->packets++;
+ 
+ 	skb->dev = fast_rx->dev;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	wdev = (struct wireless_dev *)fast_rx->dev->ieee80211_ptr;
++	if (wdev && wdev->bond_netdev) {
++		skb->dev = wdev->bond_netdev;
++	}
++#endif
+ 
+ 	ieee80211_rx_stats(fast_rx->dev, skb->len);
+ 
+@@ -4902,6 +4911,10 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
+ #endif
+ 	/* deliver to local stack */
+ 	skb->protocol = eth_type_trans(skb, fast_rx->dev);
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	if (wdev->bond_netdev)
++		skb->dev = wdev->bond_netdev;
++#endif
+ 	ieee80211_deliver_skb_to_local_stack(skb, rx);
+ }
+ 
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index 0a864b3..e923393 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -2415,6 +2415,10 @@ static int ieee80211_reconfig_link_bss(struct ieee80211_sub_if_data *sdata,
+ 		changed |= BSS_CHANGED_MU_GROUPS;
+ 
+ 	switch (sdata->vif.type) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return 0;
++#endif
+ 	case NL80211_IFTYPE_STATION:
+ 		changed |= BSS_CHANGED_ASSOC |
+ 			   BSS_CHANGED_ARP_FILTER |
+diff --git a/net/wireless/chan.c b/net/wireless/chan.c
+index 4e7363c..720bfbd 100644
+--- a/net/wireless/chan.c
++++ b/net/wireless/chan.c
+@@ -683,6 +683,10 @@ int cfg80211_chandef_dfs_required(struct wiphy *wiphy,
+ 		return -EINVAL;
+ 
+ 	switch (iftype) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return 0;
++#endif
+ 	case NL80211_IFTYPE_ADHOC:
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_P2P_GO:
+@@ -865,6 +869,10 @@ bool cfg80211_beaconing_iface_active(struct wireless_dev *wdev)
+ 	ASSERT_WDEV_LOCK(wdev);
+ 
+ 	switch (wdev->iftype) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return true;
++#endif
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_P2P_GO:
+ 		for_each_valid_link(wdev, link) {
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+index 2e45744..b653ee6 100644
+--- a/net/wireless/core.c
++++ b/net/wireless/core.c
+@@ -22,6 +22,9 @@
+ #include <linux/etherdevice.h>
+ #include <linux/rtnetlink.h>
+ #include <linux/sched.h>
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++#include <net/bonding.h>
++#endif
+ #include <net/genetlink.h>
+ #include <net/cfg80211.h>
+ #include "nl80211.h"
+@@ -54,6 +57,16 @@ module_param(cfg80211_disable_40mhz_24ghz, bool, 0644);
+ MODULE_PARM_DESC(cfg80211_disable_40mhz_24ghz,
+ 		 "Disable 40MHz support in the 2.4GHz band");
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++int g_bonded_interface_model = 0;
++module_param(g_bonded_interface_model, bool, 0644);
++MODULE_PARM_DESC(g_bonded_interface_model, "g_bonded_interface_model");
++EXPORT_SYMBOL(g_bonded_interface_model);
++
++int (*driver_bond_dev_cb)(struct wireless_dev *wdev, struct net_device *dev, bool is_register);
++EXPORT_SYMBOL(driver_bond_dev_cb);
++#endif
++
+ struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
+ {
+ 	struct cfg80211_registered_device *result = NULL, *rdev;
+@@ -1334,8 +1347,14 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
+ 
+ 	if (wdev->netdev) {
+ 		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
+-		if (unregister_netdev)
++		if (unregister_netdev) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++			if (g_bonded_interface_model && driver_bond_dev_cb) {
++				(*driver_bond_dev_cb)(wdev, wdev->netdev, false);
++			}
++#endif
+ 			unregister_netdevice(wdev->netdev);
++		}
+ 	}
+ 
+ 	list_del_rcu(&wdev->list);
+@@ -1423,6 +1442,10 @@ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
+ 	cfg80211_stop_background_radar_detection(wdev);
+ 
+ 	switch (wdev->iftype) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return;
++#endif
+ 	case NL80211_IFTYPE_ADHOC:
+ 		__cfg80211_leave_ibss(rdev, dev, true);
+ 		break;
+@@ -1556,12 +1579,12 @@ void cfg80211_register_wdev(struct cfg80211_registered_device *rdev,
+ 	if (wdev->netdev &&
+ 	    sysfs_create_link(&wdev->netdev->dev.kobj, &rdev->wiphy.dev.kobj,
+ 			      "phy80211"))
+-		pr_err("failed to add phy80211 symlink to netdev!\n");
++		pr_err("failed to add phy80211 symlink to netdev! name %s\n", wdev->netdev->name);
+ 
+ 	nl80211_notify_iface(rdev, wdev, NL80211_CMD_NEW_INTERFACE);
+ }
+ 
+-int cfg80211_register_netdevice(struct net_device *dev)
++int cfg80211_register_netdevice(struct net_device *dev, bool create_bond_dev)
+ {
+ 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+ 	struct cfg80211_registered_device *rdev;
+@@ -1584,6 +1607,12 @@ int cfg80211_register_netdevice(struct net_device *dev)
+ 		goto out;
+ 
+ 	cfg80211_register_wdev(rdev, wdev);
++
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	if (g_bonded_interface_model && create_bond_dev && driver_bond_dev_cb) {
++		(*driver_bond_dev_cb)(wdev, dev, true);
++	}
++#endif
+ 	ret = 0;
+ out:
+ 	wdev->registering = false;
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index dfb3b42..2c1695c 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -1609,6 +1609,10 @@ static int nl80211_key_allowed(struct wireless_dev *wdev)
+ 	ASSERT_WDEV_LOCK(wdev);
+ 
+ 	switch (wdev->iftype) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	case NL80211_IFTYPE_DUMMY:
++		return 0;
++#endif
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_AP_VLAN:
+ 	case NL80211_IFTYPE_P2P_GO:
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index 39be0db..de196d8 100644
+--- a/net/wireless/util.c
++++ b/net/wireless/util.c
+@@ -1113,6 +1113,10 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
+ 	if (!err) {
+ 		dev->priv_flags &= ~IFF_DONT_BRIDGE;
+ 		switch (ntype) {
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++		case NL80211_IFTYPE_DUMMY:
++			return 0;
++#endif
+ 		case NL80211_IFTYPE_STATION:
+ 			if (dev->ieee80211_ptr->use_4addr)
+ 				break;
+-- 
+2.17.1
+
