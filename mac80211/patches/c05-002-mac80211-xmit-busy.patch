@@ -1,0 +1,42 @@
+From 4eaead7a186a2e54c87d0fe68208c99558234aa3 Mon Sep 17 00:00:00 2001
+From: Jiani Liu <quic_jianil@quicinc.com>
+Date: Fri, 7 Apr 2023 15:18:33 +0800
+Subject: [PATCH] mac80211: add tx frames to pending list when queues are
+ stopped
+
+Packets from NSS are dropped when queues are stopped by driver
+due to out of resources. Dropping TCP packets is affecting throughput
+on downlink direction. Hence queue up the frames into pending list
+until it is woken up by driver. Since NSS driver does not support
+net device pause and unpause, pending queue depth is maintained to
+avoid memory overload. This change is improving TCP DL by 10 Mbps.
+
+Change-Id: Ic2135e99729117aef364becdf37a1a437df4d958
+Signed-off-by: Rajkumar Manoharan <rmanohar@codeaurora.org>
+Signed-off-by: Jiani Liu <quic_jianil@quicinc.com>
+
+diff --git a/net/mac80211/tx.c b/net/mac80211/tx.c
+index 8e40769..757f8b0 100644
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -1673,7 +1673,16 @@ static bool ieee80211_tx_frags(struct ieee80211_local *local,
+ 					return true;
+ 				}
+ 			} else {
+-
++#ifdef CPTCFG_MAC80211_NSS_SUPPORT
++				if (skb_queue_len(&local->pending[q]) >= 1000) {
++					spin_unlock_irqrestore(
++						&local->queue_stop_reason_lock,
++						flags);
++					ieee80211_purge_tx_queue(&local->hw,
++								 skbs);
++					return false;
++				}
++#endif
+ 				/*
+ 				 * Since queue is stopped, queue up frames for
+ 				 * later transmission from the tx-pending
+-- 
+2.7.4
+
