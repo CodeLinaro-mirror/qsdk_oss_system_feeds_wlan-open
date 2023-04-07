@@ -1,0 +1,99 @@
+From 594c85455f10c9f8e7b978ce927a38aeee5ee06d Mon Sep 17 00:00:00 2001
+From: Jiani Liu <quic_jianil@quicinc.com>
+Date: Fri, 7 Apr 2023 12:16:51 +0800
+Subject: [PATCH] ath10k: Add support to parse per station tx stats
+
+Per peer tx stats are available on pktlog tx stats event.
+WMI_PEER_STATS service to be enabled to parse the tx stats.
+
+tx stats histogram has success/failed/retried packets and bytes info
+per rate/mcs, bw and nss
+
+tx duration and BA fails are also supported.
+
+Change-Id: Ice5658721e8e41d3781b0d820b9618a6bb714c14
+Signed-off-by: Anilkumar kolli <akolli@codeaurora.org>
+Signed-off-by: Jiani Liu <quic_jianil@quicinc.com>
+
+diff --git a/drivers/net/wireless/ath/ath10k/htt.h b/drivers/net/wireless/ath/ath10k/htt.h
+index 903101b..240c1e7 100644
+--- a/drivers/net/wireless/ath/ath10k/htt.h
++++ b/drivers/net/wireless/ath/ath10k/htt.h
+@@ -1773,7 +1773,11 @@ struct htt_peer_tx_stats {
+ 	u8 payload[];
+ } __packed;
+ 
++#ifdef CPTCFG_MAC80211_DEBUGFS
++
+ #define ATH10K_10_2_TX_STATS_OFFSET	136
++#define ATH10K_10_2_TX_STATS_OFFSET_V2	136
++#define ATH10K_10_2_TX_STATS_OFFSET_V1	128
+ #define PEER_STATS_FOR_NO_OF_PPDUS	4
+ 
+ struct ath10k_10_2_peer_tx_stats {
+@@ -1790,6 +1794,8 @@ struct ath10k_10_2_peer_tx_stats {
+ 	u8 peer_id;
+ } __packed;
+ 
++#endif /*CPTCFG_MAC80211_DEBUGFS*/
++
+ union htt_rx_pn_t {
+ 	/* WEP: 24-bit PN */
+ 	u32 pn24;
+diff --git a/drivers/net/wireless/ath/ath10k/htt_rx.c b/drivers/net/wireless/ath/ath10k/htt_rx.c
+index 4e71ea2..9b870af 100644
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -3670,18 +3670,33 @@ static void ath10k_fetch_10_2_tx_stats(struct ath10k *ar, u8 *data)
+ 	struct ieee80211_sta *sta;
+ 	struct ath10k_peer *peer;
+ 	u16 log_type = __le16_to_cpu(hdr->log_type);
++	u16 log_flags = __le16_to_cpu(hdr->flags);
+ 	u32 peer_id = 0, i;
+ 
+-	if (log_type != ATH_PKTLOG_TYPE_TX_STAT)
++	if (log_type != ATH_PKTLOG_TYPE_TX_CTRL &&
++	    log_type != ATH_PKTLOG_TYPE_TX_STAT)
+ 		return;
+ 
+-	tx_stats = (struct ath10k_10_2_peer_tx_stats *)((hdr->payload) +
+-		    ATH10K_10_2_TX_STATS_OFFSET);
++	if (log_type == ATH_PKTLOG_TYPE_TX_STAT) {
++		if (log_flags & PKTLOG_INFO_FLAG_HW_STATUS_V2)
++			tx_stats = (struct ath10k_10_2_peer_tx_stats *)
++				    ((hdr->payload) +
++				    ATH10K_10_2_TX_STATS_OFFSET_V2);
++		else
++			tx_stats = (struct ath10k_10_2_peer_tx_stats *)
++				    ((hdr->payload) +
++				    ATH10K_10_2_TX_STATS_OFFSET_V1);
+ 
+-	if (!tx_stats->tx_ppdu_cnt)
+-		return;
++		if (!tx_stats->tx_ppdu_cnt)
++			return;
+ 
+-	peer_id = tx_stats->peer_id;
++		peer_id = tx_stats->peer_id;
++	} else {
++		u32 *tx_ctrl_desc;
++		tx_ctrl_desc = (u32 *)hdr->payload;
++
++		peer_id = __le32_to_cpu(tx_ctrl_desc[ATH10K_TXC_PEERID]);
++	}
+ 
+ 	rcu_read_lock();
+ 	spin_lock_bh(&ar->data_lock);
+@@ -3983,7 +3998,8 @@ bool ath10k_htt_t2h_msg_handler(struct ath10k *ar, struct sk_buff *skb)
+ 		ath10k_htt_rx_tx_mode_switch_ind(ar, skb);
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_PEER_STATS:
+-		ath10k_htt_fetch_peer_stats(ar, skb);
++		if (ath10k_peer_stats_enabled(ar))
++			ath10k_htt_fetch_peer_stats(ar, skb);
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_EN_STATS:
+ 	default:
+-- 
+2.7.4
+
