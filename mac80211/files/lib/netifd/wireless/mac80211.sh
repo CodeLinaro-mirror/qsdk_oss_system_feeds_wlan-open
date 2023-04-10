@@ -1254,6 +1254,8 @@ mac80211_setup_supplicant_noctl() {
 				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "80")")";;
 			VHT160|HE160|EHT160)
 				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "160")")";;
+			EHT320)
+				centre_freq="$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 "320")")";;
 		esac
 	fi
 
