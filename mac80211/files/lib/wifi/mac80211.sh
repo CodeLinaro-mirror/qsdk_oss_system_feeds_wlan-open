@@ -74,6 +74,20 @@ pre_wifi_updown() {
 		rm -rf $MLD_VAP_DETAILS
 	fi
 
+	get_device_config()  {
+		if [ ${#1} -eq 12 ]; then
+			dev=$1
+			drv_mlo_capable=$(cat /sys/module/ath12k/parameters/mlo_capable)
+		fi
+        }
+	config_foreach get_device_config wifi-device
+
+	if ([ -n "$drv_mlo_capable" ] && [ $drv_mlo_capable -eq 0 ]); then
+		echo Wireless driver is not in single wiphy architecture. Kindly set mlo_capable module param.
+		exit
+	fi
+
+
 	update_mld_vap_details
 }
 
