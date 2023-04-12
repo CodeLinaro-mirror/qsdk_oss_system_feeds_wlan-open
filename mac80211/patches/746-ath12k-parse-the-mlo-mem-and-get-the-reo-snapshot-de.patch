@@ -18,7 +18,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -134,6 +134,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max
+@@ -136,6 +136,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max
  	ag->mlo_capable = !!ath12k_mlo_capable;
  	list_add(&ag->list, &ath12k_hw_groups);
  	mutex_init(&ag->mutex_lock);
@@ -26,7 +26,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ag->hw_queues_stopped = false;
  
  	return ag;
-@@ -1267,6 +1268,8 @@ int ath12k_core_qmi_firmware_ready(struc
+@@ -1269,6 +1270,8 @@ int ath12k_core_qmi_firmware_ready(struc
  
  	mutex_unlock(&ag->mutex_lock);
  
@@ -35,33 +35,9 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	/* Add code here carefully */
  	return 0;
  
-@@ -1500,6 +1503,8 @@ static void ath12k_core_reset(struct wor
- 	struct ath12k_base *ab = container_of(work, struct ath12k_base, reset_work);
- 	struct ath12k_hw_group *ag = ab->ag;
- 	struct ath12k_base *partner_ab;
-+	struct ath12k_host_mlo_mem_arena
-+		*mlomem_arena_ctx = &ab->ag->mlomem_arena;
- 	int reset_count, fail_cont_count, i;
- 	long time_left;
- 
-@@ -1572,6 +1577,14 @@ static void ath12k_core_reset(struct wor
- 
- 	ath12k_core_post_reconfigure_recovery(ab);
- 
-+	/* We need to de-initialize only for the last invocation */
-+	mutex_lock(&mlomem_arena_ctx->mutex_lock);
-+	if (!mlomem_arena_ctx->init_count--) {
-+		ath12k_free_mlo_mgmt_rx_reo_per_link_info
-+			(&mlomem_arena_ctx->rx_reo_snapshot_info);
-+	}
-+	mutex_unlock(&mlomem_arena_ctx->mutex_lock);
-+
- 	/* reset host fixed mem off to zero */
- 	ab->host_ddr_fixed_mem_off = 0;
- 	/* prepare coredump */
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1075,6 +1075,7 @@ struct ath12k_mlo_memory {
+@@ -1120,6 +1120,7 @@ struct ath12k_mlo_memory {
  	struct target_mem_chunk chunk[ATH12K_QMI_WLANFW_MAX_NUM_MEM_SEG_V01];
  	struct reserved_mem *rsv;
  	bool init_done;
@@ -69,7 +45,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  enum ath12k_mlo_recovery_mode {
-@@ -1100,6 +1101,7 @@ struct ath12k_hw_group {
+@@ -1145,6 +1146,7 @@ struct ath12k_hw_group {
  	struct ath12k __rcu *hw_links[ATH12K_GROUP_MAX_RADIO];
  	struct ath12k_mlo_memory mlo_mem;
  	struct mutex mutex_lock;
@@ -77,7 +53,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  /* Master structure to hold the hw data which may be used in core module */
-@@ -1213,6 +1215,7 @@ struct ath12k_base {
+@@ -1262,6 +1264,7 @@ struct ath12k_base {
  		u32 fw_crash_counter;
  		u32 last_recovery_time;
  	} stats;
@@ -118,16 +94,17 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	lockdep_assert_held(&ag->mutex_lock);
  
-@@ -3293,6 +3310,18 @@ static void ath12k_qmi_free_mlo_mem_chun
+@@ -3293,6 +3310,19 @@ static void ath12k_qmi_free_mlo_mem_chun
  		chunk->v.addr = NULL;
  	chunk->paddr = NULL;
  	chunk->size = 0;
 +
 +	ag->mlo_mem.is_mlo_mem_avail = false;
 +
-+	/* We need to de-initialize only for the last invocation */
++	/* We need to de-initialize when mlo memory is cleaned */
 +	mutex_lock(&mlomem_arena_ctx->mutex_lock);
-+	if (!mlomem_arena_ctx->init_count--) {
++	if (mlomem_arena_ctx->init_done) {
++		mlomem_arena_ctx->init_done = false;
 +		ath12k_free_mlo_mgmt_rx_reo_per_link_info
 +			(&mlomem_arena_ctx->rx_reo_snapshot_info);
 +	}
@@ -137,7 +114,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  }
  
  void ath12k_qmi_free_target_mem_chunk(struct ath12k_base *ab)
-@@ -3395,6 +3424,7 @@ static int ath12k_qmi_alloc_target_mem_c
+@@ -3395,6 +3425,7 @@ static int ath12k_qmi_alloc_target_mem_c
  			}
  			chunk->paddr = mlo_chunk->paddr;
  			chunk->v.addr = mlo_chunk->v.addr;
@@ -145,7 +122,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  			mlo_idx++;
  			break;
  		case HOST_DDR_REGION_TYPE:
-@@ -3425,6 +3455,515 @@ out:
+@@ -3425,6 +3456,518 @@ out:
  	return ret;
  }
  
@@ -630,7 +607,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +
 +	/* We need to initialize only for the first invocation */
 +	mutex_lock(&mlomem_arena_ctx->mutex_lock);
-+	if (mlomem_arena_ctx->init_count++) {
++	if (mlomem_arena_ctx->init_done) {
 +		mutex_unlock(&mlomem_arena_ctx->mutex_lock);
 +		return 0;
 +	}
@@ -653,6 +630,9 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		mutex_unlock(&mlomem_arena_ctx->mutex_lock);
 +		return ret;
 +	}
++
++	mlomem_arena_ctx->init_done = true;
++
 +	mutex_unlock(&mlomem_arena_ctx->mutex_lock);
 +
 +	return 0;
@@ -661,7 +641,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  #define MAX_TGT_MEM_MODES 5
  static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab)
  {
-@@ -3571,6 +4110,7 @@ skip_mlo_mem_init:
+@@ -3571,6 +4114,7 @@ skip_mlo_mem_init:
  			ab->qmi.target_mem[idx].size = mlo_chunk->size;
  			ab->qmi.target_mem[idx].type = mlo_chunk->type;
  			mlo_sz += mlo_chunk->size;
@@ -729,7 +709,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  /* HW mode config type replicated from FW header
   * @WMI_HOST_HW_MODE_SINGLE: Only one PHY is active.
   * @WMI_HOST_HW_MODE_DBS: Both PHYs are active in different bands,
-@@ -5170,6 +5221,225 @@ struct wmi_pdev_update_muedca_event {
+@@ -5172,6 +5223,225 @@ struct wmi_pdev_update_muedca_event {
  
  #define WLAN_MGMT_TXRX_HOST_MAX_ANTENNA 4
  
@@ -766,12 +746,12 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + * ath12k_host_mlo_mem_arena - MLO Global shared memory arena context
 + * @shmem_params: shared memory parameters
 + * @rx_reo_snapshot_info: MGMT Rx REO snapshot information
-+ * @init_count: Number of init calls
++ * @init_done: Initialized snapshot info
 + */
 +struct ath12k_host_mlo_mem_arena {
 +	struct ath12k_host_ath12k_mlo_glb_shmem_params shmem_params;
 +	struct ath12k_host_mlo_glb_rx_reo_snapshot_info rx_reo_snapshot_info;
-+	int init_count;
++	bool init_done;
 +	/* Protect the parallel initialization */
 +	struct mutex mutex_lock;
 +};
@@ -957,15 +937,15 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	u32 channel;
 --- a/drivers/net/wireless/ath/ath12k/qmi.h
 +++ b/drivers/net/wireless/ath/ath12k/qmi.h
-@@ -55,6 +55,7 @@
- #define ATH12K_QMI_INVALID_RADIO	0xFF
+@@ -62,6 +62,7 @@ enum userpd_id {
+ };
  
  struct ath12k_base;
 +struct ath12k_host_mlo_glb_rx_reo_snapshot_info;
  
  enum ath12k_qmi_file_type {
  	ATH12K_QMI_FILE_TYPE_BDF_GOLDEN,
-@@ -775,6 +776,9 @@ int ath12k_qmi_m3_dump_upload_done_ind_s
+@@ -782,6 +783,9 @@ int ath12k_qmi_m3_dump_upload_done_ind_s
  					    u32 pdev_id, int status);
  void ath12k_qmi_free_target_mem_chunk(struct ath12k_base *ab);
  void ath12k_qmi_trigger_host_cap(struct ath12k_base *ab);
