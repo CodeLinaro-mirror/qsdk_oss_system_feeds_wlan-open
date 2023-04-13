@@ -528,8 +528,8 @@ mac80211_hostapd_setup_base() {
 
 	if [ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ] || [ "$htmode" == "EHT320" ]; then
 		enable_be=1;
-		config_get mlo_capable $2 mlo_capable
-		if [ -n "$mlo_capable" ] && [ $mlo_capable -eq 1 ]; then
+		drv_mlo_capable=$(cat /sys/module/ath12k/parameters/mlo_capable)
+		if [ -n "$drv_mlo_capable" ] && [ $drv_mlo_capable -eq 1 ]; then
 			append base_cfg "mlo=1" "$N"
 		fi
 		[ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"

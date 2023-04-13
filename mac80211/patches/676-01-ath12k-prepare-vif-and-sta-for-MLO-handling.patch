@@ -4223,7 +4223,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -	    (arvif->ar != arg->ar))
 -		return;
 +	lockdep_assert_held(&ah->conf_mutex);
-+
+ 
+-	arg->n_vifs++;
 +	links_map = ahvif->links_map;
 +
 +	for_each_set_bit(link_id, &links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
@@ -4233,8 +4234,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +			continue;
 +
 +		link_conf = rcu_dereference(vif->link_conf[arvif->link_id]);
- 
--	arg->n_vifs++;
++
 +		if (WARN_ON(link_conf == NULL))
 +			continue;
 +
@@ -4272,7 +4272,11 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 + 
 +	for_each_set_bit(link_id, &links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
 +		arvif = ahvif->link[link_id];
-+
+ 
+-	arg->vifs[arg->next_vif].vif = vif;
+-	arg->vifs[arg->next_vif].old_ctx = ctx;
+-	arg->vifs[arg->next_vif].new_ctx = ctx;
+-	arg->next_vif++;
 +		if (WARN_ON(arvif == NULL))
 +			continue;
 +
@@ -4280,11 +4284,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +
 +		if (WARN_ON(link_conf == NULL))
 +			continue;
- 
--	arg->vifs[arg->next_vif].vif = vif;
--	arg->vifs[arg->next_vif].old_ctx = ctx;
--	arg->vifs[arg->next_vif].new_ctx = ctx;
--	arg->next_vif++;
++
 +		ctx = rcu_access_pointer(link_conf->chanctx_conf);
 +		if ((ctx != arg->ctx) ||
 +		    (arvif->ar != arg->ar))
@@ -4828,15 +4828,15 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	struct ath12k *ar;
  	int ret;
 +	u8 link_id = arvif->link_id;
-+
-+	if (ahsta->ahvif != arvif->ahvif)
-+		return;
  
 -	if (arsta->arvif != arvif)
-+	/* Check if there is a link sta in the vif link */
-+	if (!(BIT(link_id) & ahsta->links_map))
++	if (ahsta->ahvif != arvif->ahvif)
  		return;
  
++	/* Check if there is a link sta in the vif link */
++	if (!(BIT(link_id) & ahsta->links_map))
++		return;
++
 +	ar = arvif->ar;
 +
 +	/* TODO move to sta->link addr */
@@ -4991,14 +4991,16 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	.configure_filter		= ath12k_mac_op_configure_filter,
  	.hw_scan                        = ath12k_mac_op_hw_scan,
  	.cancel_hw_scan                 = ath12k_mac_op_cancel_hw_scan,
-@@ -11539,6 +12184,7 @@ static int ath12k_mac_hw_register(struct
- 	hw->wiphy->flags |= WIPHY_FLAG_AP_UAPSD;
+@@ -11540,6 +12185,9 @@ static int ath12k_mac_hw_register(struct
  	hw->wiphy->features |= NL80211_FEATURE_AP_MODE_CHAN_WIDTH_CHANGE |
  			       NL80211_FEATURE_AP_SCAN;
-+	hw->wiphy->flags |= WIPHY_FLAG_SUPPORTS_MLO;
  
++	if (ag->mlo_capable)
++		hw->wiphy->flags |= WIPHY_FLAG_SUPPORTS_MLO;
++
  	/* TODO Split queues per chip */
  	hw->queues = ATH12K_HW_MAX_QUEUES;
+ 	hw->wiphy->tx_queue_len = ATH12K_QUEUE_LEN;
 --- a/drivers/net/wireless/ath/ath12k/mac.h
 +++ b/drivers/net/wireless/ath/ath12k/mac.h
 @@ -145,14 +145,14 @@ u8 ath12k_mac_hw_rate_to_idx(const struc
