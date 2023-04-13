@@ -171,20 +171,6 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  	u16 interface_modes;
  	bool supports_monitor;
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -780,7 +780,11 @@ struct ath12k *ath12k_mac_get_ar_by_pdev
- 			pdev = &ab->pdevs[i];
- 		else
- 			pdev = rcu_dereference(ab->pdevs_active[i]);
-+		if (pdev && pdev->pdev_id == pdev_id)
-+			return pdev->ar ? pdev->ar : NULL;
- 
-+		/*before mac start ab->pdevs_active will be NULL*/
-+		pdev = &ab->pdevs[i];
- 		if (pdev && pdev->pdev_id == pdev_id)
- 			return (pdev->ar ? pdev->ar : NULL);
- 	}
 --- a/drivers/net/wireless/ath/ath12k/spectral.c
 +++ b/drivers/net/wireless/ath/ath12k/spectral.c
 @@ -12,27 +12,28 @@
@@ -579,7 +565,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
  				  ath12k_wmi_tlv_dma_buf_parse,
  				  &parse);
-@@ -9926,6 +9947,220 @@ exit:
+@@ -9928,6 +9949,227 @@ exit:
  }
  
  
@@ -756,9 +742,11 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
 +{
 +	struct wmi_spectral_capabilities_parse parse = { };
 +	struct wmi_spectral_capabilities_event param;
-+	struct ath12k *ar;
++	struct ath12k *ar = NULL;
 +	int ret, size;
-+	u8 pdev_id;
++	u8 pdev_id, i;
++	struct ath12k_pdev *pdev;
++
 +	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
 +				  ath12k_wmi_tlv_spectral_cap_parse,
 +				  &parse);
@@ -773,16 +761,21 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
 +	param.num_fft_size_caps_entry = parse.num_fft_size_caps_entry;
 +
 +	pdev_id = param.sscan_bw_caps->pdev_id;
-+	rcu_read_lock();
-+	ar = ath12k_mac_get_ar_by_pdev_id(ab, pdev_id);
++
++	for (i = 0; i < ab->num_radios; i++) {
++		pdev = &ab->pdevs[i];
++		if (pdev && pdev->pdev_id == pdev_id) {
++			ar = pdev->ar;
++			break;
++		}
++	}
++
 +	if (!ar) {
 +		ath12k_dbg(ab, ATH12K_DBG_WMI,
 +			   "ar is NULL for pdev_id %d use default spectral fft size 7",
 +			   pdev_id);
-+		rcu_read_unlock();
 +		return;
 +	}
-+	rcu_read_unlock();
 +	size = sizeof(struct ath12k_wmi_spectral_fft_size_capabilities)*
 +					param.num_fft_size_caps_entry;
 +
@@ -800,7 +793,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -10021,6 +10256,12 @@ static void ath12k_wmi_tlv_op_rx(struct
+@@ -10023,6 +10265,12 @@ static void ath12k_wmi_tlv_op_rx(struct
  	case WMI_TWT_ADD_DIALOG_EVENTID:
  		ath12k_wmi_twt_add_dialog_event(ab, skb);
  		break;
