@@ -362,34 +362,38 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		}
  	}
  	mutex_unlock(&local->mtx);
-@@ -4293,6 +4309,7 @@ void ieee80211_dfs_radar_detected_work(s
- 	struct ieee80211_local *local =
- 		container_of(work, struct ieee80211_local, radar_detected_work);
+@@ -4290,9 +4306,11 @@ void ieee80211_awgn_detected_work(struct
+ 
+ static void
+ ieee80211_dfs_radar_detected_processing(struct ieee80211_local *local,
+-					u16 radar_bitmap)
++					u16 radar_bitmap,
++					struct ieee80211_channel *radar_channel)
+ {
  	struct cfg80211_chan_def chandef = local->hw.conf.chandef;
 +	struct cfg80211_chan_def *radar_chandef = NULL;
  	struct ieee80211_chanctx *ctx;
  	int num_chanctx = 0;
  
-@@ -4303,6 +4320,10 @@ void ieee80211_dfs_radar_detected_work(s
+@@ -4303,6 +4321,10 @@ ieee80211_dfs_radar_detected_processing(
  
  		num_chanctx++;
  		chandef = ctx->conf.def;
 +
-+		if (local->radar_channel &&
-+		    (chandef.chan == local->radar_channel))
++		if (radar_channel &&
++		    (chandef.chan == radar_channel))
 +			radar_chandef = &ctx->conf.def;
  	}
  	mutex_unlock(&local->chanctx_mtx);
  
-@@ -4310,14 +4331,25 @@ void ieee80211_dfs_radar_detected_work(s
+@@ -4310,13 +4332,24 @@ ieee80211_dfs_radar_detected_processing(
  	ieee80211_dfs_cac_cancel(local);
  	wiphy_unlock(local->hw.wiphy);
  
 +	if (radar_chandef)
-+		radar_chandef->radar_bitmap = local->radar_bitmap;
++		radar_chandef->radar_bitmap = radar_bitmap;
 +
- 	chandef.radar_bitmap = local->radar_bitmap;
- 	local->radar_bitmap = 0;
+ 	chandef.radar_bitmap = radar_bitmap;
  
 -	if (num_chanctx > 1)
 -		/* XXX: multi-channel is not supported yet */
@@ -402,7 +406,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
 +			cfg80211_radar_event(local->hw.wiphy, radar_chandef, GFP_KERNEL);
 +		} else {
-+			/* XXX: multi-channel is not supported yet for non-MLO*/
++			/* XXX: multi-channel is not supported yet */
 +			WARN_ON(1);
 +		}
 +	} else {
@@ -410,8 +414,29 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	}
  }
  
- void ieee80211_radar_detected(struct ieee80211_hw *hw)
-@@ -4330,11 +4362,19 @@ void ieee80211_radar_detected(struct iee
+ void ieee80211_dfs_radar_detected_work(struct work_struct *work)
+@@ -4325,14 +4358,18 @@ void ieee80211_dfs_radar_detected_work(s
+ 		container_of(work, struct ieee80211_local, radar_detected_work);
+ 	struct channel_radar_info *radar_info, *temp;
+ 	u16 radar_bitmap;
++	struct ieee80211_channel *radar_channel;
+ 
+ 	if (list_empty(&local->radar_info_list))
+-		return ieee80211_dfs_radar_detected_processing(local, 0);
++		return ieee80211_dfs_radar_detected_processing(local, 0,
++							       radar_channel);
+ 
+ 	list_for_each_entry_safe(radar_info, temp, &local->radar_info_list, list) {
+ 		radar_bitmap = radar_info->radar_bitmap;
++		radar_channel = radar_info->radar_channel;
+ 
+-		ieee80211_dfs_radar_detected_processing(local, radar_bitmap);
++		ieee80211_dfs_radar_detected_processing(local, radar_bitmap,
++							radar_channel);
+ 
+ 		list_del(&radar_info->list);
+ 		kfree(radar_info);
+@@ -4349,17 +4386,23 @@ void ieee80211_radar_detected(struct iee
  }
  EXPORT_SYMBOL(ieee80211_radar_detected);
  
@@ -420,21 +445,25 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +				     struct ieee80211_channel *radar_channel)
  {
  	struct ieee80211_local *local = hw_to_local(hw);
+ 	struct channel_radar_info *radar_info;
  
 +	if (WARN_ON(local->hw.wiphy->flags & WIPHY_FLAG_SUPPORTS_MLO &&
 +		    !radar_channel))
 +		return;
 +
- 	local->radar_bitmap = radar_bitmap;
-+	/* TODO: handle concurrent channels case */
-+	local->radar_channel = radar_channel;
-+
+ 	radar_info = kzalloc(sizeof(*radar_info), GFP_KERNEL);
+ 	if (!radar_info)
+ 		return;
+ 
+ 	INIT_LIST_HEAD(&radar_info->list);
+ 	radar_info->radar_bitmap = radar_bitmap;
++	radar_info->radar_channel = radar_channel;
+ 
+ 	list_add_tail(&radar_info->list, &local->radar_info_list);
  	schedule_work(&local->radar_detected_work);
- }
- EXPORT_SYMBOL(ieee80211_radar_detected_bitmap);
 --- a/net/wireless/mlme.c
 +++ b/net/wireless/mlme.c
-@@ -974,26 +974,28 @@ EXPORT_SYMBOL(cfg80211_awgn_event);
+@@ -974,26 +974,24 @@ EXPORT_SYMBOL(cfg80211_awgn_event);
  
  void cfg80211_cac_event(struct net_device *netdev,
  			const struct cfg80211_chan_def *chandef,
@@ -449,10 +478,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 -	/* not yet supported */
 -	if (wdev->valid_links)
-+	if (wdev->valid_links &&
-+	    !(wdev->valid_links & BIT(link_id)))
- 		return;
- 
+-		return;
+-
 -	trace_cfg80211_cac_event(netdev, event);
 +	trace_cfg80211_cac_event(netdev, link_id, event);
  
@@ -470,7 +497,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		WARN_ON(!time_after_eq(jiffies, timeout));
  		cfg80211_set_dfs_state(wiphy, chandef, NL80211_DFS_AVAILABLE);
  		memcpy(&rdev->cac_done_chandef, chandef,
-@@ -1002,10 +1004,10 @@ void cfg80211_cac_event(struct net_devic
+@@ -1002,10 +1000,10 @@ void cfg80211_cac_event(struct net_devic
  		cfg80211_sched_dfs_chan_update(rdev);
  		fallthrough;
  	case NL80211_RADAR_CAC_ABORTED:
@@ -739,17 +766,17 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  /**
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1390,6 +1390,7 @@ struct ieee80211_local {
- 	bool wowlan;
- 
- 	struct work_struct radar_detected_work;
+@@ -1299,6 +1299,7 @@ struct mac80211_memory_stats {
+ struct channel_radar_info {
+ 	struct list_head list;
+ 	u16 radar_bitmap;
 +	struct ieee80211_channel *radar_channel;
+ };
  
- 	/* number of RX chains the hardware has */
- 	u8 rx_chains;
+ struct ieee80211_local {
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -8444,7 +8444,8 @@ static void ath12k_dfs_calculate_subchan
+@@ -8445,7 +8445,8 @@ static void ath12k_dfs_calculate_subchan
  
  mark_radar:
  	if (!radar->detector_id) {
