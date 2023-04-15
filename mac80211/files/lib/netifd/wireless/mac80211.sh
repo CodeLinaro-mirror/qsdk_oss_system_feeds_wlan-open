@@ -532,6 +532,10 @@ mac80211_hostapd_setup_base() {
 		if [ -n "$drv_mlo_capable" ] && [ $drv_mlo_capable -eq 1 ]; then
 			append base_cfg "mlo=1" "$N"
 		fi
+		config_get bonded $2 bonded
+		if [ -n "$bonded" ] && [ $bonded -eq 1 ]; then
+			append base_cfg "bonded=1" "$N"
+		fi
 		[ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"
 	fi
 
