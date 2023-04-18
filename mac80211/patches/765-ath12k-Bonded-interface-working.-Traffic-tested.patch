@@ -1,7 +1,7 @@
-From e1e524c3248c527490673fa3e1e6facb8586137b Mon Sep 17 00:00:00 2001
-From: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
-Date: Thu, 13 Apr 2023 22:14:23 -0700
-Subject: [PATCH 4/4] ath12k: Add support for Bond interface
+From fecbd1f32d00c2523ed32b7c8224423c06db35f0 Mon Sep 17 00:00:00 2001
+From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Date: Wed, 26 Apr 2023 14:37:16 -0700
+Subject: [PATCH] ath12k: Add support for Bond interface
 
 Add support for bonded interface to represent each wifi link with a separate
 netdevice. With the new code changes, there will be new interfaces in the system.
@@ -25,12 +25,12 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
- drivers/net/wireless/ath/ath12k/bondif.c   | 480 +++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/bondif.h   |  39 ++
+ drivers/net/wireless/ath/ath12k/bondif.c   | 482 +++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.h   |  39 +++
  drivers/net/wireless/ath/ath12k/core.h     |  16 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
  drivers/net/wireless/ath/ath12k/mac.c      |  49 ++-
- drivers/net/wireless/ath/ath12k/pci.c      |  18 +
+ drivers/net/wireless/ath/ath12k/pci.c      |  18 ++
  drivers/net/wireless/ath/ath12k/ppe.c      |  23 +-
  drivers/net/wireless/ath/ath12k/ppe.h      |  13 +-
  drivers/net/wireless/ath/ath6kl/cfg80211.c |   2 +-
@@ -51,10 +51,12 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  net/wireless/core.c                        |  35 ++-
  net/wireless/nl80211.c                     |   4 +
  net/wireless/util.c                        |   4 +
- 28 files changed, 779 insertions(+), 50 deletions(-)
+ 28 files changed, 785 insertions(+), 50 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
+diff --git a/drivers/net/wireless/ath/ath12k/Kconfig b/drivers/net/wireless/ath/ath12k/Kconfig
+index e790048..bcf43d0 100644
 --- a/drivers/net/wireless/ath/ath12k/Kconfig
 +++ b/drivers/net/wireless/ath/ath12k/Kconfig
 @@ -70,3 +70,12 @@ config ATH12K_PPE_DS_SUPPORT
@@ -70,9 +72,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		Enable ath12k Bonded-DS support
 +
 +		Say Y to enable Bonded DS Support. If unsure, say N.
+diff --git a/drivers/net/wireless/ath/ath12k/Makefile b/drivers/net/wireless/ath/ath12k/Makefile
+index 98ecf02..a0fc6e6 100644
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -31,6 +31,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += co
+@@ -31,6 +31,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
  ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
  ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
  ath12k-$(CPTCFG_ATH12K_PPE_DS_SUPPORT) += ppe.o
@@ -80,9 +84,12 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  # for tracing framework to find trace.h
  CFLAGS_trace.o := -I$(src)
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
+new file mode 100644
+index 0000000..2a7e449
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,482 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -492,12 +499,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +			ath12k_err(NULL, "ERR: Couldn't allocate mlo_info\n");
 +			return -ENOMEM;
 +		}
++		memset(mlo_info, 0, sizeof(struct mlo_bond_info));
 +		mldev = kmalloc(sizeof(struct ath12k_mld_dev), GFP_KERNEL);
 +		if (!mldev) {
 +			ath12k_err(NULL, "ERR: Couldn't allocate mld_dev\n");
 +			kfree(mlo_info);
 +			return -ENOMEM;
 +		}
++		memset(mldev, 0, sizeof(struct ath12k_mld_dev));
 +		dummywdev = kmalloc(sizeof(struct wireless_dev), GFP_KERNEL);
 +		if (!mldev) {
 +			ath12k_err(NULL, "ERR: Couldn't allocate mld_dev\n");
@@ -563,6 +572,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	return 0;
 +}
 +EXPORT_SYMBOL(ath12k_bond_dev_cb);
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.h b/drivers/net/wireless/ath/ath12k/bondif.h
+new file mode 100644
+index 0000000..8477c3e
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.h
 @@ -0,0 +1,39 @@
@@ -599,12 +611,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	struct ieee80211_vif *vif;
 +	struct wireless_dev *wdev; //dummy one for bond registration. Optimize Bond MLO API.
 +	struct net_device *link_dev[MAX_MLO_CHIPS][MAX_PDEV_PER_SOC];
-+	int primary_chipid, primary_pdevid;
++	u8 primary_chipid, primary_pdevid;
 +	bool mcast_dev_set;
 +	unsigned long bond_state;
 +};
 +
 +#endif //__BONDIF_H
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index e7049fe..944ab80 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -332,6 +332,17 @@ struct ath12k_vif_tcl_desc_template {
@@ -637,9 +651,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	bool mvr_processing;
  };
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index cf09981..2f38d7c 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2780,7 +2780,12 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2780,7 +2780,12 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  #endif
  				spin_unlock_bh(&ar->ab->base_lock);
  				ath12k_dp_rx_h_csum_offload(ar, msdu);
@@ -653,7 +669,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  				if (vp) {
  					if (likely(ppe_vp_tx_to_ppe(vp, msdu)))
-@@ -2801,6 +2806,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2801,6 +2806,14 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  	}
  	spin_unlock_bh(&ar->ab->base_lock);
  
@@ -668,6 +684,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	*fast_rx = false;
  
  	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index c289535..2bf02f3 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
@@ -698,7 +716,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4714,8 +4722,12 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4717,8 +4725,12 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
  	arvif->is_created = false;
  
  clean_up:
@@ -712,7 +730,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4763,7 +4775,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4766,7 +4778,7 @@ void ath12k_mac_unassign_link_vif(struct ath12k_link_vif *arvif)
  		kfree(arvif);
  }
  
@@ -721,7 +739,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -6617,8 +6629,8 @@ static int ath12k_mac_station_add(struct
+@@ -6625,8 +6637,8 @@ static int ath12k_mac_station_add(struct ath12k *ar,
  		}
  	}
  
@@ -732,7 +750,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #else
  	ret = ath12k_dp_peer_setup(ar, arvif, arsta, -1);
  #endif
-@@ -9461,6 +9473,9 @@ static int ath12k_mac_vdev_create(struct
+@@ -9478,6 +9490,9 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -742,7 +760,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9519,6 +9534,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9536,6 +9551,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -753,7 +771,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9610,6 +9629,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9627,6 +9646,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -764,7 +782,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -10189,15 +10212,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10209,15 +10232,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
  	return ret;
  }
  
@@ -786,7 +804,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -13944,10 +13969,6 @@ static const struct ieee80211_ops ath12k
+@@ -13967,10 +13992,6 @@ static const struct ieee80211_ops ath12k_ops = {
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -797,6 +815,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index 7ba262e..cf7662a 100644
 --- a/drivers/net/wireless/ath/ath12k/pci.c
 +++ b/drivers/net/wireless/ath/ath12k/pci.c
 @@ -65,6 +65,15 @@ EXPORT_SYMBOL(ath12k_napi_poll_budget);
@@ -815,7 +835,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static const struct pci_device_id ath12k_pci_id_table[] = {
  	{ PCI_VDEVICE(QCOM, QCN9274_DEVICE_ID) },
  	{ PCI_VDEVICE(QCOM, WCN7850_DEVICE_ID) },
-@@ -1363,7 +1372,16 @@ static int ath12k_pci_probe(struct pci_d
+@@ -1363,7 +1372,16 @@ static int ath12k_pci_probe(struct pci_dev *pdev,
  	struct ath12k_pci *ab_pci;
  	u32 soc_hw_version_major, soc_hw_version_minor, addr;
  	int ret;
@@ -832,9 +852,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ab = ath12k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH12K_BUS_PCI,
  			       &ath12k_pci_bus_params);
  	if (!ab) {
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
+index 08f68fa..054e7ba 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -507,16 +507,12 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -507,16 +507,12 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
  	return;
  }
  
@@ -853,7 +875,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	//TODO: Handle split phy
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_dp_ppe_vp_profile *vp_profile = NULL;
-@@ -535,7 +531,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -535,7 +531,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  		return -EINVAL;
  	}
  
@@ -862,7 +884,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		return -EINVAL;
  	}
  
-@@ -560,7 +556,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -560,7 +556,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  		goto dealloc_vp_profile;
  	}
  
@@ -871,7 +893,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -576,6 +572,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -576,6 +572,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -897,7 +919,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	struct ath12k_dp_ppe_vp_profile *vp_profile;
  	int ppe_vp_profile_idx = -1;
  
-@@ -627,7 +620,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+@@ -627,7 +620,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -906,6 +928,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		ath12k_dp_ppeds_dealloc_vp_search_idx_tbl_entry(ab, vp_profile->search_idx_reg_num);
  
  	ath12k_dp_ppeds_dealloc_vp_tbl_entry(ab, vp_profile->ppe_vp_num_idx);
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
+index 090e3e3..a73d0d9 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -14,6 +14,7 @@ struct ath12k_dp_ppe_vp_profile {
@@ -916,7 +940,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  #define ATH12K_PPEDS_DEFAULT_POOL_ID 0
-@@ -26,13 +27,11 @@ void ath12k_dp_ppeds_stop(struct ath12k_
+@@ -26,13 +27,11 @@ void ath12k_dp_ppeds_stop(struct ath12k_base *ab);
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
  int ath12k_ppeds_attach( struct ath12k_base *ab);
@@ -935,9 +959,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
  irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
  irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
+diff --git a/drivers/net/wireless/ath/ath6kl/cfg80211.c b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+index 972b9bb..bff3f67 100644
 --- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
 +++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
-@@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_ad
+@@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_add(struct ath6kl *ar, const char *name,
  
  	netdev_set_default_ethtool_ops(ndev, &ath6kl_ethtool_ops);
  
@@ -946,9 +972,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		goto err;
  
  	ar->avail_idx_map &= ~BIT(fw_vif_idx);
+diff --git a/drivers/net/wireless/ath/wil6210/netdev.c b/drivers/net/wireless/ath/wil6210/netdev.c
+index 6539b39..f055cbc 100644
 --- a/drivers/net/wireless/ath/wil6210/netdev.c
 +++ b/drivers/net/wireless/ath/wil6210/netdev.c
-@@ -432,7 +432,7 @@ int wil_vif_add(struct wil6210_priv *wil
+@@ -432,7 +432,7 @@ int wil_vif_add(struct wil6210_priv *wil, struct wil6210_vif *vif)
  		if (rc)
  			return rc;
  	}
@@ -957,6 +985,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (rc < 0) {
  		dev_err(&ndev->dev, "Failed to register netdev: %d\n", rc);
  		if (any_active && vif->mid != 0)
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 6830fc7..d819ac2 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -6066,6 +6066,7 @@ struct wireless_dev {
@@ -967,7 +997,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	u32 identifier;
  
-@@ -8749,7 +8750,7 @@ void cfg80211_unregister_wdev(struct wir
+@@ -8749,7 +8750,7 @@ void cfg80211_unregister_wdev(struct wireless_dev *wdev);
   *
   * Requires the RTNL and wiphy mutex to be held.
   */
@@ -976,6 +1006,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  /**
   * cfg80211_unregister_netdevice - unregister the given netdev
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 0ccb9dd..daf49cc 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
 @@ -1965,7 +1965,11 @@ struct ieee80211_vif {
@@ -991,6 +1023,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	int ppe_vp_num;
  	unsigned long ppe_vp_type;
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 4f0cc04..9a79f8f 100644
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
 @@ -3503,6 +3503,9 @@ enum nl80211_iftype {
@@ -1003,6 +1037,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	/* keep last */
  	NUM_NL80211_IFTYPES,
+diff --git a/local-symbols b/local-symbols
+index 17bedea..cd8ceae 100644
 --- a/local-symbols
 +++ b/local-symbols
 @@ -67,6 +67,7 @@ MAC80211_DEBUG_COUNTERS=
@@ -1018,6 +1054,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  ATH12K_PKTLOG=
  ATH12K_PPE_DS_SUPPORT=
 +ATH12K_BONDED_DS_SUPPORT=
+diff --git a/net/mac80211/Kconfig b/net/mac80211/Kconfig
+index 2599669..fd33a84 100644
 --- a/net/mac80211/Kconfig
 +++ b/net/mac80211/Kconfig
 @@ -122,6 +122,24 @@ config MAC80211_PPE_SUPPORT
@@ -1045,9 +1083,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  config MAC80211_NOINLINE
  	bool "Do not inline TX/RX handlers"
  	depends on MAC80211_DEBUG_MENU
+diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
+index 3005eec..6c438d7 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -194,7 +194,11 @@ static struct wireless_dev *ieee80211_ad
+@@ -194,7 +194,11 @@ static struct wireless_dev *ieee80211_add_iface(struct wiphy *wiphy,
  	struct ieee80211_sub_if_data *sdata;
  	int err;
  
@@ -1060,7 +1100,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (err)
  		return ERR_PTR(err);
  
-@@ -218,6 +222,26 @@ static int ieee80211_del_iface(struct wi
+@@ -218,6 +222,26 @@ static int ieee80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
  	return 0;
  }
  
@@ -1087,7 +1127,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static int ieee80211_change_iface(struct wiphy *wiphy,
  				  struct net_device *dev,
  				  enum nl80211_iftype type,
-@@ -542,6 +566,10 @@ static int ieee80211_add_key(struct wiph
+@@ -542,6 +566,10 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
  	}
  
  	switch (sdata->vif.type) {
@@ -1098,9 +1138,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_STATION:
  		if (sdata->u.mgd.mfp != IEEE80211_MFP_DISABLED)
  			key->conf.flags |= IEEE80211_KEY_FLAG_RX_MGMT;
+diff --git a/net/mac80211/chan.c b/net/mac80211/chan.c
+index 0221b4f..5782262 100644
 --- a/net/mac80211/chan.c
 +++ b/net/mac80211/chan.c
-@@ -294,6 +294,10 @@ ieee80211_get_chanctx_vif_max_required_b
+@@ -294,6 +294,10 @@ ieee80211_get_chanctx_vif_max_required_bw(struct ieee80211_sub_if_data *sdata,
  			continue;
  
  		switch (vif->type) {
@@ -1111,7 +1153,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		case NL80211_IFTYPE_AP:
  		case NL80211_IFTYPE_AP_VLAN:
  			width = ieee80211_get_max_required_bw(sdata, link_id);
-@@ -1228,6 +1232,10 @@ ieee80211_link_chanctx_reservation_compl
+@@ -1228,6 +1232,10 @@ ieee80211_link_chanctx_reservation_complete(struct ieee80211_link_data *link)
  	struct ieee80211_sub_if_data *sdata = link->sdata;
  
  	switch (sdata->vif.type) {
@@ -1122,6 +1164,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_ADHOC:
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_MESH_POINT:
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index a674084..38eafe8 100644
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
 @@ -26,6 +26,9 @@
@@ -1143,9 +1187,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
  			     enum nl80211_iftype type);
  void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index 3fc5078..012f930 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -804,7 +804,7 @@ static int ieee80211_stop(struct net_dev
+@@ -804,7 +804,7 @@ static int ieee80211_stop(struct net_device *dev)
  #endif
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -1154,7 +1200,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		drv_ppeds_detach_vdev(sdata, &sdata->vif, &vp_params);
  		if (sdata->vif.ppe_vp_type != PPE_VP_USER_TYPE_DS)
  			ppe_vp_free(sdata->vif.ppe_vp_num);
-@@ -1434,6 +1434,11 @@ int ieee80211_do_open(struct wireless_de
+@@ -1434,6 +1434,11 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
  		/* cannot happen */
  		WARN_ON(1);
  		break;
@@ -1166,7 +1212,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	if (local->open_count == 0) {
-@@ -2011,6 +2016,10 @@ static void ieee80211_setup_sdata(struct
+@@ -2011,6 +2016,10 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
  	case NUM_NL80211_IFTYPES:
  		WARN_ON(1);
  		break;
@@ -1177,7 +1223,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	/* need to do this after the switch so vif.type is correct */
-@@ -2274,7 +2283,7 @@ static void ieee80211_assign_perm_addr(s
+@@ -2274,7 +2283,7 @@ static void ieee80211_assign_perm_addr(struct ieee80211_local *local,
  int ieee80211_if_add(struct ieee80211_local *local, const char *name,
  		     unsigned char name_assign_type,
  		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
@@ -1186,7 +1232,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  {
  	struct net_device *ndev = NULL;
  	struct ieee80211_sub_if_data *sdata = NULL;
-@@ -2447,7 +2456,7 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -2447,7 +2456,7 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
  #endif
  		}
  
@@ -1195,9 +1241,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		if (ret) {
  			free_netdev(ndev);
  			return ret;
+diff --git a/net/mac80211/main.c b/net/mac80211/main.c
+index 0e73b02..ce729b7 100644
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee802
+@@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
  	    !ieee80211_hw_check(hw, NO_AUTO_VIF)) {
  		struct vif_params params = {0};
  
@@ -1213,9 +1261,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		if (result)
  			wiphy_warn(local->hw.wiphy,
  				   "Failed to add default virtual iface\n");
+diff --git a/net/mac80211/rx.c b/net/mac80211/rx.c
+index 716b931..cef7c34 100644
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -4802,6 +4802,9 @@ static void ieee80211_rx_8023(struct iee
+@@ -4802,6 +4802,9 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
  	struct sta_info *sta = rx->sta;
  	struct link_sta_info *link_sta;
  	struct sk_buff *skb = rx->skb;
@@ -1225,7 +1275,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	void *sa = skb->data + ETH_ALEN;
  	void *da = skb->data;
  
-@@ -4852,6 +4855,12 @@ static void ieee80211_rx_8023(struct iee
+@@ -4852,6 +4855,12 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
  	stats->packets++;
  
  	skb->dev = fast_rx->dev;
@@ -1238,7 +1288,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	ieee80211_rx_stats(fast_rx->dev, skb->len);
  
-@@ -4902,6 +4911,10 @@ static void ieee80211_rx_8023(struct iee
+@@ -4902,6 +4911,10 @@ static void ieee80211_rx_8023(struct ieee80211_rx_data *rx,
  #endif
  	/* deliver to local stack */
  	skb->protocol = eth_type_trans(skb, fast_rx->dev);
@@ -1249,9 +1299,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ieee80211_deliver_skb_to_local_stack(skb, rx);
  }
  
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index de10158..4da3eae 100644
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -2415,6 +2415,10 @@ static int ieee80211_reconfig_link_bss(s
+@@ -2415,6 +2415,10 @@ static int ieee80211_reconfig_link_bss(struct ieee80211_sub_if_data *sdata,
  		changed |= BSS_CHANGED_MU_GROUPS;
  
  	switch (sdata->vif.type) {
@@ -1262,9 +1314,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_STATION:
  		changed |= BSS_CHANGED_ASSOC |
  			   BSS_CHANGED_ARP_FILTER |
+diff --git a/net/wireless/chan.c b/net/wireless/chan.c
+index ade93ce..f6cf393 100644
 --- a/net/wireless/chan.c
 +++ b/net/wireless/chan.c
-@@ -683,6 +683,10 @@ int cfg80211_chandef_dfs_required(struct
+@@ -683,6 +683,10 @@ int cfg80211_chandef_dfs_required(struct wiphy *wiphy,
  		return -EINVAL;
  
  	switch (iftype) {
@@ -1275,7 +1329,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_ADHOC:
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -865,6 +869,10 @@ bool cfg80211_beaconing_iface_active(str
+@@ -865,6 +869,10 @@ bool cfg80211_beaconing_iface_active(struct wireless_dev *wdev)
  	ASSERT_WDEV_LOCK(wdev);
  
  	switch (wdev->iftype) {
@@ -1286,6 +1340,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_P2P_GO:
  		for_each_valid_link(wdev, link) {
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+index 2e45744..b653ee6 100644
 --- a/net/wireless/core.c
 +++ b/net/wireless/core.c
 @@ -22,6 +22,9 @@
@@ -1298,7 +1354,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #include <net/genetlink.h>
  #include <net/cfg80211.h>
  #include "nl80211.h"
-@@ -54,6 +57,16 @@ module_param(cfg80211_disable_40mhz_24gh
+@@ -54,6 +57,16 @@ module_param(cfg80211_disable_40mhz_24ghz, bool, 0644);
  MODULE_PARM_DESC(cfg80211_disable_40mhz_24ghz,
  		 "Disable 40MHz support in the 2.4GHz band");
  
@@ -1315,7 +1371,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
  {
  	struct cfg80211_registered_device *result = NULL, *rdev;
-@@ -1334,8 +1347,14 @@ static void _cfg80211_unregister_wdev(st
+@@ -1334,8 +1347,14 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
  
  	if (wdev->netdev) {
  		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
@@ -1331,7 +1387,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	list_del_rcu(&wdev->list);
-@@ -1423,6 +1442,10 @@ void __cfg80211_leave(struct cfg80211_re
+@@ -1423,6 +1442,10 @@ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
  	cfg80211_stop_background_radar_detection(wdev);
  
  	switch (wdev->iftype) {
@@ -1342,7 +1398,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_ADHOC:
  		__cfg80211_leave_ibss(rdev, dev, true);
  		break;
-@@ -1556,12 +1579,12 @@ void cfg80211_register_wdev(struct cfg80
+@@ -1556,12 +1579,12 @@ void cfg80211_register_wdev(struct cfg80211_registered_device *rdev,
  	if (wdev->netdev &&
  	    sysfs_create_link(&wdev->netdev->dev.kobj, &rdev->wiphy.dev.kobj,
  			      "phy80211"))
@@ -1357,7 +1413,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  {
  	struct wireless_dev *wdev = dev->ieee80211_ptr;
  	struct cfg80211_registered_device *rdev;
-@@ -1584,6 +1607,12 @@ int cfg80211_register_netdevice(struct n
+@@ -1584,6 +1607,12 @@ int cfg80211_register_netdevice(struct net_device *dev)
  		goto out;
  
  	cfg80211_register_wdev(rdev, wdev);
@@ -1370,9 +1426,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = 0;
  out:
  	wdev->registering = false;
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index fcf79df..d2813a4 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -1609,6 +1609,10 @@ static int nl80211_key_allowed(struct wi
+@@ -1609,6 +1609,10 @@ static int nl80211_key_allowed(struct wireless_dev *wdev)
  	ASSERT_WDEV_LOCK(wdev);
  
  	switch (wdev->iftype) {
@@ -1383,9 +1441,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index a72db8e..2c6d9b5 100644
 --- a/net/wireless/util.c
 +++ b/net/wireless/util.c
-@@ -1113,6 +1113,10 @@ int cfg80211_change_iface(struct cfg8021
+@@ -1113,6 +1113,10 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
  	if (!err) {
  		dev->priv_flags &= ~IFF_DONT_BRIDGE;
  		switch (ntype) {
@@ -1396,3 +1456,6 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		case NL80211_IFTYPE_STATION:
  			if (dev->ieee80211_ptr->use_4addr)
  				break;
+-- 
+2.7.4
+
