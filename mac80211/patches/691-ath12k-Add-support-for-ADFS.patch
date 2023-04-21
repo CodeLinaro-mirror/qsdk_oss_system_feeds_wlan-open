@@ -40,7 +40,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  	u8 nss_ratio_info;
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9727,6 +9727,23 @@ ath12k_mac_vdev_config_after_start(struc
+@@ -9722,6 +9722,23 @@ ath12k_mac_vdev_config_after_start(struc
  	if (ret)
  		ath12k_warn(ab, "failed to set 6G non-ht dup conf for vdev %d: %d\n",
  		            arvif->vdev_id, ret);
@@ -64,7 +64,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  
  	return ret;
  }
-@@ -12894,6 +12911,123 @@ err_fallback:
+@@ -12898,6 +12915,123 @@ err_fallback:
  	return 0;
  }
  
@@ -188,7 +188,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  static const struct ieee80211_ops ath12k_ops = {
  	.tx				= ath12k_mac_op_tx,
  	.start                          = ath12k_mac_op_start,
-@@ -12936,6 +13070,7 @@ static const struct ieee80211_ops ath12k
+@@ -12940,6 +13074,7 @@ static const struct ieee80211_ops ath12k
  	.sta_add_debugfs		= ath12k_debugfs_sta_op_add,
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
@@ -196,7 +196,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -13371,6 +13506,11 @@ static int __ath12k_mac_register(struct
+@@ -13375,6 +13510,11 @@ static int __ath12k_mac_register(struct
  				      NL80211_EXT_FEATURE_UNSOL_BCAST_PROBE_RESP);
  	}
  
@@ -208,7 +208,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  	return 0;
  }
  static int ath12k_setup_per_hw_if_comb(struct ath12k_hw *ah) {
-@@ -13985,3 +14125,35 @@ u16 ath12k_calculate_subchannel_count(en
+@@ -13991,3 +14131,42 @@ u16 ath12k_calculate_subchannel_count(en
  	}
  	return width_num/20;
  }
@@ -219,6 +219,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 +	struct ath12k_vif *ahvif;
 +	struct ath12k_link_vif *arvif;
 +	bool arvif_found = false;
++	int ret = 0;
 +
 +	list_for_each_entry(arvif, &ar->arvifs, list) {
 +		ahvif = arvif->ahvif;
@@ -235,12 +236,18 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 +	if (ev == ATH12K_BGDFS_RADAR) {
 +		cfg80211_background_radar_event(ar->ah->hw->wiphy, &ar->agile_chandef, GFP_ATOMIC);
 +		lockdep_assert_held(&ar->conf_mutex);
-+		if (!(ath12k_wmi_vdev_adfs_ocac_abort_cmd_send(ar,arvif->vdev_id))) {
-+			memset(&ar->agile_chandef, 0, sizeof(struct cfg80211_chan_def));
-+			ar->agile_chandef.chan = NULL;
-+		}
++		ret = ath12k_wmi_vdev_adfs_ocac_abort_cmd_send(ar, arvif->vdev_id);
 +	} else if (ev == ATH12K_BGDFS_ABORT) {
 +		cfg80211_background_cac_abort(ar->ah->hw->wiphy);
++	}
++
++	if (!ret) {
++		memset(&ar->agile_chandef, 0, sizeof(struct cfg80211_chan_def));
++		ar->agile_chandef.chan = NULL;
++	} else {
++		ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
++			   "ADFS state can't be reset (ret=%d)\n",
++			   ret);
 +	}
 +}
 +
@@ -487,7 +494,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  }
  
  static void
-@@ -9726,6 +9875,55 @@ static void ath12k_wmi_event_mvr_respons
+@@ -9726,6 +9875,58 @@ static void ath12k_wmi_event_mvr_respons
  	ath12k_wmi_process_mvr_event(ab, parse.vdev_id_bm, parse.num_vdevs_bm);
  }
  
@@ -532,9 +539,12 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 +        ath12k_dbg(ar->ab, ATH12K_DBG_WMI,"aDFS ocac complete event in vdev %d\n",
 +                   ev->vdev_id);
 +
-+        if (ev->status)
++        if (ev->status) {
 +            ath12k_mac_background_dfs_event(ar, ATH12K_BGDFS_ABORT);
-+
++	} else {
++		memset(&ar->agile_chandef, 0, sizeof(struct cfg80211_chan_def));
++		ar->agile_chandef.chan = NULL;
++	}
 +exit:
 +        kfree(tb);
 +}
@@ -543,7 +553,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -9875,6 +10073,9 @@ static void ath12k_wmi_tlv_op_rx(struct
+@@ -9875,6 +10076,9 @@ static void ath12k_wmi_tlv_op_rx(struct
  	case WMI_PDEV_MULTIPLE_VDEV_RESTART_RESP_EVENTID:
  		ath12k_wmi_event_mvr_response(ab, skb);
  		break;
@@ -553,7 +563,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -10410,3 +10611,96 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+@@ -10410,3 +10614,96 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  
  	return ret;
  }
