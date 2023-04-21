@@ -1,6 +1,6 @@
-From 2e951bebcb80c2a33b1bc2658177d97211ad3ef7 Mon Sep 17 00:00:00 2001
+From 5734c676fef131d3040934ab78bd1776c3014b28 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Wed, 26 Apr 2023 14:52:59 -0700
+Date: Wed, 26 Apr 2023 15:19:06 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
 
 Add support for bonded interface to represent each wifi link with a separate
@@ -25,7 +25,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
- drivers/net/wireless/ath/ath12k/bondif.c   | 469 +++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.c   | 471 +++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/bondif.h   |  39 +++
  drivers/net/wireless/ath/ath12k/core.h     |  16 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
@@ -51,7 +51,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  net/wireless/core.c                        |  35 ++-
  net/wireless/nl80211.c                     |   4 +
  net/wireless/util.c                        |   4 +
- 28 files changed, 777 insertions(+), 50 deletions(-)
+ 28 files changed, 779 insertions(+), 50 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -86,10 +86,10 @@ index 98ecf02..a0fc6e6 100644
  CFLAGS_trace.o := -I$(src)
 diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
 new file mode 100644
-index 0000000..71af38b
+index 0000000..5ea0b06
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,471 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -111,29 +111,29 @@ index 0000000..71af38b
 +
 +static void ath12k_ieee80211_if_free(struct net_device *dev)
 +{
-+        free_percpu(dev->tstats);
++	free_percpu(dev->tstats);
 +}
 +
 +static void ath12k_ieee80211_if_setup(struct net_device *dev)
 +{
-+        ether_setup(dev);
-+        dev->priv_flags &= ~IFF_TX_SKB_SHARING;
-+        dev->netdev_ops = &ieee80211_link_dataif_8023_ops;
-+        netdev_set_priv_destructor(dev, ath12k_ieee80211_if_free);
++	ether_setup(dev);
++	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
++	dev->netdev_ops = &ieee80211_link_dataif_8023_ops;
++	netdev_set_priv_destructor(dev, ath12k_ieee80211_if_free);
 +}
 +
 +static bool ath12k_dst_ppe_vp(struct net_device *dev,
 +                                         struct sk_buff *skb, void *cb_data)
 +{
-+        if (unlikely(dev == NULL)) {
-+                dev_kfree_skb_any(skb);
-+                return false;
-+        }
++	if (unlikely(dev == NULL)) {
++		dev_kfree_skb_any(skb);
++		return false;
++	}
 +
-+        skb->dev = dev;
-+        dev_queue_xmit(skb);
++	skb->dev = dev;
++	dev_queue_xmit(skb);
 +
-+        return true;
++	return true;
 +}
 +
 +int ath12k_ppeds_get_core_mask(struct ath12k *ar)
@@ -160,12 +160,12 @@ index 0000000..71af38b
 +{
 +	struct ppe_vp_ai vpai;
 +	struct ieee80211_ppe_vp_ds_params vp_params = {0};
-+         struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +	int ret;
 +	int ppe_vp_num = -1;
 +
-+         if (!g_bonded_interface_model)
-+                 return -EINVAL;
++	if (!g_bonded_interface_model)
++		return -EINVAL;
 +
 +	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
 +
@@ -204,8 +204,8 @@ index 0000000..71af38b
 +	struct ieee80211_ppe_vp_ds_params vp_params = {0};
 +	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +
-+        if (!g_bonded_interface_model)
-+                 return;
++	if (!g_bonded_interface_model)
++		return;
 +
 +	link_ndev_pvt = netdev_priv(link_dev);
 +	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
@@ -225,102 +225,102 @@ index 0000000..71af38b
 +					  u16 old_links, u16 new_links,
 +					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS])
 +{
-+         u16  new_link_id;
-+         struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
-+	 struct net_device *cp_netdev = wdev->netdev;
-+         struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
-+         struct net_device *link_ndev;
-+	 struct ath12k_mld_dev *mldev = NULL;
-+         u16 link_num;
-+         struct net_device *bond_dev = NULL;
-+         char name[20] = {0};
-+         int ret = 0, chip_id = 0, pdev_id = 0;
++	u16  new_link_id;
++	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
++	struct net_device *cp_netdev = wdev->netdev;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++	struct net_device *link_ndev;
++	struct ath12k_mld_dev *mldev = NULL;
++	u16 link_num;
++	struct net_device *bond_dev = NULL;
++	char name[20] = {0};
++	int ret = 0, chip_id = 0, pdev_id = 0;
 +
-+         if (!g_bonded_interface_model)
-+                 return 0;
++	if (!g_bonded_interface_model)
++		return 0;
 +
 +	 if (!vif->bond_init) {
 +		 mutex_init(&vif->bond_mutex);
 +	 }
 +
-+         bond_dev = wdev->bond_netdev;
-+	 mldev = bond_get_mlo_ctx(bond_dev);
++	bond_dev = wdev->bond_netdev;
++	mldev = bond_get_mlo_ctx(bond_dev);
 +
-+         new_link_id = new_links ^ old_links;
-+         link_num =  ffs(new_link_id) - 1;
-+	 /* TODO: Do this assignment only for the Add link case */
++	new_link_id = new_links ^ old_links;
++	link_num =  ffs(new_link_id) - 1;
++	/* TODO: Do this assignment only for the Add link case */
 +
-+         if (new_links > old_links)  {
-+                 /* Add Link operation */
-+                 snprintf(name, sizeof(name), "%s_l%d", cp_netdev->name, link_num);
-+                 link_ndev = alloc_netdev_mqs(sizeof (struct ath12k_link_vif_pvt), name, NET_NAME_ENUM, ath12k_ieee80211_if_setup, 1, 1);
-+                 if (!link_ndev) {
-+                         ath12k_err(NULL, "ERR: link netdev allocation failed\n");
-+			 //TODO: Graceful cleanup
-+			 return -EINVAL;
-+                 }
++	if (new_links > old_links)  {
++		/* Add Link operation */
++		snprintf(name, sizeof(name), "%s_l%d", cp_netdev->name, link_num);
++		link_ndev = alloc_netdev_mqs(sizeof (struct ath12k_link_vif_pvt), name, NET_NAME_ENUM, ath12k_ieee80211_if_setup, 1, 1);
++		if (!link_ndev) {
++			ath12k_err(NULL, "ERR: link netdev allocation failed\n");
++			//TODO: Graceful cleanup
++			return -EINVAL;
++		}
 +
-+                 memcpy(&link_ndev->perm_addr, wdev->links[link_num].addr, ETH_ALEN);
-+                 link_ndev->dev_addr = &link_ndev->perm_addr;
-+                 link_ndev_pvt = netdev_priv(link_ndev);
-+		 memset(link_ndev_pvt, 0, sizeof(*link_ndev_pvt));
-+                 link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
-+		 link_ndev_pvt->hw = hw;
-+		 link_ndev_pvt->link_ndev = link_ndev;
-+		 link_ndev_pvt->is_started = false;
-+		 mldev->vif = vif;
-+		 mutex_lock(&vif->bond_mutex);
-+                 vif->link_ndev[link_num] = link_ndev;
-+		 mutex_unlock(&vif->bond_mutex);
-+                 link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
-+                 rtnl_lock();
-+	         ret = register_netdevice(link_ndev);
-+                 if (ret) {
-+                         ath12k_err(NULL, "Error register link netdevice\n");
-+			 //TODO: Graceful cleanup
-+			 return -EINVAL;
-+                 }
-+		 ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
-+		 ret = bond_enslave(bond_dev, link_ndev, NULL);
-+                 rtnl_unlock();
++		memcpy(&link_ndev->perm_addr, wdev->links[link_num].addr, ETH_ALEN);
++		link_ndev->dev_addr = &link_ndev->perm_addr;
++		link_ndev_pvt = netdev_priv(link_ndev);
++		memset(link_ndev_pvt, 0, sizeof(*link_ndev_pvt));
++		link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
++		link_ndev_pvt->hw = hw;
++		link_ndev_pvt->link_ndev = link_ndev;
++		link_ndev_pvt->is_started = false;
++		mldev->vif = vif;
++		mutex_lock(&vif->bond_mutex);
++		vif->link_ndev[link_num] = link_ndev;
++		mutex_unlock(&vif->bond_mutex);
++		link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
++		rtnl_lock();
++		ret = register_netdevice(link_ndev);
++		if (ret) {
++			ath12k_err(NULL, "Error register link netdevice\n");
++			//TODO: Graceful cleanup
++			return -EINVAL;
++		}
++		ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
++		ret = bond_enslave(bond_dev, link_ndev, NULL);
++		rtnl_unlock();
 +
-+                 if (ret) {
-+                         ath12k_err(NULL, "Error bond enslave error\n");
-+			 //TODO: Graceful exit
-+			 return -EINVAL;
-+		 }
-+                 else
-+                         ath12k_info(NULL, "Successfully register link_ndev(enslave) %s %px. \n", name, link_ndev );
++		if (ret) {
++			ath12k_err(NULL, "Error bond enslave error\n");
++			//TODO: Graceful exit
++			return -EINVAL;
++		}
++		else
++			ath12k_info(NULL, "Successfully register link_ndev(enslave) %s %px. \n", name, link_ndev );
 +
-+                 memcpy(&bond_dev->perm_addr, vif->addr, ETH_ALEN);
-+		 bond_dev->dev_addr = &bond_dev->perm_addr;
++		memcpy(&bond_dev->perm_addr, vif->addr, ETH_ALEN);
++		bond_dev->dev_addr = &bond_dev->perm_addr;
 +
-+		 if (mldev && !mldev->mcast_dev_set) {
-+			 mldev->mcast_dev_set = true;
-+			 mldev->primary_chipid = chip_id;
-+			 mldev->primary_pdevid = pdev_id;
-+		 }
-+		 if (mldev)
-+			 mldev->link_dev[chip_id][pdev_id] =  link_ndev;
++		if (mldev && !mldev->mcast_dev_set) {
++			mldev->mcast_dev_set = true;
++			mldev->primary_chipid = chip_id;
++			mldev->primary_pdevid = pdev_id;
++		}
++		if (mldev)
++			mldev->link_dev[chip_id][pdev_id] =  link_ndev;
 +
-+         } else {
-+                 /* Delete Link operation */
-+		 mutex_lock(&vif->bond_mutex);
-+                 link_ndev = vif->link_ndev[link_num];
-+		 if (link_ndev) {
-+                 	 ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+			 bond_release(wdev->bond_netdev, link_ndev);
-+			 unregister_netdevice(link_ndev);
-+			 vif->link_ndev[link_num] = NULL;
-+		 } else {
-+                 	 ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+		 }
-+		 mutex_unlock(&vif->bond_mutex);
-+	 	 if (vif->bond_init && new_links == 0) {
-+			 vif->bond_init = 0;
-+			 mutex_destroy(&vif->bond_mutex);
-+		 }
-+         }
++		} else {
++			/* Delete Link operation */
++			mutex_lock(&vif->bond_mutex);
++			link_ndev = vif->link_ndev[link_num];
++			if (link_ndev) {
++				ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
++				bond_release(wdev->bond_netdev, link_ndev);
++				unregister_netdevice(link_ndev);
++				vif->link_ndev[link_num] = NULL;
++			} else {
++				ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
++			}
++			mutex_unlock(&vif->bond_mutex);
++			if (vif->bond_init && new_links == 0) {
++				vif->bond_init = 0;
++				mutex_destroy(&vif->bond_mutex);
++			}
++		}
 +	ath12k_info(NULL, "%s:%d link changed for MLD %pM old 0x%x new 0x%x\n", __func__, __LINE__, vif->addr, old_links, new_links);
 +	return 0;
 +}
@@ -385,6 +385,7 @@ index 0000000..71af38b
 +
 +void ieee80211_link_uninit(struct net_device *dev)
 +{
++	return;
 +}
 +
 +netdev_tx_t ieee80211_link_subif_start_xmit_8023(struct sk_buff *skb,
@@ -420,6 +421,7 @@ index 0000000..71af38b
 +
 +void ieee80211_link_set_multicast_list(struct net_device *dev)
 +{
++	return;
 +}
 +
 +int ieee80211_link_change_mac(struct net_device *dev, void *addr)
@@ -473,8 +475,8 @@ index 0000000..71af38b
 +	struct wiphy *dummywiphy = NULL;
 +	bool ret;
 +
-+         if (!g_bonded_interface_model)
-+                 return 0;
++	if (!g_bonded_interface_model)
++		return 0;
 +
 +	if (is_register) {
 +		if (wdev->bond_netdev && test_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state)) {
@@ -517,7 +519,7 @@ index 0000000..71af38b
 +		mlo_info->bond_mlo_ctx = (void *)mldev;
 +		mlo_info->bond_mlo_xmit_netdev = ath12k_dp_mlo_xmit_netdev;
 +		mlo_info->bond_get_mlo_tx_netdev = ath12k_dp_get_mlo_tx_netdev ;
-+                snprintf(name, sizeof(name), "%s_b", dev->name);
++		snprintf(name, sizeof(name), "%s_b", dev->name);
 +		wdev->bond_netdev = bond_create_mlo(&init_net, name, mlo_info);
 +
 +		if (wdev->bond_netdev) {
