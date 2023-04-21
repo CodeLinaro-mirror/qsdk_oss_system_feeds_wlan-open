@@ -753,7 +753,7 @@ mac80211_wds_support_check() {
 			local freq="$(get_freq "$phy" "$channel" "$device")"
 			local board_type=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}' | awk -F- '{print $3}')
 
-			if [ $board_type == "C6" ] && [ $freq -gt 2000 ] && [ $freq -lt 3000]; then
+			if [ $board_type == "C6" ] && [ $freq -gt 2000 ] && [ $freq -lt 3000 ]; then
 				frame_mode=$(cat /sys/module/ath11k/parameters/frame_mode)
 			else
 				frame_mode=$(cat /sys/module/ath12k/parameters/frame_mode)
