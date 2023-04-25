@@ -22,8 +22,6 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  net/mac80211/iface.c   | 18 +++++++---
  3 files changed, 79 insertions(+), 22 deletions(-)
 
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index d0497e9..0ce9009 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
 @@ -739,6 +739,8 @@ struct ieee80211_bss_conf {
@@ -44,11 +42,9 @@ index d0497e9..0ce9009 100644
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	u32 ppe_vp_num;
  #endif
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 0daa809..58ca5f4 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -142,8 +142,10 @@ static int ieee80211_set_ap_mbssid_options(struct ieee80211_sub_if_data *sdata,
+@@ -142,8 +142,10 @@ static int ieee80211_set_ap_mbssid_optio
  					   struct ieee80211_bss_conf *link_conf)
  {
  	struct ieee80211_sub_if_data *tx_sdata;
@@ -60,7 +56,7 @@ index 0daa809..58ca5f4 100644
  	link_conf->bssid_index = 0;
  	link_conf->nontransmitted = false;
  	link_conf->ema_ap = false;
-@@ -156,9 +158,18 @@ static int ieee80211_set_ap_mbssid_options(struct ieee80211_sub_if_data *sdata,
+@@ -156,9 +158,18 @@ static int ieee80211_set_ap_mbssid_optio
  		return -EINVAL;
  
  	if (tx_sdata == sdata) {
@@ -81,7 +77,27 @@ index 0daa809..58ca5f4 100644
  		link_conf->nontransmitted = true;
  		link_conf->bssid_index = params.index;
  	}
-@@ -3676,23 +3687,41 @@ void ieee80211_csa_finish(struct ieee80211_vif *vif, unsigned int link_id)
+@@ -1583,7 +1594,7 @@ static void ieee80211_free_next_beacon(s
+ 	link->u.ap.next_beacon = NULL;
+ }
+ 
+-static int ieee80211_stop_ap(struct wiphy *wiphy, struct net_device *dev,
++int ieee80211_stop_ap(struct wiphy *wiphy, struct net_device *dev,
+ 			     unsigned int link_id)
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+@@ -1663,7 +1674,10 @@ static int ieee80211_stop_ap(struct wiph
+ 	__sta_info_flush(sdata, true);
+ 	ieee80211_free_keys(sdata, true);
+ 
++	ieee80211_stop_mbssid(sdata);
+ 	link_conf->enable_beacon = false;
++	link_conf->mbssid_tx_vif = NULL;
++	link_conf->mbssid_tx_vif_linkid = -1;
+ 	sdata->beacon_rate_set = false;
+ 	sdata->vif.cfg.ssid_len = 0;
+ 	clear_bit(SDATA_STATE_OFFCHANNEL_BEACON_STOPPED, &sdata->state);
+@@ -3676,23 +3690,41 @@ void ieee80211_csa_finish(struct ieee802
  		return;
  	}
  
@@ -128,7 +144,7 @@ index 0daa809..58ca5f4 100644
  		}
  	}
  	ieee80211_queue_work(&local->hw, &link->csa_finalize_work);
-@@ -4898,6 +4927,7 @@ ieee80211_color_change_bss_config_notify(struct ieee80211_link_data *link,
+@@ -4898,6 +4930,7 @@ ieee80211_color_change_bss_config_notify
  {
  	struct ieee80211_sub_if_data *sdata = link->sdata;
  
@@ -136,7 +152,7 @@ index 0daa809..58ca5f4 100644
  	link->conf->he_bss_color.color = color;
  	link->conf->he_bss_color.enabled = enable;
  
-@@ -4905,19 +4935,38 @@ ieee80211_color_change_bss_config_notify(struct ieee80211_link_data *link,
+@@ -4905,19 +4938,38 @@ ieee80211_color_change_bss_config_notify
  
  	ieee80211_link_info_change_notify(sdata, link, changed);
  
@@ -182,52 +198,141 @@ index 0daa809..58ca5f4 100644
  		}
  		mutex_unlock(&sdata->local->iflist_mtx);
  	}
-diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
-index c55f6b4..90fad65 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -673,28 +673,36 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
- static void ieee80211_stop_mbssid(struct ieee80211_sub_if_data *sdata)
+@@ -670,31 +670,105 @@ static void ieee80211_do_stop(struct iee
+ 		ieee80211_add_virtual_monitor(local);
+ }
+ 
+-static void ieee80211_stop_mbssid(struct ieee80211_sub_if_data *sdata)
++void ieee80211_stop_mbssid(struct ieee80211_sub_if_data *sdata)
  {
  	struct ieee80211_sub_if_data *tx_sdata, *non_tx_sdata, *tmp_sdata;
 -	struct ieee80211_vif *tx_vif = sdata->vif.mbssid_tx_vif;
-+	struct ieee80211_vif *tx_vif = sdata->vif.bss_conf.mbssid_tx_vif;
- 
- 	if (!tx_vif)
- 		return;
- 
-+	/* TODO: For MLO Need to handle this teardown by looping through all links bss
-+	 * in mbssid group, if any of such link is part of MLD Stop all link in that MLD.
-+	 * Currenly handled Non-MLO teardown.
-+	 */
-+	if (tx_vif->active_links)
-+		return;
-+
- 	tx_sdata = vif_to_sdata(tx_vif);
+-
+-	if (!tx_vif)
+-		return;
+-
+-	tx_sdata = vif_to_sdata(tx_vif);
 -	sdata->vif.mbssid_tx_vif = NULL;
-+	sdata->vif.bss_conf.mbssid_tx_vif = NULL;
- 
- 	list_for_each_entry_safe(non_tx_sdata, tmp_sdata,
- 				 &tx_sdata->local->interfaces, list) {
- 		if (non_tx_sdata != sdata && non_tx_sdata != tx_sdata &&
+-
+-	list_for_each_entry_safe(non_tx_sdata, tmp_sdata,
+-				 &tx_sdata->local->interfaces, list) {
+-		if (non_tx_sdata != sdata && non_tx_sdata != tx_sdata &&
 -		    non_tx_sdata->vif.mbssid_tx_vif == tx_vif &&
-+		    non_tx_sdata->vif.bss_conf.mbssid_tx_vif == tx_vif &&
- 		    ieee80211_sdata_running(non_tx_sdata)) {
+-		    ieee80211_sdata_running(non_tx_sdata)) {
 -			non_tx_sdata->vif.mbssid_tx_vif = NULL;
-+			non_tx_sdata->vif.bss_conf.mbssid_tx_vif = NULL;
- 			dev_close(non_tx_sdata->wdev.netdev);
+-			dev_close(non_tx_sdata->wdev.netdev);
++	struct ieee80211_vif *tx_vif;
++	unsigned int valid_links, link_id, tx_link_id, iter_valid_links, iter_link_id, mld_link_id;
++	struct ieee80211_link_data *link_iter, *link, *mld_link;
++
++	/* Check link 0 by default for non MLO. */
++	iter_valid_links = sdata->vif.valid_links | BIT(0);
++	/* Check if any of the links of current sdata is an MBSSID. */
++	for_each_set_bit(iter_link_id, &iter_valid_links,
++			 IEEE80211_MLD_MAX_NUM_LINKS) {
++		rcu_read_lock();
++		link_iter = rcu_dereference(sdata->link[iter_link_id]);
++		if (!link_iter) {
++			rcu_read_unlock();
++			continue;
++		}
++		tx_vif = link_iter->conf->mbssid_tx_vif;
++		tx_link_id = link_iter->conf->mbssid_tx_vif_linkid;
++		if (!tx_vif) {
++			rcu_read_unlock();
++			continue;
  		}
- 	}
+-	}
  
- 	if (sdata != tx_sdata && ieee80211_sdata_running(tx_sdata)) {
+-	if (sdata != tx_sdata && ieee80211_sdata_running(tx_sdata)) {
 -		tx_sdata->vif.mbssid_tx_vif = NULL;
-+		tx_sdata->vif.bss_conf.mbssid_tx_vif = NULL;
- 		dev_close(tx_sdata->wdev.netdev);
+-		dev_close(tx_sdata->wdev.netdev);
++		tx_sdata = vif_to_sdata(tx_vif);
++		link_iter->conf->mbssid_tx_vif = NULL;
++		rcu_read_unlock();
++
++		/* loop through sdatas to find if any of their links
++		 * belong to same mbssid group as the one getting deleted.
++		 */
++		list_for_each_entry_safe(non_tx_sdata, tmp_sdata,
++					 &tx_sdata->local->interfaces, list) {
++			if (non_tx_sdata != sdata && non_tx_sdata != tx_sdata &&
++			    ieee80211_sdata_running(non_tx_sdata)) {
++				valid_links = non_tx_sdata->vif.valid_links | BIT(0);
++				for_each_set_bit(link_id, &valid_links,
++						 IEEE80211_MLD_MAX_NUM_LINKS) {
++					rcu_read_lock();
++					link = rcu_dereference(non_tx_sdata->link[link_id]);
++					if (!link) {
++						rcu_read_unlock();
++						continue;
++					}
++					/* If both tx vif and tx linkid is matching then it belongs to
++					 * same MBSSID group.
++					 */
++					if (link->conf->mbssid_tx_vif != tx_vif ||
++					    link->conf->mbssid_tx_vif_linkid != tx_link_id) {
++						rcu_read_unlock();
++						continue;
++					}
++					link->conf->mbssid_tx_vif = NULL;
++					rcu_read_unlock();
++					sdata_lock(non_tx_sdata);
++					/* Remove all links of matching MLD untill dynamic link removal
++					 * can be supported.
++					 */
++					for_each_set_bit(mld_link_id, &valid_links,
++							 IEEE80211_MLD_MAX_NUM_LINKS) {
++						rcu_read_lock();
++						mld_link = rcu_dereference(non_tx_sdata->link[mld_link_id]);
++						if (!mld_link) {
++							rcu_read_unlock();
++							continue;
++						}
++						rcu_read_unlock();
++						ieee80211_stop_ap(non_tx_sdata->wdev.wiphy,
++								  non_tx_sdata->wdev.netdev,
++								  mld_link->link_id);
++					}
++					sdata_unlock(non_tx_sdata);
++				}
++			}
++		}
++		/* If we are not tx sdata, remove links of tx sdata and proceed.
++		 */
++		if (sdata != tx_sdata && ieee80211_sdata_running(tx_sdata)) {
++			valid_links = tx_sdata->vif.valid_links | BIT(0);
++			for_each_set_bit(link_id, &valid_links,
++					 IEEE80211_MLD_MAX_NUM_LINKS) {
++				rcu_read_lock();
++				link = rcu_dereference(tx_sdata->link[link_id]);
++				if (!link) {
++					rcu_read_unlock();
++					continue;
++				}
++				link->conf->mbssid_tx_vif = NULL;
++				rcu_read_unlock();
++				sdata_lock(tx_sdata);
++				ieee80211_stop_ap(tx_sdata->wdev.wiphy,
++						  tx_sdata->wdev.netdev,
++						  link_id);
++				sdata_unlock(tx_sdata);
++			}
++		}
  	}
 +	return;
  }
  
  static int ieee80211_stop(struct net_device *dev)
--- 
-2.17.1
-
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -2624,4 +2624,7 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(stru
+ 				    struct link_sta_info *link_sta);
+ void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_bss_conf *link_conf,
+ 				     const struct ieee80211_eht_operation *op_ie);
++int ieee80211_stop_ap(struct wiphy *wiphy, struct net_device *dev,
++		      unsigned int link_id);
++void ieee80211_stop_mbssid(struct ieee80211_sub_if_data *sdata);
+ #endif /* IEEE80211_I_H */
