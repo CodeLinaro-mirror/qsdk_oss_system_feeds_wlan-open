@@ -24,23 +24,30 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -95,40 +95,42 @@ int ath12k_dp_peer_setup(struct ath12k *
+@@ -93,44 +93,53 @@ int ath12k_dp_peer_setup(struct ath12k *
+ {
+ 	struct ath12k_base *ab = ar->ab;
  	struct ath12k_peer *peer;
++	struct crypto_shash *tfm;
  	int ret = 0, tid;
  
 -	/* TODO setup resources only for primary link peer for ML case */
++	tfm = crypto_alloc_shash("michael_mic", 0, 0);
++	if (IS_ERR(tfm))
++		return PTR_ERR(tfm);
++
 +	spin_lock_bh(&ab->base_lock);
 +	peer = ath12k_peer_find(ab, arvif->vdev_id, arsta->addr);
 +	if (!peer) {
 +		ath12k_warn(ab, "failed to lookup peer %pM on vdev %d\n",
 +			    arsta->addr, arvif->vdev_id);
-+		spin_unlock_bh(&ab->base_lock);
-+		return -ENOENT;
++		ret = -ENOENT;
++		goto free_shash;
 +	}
 +
 +	if (!peer->primary_link) {
-+		spin_unlock_bh(&ab->base_lock);
-+		return 0;
++		ret = 0;
++		goto free_shash;
 +	}
  
  	for (tid = 0; tid <= IEEE80211_NUM_TIDS; tid++) {
@@ -56,7 +63,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
 -	ret = ath12k_dp_rx_peer_frag_setup(ar, arsta->addr, arvif->vdev_id);
-+	ret = ath12k_dp_rx_peer_frag_setup(ar, peer);
++	ret = ath12k_dp_rx_peer_frag_setup(ar, peer, tfm);
  	if (ret) {
  		ath12k_warn(ab, "failed to setup rx defrag context\n");
 -		tid--;
@@ -84,7 +91,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +	for (tid--; tid >= 0; tid--)
  		ath12k_dp_rx_peer_tid_delete(ar, peer, tid);
  
++free_shash:
++	crypto_free_shash(tfm);
  	spin_unlock_bh(&ab->base_lock);
+ 
+ 	return ret;
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -1075,13 +1075,11 @@ static int ath12k_peer_rx_tid_reo_update
@@ -217,23 +228,24 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	return ret;
  }
  
-@@ -3519,11 +3513,10 @@ static void ath12k_dp_rx_frag_timer(stru
+@@ -3519,32 +3513,13 @@ static void ath12k_dp_rx_frag_timer(stru
  	spin_unlock_bh(&rx_tid->ab->base_lock);
  }
  
 -int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_id)
-+int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, struct ath12k_peer *peer)
++int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, struct ath12k_peer *peer,
++				 struct crypto_shash *tfm)
  {
  	struct ath12k_base *ab = ar->ab;
- 	struct crypto_shash *tfm;
+-	struct crypto_shash *tfm;
 -	struct ath12k_peer *peer;
  	struct ath12k_dp_rx_tid *rx_tid;
  	int i;
  
-@@ -3531,20 +3524,6 @@ int ath12k_dp_rx_peer_frag_setup(struct
- 	if (IS_ERR(tfm))
- 		return PTR_ERR(tfm);
- 
+-	tfm = crypto_alloc_shash("michael_mic", 0, 0);
+-	if (IS_ERR(tfm))
+-		return PTR_ERR(tfm);
+-
 -	spin_lock_bh(&ab->base_lock);
 -
 -	peer = ath12k_peer_find(ab, vdev_id, peer_mac);
@@ -251,7 +263,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	for (i = 0; i <= IEEE80211_NUM_TIDS; i++) {
  		rx_tid = &peer->rx_tid[i];
  		rx_tid->ab = ab;
-@@ -3554,7 +3533,6 @@ int ath12k_dp_rx_peer_frag_setup(struct
+@@ -3554,7 +3529,6 @@ int ath12k_dp_rx_peer_frag_setup(struct
  
  	peer->tfm_mmic = tfm;
  	peer->dp_setup_done = true;
@@ -273,12 +285,14 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  void ath12k_dp_htt_htc_t2h_msg_handler(struct ath12k_base *ab,
  				       struct sk_buff *skb);
  int ath12k_dp_rx_pdev_reo_setup(struct ath12k_base *ab);
-@@ -167,7 +166,7 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
+@@ -167,8 +166,8 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
  			   void *data);
  int ath12k_dp_rx_pdev_mon_attach(struct ath12k *ar);
  void ath12k_dp_rx_pdev_mon_detach(struct ath12k_base *ab, const int pdev_idx);
 -int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_id);
-+int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, struct ath12k_peer *peer);
- 
+-
++int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, struct ath12k_peer *peer,
++				 struct crypto_shash *tfm);
  int ath12k_dp_rx_pktlog_start(struct ath12k_base *ab);
  int ath12k_dp_rx_pktlog_stop(struct ath12k_base *ab, bool stop_timer);
+ u8 ath12k_dp_rx_h_l3pad(struct ath12k_base *ab,
