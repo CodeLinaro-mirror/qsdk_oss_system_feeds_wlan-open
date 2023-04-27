@@ -347,13 +347,13 @@ boost_performance() {
 
 				;;
 			ap-mi01.2)
-				tc qdisc replace dev eth4 root noqueue
-				tc qdisc replace dev eth5 root noqueue
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
 
-				ethtool -K eth4 gro off
-				ethtool -K eth4 gso off
-				ethtool -K eth5 gro off
-				ethtool -K eth5 gso off
+				ethtool -K eth0 gro off
+				ethtool -K eth0 gso off
+				ethtool -K eth1 gro off
+				ethtool -K eth1 gso off
 
 				ssdk_sh fdb learnCtrl set disable
 				ssdk_sh fdb entry flush 1
@@ -370,17 +370,26 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
-				#6G reo queues
-				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+				#5G reo queues
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
 
-				#For 5G reo queues
-				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+				#For 6G reo queues
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
 
 				#For 2G reo queues
 				echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
-				echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+				echo 0x13213213 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
 
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
@@ -389,16 +398,17 @@ boost_performance() {
 				tc qdisc replace dev wlan0 root noqueue
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			ap-mi01.6)
-                                tc qdisc replace dev eth4 root noqueue
-                                tc qdisc replace dev eth5 root noqueue
+                                tc qdisc replace dev eth0 root noqueue
+                                tc qdisc replace dev eth1 root noqueue
 
-                                ethtool -K eth4 gro off
-                                ethtool -K eth4 gso off
-                                ethtool -K eth5 gro off
-                                ethtool -K eth5 gso off
+                                ethtool -K eth0 gro off
+                                ethtool -K eth0 gso off
+                                ethtool -K eth1 gro off
+                                ethtool -K eth1 gso off
 
                                 ssdk_sh fdb learnCtrl set disable
                                 ssdk_sh fdb entry flush 1
@@ -416,12 +426,21 @@ boost_performance() {
                                 echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
                                 #For 5G/6G reo queues
-                                echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
-                                echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+                                echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+                                echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
 
                                 #For 2G reo queues
                                 echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
                                 echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
 
                                 echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
                                 echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
@@ -430,6 +449,7 @@ boost_performance() {
                                 tc qdisc replace dev wlan0 root noqueue
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
                                 #no settings
                                 ;;
 
