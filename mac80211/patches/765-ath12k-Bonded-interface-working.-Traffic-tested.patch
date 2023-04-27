@@ -1,6 +1,6 @@
-From fecbd1f32d00c2523ed32b7c8224423c06db35f0 Mon Sep 17 00:00:00 2001
+From 2e951bebcb80c2a33b1bc2658177d97211ad3ef7 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Wed, 26 Apr 2023 14:37:16 -0700
+Date: Wed, 26 Apr 2023 14:52:59 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
 
 Add support for bonded interface to represent each wifi link with a separate
@@ -25,11 +25,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
- drivers/net/wireless/ath/ath12k/bondif.c   | 482 +++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.c   | 469 +++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/bondif.h   |  39 +++
  drivers/net/wireless/ath/ath12k/core.h     |  16 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
- drivers/net/wireless/ath/ath12k/mac.c      |  49 ++-
+ drivers/net/wireless/ath/ath12k/mac.c      |  54 +++-
  drivers/net/wireless/ath/ath12k/pci.c      |  18 ++
  drivers/net/wireless/ath/ath12k/ppe.c      |  23 +-
  drivers/net/wireless/ath/ath12k/ppe.h      |  13 +-
@@ -51,7 +51,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  net/wireless/core.c                        |  35 ++-
  net/wireless/nl80211.c                     |   4 +
  net/wireless/util.c                        |   4 +
- 28 files changed, 785 insertions(+), 50 deletions(-)
+ 28 files changed, 777 insertions(+), 50 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -86,10 +86,10 @@ index 98ecf02..a0fc6e6 100644
  CFLAGS_trace.o := -I$(src)
 diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
 new file mode 100644
-index 0000000..2a7e449
+index 0000000..71af38b
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,482 @@
+@@ -0,0 +1,469 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -225,10 +225,6 @@ index 0000000..2a7e449
 +					  u16 old_links, u16 new_links,
 +					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS])
 +{
-+         struct ath12k_hw *ah = hw->priv;
-+ 	 struct ath12k_link_vif *arvif = NULL;
-+	 struct ath12k_base *ab = NULL;
-+	 struct ath12k *ar = NULL;
 +         u16  new_link_id;
 +         struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
 +	 struct net_device *cp_netdev = wdev->netdev;
@@ -253,13 +249,6 @@ index 0000000..2a7e449
 +         new_link_id = new_links ^ old_links;
 +         link_num =  ffs(new_link_id) - 1;
 +	 /* TODO: Do this assignment only for the Add link case */
-+	 arvif = ath12k_mac_assign_link_vif(ah, vif, link_num);
-+	 if (arvif) {
-+		 ab = arvif->ab;
-+		 ar = arvif->ar;
-+//		 chip_id = ab->chip_id;
-+//		 pdev_id = ar->pdev->pdev_id;
-+	 }
 +
 +         if (new_links > old_links)  {
 +                 /* Add Link operation */
@@ -276,11 +265,9 @@ index 0000000..2a7e449
 +                 link_ndev_pvt = netdev_priv(link_ndev);
 +		 memset(link_ndev_pvt, 0, sizeof(*link_ndev_pvt));
 +                 link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
-+		 link_ndev_pvt->arvif = arvif;
 +		 link_ndev_pvt->hw = hw;
 +		 link_ndev_pvt->link_ndev = link_ndev;
 +		 link_ndev_pvt->is_started = false;
-+		 arvif->ndev_pvt = link_ndev_pvt;
 +		 mldev->vif = vif;
 +		 mutex_lock(&vif->bond_mutex);
 +                 vif->link_ndev[link_num] = link_ndev;
@@ -417,7 +404,7 @@ index 0000000..2a7e449
 +		ieee80211_free_txskb(arvif_pvt->hw, skb);
 +		return NETDEV_TX_OK;
 +	}
-+	if (!arvif->is_started) {
++	if (!arvif || !arvif->is_started) {
 +		ath12k_err(NULL, "Dropping frames as arvif is not started\n");
 +		return NETDEV_TX_OK;
 +	}
@@ -685,7 +672,7 @@ index cf09981..2f38d7c 100644
  
  	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index c289535..2bf02f3 100644
+index c289535..cd8b2ea 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
@@ -750,28 +737,33 @@ index c289535..2bf02f3 100644
  #else
  	ret = ath12k_dp_peer_setup(ar, arvif, arsta, -1);
  #endif
-@@ -9478,6 +9490,9 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9478,6 +9490,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	struct net_device *link_ndev = NULL;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +#endif
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9536,6 +9551,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9536,6 +9552,14 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+	if (arvif->ndev_pvt)
-+		link_ndev = arvif->ndev_pvt->link_ndev ;
++	link_ndev = vif->link_ndev[link_id];
++	if (link_ndev) {
++		link_ndev_pvt = netdev_priv(link_ndev);
++		link_ndev_pvt->arvif = arvif;
++		arvif->ndev_pvt = link_ndev_pvt;
++	}
 +#endif
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9627,6 +9646,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9627,6 +9651,10 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -782,7 +774,7 @@ index c289535..2bf02f3 100644
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -10209,15 +10232,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
+@@ -10209,15 +10237,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
  	return ret;
  }
  
@@ -804,7 +796,7 @@ index c289535..2bf02f3 100644
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -13967,10 +13992,6 @@ static const struct ieee80211_ops ath12k_ops = {
+@@ -13967,10 +13997,6 @@ static const struct ieee80211_ops ath12k_ops = {
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
