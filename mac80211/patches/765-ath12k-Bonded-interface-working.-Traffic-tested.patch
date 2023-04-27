@@ -1,6 +1,6 @@
-From 5734c676fef131d3040934ab78bd1776c3014b28 Mon Sep 17 00:00:00 2001
+From 5709709406a3cedac4fc8320c1e16ce57413b7bd Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Wed, 26 Apr 2023 15:19:06 -0700
+Date: Wed, 26 Apr 2023 15:28:33 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
 
 Add support for bonded interface to represent each wifi link with a separate
@@ -25,7 +25,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
- drivers/net/wireless/ath/ath12k/bondif.c   | 471 +++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.c   | 480 +++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/bondif.h   |  39 +++
  drivers/net/wireless/ath/ath12k/core.h     |  16 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
@@ -51,7 +51,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  net/wireless/core.c                        |  35 ++-
  net/wireless/nl80211.c                     |   4 +
  net/wireless/util.c                        |   4 +
- 28 files changed, 779 insertions(+), 50 deletions(-)
+ 28 files changed, 788 insertions(+), 50 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -86,10 +86,10 @@ index 98ecf02..a0fc6e6 100644
  CFLAGS_trace.o := -I$(src)
 diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
 new file mode 100644
-index 0000000..5ea0b06
+index 0000000..7935fe4
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,480 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -235,6 +235,7 @@ index 0000000..5ea0b06
 +	struct net_device *bond_dev = NULL;
 +	char name[20] = {0};
 +	int ret = 0, chip_id = 0, pdev_id = 0;
++	int rtnl_locked = rtnl_is_locked();
 +
 +	if (!g_bonded_interface_model)
 +		return 0;
@@ -273,16 +274,20 @@ index 0000000..5ea0b06
 +		vif->link_ndev[link_num] = link_ndev;
 +		mutex_unlock(&vif->bond_mutex);
 +		link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
-+		rtnl_lock();
++		if (!rtnl_locked)
++			rtnl_lock();
 +		ret = register_netdevice(link_ndev);
 +		if (ret) {
 +			ath12k_err(NULL, "Error register link netdevice\n");
 +			//TODO: Graceful cleanup
++			if (!rtnl_locked)
++				rtnl_unlock();
 +			return -EINVAL;
 +		}
 +		ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
 +		ret = bond_enslave(bond_dev, link_ndev, NULL);
-+		rtnl_unlock();
++		if (!rtnl_locked)
++			rtnl_unlock();
 +
 +		if (ret) {
 +			ath12k_err(NULL, "Error bond enslave error\n");
@@ -309,8 +314,12 @@ index 0000000..5ea0b06
 +			link_ndev = vif->link_ndev[link_num];
 +			if (link_ndev) {
 +				ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
++				if (!rtnl_locked)
++					rtnl_lock();
 +				bond_release(wdev->bond_netdev, link_ndev);
 +				unregister_netdevice(link_ndev);
++				if (!rtnl_locked)
++					rtnl_unlock();
 +				vif->link_ndev[link_num] = NULL;
 +			} else {
 +				ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
