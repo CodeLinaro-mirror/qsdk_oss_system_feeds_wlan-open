@@ -1,7 +1,7 @@
-From 5c2e7fb3ede90bc9f2dd1ebb435f3888b2a63c37 Mon Sep 17 00:00:00 2001
+From 44da5ae624eb7c084a13ad9b261030bfb04eb808 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Wed, 12 Apr 2023 16:09:58 -0700
-Subject: [PATCH 2/2] wifi: ath12k: add framework to support PPE DS
+Subject: [PATCH 2/4] wifi: ath12k: add framework to support PPE DS
 
 Add framework to support PPE DS. By default ppe ds is disabled.
 This can be enabled through writing 1 to module params
@@ -32,10 +32,10 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  drivers/net/wireless/ath/ath12k/debug.h    |   3 +
  drivers/net/wireless/ath/ath12k/debugfs.c  |  89 +++
  drivers/net/wireless/ath/ath12k/dp.c       | 243 +++++-
- drivers/net/wireless/ath/ath12k/dp.h       | 118 ++-
+ drivers/net/wireless/ath/ath12k/dp.h       | 123 ++-
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  74 ++
  drivers/net/wireless/ath/ath12k/dp_rx.h    |  35 +
- drivers/net/wireless/ath/ath12k/dp_tx.c    | 149 ++++
+ drivers/net/wireless/ath/ath12k/dp_tx.c    | 144 ++++
  drivers/net/wireless/ath/ath12k/dp_tx.h    |   6 +-
  drivers/net/wireless/ath/ath12k/hal.c      |  65 +-
  drivers/net/wireless/ath/ath12k/hal.h      |  29 +-
@@ -46,16 +46,17 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  drivers/net/wireless/ath/ath12k/hal_tx.h   |  16 +
  drivers/net/wireless/ath/ath12k/hif.h      |  49 ++
  drivers/net/wireless/ath/ath12k/hw.c       |  29 +-
- drivers/net/wireless/ath/ath12k/hw.h       |   8 +-
+ drivers/net/wireless/ath/ath12k/hw.h       |   9 +-
  drivers/net/wireless/ath/ath12k/mac.c      |  21 +-
  drivers/net/wireless/ath/ath12k/pci.c      |  88 +++
  drivers/net/wireless/ath/ath12k/pci.h      |  13 +
- drivers/net/wireless/ath/ath12k/ppe.c      | 858 +++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/ppe.h      |  39 +
+ drivers/net/wireless/ath/ath12k/ppe.c      | 856 +++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/ppe.h      |  41 +
  drivers/net/wireless/ath/ath12k/wmi.c      |  82 ++
  drivers/net/wireless/ath/ath12k/wmi.h      |  68 ++
  local-symbols                              |   1 +
- 30 files changed, 2175 insertions(+), 90 deletions(-)
+ net/mac80211/iface.c                       |   4 +
+ 31 files changed, 2180 insertions(+), 90 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.c
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.h
 
@@ -636,7 +637,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	}
 +
 +	/* PPEDS TX Descriptor cleanup */
-+	for (i = 0; i < ATH12K_HW_MAX_QUEUES; i++) {
++	for (i = 0; i < ATH12K_HW_MAX_QUEUES_PPEDS; i++) {
 +		spin_lock_bh(&dp->ppeds_tx_desc_lock[i]);
 +
 +		list_for_each_entry_safe(ppeds_tx_desc_info, tmp2,
@@ -655,7 +656,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		spin_unlock_bh(&dp->ppeds_tx_desc_lock[i]);
 +	}
 +
-+	for (pool_id = 0; pool_id < ATH12K_HW_MAX_QUEUES; pool_id++) {
++	for (pool_id = 0; pool_id < ATH12K_HW_MAX_QUEUES_PPEDS; pool_id++) {
 +		spin_lock_bh(&dp->ppeds_tx_desc_lock[pool_id]);
 +
 +		for (i = 0; i < ATH12K_PPEDS_TX_SPT_PAGES_PER_POOL; i++) {
@@ -684,7 +685,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	/* pointer to start of TX pages */
 +	ppeds_tx_spt_pages = &dp->spt_info[ATH12K_PPEDS_TX_SPT_PAGE_OFFSET];
 +
-+	for (pool_id = 0; pool_id < ATH12K_HW_MAX_QUEUES; pool_id++) {
++	for (pool_id = 0; pool_id < ATH12K_HW_MAX_QUEUES_PPEDS; pool_id++) {
 +		spin_lock_bh(&dp->ppeds_tx_desc_lock[pool_id]);
 +		for (i = 0; i < ATH12K_PPEDS_TX_SPT_PAGES_PER_POOL; i++) {
 +			ppeds_tx_descs = kcalloc(ATH12K_MAX_SPT_ENTRIES, sizeof(*ppeds_tx_descs),
@@ -737,7 +738,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags)) {
-+		for (i = 0; i < ATH12K_HW_MAX_QUEUES; i++) {
++		for (i = 0; i < ATH12K_HW_MAX_QUEUES_PPEDS; i++) {
 +			INIT_LIST_HEAD(&dp->ppeds_tx_desc_free_list[i]);
 +			INIT_LIST_HEAD(&dp->ppeds_tx_desc_used_list[i]);
 +			spin_lock_init(&dp->ppeds_tx_desc_lock[i]);
@@ -779,15 +780,20 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #define DP_DIR_BUF_COOKIE_BUF_ID	GENMASK(17, 0)
  #define DP_DIR_BUF_COOKIE_PDEV_ID	GENMASK(19, 18)
  
-@@ -196,6 +210,7 @@ struct ath12k_pdev_dp {
- #define ATH12K_SHADOW_CTRL_TIMER_INTERVAL 10
+@@ -197,6 +211,12 @@ struct ath12k_pdev_dp {
  
  #define ATH12K_NUM_POOL_TX_DESC	32768
-+#define ATH12K_NUM_POOL_PPEDS_TX_DESC 32768
  
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++#define ATH12K_NUM_POOL_PPEDS_TX_DESC 0x10000
++#else
++#define ATH12K_NUM_POOL_PPEDS_TX_DESC 0
++#endif
++
  /* TODO revisit this count during testing */
  #define ATH12K_RX_DESC_COUNT	(12288)
-@@ -215,9 +230,19 @@ struct ath12k_pdev_dp {
+ 
+@@ -215,9 +235,19 @@ struct ath12k_pdev_dp {
  #define ATH12K_TX_SPT_PAGES_PER_POOL (ATH12K_NUM_POOL_TX_DESC / \
  					  ATH12K_MAX_SPT_ENTRIES)
  #define ATH12K_NUM_TX_SPT_PAGES	(ATH12K_TX_SPT_PAGES_PER_POOL * ATH12K_HW_MAX_QUEUES)
@@ -803,14 +809,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +#define ATH12K_PPEDS_TX_SPT_PAGES_PER_POOL (ATH12K_NUM_POOL_PPEDS_TX_DESC / \
 +					    ATH12K_MAX_SPT_ENTRIES)
 +#define ATH12K_NUM_PPEDS_TX_SPT_PAGES (ATH12K_PPEDS_TX_SPT_PAGES_PER_POOL *\
-+				       ATH12K_HW_MAX_QUEUES)
++				       ATH12K_HW_MAX_QUEUES_PPEDS)
 +
 +#define ATH12K_NUM_SPT_PAGES	(ATH12K_NUM_TX_SPT_PAGES + ATH12K_NUM_RX_SPT_PAGES + \
 +				 ATH12K_NUM_PPEDS_TX_SPT_PAGES)
  
  /* The SPT pages are divided for RX and TX, first block for RX
   * and remaining for TX
-@@ -282,6 +307,7 @@ struct ath12k_rx_desc_info {
+@@ -282,6 +312,7 @@ struct ath12k_rx_desc_info {
  	struct sk_buff *skb;
  	u32 cookie;
  	u32 magic;
@@ -818,7 +824,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  struct ath12k_tx_desc_info {
-@@ -294,11 +320,23 @@ struct ath12k_tx_desc_info {
+@@ -294,11 +325,23 @@ struct ath12k_tx_desc_info {
  	u8 recycler_fast_xmit;
  };
  
@@ -842,7 +848,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  struct ath12k_reo_queue_ref {
-@@ -321,6 +359,21 @@ struct host_link_stats {
+@@ -321,6 +364,21 @@ struct host_link_stats {
  	u32 tx_desc_type[HAL_TCL_DESC_TYPE_EXT_DESC];
  };
  
@@ -864,7 +870,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  struct ath12k_dp {
  	struct ath12k_base *ab;
  	u8 num_bank_profiles;
-@@ -341,6 +394,11 @@ struct ath12k_dp {
+@@ -341,6 +399,11 @@ struct ath12k_dp {
  	struct dp_srng rx_rel_ring;
  	struct dp_srng reo_except_ring;
  	struct dp_srng reo_cmd_ring;
@@ -876,15 +882,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	struct dp_srng reo_status_ring;
  	struct dp_srng reo_dst_ring[DP_REO_DST_RING_MAX];
  	struct dp_tx_ring tx_ring[DP_TCL_NUM_RING_MAX];
-@@ -376,6 +434,17 @@ struct ath12k_dp {
+@@ -376,6 +439,17 @@ struct ath12k_dp {
  	/* protects the free and used desc lists */
  	spinlock_t tx_desc_lock[ATH12K_HW_MAX_QUEUES];
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
-+	struct list_head ppeds_tx_desc_free_list[ATH12K_HW_MAX_QUEUES];
-+	struct list_head ppeds_tx_desc_used_list[ATH12K_HW_MAX_QUEUES];
++	struct list_head ppeds_tx_desc_free_list[ATH12K_HW_MAX_QUEUES_PPEDS];
++	struct list_head ppeds_tx_desc_used_list[ATH12K_HW_MAX_QUEUES_PPEDS];
 +	/* protects the free and used desc lists */
-+	spinlock_t ppeds_tx_desc_lock[ATH12K_HW_MAX_QUEUES];
++	spinlock_t ppeds_tx_desc_lock[ATH12K_HW_MAX_QUEUES_PPEDS];
 +
 +	struct dp_ppe_vp_profile ppe_vp_profile[PPE_VP_ENTRIES_MAX];
 +	char ppeds_irq_name[MAX_PPEDS_IRQS][MAX_PPEDS_IRQ_NAME_LEN];
@@ -894,7 +900,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	struct dp_rxdma_ring rx_refill_buf_ring;
  	struct dp_srng rx_mac_buf_ring[MAX_RXDMA_PER_PDEV];
  	struct dp_srng rxdma_err_dst_ring[MAX_RXDMA_PER_PDEV];
-@@ -444,6 +513,7 @@ enum htt_h2t_msg_type {
+@@ -444,6 +518,7 @@ enum htt_h2t_msg_type {
  	HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG	= 0xc,
  	HTT_H2T_MSG_TYPE_EXT_STATS_CFG		= 0x10,
  	HTT_H2T_MSG_TYPE_PPDU_STATS_CFG		= 0x11,
@@ -902,7 +908,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	HTT_H2T_MSG_TYPE_VDEV_TXRX_STATS_CFG	= 0x1a,
  	HTT_H2T_MSG_TYPE_TX_MONITOR_CFG		= 0x1b,
  };
-@@ -2019,6 +2089,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_
+@@ -2020,6 +2095,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_
  	u32 vdev_id_hi_bitmask;
  };
  
@@ -922,7 +928,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  /* @brief target -> host extended statistics upload
   *
   * @details
-@@ -2159,6 +2242,26 @@ struct ath11k_htt_mlo_peer_unmap_msg {
+@@ -2160,6 +2248,26 @@ struct ath11k_htt_mlo_peer_unmap_msg {
  	u32 info0;
  } __packed;
  
@@ -949,7 +955,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  int ath12k_dp_service_srng(struct ath12k_base *ab,
  			   struct ath12k_ext_irq_grp *irq_grp,
  			   int budget);
-@@ -2177,7 +2280,7 @@ int ath12k_dp_peer_default_route_setup(s
+@@ -2178,7 +2286,7 @@ int ath12k_dp_peer_default_route_setup(s
  				       struct ath12k_link_vif *arvif,
  				       struct ath12k_link_sta *arsta);
  int ath12k_dp_peer_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
@@ -958,7 +964,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  void ath12k_dp_peer_cleanup(struct ath12k *ar, int vdev_id, const u8 *addr);
  void ath12k_dp_srng_cleanup(struct ath12k_base *ab, struct dp_srng *ring);
  int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
-@@ -2195,4 +2298,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
+@@ -2196,4 +2304,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
  struct ath12k_tx_desc_info *ath12k_dp_get_tx_desc(struct ath12k_base *ab,
  						  u32 desc_id);
  void ath12k_dp_tx_update_bank_profile(struct ath12k_link_vif *arvif);
@@ -972,7 +978,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -3308,6 +3308,31 @@ static void ath12k_dp_rx_process_receive
+@@ -3312,6 +3312,31 @@ static void ath12k_dp_rx_process_receive
  	rcu_read_unlock();
  }
  
@@ -1004,7 +1010,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  int ath12k_dp_rx_process(struct ath12k_base *ab, int ring_id,
  			 struct napi_struct *napi, int budget)
  {
-@@ -4898,6 +4923,55 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7
+@@ -4902,6 +4927,55 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7
  	return ret;
  }
  
@@ -1111,7 +1117,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #endif /* ATH12K_DP_RX_H */
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -67,6 +67,18 @@ enum hal_encrypt_type ath12k_dp_tx_get_e
+@@ -10,6 +10,7 @@
+ #include "debugfs_sta.h"
+ #include "hw.h"
+ #include "peer.h"
++#include "ppe.h"
+ #include <linux/dma-mapping.h>
+ #include <asm/cacheflush.h>
+ 
+@@ -67,6 +68,35 @@ enum hal_encrypt_type ath12k_dp_tx_get_e
  	}
  }
  
@@ -1120,47 +1134,34 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +				       struct ath12k_ppeds_tx_desc_info *tx_desc,
 +				       u8 ring_id)
 +{
-+	spin_lock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +	tx_desc->skb = NULL;
 +	list_move_tail(&tx_desc->list, &dp->ppeds_tx_desc_free_list[ring_id]);
-+	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +}
-+#endif
 +
- static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
- 				       struct ath12k_tx_desc_info *tx_desc,
- 				       u8 ring_id)
-@@ -78,6 +90,29 @@ static void ath12k_dp_tx_release_txbuf(s
- 	spin_unlock_bh(&dp->tx_desc_lock[ring_id]);
- }
- 
-+#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +struct ath12k_ppeds_tx_desc_info *ath12k_dp_ppeds_tx_assign_desc(struct ath12k_dp *dp,
 +							      u8 ring_id)
 +{
 +	struct ath12k_ppeds_tx_desc_info *desc;
 +
-+	spin_lock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +	desc = list_first_entry_or_null(&dp->ppeds_tx_desc_free_list[ring_id],
 +					struct ath12k_ppeds_tx_desc_info,
 +					list);
 +	if (unlikely(!desc)) {
-+		spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +		ath12k_warn(dp->ab, "failed to allocate data Tx buffer\n");
 +		return NULL;
 +	}
 +
 +	list_move_tail(&desc->list, &dp->ppeds_tx_desc_used_list[ring_id]);
-+	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +
 +	return desc;
 +}
++
 +#endif
 +
- static inline
- struct ath12k_tx_desc_info *ath12k_dp_tx_assign_buffer(struct ath12k_dp *dp,
- 							      u8 pool_id)
-@@ -982,6 +1017,120 @@ static inline bool ath12k_dp_tx_completi
+ static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
+ 				       struct ath12k_tx_desc_info *tx_desc,
+ 				       u8 ring_id)
+@@ -984,6 +1014,120 @@ static inline bool ath12k_dp_tx_completi
  	return true;
  }
  
@@ -1242,7 +1243,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		/* Release descriptor as soon as extracting necessary info
 +		 * to reduce contention
 +		 */
-+		ath12k_dp_ppeds_tx_release_txbuf(dp, tx_desc, tx_desc->pool_id);
++		ath12k_dp_ppeds_tx_release_txbuf(dp, tx_desc, ATH12K_PPEDS_DEFAULT_POOL_ID);
 +		buf_rel_source = FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE,
 +					   tx_status->info0);
 +		if (unlikely(buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)) {
@@ -1412,7 +1413,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	u32 val = HAL_REO1_REO2PPE_DST_VAL;
 +
 +	ath12k_hif_write32(ab, reo_base + HAL_REO1_REO2PPE_DST_INFO,
-+                          val);	
++                          val);
 +}
 +
  void ath12k_hal_srng_get_shadow_config(struct ath12k_base *ab,
@@ -1622,7 +1623,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	val = curr & ~(REO_DEST_CTRL_IX_0_RING6_MAP_MASK <<
 +		       REO_DEST_CTRL_IX_0_RING6_MAP_SHFT);
 +	val |= (REO2PPE_DST_RING_MAP << REO_DEST_CTRL_IX_0_RING6_MAP_SHFT);
-+	
++
 +	ath12k_hif_write32(ab, reo_base + HAL_REO1_DEST_RING_CTRL_IX_0,
 +			   val);
 +}
@@ -1793,7 +1794,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  static const struct ath12k_hw_ring_mask ath12k_hw_ring_mask_ipq5332 = {
-@@ -992,8 +1007,8 @@ static const struct ath12k_hw_regs qcn92
+@@ -990,8 +1005,8 @@ static const struct ath12k_hw_regs qcn92
  	.hal_wbm0_release_ring_base_lsb = 0x00000dd8,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e50,
  
@@ -1804,7 +1805,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	/* PCIe base address */
  	.pcie_qserdes_sysclk_en_sel = 0x01e0c0a8,
-@@ -1083,8 +1098,8 @@ const struct ath12k_hw_regs qcn9274_v2_r
+@@ -1081,8 +1096,8 @@ const struct ath12k_hw_regs qcn9274_v2_r
  	.hal_wbm0_release_ring_base_lsb = 0x00000e08,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e80,
  
@@ -1815,7 +1816,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	/* PCIe base address */
  	.pcie_qserdes_sysclk_en_sel = 0x01e0c0a8,
-@@ -1173,9 +1188,6 @@ const struct ath12k_hw_regs ipq5332_regs
+@@ -1171,9 +1186,6 @@ const struct ath12k_hw_regs ipq5332_regs
  	.hal_wbm0_release_ring_base_lsb = 0x00000e08,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e80,
  
@@ -1825,7 +1826,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	/* CE base address */
  	.hal_umac_ce0_src_reg_base = 0x00740000,
  	.hal_umac_ce0_dest_reg_base = 0x00741000,
-@@ -1237,7 +1249,8 @@ static const struct ath12k_hw_hal_params
+@@ -1235,7 +1247,8 @@ static const struct ath12k_hw_hal_params
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW1_EN |
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW2_EN |
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW3_EN |
@@ -1837,7 +1838,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static const struct ath12k_hw_hal_params ath12k_hw_hal_params_wcn7850 = {
 --- a/drivers/net/wireless/ath/ath12k/hw.h
 +++ b/drivers/net/wireless/ath/ath12k/hw.h
-@@ -132,6 +132,11 @@ struct ath12k_hw_ring_mask {
+@@ -73,6 +73,7 @@
+ #define ATH12K_HW_DEFAULT_QUEUE		0
+ 
+ #define ATH12K_HW_MAX_QUEUES		4
++#define ATH12K_HW_MAX_QUEUES_PPEDS	1
+ #define ATH12K_QUEUE_LEN		4096
+ 
+ #define ATH11k_HW_RATECODE_CCK_SHORT_PREAM_MASK  0x4
+@@ -132,6 +133,11 @@ struct ath12k_hw_ring_mask {
  	u8 reo_status[ATH12K_EXT_IRQ_GRP_NUM_MAX];
  	u8 host2rxdma[ATH12K_EXT_IRQ_GRP_NUM_MAX];
  	u8 tx_mon_dest[ATH12K_EXT_IRQ_GRP_NUM_MAX];
@@ -1849,7 +1858,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  struct ath12k_hw_hal_params {
-@@ -321,6 +326,7 @@ struct ath12k_hw_regs {
+@@ -321,6 +327,7 @@ struct ath12k_hw_regs {
  	u32 hal_tcl_status_ring_base_lsb;
  
  	u32 hal_reo2_ring_base;
@@ -1857,7 +1866,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	u32 hal_reo1_misc_ctrl_addr;
  	u32 hal_reo1_sw_cookie_cfg0;
  	u32 hal_reo1_sw_cookie_cfg1;
-@@ -370,8 +376,6 @@ struct ath12k_hw_regs {
+@@ -370,8 +377,6 @@ struct ath12k_hw_regs {
  	u32 hal_wbm0_release_ring_base_lsb;
  	u32 hal_wbm1_release_ring_base_lsb;
  
@@ -1876,7 +1885,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -6618,7 +6619,11 @@ static int ath12k_mac_station_add(struct
+@@ -6616,7 +6617,11 @@ static int ath12k_mac_station_add(struct
  		}
  	}
  
@@ -1889,7 +1898,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (ret) {
  		ath12k_warn(ab, "failed to setup dp for peer %pM on vdev %i (%d)\n",
  			    arsta->addr, arvif->vdev_id, ret);
-@@ -8954,6 +8959,16 @@ static int ath12k_mac_radio_start(struct
+@@ -8952,6 +8957,16 @@ static int ath12k_mac_radio_start(struct
  		}
  	}
  
@@ -1906,7 +1915,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
  	/* TODO: Do we need to enable ANI? */
-@@ -13922,6 +13937,10 @@ static const struct ieee80211_ops ath12k
+@@ -13929,6 +13944,10 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -2064,7 +2073,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #endif /* ATH12K_PCI_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,858 @@
+@@ -0,0 +1,856 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2113,7 +2122,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	srng = &ab->hal.srng_list[dp->ppe2tcl_ring.ring_id];
 +	if (!ab->stats_disable)
 +		ab->ppeds_stats.tcl_prod_cnt++;
-+	
++
 +	srng->u.src_ring.hp = tcl_prod_idx * srng->entry_size;
 +	ath12k_hal_srng_access_end(ab, srng);
 +}
@@ -2144,7 +2153,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	srng = &ab->hal.srng_list[dp->reo2ppe_ring.ring_id];
 +	if (!ab->stats_disable)
 +		ab->ppeds_stats.reo_cons_cnt++;
-+	
++
 +	srng->u.src_ring.hp = reo_cons_idx * srng->entry_size;
 +	ath12k_hal_srng_access_end(ab, srng);
 +}
@@ -2257,10 +2266,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	int i;
 +	int allocated = 0;
 +	struct sk_buff *skb = NULL;
++	int flags = GFP_KERNEL;
 +	dma_addr_t paddr;
 +	struct ath12k_ppeds_tx_desc_info *tx_desc = NULL;
-+	/* TODO: Return it to the actual pool, instead of using the smp_processor_ID as the pool */
-+	int ring_id = smp_processor_id();
 +
 +	if (!ab->stats_disable) {
 +		ab->ppeds_stats.get_tx_desc_cnt++;
@@ -2274,7 +2282,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		 * processed by SW
 +		 * TODO: check on ~__GFP_KSWAPD_RECLAIM option
 +		 */
-+		skb = __netdev_alloc_skb_no_skb_reset(NULL, buff_size, GFP_KERNEL);
++		skb = __netdev_alloc_skb_no_skb_reset(NULL, buff_size, flags);
 +		if (!skb)
 +			return allocated;
 +
@@ -2284,14 +2292,13 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +			skb->recycled_for_ds = 1;
 +		}
 +
-+		/* TODO: Optimized dma_unmap_single */
 +		paddr = dma_map_single_attrs(ab->dev, skb->data,
 +				skb->len + skb_tailroom(skb),
 +				DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
 +		if (dma_mapping_error(ab->dev, paddr))
 +			goto fail_free_skb;
 +
-+		 tx_desc = ath12k_dp_ppeds_tx_assign_desc(dp, ring_id);
++		 tx_desc = ath12k_dp_ppeds_tx_assign_desc(dp, ATH12K_PPEDS_DEFAULT_POOL_ID);
 +		 if (unlikely(!tx_desc)) {
 +			 goto fail_free_skb;
 +		 }
@@ -2327,7 +2334,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		napi_complete(napi);
 +		ath12k_hif_ppeds_irq_enable(ab, PPEDS_IRQ_PPE_WBM2SW_REL);
 +	}
-+	
++
 +	return (work_done > budget) ? budget : work_done;
 +}
 +
@@ -2815,7 +2822,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +	ppe_ds_wlan_inst_stop(ab->ppeds_handle);
 +	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS stop success\n");
-+	
++
 +}
 +
 +int ath12k_dp_ppeds_register_soc(struct ath12k_dp *dp)
@@ -2925,7 +2932,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,41 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2943,6 +2950,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +        u8 to_fw;
 +        u8 use_ppe_int_pri;
 +};
++
++#define ATH12K_PPEDS_DEFAULT_POOL_ID 0
 +
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +void ath12k_dp_srng_ppeds_cleanup(struct ath12k_base *ab);
@@ -3182,7 +3191,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +ATH12K_PPE_DS_SUPPORT=
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -715,7 +715,9 @@ static void ieee80211_stop_mbssid(struct
+@@ -781,7 +781,9 @@ void ieee80211_stop_mbssid(struct ieee80
  static int ieee80211_stop(struct net_device *dev)
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -3192,7 +3201,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	/* close dependent VLAN and MBSSID interfaces before locking wiphy */
  	if (sdata->vif.type == NL80211_IFTYPE_AP) {
-@@ -1866,7 +1868,9 @@ static void ieee80211_setup_sdata(struct
+@@ -1932,7 +1934,9 @@ static void ieee80211_setup_sdata(struct
  	/* and set some type-dependent values */
  	sdata->vif.type = type;
  	sdata->vif.p2p = false;
