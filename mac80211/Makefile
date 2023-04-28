@@ -241,18 +241,18 @@ ifneq ($(call qstrip,$(_LINUX_SRC)),)
 # --reference option doesn't work on git trees synced with "repo", so instead
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
-	git clone $(_LINUX_SRC) $(2) || \
+	git clone --depth=1 $(_LINUX_SRC) $(2) || \
 	(rm -rf $(2) && \
-	git clone $(_LINUX_SRC) $(2))
+	git clone --depth=1 $(_LINUX_SRC) $(2))
 	(cd $(2); git remote add src $(1); git fetch src)
   endef
 else
   define FastCloneKernel
 	GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
-	git clone $(1) $(2) || \
+	git clone --depth=1 $(1) $(2) || \
 	([ -n "${CONFIG_GIT_MIRROR}" ] && \
 	rm -rf $(2) && \
-	git clone $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
+	git clone --depth=1 $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
   endef
 endif
 
@@ -299,9 +299,9 @@ define DownloadBackports
 	git revert --no-edit e72aeb9e && git revert --no-edit de1352ead8 && \
 	git revert --no-edit fb5f6a0e && git revert --no-edit 74624944)
 
-	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
+	git clone --depth=1 $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
 	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
-	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
+	git clone --depth=1 $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
 	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
 	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0073-netdevice-mtu-range.cocci && \
