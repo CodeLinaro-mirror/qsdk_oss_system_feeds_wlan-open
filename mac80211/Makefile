@@ -426,7 +426,7 @@ endef
 define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
-  DEPENDS+= +kmod-ath \
+  DEPENDS+= +kmod-ath +kmod-telemetry-agent\
 	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
   FILES:= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
   AUTOLOAD:=$(call AutoProbe,ath12k)
