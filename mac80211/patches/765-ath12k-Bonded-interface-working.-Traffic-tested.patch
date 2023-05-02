@@ -1,6 +1,6 @@
-From 5709709406a3cedac4fc8320c1e16ce57413b7bd Mon Sep 17 00:00:00 2001
+From fae523db1e68343ea223f573a34cc103dc820f26 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Wed, 26 Apr 2023 15:28:33 -0700
+Date: Wed, 26 Apr 2023 16:37:13 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
 
 Add support for bonded interface to represent each wifi link with a separate
@@ -25,7 +25,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   9 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
- drivers/net/wireless/ath/ath12k/bondif.c   | 480 +++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/bondif.c   | 488 +++++++++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/bondif.h   |  39 +++
  drivers/net/wireless/ath/ath12k/core.h     |  16 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
@@ -51,7 +51,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  net/wireless/core.c                        |  35 ++-
  net/wireless/nl80211.c                     |   4 +
  net/wireless/util.c                        |   4 +
- 28 files changed, 788 insertions(+), 50 deletions(-)
+ 28 files changed, 797 insertions(+), 50 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -86,10 +86,10 @@ index 98ecf02..a0fc6e6 100644
  CFLAGS_trace.o := -I$(src)
 diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
 new file mode 100644
-index 0000000..7935fe4
+index 0000000..cdfd0d6
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,488 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -368,6 +368,10 @@ index 0000000..7935fe4
 +		link_dev = ath12k_mac_get_tx_link_netdev( mldev, eh->h_dest);
 +	}
 +
++	if (!link_dev) {
++		dev_kfree_skb_any(skb);
++		return 0;
++	}
 +	return link_dev->netdev_ops->ndo_start_xmit(skb, link_dev);
 +}
 +
@@ -405,6 +409,7 @@ index 0000000..7935fe4
 +	int ret;
 +	int is_mcast;
 +	struct ethhdr *eh = NULL;
++	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 +
 +	eh = (struct ethhdr *)skb->data;
 +	is_mcast = is_multicast_ether_addr(eh->h_dest);
@@ -418,6 +423,9 @@ index 0000000..7935fe4
 +		ath12k_err(NULL, "Dropping frames as arvif is not started\n");
 +		return NETDEV_TX_OK;
 +	}
++
++	/* TODO: debug why queue is always 15 */
++	info->hw_queue = 0;
 +	ret = ath12k_dp_tx_direct(arvif, skb);
 +	if (unlikely(ret)) {
 +		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
@@ -570,7 +578,6 @@ index 0000000..7935fe4
 +	}
 +	return 0;
 +}
-+EXPORT_SYMBOL(ath12k_bond_dev_cb);
 diff --git a/drivers/net/wireless/ath/ath12k/bondif.h b/drivers/net/wireless/ath/ath12k/bondif.h
 new file mode 100644
 index 0000000..8477c3e
@@ -857,10 +864,10 @@ index 7ba262e..cf7662a 100644
  			       &ath12k_pci_bus_params);
  	if (!ab) {
 diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 8a0ff17..f9b57ed 100644
+index 08f68fa..0d162c7 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -332,6 +332,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_profile(struct ath12k_base *ab,
+@@ -330,6 +330,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_profile(struct ath12k_base *ab,
  
  	if (i == PPE_VP_ENTRIES_MAX) {
  		WARN_ONCE(1, "All ppe vp profile entries are in use!");
@@ -868,7 +875,7 @@ index 8a0ff17..f9b57ed 100644
  		return -ENOSR;
  	}
  
-@@ -509,16 +510,12 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
+@@ -507,16 +508,12 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
  	return;
  }
  
@@ -887,7 +894,7 @@ index 8a0ff17..f9b57ed 100644
  	//TODO: Handle split phy
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_dp_ppe_vp_profile *vp_profile = NULL;
-@@ -535,7 +531,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+@@ -535,7 +532,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  		return -EINVAL;
  	}
  
@@ -896,7 +903,7 @@ index 8a0ff17..f9b57ed 100644
  		return -EINVAL;
  	}
  
-@@ -560,7 +556,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+@@ -560,7 +557,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  		goto dealloc_vp_profile;
  	}
  
@@ -905,7 +912,7 @@ index 8a0ff17..f9b57ed 100644
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -576,6 +572,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+@@ -576,6 +573,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -913,7 +920,7 @@ index 8a0ff17..f9b57ed 100644
  
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
-@@ -598,15 +595,11 @@ vp_free:
+@@ -598,15 +596,11 @@ vp_free:
  	return ret;
  }
  
@@ -931,7 +938,7 @@ index 8a0ff17..f9b57ed 100644
  	struct ath12k_dp_ppe_vp_profile *vp_profile;
  	int ppe_vp_profile_idx = -1;
  
-@@ -627,7 +620,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
+@@ -627,7 +621,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
