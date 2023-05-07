@@ -1,0 +1,129 @@
+From 2f15a450cff5918f2f1c5d8be92c2930d0aacd5e Mon Sep 17 00:00:00 2001
+From: P Praneesh <quic_ppranees@quicinc.com>
+Date: Sun, 7 May 2023 23:05:14 +0530
+Subject: [PATCH] ath12k: add ring descriptor and srng dump prints
+
+When the destination ring descriptors are not valid, print the ring descriptor
+content and crash the host rather than reaping next descriptor.
+This helps hardware to debug the exact problematic descriptor
+from the crash dump.
+
+Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/debug.c | 31 +++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/debug.h | 17 ++++++++++++++
+ drivers/net/wireless/ath/ath12k/dp_rx.c |  8 +++++--
+ drivers/net/wireless/ath/ath12k/hw.c    |  4 ++++
+ drivers/net/wireless/ath/ath12k/hw.h    |  1 +
+ 5 files changed, 59 insertions(+), 2 deletions(-)
+
+--- a/drivers/net/wireless/ath/ath12k/debug.c
++++ b/drivers/net/wireless/ath/ath12k/debug.c
+@@ -112,4 +112,35 @@ void ath12k_dbg_dump(struct ath12k_base
+ 	}
+ }
+ 
++void ath12k_err_dump(struct ath12k_base *ab, const char *msg,
++		     const char *prefix, const void *buf,
++		     size_t len, struct hal_srng *srng)
++{
++	char linebuf[512];
++	size_t linebuflen;
++	const void *ptr;
++
++	if (msg)
++		ath12k_err(ab, msg);
++
++	for (ptr = buf; (ptr - buf) < len; ptr += 16) {
++		linebuflen = 0;
++		linebuflen += scnprintf(linebuf + linebuflen,
++					sizeof(linebuf) - linebuflen,
++					"%s%08x: ",
++					(prefix ? prefix : ""),
++					(unsigned int)(ptr - buf));
++		hex_dump_to_buffer(ptr, len - (ptr - buf), 16, 1,
++				   linebuf + linebuflen,
++				   sizeof(linebuf) - linebuflen, true);
++		dev_err(ab->dev, "%s\n", linebuf);
++	}
++
++	if (srng->ring_dir == HAL_SRNG_DIR_DST)
++		dev_err(ab->dev, "ring_base_vaddr=%px tp=0x%X size=0x%X cached_hp=0x%X",
++			srng->ring_base_vaddr,
++			srng->u.dst_ring.tp,
++			srng->ring_size,
++			srng->u.dst_ring.cached_hp);
++}
+ #endif /* CPTCFG_ATH12K_DEBUG */
+--- a/drivers/net/wireless/ath/ath12k/debug.h
++++ b/drivers/net/wireless/ath/ath12k/debug.h
+@@ -51,6 +51,9 @@ void ath12k_dbg_dump(struct ath12k_base
+ 		     enum ath12k_debug_mask mask,
+ 		     const char *msg, const char *prefix,
+ 		     const void *buf, size_t len);
++void ath12k_err_dump(struct ath12k_base *ab, const char *msg,
++                     const char *prefix, const void *buf,
++                     size_t len, struct hal_srng *srng);
+ #else /* CPTCFG_ATH12K_DEBUG */
+ static inline int __ath12k_dbg(struct ath12k_base *ab,
+ 			       enum ath12k_debug_mask dbg_mask,
+@@ -65,6 +68,12 @@ static inline void ath12k_dbg_dump(struc
+ 				   const void *buf, size_t len)
+ {
+ }
++
++static inline void ath12k_err_dump(struct ath12k_base *ab, const char *msg,
++                     const char *prefix, const void *buf,
++                     size_t len, struct hal_srng *srng)
++{
++}
+ #endif /* CPTCFG_ATH12K_DEBUG */
+ 
+ #define ath12k_dbg(ar, dbg_mask, fmt, ...)			\
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -4215,6 +4215,7 @@ int ath12k_dp_rx_process_err(struct ath1
+ 	u32 *desc;
+ 	bool is_frag;
+ 	u8 drop = 0;
++	char buf[64] = {0};
+ 
+ 	tot_n_bufs_reaped = 0;
+ 	quota = budget;
+@@ -4237,9 +4238,10 @@ int ath12k_dp_rx_process_err(struct ath1
+ 		ret = ath12k_hal_desc_reo_parse_err(ab, desc, &paddr,
+ 						    &desc_bank);
+ 		if (ret) {
+-			ath12k_warn(ab, "failed to parse error reo desc %d\n",
+-				    ret);
+-			continue;
++			scnprintf(buf, sizeof(buf), "failed to parse error reo desc %d\n", ret);
++			ath12k_err_dump(ab, buf, "rx err desc: ", reo_desc,
++					sizeof(*reo_desc), srng);
++			BUG_ON(1);
+ 		}
+ 		link_desc_va = link_desc_banks[desc_bank].vaddr +
+ 			       (paddr - link_desc_banks[desc_bank].paddr);
+@@ -4634,6 +4636,7 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 	struct ath12k_soc_dp_stats *soc_stats = &ab->soc_stats;
+ 	int ret;
+ 	u8 src_link_id;
++	char buf[64] = {0};
+ 
+ 	__skb_queue_head_init(&msdu_list);
+ 
+@@ -4651,10 +4654,10 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 
+ 		ret = ath12k_hal_wbm_desc_parse_err(ab, rx_desc, &err_info);
+ 		if (ret) {
+-			ath12k_warn(ab,
+-				    "failed to parse rx error in wbm_rel ring desc %d\n",
+-				    ret);
+-			continue;
++			scnprintf(buf, sizeof(buf), "failed to parse rx error in wbm_rel ring desc %d\n", ret);
++			ath12k_err_dump(ab, buf, "wbm err desc: ", rx_desc,
++					sizeof(struct hal_wbm_release_ring), srng);
++			BUG_ON(1);
+ 		}
+ 
+ 		desc_info = (struct ath12k_rx_desc_info *)err_info.rx_desc;
