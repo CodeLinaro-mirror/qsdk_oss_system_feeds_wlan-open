@@ -40,24 +40,53 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static void ath12k_dp_service_mon_ring(struct timer_list *t)
  {
  	struct ath12k_base *ab = from_timer(ab, t, mon_reap_timer);
-@@ -2754,8 +2760,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2735,7 +2741,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+ 				struct ath12k_dp_rx_info *rx_info,
+ 				bool *fast_rx)
+ {
+-	bool  fill_crypto_hdr;
++	bool is_ra_mcbc;
+ 	struct ath12k_base *ab = ar->ab;
+ 	struct ath12k_skb_rxcb *rxcb;
+ 	enum hal_encrypt_type enctype;
+@@ -2754,8 +2760,8 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	tid = ath12k_dp_rx_h_tid(ab, rx_desc);
  	/* PN for multicast packets will be checked in mac80211 */
  	rxcb = ATH12K_SKB_RXCB(msdu);
 -	fill_crypto_hdr = ath12k_dp_rx_h_is_mcbc(ar->ab, rx_desc);
 -	rxcb->is_mcbc = fill_crypto_hdr;
 +	rxcb->is_mcbc = ath12k_dp_rx_da_is_mcbc(ar->ab, rx_desc);
++	is_ra_mcbc = ath12k_dp_rx_ra_is_mcbc(ar->ab, rx_desc);
  
  	if (rxcb->is_mcbc)
  		rxcb->peer_id = ath12k_dp_rx_h_peer_id(ar->ab, rx_desc);
-@@ -2832,6 +2837,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
- 	if (err_bitmap & HAL_RX_MPDU_ERR_TKIP_MIC)
- 		rx_status->flag |= RX_FLAG_MMIC_ERROR;
- 
-+	fill_crypto_hdr = ath12k_dp_rx_ra_is_mcbc(ar->ab, rx_desc);
+@@ -2797,7 +2803,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+ 				return;
+ 		        }
+ 		}
+-		if (rxcb->is_mcbc)
++		if (is_ra_mcbc)
+ 			enctype = peer->sec_type_grp;
+ 		else
+ 			enctype = peer->sec_type;
+@@ -2835,7 +2841,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	if (is_decrypted) {
  		rx_status->flag |= RX_FLAG_DECRYPTED | RX_FLAG_MMIC_STRIPPED;
  
+-		if (fill_crypto_hdr)
++		if (is_ra_mcbc)
+ 			rx_status->flag |= RX_FLAG_MIC_STRIPPED |
+ 					RX_FLAG_ICV_STRIPPED;
+ 		else
+@@ -2847,7 +2853,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+ 	ath12k_dp_rx_h_undecap(ar, msdu, rx_desc,
+ 			       enctype, rx_status, is_decrypted);
+ 
+-	if (!is_decrypted || fill_crypto_hdr)
++	if (!is_decrypted || is_ra_mcbc)
+ 		return;
+ 
+ 	if (rx_info->decap_type != DP_RX_DECAP_TYPE_ETHERNET2_DIX) {
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
 @@ -412,10 +412,10 @@ static u8 *ath12k_hw_qcn9274_rx_desc_mpd
