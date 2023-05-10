@@ -2201,7 +2201,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #endif /* ATH12K_PCI_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,856 @@
+@@ -0,0 +1,859 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2398,46 +2398,49 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	dma_addr_t paddr;
 +	struct ath12k_ppeds_tx_desc_info *tx_desc = NULL;
 +
-+	if (!ab->stats_disable) {
-+		ab->ppeds_stats.get_tx_desc_cnt++;
-+		ab->ppeds_stats.tx_desc_allocated += num_buff_req;
-+	}
-+
 +	for (i = 0; i < num_buff_req; i++) {
 +		/* In skb recycler, if recyler module allocates the buffers
 +		 * already used by DS module to DS, then memzero, shinfo
 +		 * reset can be avoided, since the DS packets were not
 +		 * processed by SW
-+		 * TODO: check on ~__GFP_KSWAPD_RECLAIM option
 +		 */
++		if (in_interrupt() || irqs_disabled() || in_atomic()) {
++			flags = GFP_ATOMIC;
++#if LINUX_VERSION_IS_GEQ(4,4,0)
++			flags = flags & ~__GFP_KSWAPD_RECLAIM;
++#endif
++		}
 +		skb = __netdev_alloc_skb_no_skb_reset(NULL, buff_size, flags);
 +		if (!skb)
-+			return allocated;
++			break;
 +
 +		skb_reserve(skb, headroom);
 +		if (!skb->recycled_for_ds) {
-+			dmac_inv_range_no_dsb((void *)skb->data, (void *)skb->data + buff_size);
++			dmac_inv_range_no_dsb((void *)skb->data,
++					(void *)skb->data + buff_size - headroom);
 +			skb->recycled_for_ds = 1;
 +		}
 +
-+		paddr = dma_map_single_attrs(ab->dev, skb->data,
-+				skb->len + skb_tailroom(skb),
-+				DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
-+		if (dma_mapping_error(ab->dev, paddr))
++		paddr = virt_to_phys(skb->data);
++
++		tx_desc = ath12k_dp_ppeds_tx_assign_desc(dp, ATH12K_PPEDS_DEFAULT_POOL_ID);
++		if (unlikely(!tx_desc)) {
 +			goto fail_free_skb;
++		}
++		tx_desc->skb = skb;
 +
-+		 tx_desc = ath12k_dp_ppeds_tx_assign_desc(dp, ATH12K_PPEDS_DEFAULT_POOL_ID);
-+		 if (unlikely(!tx_desc)) {
-+			 goto fail_free_skb;
-+		 }
-+		 tx_desc->skb = skb;
-+
-+		 arr[i].opaque_lo = tx_desc->desc_id;
-+		 arr[i].opaque_hi = 0;
-+		 arr[i].buff_addr = paddr;
-+		 allocated++;
++		arr[i].opaque_lo = tx_desc->desc_id;
++		arr[i].opaque_hi = 0;
++		arr[i].buff_addr = paddr;
++		allocated++;
 +	}
-+	/*TODO: is dsb() needed? */
++
++	dsb(st);
++
++	if (!ab->stats_disable) {
++		ab->ppeds_stats.get_tx_desc_cnt++;
++		ab->ppeds_stats.tx_desc_allocated += num_buff_req;
++	}
 +
 +	return allocated;
 +
