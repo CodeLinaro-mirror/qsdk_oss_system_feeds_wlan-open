@@ -1254,34 +1254,6 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -		arsta->bw_prev = sta->deflink.bandwidth;
 -
 -		spin_unlock_bh(&ar->data_lock);
--	} else if (old_state == IEEE80211_STA_ASSOC &&
--		   new_state == IEEE80211_STA_AUTHORIZED) {
--		spin_lock_bh(&ar->ab->base_lock);
--
--		peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
--		if (peer)
--			peer->is_authorized = true;
--
--		spin_unlock_bh(&ar->ab->base_lock);
--
--		if (vif->type == NL80211_IFTYPE_STATION && arvif->is_up) {
--			ret = ath12k_wmi_set_peer_param(ar, sta->addr,
--							arvif->vdev_id,
--							WMI_PEER_AUTHORIZE,
--							1);
--			if (ret)
--				ath12k_warn(ar->ab, "Unable to authorize peer %pM vdev %d: %d\n",
--					    sta->addr, arvif->vdev_id, ret);
--		}
--	} else if (old_state == IEEE80211_STA_AUTHORIZED &&
--		   new_state == IEEE80211_STA_ASSOC) {
--		spin_lock_bh(&ar->ab->base_lock);
--
--		peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
--		if (peer)
--			peer->is_authorized = false;
--
--		spin_unlock_bh(&ar->ab->base_lock);
 +				    arsta->addr);
  	} else if (old_state == IEEE80211_STA_ASSOC &&
  		   new_state == IEEE80211_STA_AUTHORIZED) {
@@ -1305,6 +1277,34 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		ret = ath12k_station_authorize(ar, arvif, arsta);
  	} else if (old_state == IEEE80211_STA_AUTHORIZED &&
  		   new_state == IEEE80211_STA_ASSOC) {
+-		spin_lock_bh(&ar->ab->base_lock);
+-
+-		peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
+-		if (peer)
+-			peer->is_authorized = false;
+-
+-		spin_unlock_bh(&ar->ab->base_lock);
+-	} else if (old_state == IEEE80211_STA_ASSOC &&
+-		   new_state == IEEE80211_STA_AUTHORIZED) {
+-		spin_lock_bh(&ar->ab->base_lock);
+-
+-		peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
+-		if (peer)
+-			peer->is_authorized = true;
+-
+-		spin_unlock_bh(&ar->ab->base_lock);
+-
+-		if (vif->type == NL80211_IFTYPE_STATION && arvif->is_up) {
+-			ret = ath12k_wmi_set_peer_param(ar, sta->addr,
+-							arvif->vdev_id,
+-							WMI_PEER_AUTHORIZE,
+-							1);
+-			if (ret)
+-				ath12k_warn(ar->ab, "Unable to authorize peer %pM vdev %d: %d\n",
+-					    sta->addr, arvif->vdev_id, ret);
+-		}
+-	} else if (old_state == IEEE80211_STA_AUTHORIZED &&
+-		   new_state == IEEE80211_STA_ASSOC) {
 -		spin_lock_bh(&ar->ab->base_lock);
 -
 -		peer = ath12k_peer_find(ar->ab, arvif->vdev_id, sta->addr);
@@ -1369,7 +1369,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  					WMI_PEER_USE_FIXED_PWR, txpwr);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to set tx power for station ret: %d\n",
-@@ -6061,6 +6322,173 @@ out:
+@@ -6061,6 +6322,175 @@ out:
  	return ret;
  }
  
@@ -1526,10 +1526,12 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +
 +		ar = arvif->ar;
 +
++		mutex_lock(&ar->conf_mutex);
 +		ret = ath12k_mac_station_add(ar, arvif, arsta);
 +		if (ret)
 +			ath12k_warn(ar->ab, "Failed to add station: %pM for VDEV: %d\n",
 +				    arsta->addr, arvif->vdev_id);
++		mutex_unlock(&ar->conf_mutex);
 +	}
 +
 +	/* FW doesnt support removal of one of link stas. All sta would be removed during ML STA
@@ -1543,7 +1545,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static void ath12k_mac_op_sta_set_4addr(struct ieee80211_hw *hw,
  					struct ieee80211_vif *vif,
  					struct ieee80211_sta *sta, bool enabled)
-@@ -6107,11 +6535,11 @@ static void ath12k_mac_op_sta_rc_update(
+@@ -6107,11 +6537,11 @@ static void ath12k_mac_op_sta_rc_update(
  
  	spin_lock_bh(&ar->ab->base_lock);
  
@@ -1557,7 +1559,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		return;
  	}
  
-@@ -6119,7 +6547,7 @@ static void ath12k_mac_op_sta_rc_update(
+@@ -6119,7 +6549,7 @@ static void ath12k_mac_op_sta_rc_update(
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac sta rc update for %pM changed %08x bw %d nss %d smps %d\n",
@@ -1566,7 +1568,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		   sta->smps_mode);
  
  	spin_lock_bh(&ar->data_lock);
-@@ -6145,7 +6573,7 @@ static void ath12k_mac_op_sta_rc_update(
+@@ -6145,7 +6575,7 @@ static void ath12k_mac_op_sta_rc_update(
  			break;
  		default:
  			ath12k_warn(ar->ab, "Invalid bandwidth %d in rc update for %pM\n",
@@ -1575,7 +1577,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			bw = WMI_PEER_CHWIDTH_20MHZ;
  			break;
  		}
-@@ -6173,7 +6601,7 @@ static void ath12k_mac_op_sta_rc_update(
+@@ -6173,7 +6603,7 @@ static void ath12k_mac_op_sta_rc_update(
  			break;
  		default:
  			ath12k_warn(ar->ab, "Invalid smps %d in sta rc update for %pM\n",
@@ -1584,7 +1586,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			smps = WMI_PEER_SMPS_PS_NONE;
  			break;
  		}
-@@ -11091,6 +11519,7 @@ static void ath12k_mac_set_bitrate_mask_
+@@ -11092,6 +11522,7 @@ static void ath12k_mac_set_bitrate_mask_
  static void ath12k_mac_disable_peer_fixed_rate(void *data,
  					       struct ieee80211_sta *sta)
  {
@@ -1592,7 +1594,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ath12k_sta *ahsta = (struct ath12k_sta *)sta->drv_priv;
  	struct ath12k_link_vif *arvif = data;
  	struct ath12k *ar;
-@@ -11104,17 +11533,19 @@ static void ath12k_mac_disable_peer_fixe
+@@ -11105,17 +11536,19 @@ static void ath12k_mac_disable_peer_fixe
  	if (!(BIT(link_id) & ahsta->links_map))
  		return;
  
@@ -1614,7 +1616,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static bool
-@@ -11720,6 +12151,7 @@ static const struct ieee80211_ops ath12k
+@@ -11721,6 +12154,7 @@ static const struct ieee80211_ops ath12k
  	.get_survey			= ath12k_mac_op_get_survey,
  	.flush				= ath12k_mac_op_flush,
  	.sta_statistics			= ath12k_mac_op_sta_statistics,
