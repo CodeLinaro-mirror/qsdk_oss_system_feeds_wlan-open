@@ -384,16 +384,16 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
 				#5G reo queues
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
-				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
 
 				#For 6G reo queues
-				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
-				echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
 
 				#For 2G reo queues
-				echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
-				echo 0x13213213 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
 				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
 				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
@@ -439,12 +439,12 @@ boost_performance() {
                                 echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
                                 #For 5G/6G reo queues
-                                echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
-                                echo 0x13213213 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
 
                                 #For 2G reo queues
-                                echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
-                                echo 0x21321321 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
 				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
 				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
