@@ -1,0 +1,79 @@
+From b19575e3cbc749aab98192a45be084f8cce52888 Mon Sep 17 00:00:00 2001
+From: Aditya Kumar Singh <quic_adisi@quicinc.com>
+Date: Thu, 11 May 2023 10:18:23 +0530
+Subject: [PATCH] ath12k: add num_stations counter for each interface
+
+Currently ath12k maintains number of stations connected to each radio.
+However, at certain times it is useful to know number of stations
+connected to any one of the interface under that radio.
+
+Add support to maintain a counter for number of stations connected to
+each interface.
+
+Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.h |  1 +
+ drivers/net/wireless/ath/ath12k/mac.c  | 14 ++++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 7a919fa65987..dc19b7578ba6 100644
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -404,6 +404,7 @@ struct ath12k_link_vif {
+ 
+ 	bool mvr_processing;
+ 	bool pending_csa_up;
++	int num_stations;
+ };
+ 
+ struct ath12k_vif {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 96e103187d1f..2237992ef483 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -4868,6 +4868,7 @@ ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8
+ 				  ath12k_update_obss_color_notify_work);
+ 			INIT_WORK(&arvif->update_bcn_template_work,
+ 				  ath12k_update_bcn_template_work);
++			arvif->num_stations = 0;
+ 		}
+ 	}
+ 
+@@ -6130,6 +6131,12 @@ static int ath12k_station_assoc(struct ath12k *ar,
+ 		return ret;
+ 	}
+ 
++	spin_lock_bh(&ar->data_lock);
++	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
++		   "mac station %pM connected to vdev %u. num_stations=%u\n",
++		   arsta->addr,  arvif->vdev_id, ++arvif->num_stations);
++	spin_unlock_bh(&ar->data_lock);
++
+ 	if (!sta->wme) {
+ 		arvif->num_legacy_stations++;
+ 		ret = ath12k_recalc_rtscts_prot(arvif);
+@@ -6172,6 +6179,12 @@ static int ath12k_station_disassoc(struct ath12k *ar,
+ 
+ 	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
+ 
++	spin_lock_bh(&arvif->ar->data_lock);
++	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
++		   "mac station %pM disconnected from vdev %u. num_stations=%u\n",
++		   arsta->addr, arvif->vdev_id, --arvif->num_stations);
++	spin_unlock_bh(&arvif->ar->data_lock);
++
+ 	if (!sta->wme) {
+ 		arvif->num_legacy_stations--;
+ 		ret = ath12k_recalc_rtscts_prot(arvif);
+@@ -10002,6 +10015,7 @@ static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 		  ath12k_update_obss_color_notify_work);
+ 	INIT_WORK(&ahvif->deflink.update_bcn_template_work,
+ 		  ath12k_update_bcn_template_work);
++	ahvif->deflink.num_stations = 0;
+ 
+ 	ahvif->key_cipher = INVALID_CIPHER;
+ 
+-- 
+2.17.1
+
