@@ -536,6 +536,7 @@ mac80211_hostapd_setup_base() {
 		if [ -n "$bonded" ] && [ $bonded -eq 1 ]; then
 			append base_cfg "bonded=1" "$N"
 		fi
+
 		[ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"
 	fi
 
@@ -1844,6 +1845,37 @@ mac80211_export_mld_info() {
 	mac80211_update_mld_configs
 }
 
+mac80211_update_bondif() {
+	local iflist
+	config_load wireless
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	if [ -z "$_mlds" ]; then
+		return
+	fi
+	for _mld in $_mlds
+	do
+		config_get mld_ifname "$_mld" ifname
+		config_get is_bonded "$_mld" bonded
+		mac80211_export_mld_info
+		#Check if ppe_ds_enable is set and then update the bondif
+		if ([ $mld_vaps_count -ge 2 ] && [ -n $mld_ifname ]); then
+			cmd="ls /sys/class/net"
+			iface=$($cmd | grep "$mld_ifname"_b)
+			if ([ -d /sys/class/net/"$mld_ifname"_b ] && [ -n $network_bridge ]); then
+				brctl delif $network_bridge $mld_ifname
+				brctl addif $network_bridge "$mld_ifname"_b
+				ifconfig "$mld_ifname"_b up
+			fi
+		fi
+	done
+	return
+}
+
 drv_mac80211_setup() {
 
 	local device=$1
@@ -2053,6 +2085,10 @@ drv_mac80211_setup() {
 		. /lib/performance.sh
 	}
 	for_each_interface "ap mesh" mac80211_set_fq_limit
+	#Check if ppe_ds_enable is set and then update the bondif
+	if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+		mac80211_update_bondif
+	fi
 
 
 }
