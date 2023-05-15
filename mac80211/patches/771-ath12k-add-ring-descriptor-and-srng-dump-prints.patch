@@ -127,3 +127,89 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		}
  
  		desc_info = (struct ath12k_rx_desc_info *)err_info.rx_desc;
+--- a/drivers/net/wireless/ath/ath12k/dp_mon.c
++++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
+@@ -2551,6 +2551,7 @@ int ath12k_dp_mon_buf_replenish(struct a
+ 		mon_buf->paddr_lo = lower_32_bits(paddr);
+ 		mon_buf->paddr_hi = upper_32_bits(paddr);
+ 		mon_buf->cookie = cookie;
++		mon_buf->magic = DP_MON_MAGIC_VALUE;
+ 
+ 		req_entries--;
+ 	}
+@@ -3647,6 +3648,7 @@ int ath12k_dp_mon_srng_process(struct at
+ 	u64 cookie;
+ 	u32 hal_status, end_reason, ppdu_id, end_offset;
+ 	int num_buffs_reaped = 0, srng_id, buf_id;
++	char buf[64] = {0};
+ 
+ 	__skb_queue_head_init(&skb_list);
+ 
+@@ -3670,6 +3672,13 @@ int ath12k_dp_mon_srng_process(struct at
+ 		if (unlikely(!mon_dst_desc))
+ 			break;
+ 
++		if (unlikely(mon_dst_desc->magic != DP_MON_MAGIC_VALUE)) {
++			scnprintf(buf, sizeof(buf), "invalid mon dest desc in mon srng process\n");
++			ath12k_err_dump(ab, buf, "mon dest desc: ", mon_dst_desc,
++					sizeof(*mon_dst_desc), srng);
++			BUG_ON(1);
++		}
++
+ 		if (u32_get_bits(mon_dst_desc->info0, HAL_MON_DEST_INFO0_EMPTY_DESC)) {
+ 			ab->soc_stats.mon_drop_desc++;
+ 			goto move_next;
+@@ -3814,6 +3823,7 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 	int num_buffs_reaped = 0, srng_id, buf_id;
+ 	u32 hal_status, rx_buf_sz, end_reason, end_offset;
+ 	u16 log_type = 0;
++	char buf[64] = {0};
+ 
+ 	__skb_queue_head_init(&skb_list);
+ 
+@@ -3831,6 +3841,13 @@ int ath12k_dp_mon_rx_process_stats(struc
+ 		if (unlikely(!mon_dst_desc))
+ 			break;
+ 
++		if (unlikely(mon_dst_desc->magic != DP_MON_MAGIC_VALUE)) {
++			scnprintf(buf, sizeof(buf), "invalid mon dest desc in mon stats process\n");
++			ath12k_err_dump(ab, buf, "mon dest desc: ", mon_dst_desc,
++					sizeof(*mon_dst_desc), srng);
++			BUG_ON(1);
++		}
++
+ 		if (u32_get_bits(mon_dst_desc->info0, HAL_MON_DEST_INFO0_EMPTY_DESC)) {
+ 			ab->soc_stats.mon_drop_desc++;
+ 			goto move_next;
+--- a/drivers/net/wireless/ath/ath12k/dp_mon.h
++++ b/drivers/net/wireless/ath/ath12k/dp_mon.h
+@@ -15,6 +15,8 @@
+ 
+ #define ATH12K_WIFIRX_DOT11_OFFSET	5
+ 
++#define DP_MON_MAGIC_VALUE	0xDECAFEED
++
+ enum dp_mon_tx_ppdu_info_type {
+ 	DP_MON_TX_PROT_PPDU_INFO,
+ 	DP_MON_TX_DATA_PPDU_INFO
+--- a/drivers/net/wireless/ath/ath12k/hal_desc.h
++++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
+@@ -2902,7 +2902,8 @@ struct hal_tcl_entrance_from_ppe_ring {
+ struct hal_mon_buf_ring {
+ 	u32 paddr_lo;
+ 	u32 paddr_hi;
+-	u64 cookie;
++	u32 cookie;
++	u32 magic;
+ };
+ 
+ /* hal_mon_buf_ring
+@@ -2929,7 +2930,7 @@ struct hal_mon_buf_ring {
+ 
+ struct hal_mon_dest_desc {
+ 	u32 cookie;
+-	u32 reserved;
++	u32 magic;
+ 	u32 ppdu_id;
+ 	u32 info0;
+ };
