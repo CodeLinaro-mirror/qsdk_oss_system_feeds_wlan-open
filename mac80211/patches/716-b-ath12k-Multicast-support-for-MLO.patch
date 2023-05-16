@@ -155,7 +155,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	atomic_inc(&ar->dp.num_tx_pending);
  
  	return 0;
-@@ -1219,7 +1236,16 @@ int ath12k_dp_tx_htt_h2t_ver_req_msg(str
+@@ -1230,7 +1247,16 @@ int ath12k_dp_tx_htt_h2t_ver_req_msg(str
  	skb_put(skb, len);
  	cmd = (struct htt_ver_req_cmd *)skb->data;
  	cmd->ver_reg_info = u32_encode_bits(HTT_H2T_MSG_TYPE_VERSION_REQ,
@@ -187,7 +187,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  int ath12k_dp_tx_htt_h2t_ppdu_stats_req(struct ath12k *ar, u32 mask);
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8373,6 +8373,21 @@ static int ath12k_mac_mgmt_tx(struct ath
+@@ -8384,6 +8384,21 @@ static int ath12k_mac_mgmt_tx(struct ath
  	return 0;
  }
  
@@ -209,7 +209,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  static u8 ath12k_mac_get_tx_link(struct ieee80211_sta *sta, struct ieee80211_vif *vif,
  				 u8 link, struct sk_buff *skb, u32 info_flags)
  {
-@@ -8399,47 +8414,50 @@ static u8 ath12k_mac_get_tx_link(struct
+@@ -8410,47 +8425,50 @@ static u8 ath12k_mac_get_tx_link(struct
  	/* enqueue eth data frames on assoc link */
  	if (info_flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
  		return ahsta->assoc_link_id;
@@ -292,7 +292,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  }
  
  static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
-@@ -8450,18 +8468,25 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8461,18 +8479,24 @@ static void ath12k_mac_op_tx(struct ieee
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	struct ieee80211_vif *vif = info->control.vif;
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
@@ -313,14 +313,13 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	u32 info_flags = info->flags;
  	bool is_prb_rsp;
 +	bool is_mcast = false;
-+	bool gsn_valid;
  	u16 frm_type = 0;
 +	u8 link_id;
 +	u16 mcbc_gsn;
  	int ret;
   	u8 link = u32_get_bits(info->control.flags, IEEE80211_TX_CTRL_MLO_LINK);
  
-@@ -8508,6 +8533,7 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8519,6 +8543,7 @@ static void ath12k_mac_op_tx(struct ieee
  
  	if (info_flags & IEEE80211_TX_CTL_HW_80211_ENCAP) {
  		skb_cb->flags |= ATH12K_SKB_HW_80211_ENCAP;
@@ -328,7 +327,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	} else if (ieee80211_is_mgmt(hdr->frame_control)) {
  		frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
-@@ -8526,7 +8552,9 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8537,7 +8562,9 @@ static void ath12k_mac_op_tx(struct ieee
  			spin_unlock_bh(&ar->data_lock);
  		}
  		return;
@@ -339,7 +338,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	if (sta)
  		ahsta = (struct ath12k_sta *)control->sta->drv_priv;
  
-@@ -8540,23 +8568,99 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8551,23 +8578,91 @@ static void ath12k_mac_op_tx(struct ieee
  	    test_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags))
  		skb_cb->flags |= ATH12K_SKB_TX_STATUS;
  
@@ -370,19 +369,11 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 +				atomic_inc(&arsta->drv_tx_pkts.pkts_out);
 +		}
 +	} else {
-+		/* WAR: Currently bypassing gsn logic hence false below.
-+		 * Need a fix here to handle MLO Global Seq No
-+		 */
-+		if (false && (hweight16(vif->valid_links) > 1)) {
-+			spin_lock(&ahvif->mcbc_gsn_lock);
-+			mcbc_gsn = ahvif->mcbc_gsn++;
-+			if (ahvif->mcbc_gsn > 0xFFF)
-+				ahvif->mcbc_gsn = 0;
-+			spin_unlock(&ahvif->mcbc_gsn_lock);
-+		} else {
-+			gsn_valid = false;
-+			mcbc_gsn = 0;
-+		}
++		spin_lock(&ahvif->mcbc_gsn_lock);
++		mcbc_gsn = ahvif->mcbc_gsn++;
++		if (ahvif->mcbc_gsn > 0xFFF)
++			ahvif->mcbc_gsn = 0;
++		spin_unlock(&ahvif->mcbc_gsn_lock);
 +
 +		for_each_set_bit(link_id, &ahvif->links_map,
 +				 IEEE80211_MLD_MAX_NUM_LINKS) {
@@ -429,7 +420,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 +			spin_unlock_bh(&tmp_ar->ab->base_lock);
 +mlo_mcbc_tx:
 +			ret = ath12k_dp_tx(tmp_ar, tmp_arvif, ahsta,
-+					   msdu_copied, gsn_valid, mcbc_gsn);
++					   msdu_copied, true, mcbc_gsn);
 +
 +			if (unlikely(ret)) {
 +				if (ret == -ENOMEM)
@@ -453,7 +444,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  }
  
  void ath12k_mac_drain_tx(struct ath12k *ar)
-@@ -9664,6 +9768,7 @@ static int ath12k_mac_op_add_interface(s
+@@ -9675,6 +9770,7 @@ static int ath12k_mac_op_add_interface(s
  
  	ahvif->deflink.ahvif = ahvif;
  	ahvif->deflink.link_id = 0;
@@ -461,7 +452,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	INIT_LIST_HEAD(&ahvif->deflink.list);
  	INIT_WORK(&ahvif->deflink.update_obss_color_notify_work,
  		  ath12k_update_obss_color_notify_work);
-@@ -14645,6 +14750,8 @@ static int ath12k_mac_hw_register(struct
+@@ -14656,6 +14752,8 @@ static int ath12k_mac_hw_register(struct
  	if (ag->mlo_capable) {
  		ath12k_iftypes_ext_capa[2].eml_capabilities = cap->eml_cap;
  		ath12k_iftypes_ext_capa[2].mld_capa_and_ops = cap->mld_cap;
