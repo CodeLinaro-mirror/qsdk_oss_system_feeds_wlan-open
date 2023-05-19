@@ -117,18 +117,18 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	while ((skb = skb_dequeue(&ar->wmi_mgmt_tx_queue)) != NULL) {
  		skb_cb = ATH12K_SKB_CB(skb);
  		if (!skb_cb->vif) {
-@@ -7899,8 +7901,22 @@ static void ath12k_mgmt_over_wmi_tx_work
+@@ -7899,8 +7901,23 @@ static void ath12k_mgmt_over_wmi_tx_work
  		}
  
  		ahvif = ath12k_vif_to_ahvif(skb_cb->vif);
 -		/* TODO check this for extending link specific */
 -		arvif = &ahvif->deflink;
-+
 +		if (!(ahvif->links_map & BIT(skb_cb->link_id))) {
 +			ath12k_warn(ar->ab,
 +				    "invalid linkid 0x%X in mgmt over wmi tx with linkmap 0x%X\n",
 +				    skb_cb->link_id,
 +				    ahvif->links_map);
++			ath12k_mgmt_over_wmi_tx_drop(ar, skb);
 +			continue;
 +		}
 +
@@ -136,13 +136,14 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		if (!arvif) {
 +			ath12k_warn(ar->ab, "invalid arvif for mgmt tx - link %d\n",
 +				    skb_cb->link_id);
++			ath12k_mgmt_over_wmi_tx_drop(ar, skb);
 +			continue;
 +		}
 +
  		mutex_lock(&ar->conf_mutex);
  		if (ar->allocated_vdev_map & (1LL << arvif->vdev_id) &&
  		    arvif->is_started) {
-@@ -7916,13 +7932,15 @@ static void ath12k_mgmt_over_wmi_tx_work
+@@ -7916,13 +7933,15 @@ static void ath12k_mgmt_over_wmi_tx_work
  			}
  		} else {
  			ath12k_warn(ar->ab,
@@ -160,7 +161,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static int ath12k_mac_mgmt_tx(struct ath12k *ar, struct sk_buff *skb,
-@@ -8065,18 +8083,22 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8065,18 +8084,22 @@ static void ath12k_mac_op_tx(struct ieee
  			ieee80211_free_txskb(hw, skb);
  			return;
  		}
@@ -190,7 +191,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		return;
  	}
  
-@@ -8090,6 +8112,7 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8090,6 +8113,7 @@ static void ath12k_mac_op_tx(struct ieee
  	} else if (ieee80211_is_mgmt(hdr->frame_control)) {
  		frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
@@ -198,7 +199,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ret = ath12k_mac_mgmt_tx(ar, skb, is_prb_rsp);
  		if (ret) {
  			if (ret != -EBUSY)
-@@ -9428,24 +9451,20 @@ static int ath12k_mac_op_set_antenna(str
+@@ -9428,24 +9452,20 @@ static int ath12k_mac_op_set_antenna(str
  	return ret;
  }
  
@@ -229,7 +230,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		return -EPERM;
  	}
  
-@@ -9453,10 +9472,10 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -9453,10 +9473,10 @@ static int ath12k_mac_op_ampdu_action(st
  
  	switch (params->action) {
  	case IEEE80211_AMPDU_RX_START:
@@ -242,7 +243,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		break;
  	case IEEE80211_AMPDU_TX_START:
  	case IEEE80211_AMPDU_TX_STOP_CONT:
-@@ -9470,7 +9489,36 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -9470,7 +9490,36 @@ static int ath12k_mac_op_ampdu_action(st
  		break;
  	}
  
