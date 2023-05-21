@@ -1,0 +1,121 @@
+From 9ccbd25697a9c200a03a536469a93ff07a1dd5ba Mon Sep 17 00:00:00 2001
+From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+Date: Tue, 25 Apr 2023 16:48:24 -0700
+Subject: [PATCH 2/2] ath12k: skip rx skb reallocation for ppe ds in rx data
+ path
+
+As receive buffers used by PPE DS module are untouched by
+software/firmware they can be reused in replenish directly.
+
+Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c    |  6 +++++-
+ drivers/net/wireless/ath/ath12k/dp.h    |  1 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 16 +++++++++++-----
+ drivers/net/wireless/ath/ath12k/ppe.c   |  7 ++-----
+ 4 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index 5eb322d50d6d..3d354316912e 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -1354,7 +1354,11 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+ 
+ 	list_for_each_entry_safe(desc_info, tmp, &dp->rx_desc_used_list, list) {
+ 		list_del(&desc_info->list);
+-		skb = desc_info->skb;
++		WARN_ON(desc_info->reuse_skb && desc_info->skb);
++		if (desc_info->reuse_skb)
++			skb = desc_info->reuse_skb;
++		else
++			skb = desc_info->skb;
+ 
+ 		if (!skb)
+ 			continue;
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index 94229c46d2b6..6a83783a9645 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -313,6 +313,7 @@ struct ath12k_rx_desc_info {
+ 	u32 cookie;
+ 	u32 magic;
+ 	struct ath12k_base *ab;
++	struct sk_buff *reuse_skb;
+ };
+ 
+ struct ath12k_tx_desc_info {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index a5e59afdd8dd..92ea941763dc 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -296,7 +296,7 @@ static int ath12k_dp_purge_mon_ring(struct ath12k_base *ab)
+ 	return -ETIMEDOUT;
+ }
+ 
+-
++static
+ int ath12k_dp_rx_bufs_alloc_skb(struct ath12k_base *ab,
+ 				struct sk_buff **buf, dma_addr_t *buf_paddr)
+ {
+@@ -377,10 +377,16 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 				break;
+ 			}
+ 
+-			ret = ath12k_dp_rx_bufs_alloc_skb(ab, &skb, &paddr);
+-			if (unlikely(ret)) {
+-				spin_unlock_bh(&dp->rx_desc_lock);
+-				break;
++			if (rx_desc->reuse_skb) {
++				skb = rx_desc->reuse_skb;
++				rx_desc->reuse_skb = NULL;
++				paddr = ATH12K_SKB_RXCB(skb)->paddr;
++			} else {
++				ret = ath12k_dp_rx_bufs_alloc_skb(ab, &skb, &paddr);
++				if (unlikely(ret)) {
++					spin_unlock_bh(&dp->rx_desc_lock);
++					break;
++				}
+ 			}
+ 
+ 			rx_desc->skb = skb;
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
+index 054e7ba6a7cc..1bf6c6c81c64 100644
+--- a/drivers/net/wireless/ath/ath12k/ppe.c
++++ b/drivers/net/wireless/ath/ath12k/ppe.c
+@@ -120,7 +120,6 @@ static void ath12k_ppeds_release_rx_desc(ppe_ds_wlan_handle_t *ppeds_handle,
+ 	struct ath12k_base *ab = *(struct ath12k_base **)ppe_ds_wlan_priv(ppeds_handle);
+ 	struct ath12k_base *src_ab = NULL;
+ 	u32 rx_bufs_reaped[ATH12K_MAX_SOCS][MAX_RADIOS] = {0};
+-	struct sk_buff_head free_list_head;
+ 	struct ath12k_rx_desc_info *rx_desc;
+ 	struct dp_rxdma_ring *rx_ring;
+ 	int chip_id, mac_id;
+@@ -129,7 +128,6 @@ static void ath12k_ppeds_release_rx_desc(ppe_ds_wlan_handle_t *ppeds_handle,
+ 	if (!ab->stats_disable)
+ 		ab->ppeds_stats.release_rx_desc_cnt++;
+ 
+-	skb_queue_head_init(&free_list_head);
+ 	for (i = 0; i < count; i++) {
+ 		rx_desc = (struct ath12k_rx_desc_info *)arr[i].cookie;
+ 		if (rx_desc == NULL) {
+@@ -139,15 +137,14 @@ static void ath12k_ppeds_release_rx_desc(ppe_ds_wlan_handle_t *ppeds_handle,
+ 		src_ab = rx_desc->ab;
+ 		/* TODO: review split phy */
+ 		rx_bufs_reaped[src_ab->chip_id][0]++;
+-		__skb_queue_head(&free_list_head, rx_desc->skb);
++		rx_desc->reuse_skb = rx_desc->skb;
++		rx_desc->skb = NULL;
+ 
+ 		spin_lock_bh(&src_ab->dp.rx_desc_lock);
+ 		list_move_tail(&rx_desc->list, &src_ab->dp.rx_desc_free_list);
+ 		spin_unlock_bh(&src_ab->dp.rx_desc_lock);
+ 	}
+ 
+-	dev_kfree_skb_list_fast(&free_list_head);
+-
+ 	for (chip_id = 0; chip_id < ATH12K_MAX_SOCS; chip_id++) {
+ 	        for (mac_id = 0; mac_id < MAX_RADIOS; mac_id++) {
+ 
+-- 
+2.17.1
+

@@ -1,0 +1,131 @@
+From 0e736630e4f3992a039259504cf89a9e7d47b0ed Mon Sep 17 00:00:00 2001
+From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+Date: Tue, 25 Apr 2023 16:42:17 -0700
+Subject: [PATCH 1/2] ath12k: restructure ath12k_dp_rx_bufs_replenish
+
+Move buffer allocation and dma mapping to different function.
+No functional change is expected. This is to accomodate
+ppeds related buffer optimization that will be added in later
+patches.
+
+Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 65 ++++++++++++++++---------
+ 1 file changed, 43 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 9be04ab393ea..a5e59afdd8dd 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -296,6 +296,36 @@ static int ath12k_dp_purge_mon_ring(struct ath12k_base *ab)
+ 	return -ETIMEDOUT;
+ }
+ 
++
++int ath12k_dp_rx_bufs_alloc_skb(struct ath12k_base *ab,
++				struct sk_buff **buf, dma_addr_t *buf_paddr)
++{
++	struct sk_buff *skb;
++
++	skb = dev_alloc_skb(DP_RX_BUFFER_SIZE +
++			DP_RX_BUFFER_ALIGN_SIZE);
++	if (unlikely(!skb))
++		return -ENOMEM;
++
++	if (!IS_ALIGNED((unsigned long)skb->data,
++				DP_RX_BUFFER_ALIGN_SIZE)) {
++		skb_pull(skb,
++		PTR_ALIGN(skb->data, DP_RX_BUFFER_ALIGN_SIZE) -
++					skb->data);
++	}
++
++	*buf = skb;
++	*buf_paddr = dma_map_single_attrs(ab->dev, skb->data,
++			skb->len + skb_tailroom(skb),
++			DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
++	if (dma_mapping_error(ab->dev, *buf_paddr)) {
++		dev_kfree_skb_any(skb);
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
+ /* Returns number of Rx buffers replenished */
+ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 				struct dp_rxdma_ring *rx_ring,
+@@ -308,7 +338,7 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 	struct sk_buff *skb;
+ 	int num_free;
+ 	int num_remain;
+-	int buf_id;
++	int buf_id, ret;
+ 	u32 cookie;
+ 	dma_addr_t paddr;
+ 	struct ath12k_dp *dp = &ab->dp;
+@@ -330,24 +360,6 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 	num_remain = req_entries;
+ 
+ 	while (num_remain > 0) {
+-		skb = dev_alloc_skb(DP_RX_BUFFER_SIZE +
+-				    DP_RX_BUFFER_ALIGN_SIZE);
+-		if (unlikely(!skb))
+-			break;
+-
+-		if (!IS_ALIGNED((unsigned long)skb->data,
+-				DP_RX_BUFFER_ALIGN_SIZE)) {
+-			skb_pull(skb,
+-				 PTR_ALIGN(skb->data, DP_RX_BUFFER_ALIGN_SIZE) -
+-				 skb->data);
+-		}
+-
+-		paddr = dma_map_single_attrs(ab->dev, skb->data,
+-					     skb->len + skb_tailroom(skb),
+-					     DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+-		if (dma_mapping_error(ab->dev, paddr))
+-			goto fail_free_skb;
+-
+ 		if (likely(hw_cc)) {
+ 			spin_lock_bh(&dp->rx_desc_lock);
+ 
+@@ -362,7 +374,13 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 							   list);
+ 			if (!rx_desc) {
+ 				spin_unlock_bh(&dp->rx_desc_lock);
+-				goto fail_dma_unmap;
++				break;
++			}
++
++			ret = ath12k_dp_rx_bufs_alloc_skb(ab, &skb, &paddr);
++			if (unlikely(ret)) {
++				spin_unlock_bh(&dp->rx_desc_lock);
++				break;
+ 			}
+ 
+ 			rx_desc->skb = skb;
+@@ -372,6 +390,10 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 
+ 			spin_unlock_bh(&dp->rx_desc_lock);
+ 		} else {
++			ret = ath12k_dp_rx_bufs_alloc_skb(ab, &skb, &paddr);
++			if (unlikely(ret))
++				break;
++
+ 			spin_lock_bh(&rx_ring->idr_lock);
+ 			buf_id = idr_alloc(&rx_ring->bufs_idr, skb, 0,
+ 					   rx_ring->bufs_max * 3, GFP_ATOMIC);
+@@ -411,10 +433,9 @@ fail_idr_remove:
+ 	spin_lock_bh(&rx_ring->idr_lock);
+ 	idr_remove(&rx_ring->bufs_idr, buf_id);
+ 	spin_unlock_bh(&rx_ring->idr_lock);
+-fail_dma_unmap:
++
+ 	dma_unmap_single_attrs(ab->dev, paddr, skb->len + skb_tailroom(skb),
+ 			       DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+-fail_free_skb:
+ 	dev_kfree_skb_any(skb);
+ 
+ 	ath12k_hal_srng_access_end(ab, srng);
+-- 
+2.17.1
+
