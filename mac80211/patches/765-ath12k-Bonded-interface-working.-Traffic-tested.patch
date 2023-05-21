@@ -82,7 +82,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,769 @@
+@@ -0,0 +1,741 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -149,7 +149,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +}
 +
 +int ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
-+					    struct net_device *link_dev)
++				     struct net_device *link_dev)
 +{
 +	struct ppe_vp_ai vpai;
 +	struct ieee80211_ppe_vp_ds_params vp_params = {0};
@@ -228,16 +228,13 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	struct net_device *bond_dev = NULL;
 +	char name[20] = {0};
 +	int ret = 0, chip_id = 0, pdev_id = 0;
-+	int rtnl_locked = rtnl_is_locked();
 +
 +	if (!g_bonded_interface_model)
 +		return 0;
 +
-+	 if (!vif->bond_init) {
-+		 mutex_init(&vif->bond_mutex);
-+	 }
-+
 +	bond_dev = wdev->bond_netdev;
++	if (!bond_dev)
++		return 0;
 +	mldev = bond_get_mlo_ctx(bond_dev);
 +
 +	new_link_id = new_links ^ old_links;
@@ -267,20 +264,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		vif->link_ndev[link_num] = link_ndev;
 +		mutex_unlock(&vif->bond_mutex);
 +		link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
-+		if (!rtnl_locked)
-+			rtnl_lock();
 +		ret = register_netdevice(link_ndev);
 +		if (ret) {
 +			ath12k_err(NULL, "Error register link netdevice\n");
 +			//TODO: Graceful cleanup
-+			if (!rtnl_locked)
-+				rtnl_unlock();
 +			return -EINVAL;
 +		}
 +		ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
 +		ret = bond_enslave(bond_dev, link_ndev, NULL);
-+		if (!rtnl_locked)
-+			rtnl_unlock();
 +
 +		if (ret) {
 +			ath12k_err(NULL, "Error bond enslave error\n");
@@ -307,21 +298,13 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +			link_ndev = vif->link_ndev[link_num];
 +			if (link_ndev) {
 +				ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+				if (!rtnl_locked)
-+					rtnl_lock();
 +				bond_release(wdev->bond_netdev, link_ndev);
 +				unregister_netdevice(link_ndev);
-+				if (!rtnl_locked)
-+					rtnl_unlock();
 +				vif->link_ndev[link_num] = NULL;
 +			} else {
 +				ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
 +			}
 +			mutex_unlock(&vif->bond_mutex);
-+			if (vif->bond_init && new_links == 0) {
-+				vif->bond_init = 0;
-+				mutex_destroy(&vif->bond_mutex);
-+			}
 +		}
 +	ath12k_info(NULL, "%s:%d link changed for MLD %pM old 0x%x new 0x%x\n", __func__, __LINE__, vif->addr, old_links, new_links);
 +	return 0;
@@ -408,7 +391,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		ab->soc_stats.tx_err.txbuf_na[ti.ring_id]++;
 +		return -ENOMEM;
 +	}
-+	
++
 +	ti.bank_id = arvif->bank_id;
 +	ti.meta_data_flags = arvif->tcl_metadata;
 +
@@ -422,7 +405,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		ti.vdev_id = arvif->vdev_id;
 +	}
 +
-+	ti.encap_type = HAL_TCL_ENCAP_TYPE_ETHERNET; 
++	ti.encap_type = HAL_TCL_ENCAP_TYPE_ETHERNET;
 +	ti.addr_search_flags = arvif->hal_addr_search_flags;
 +	ti.search_type = arvif->search_type;
 +	ti.type = HAL_TCL_DESC_TYPE_BUFFER;
@@ -539,9 +522,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +		link_dev = mldev->link_dev[chip_id][pdev_id];
 +		arvif_pvt = netdev_priv(link_dev);
-+		arvif = arvif_pvt->arvif; 
++		arvif = arvif_pvt->arvif;
 +		if (!arvif) {
-+			dev_kfree_skb_any(skb);	
++			dev_kfree_skb_any(skb);
 +			return NETDEV_TX_OK;
 +		}
 +
@@ -568,11 +551,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +			ret = ath12k_mcast_dp_tx(tmp_ar, tmp_arvif, msdu_copied, true, mcbc_gsn);
 +			if (ret) {
-+				dev_kfree_skb_any(msdu_copied);	
++				dev_kfree_skb_any(msdu_copied);
 +				return ret;
 +			}
 +		}
-+		dev_kfree_skb_any(skb);	
++		dev_kfree_skb_any(skb);
 +		return NETDEV_TX_OK;
 +	} else {
 +		link_dev = ath12k_mac_get_tx_link_netdev( mldev, eh->h_dest);
@@ -702,19 +685,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	struct wireless_dev *dummywdev = NULL;
 +	struct wiphy *dummywiphy = NULL;
 +	struct net_device *link_ndev = NULL;
-+	int rtnl_locked = rtnl_is_locked();
 +	int ret;
 +
 +	mutex_lock(&vif->bond_mutex);
 +	link_ndev = vif->link_ndev[link_num];
 +	if (link_ndev) {
 +		ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+		if (!rtnl_locked)
-+			rtnl_lock();
 +		bond_release(wdev->bond_netdev, link_ndev);
 +		unregister_netdevice(link_ndev);
-+		if (!rtnl_locked)
-+			rtnl_unlock();
 +		vif->link_ndev[link_num] = NULL;
 +	} else {
 +		ath12k_err(NULL, "ERR Free Bond dev for SFE. Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
@@ -733,8 +711,6 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	dummywiphy = mldev->wdev->wiphy;
 +	dummywdev = mldev->wdev;
 +
-+	if (!rtnl_locked)
-+		rtnl_lock();
 +	/* Returns true on success */
 +	ret  = bond_destroy_mlo(wdev->bond_netdev);
 +	if (ret) {
@@ -742,12 +718,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		ath12k_info(NULL,"Successfully destroyed bond device\n");
 +	} else {
 +		ath12k_err(NULL, "Not able destroy bond device %s ret %d\n", wdev->bond_netdev->name, ret);
-+		if (!rtnl_locked)
-+			rtnl_unlock();
 +		return -EINVAL;
 +	}
-+	if (!rtnl_locked)
-+		rtnl_unlock();
 +	kfree(dummywdev);
 +	wiphy_free(dummywiphy);
 +	clear_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state);
@@ -918,7 +890,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  struct ath12k_link_vif {
  	struct ath12k_base *ab;
  	struct ath12k_dp *dp;
-@@ -384,6 +395,11 @@ struct ath12k_link_vif {
+@@ -385,6 +396,11 @@ struct ath12k_link_vif {
  	u32 tx_vdev_id;
  	u8 link_id;
  	struct ath12k_vif *ahvif;
@@ -929,7 +901,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +#endif
  
  	bool mvr_processing;
- };
+ 	bool pending_csa_up;
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -2780,7 +2780,12 @@ static void ath12k_dp_rx_h_mpdu(struct a
@@ -944,7 +916,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +#endif
 +					msdu->dev = wdev->netdev;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
- 				if (vp) {
+ 				if (vp > 0) {
  					if (likely(ppe_vp_tx_to_ppe(vp, msdu)))
 @@ -2801,6 +2806,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	}
@@ -991,17 +963,23 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4712,10 +4720,16 @@ static int ath12k_mac_vdev_delete(struct
- 	ar->num_created_vdevs--;
- 	arvif->ahvif->num_vdev_created--;
- 	arvif->is_created = false;
+@@ -4744,6 +4752,9 @@ static int ath12k_mac_vdev_delete(struct
+ 
+ 	reinit_completion(&ar->vdev_delete_done);
+ 
 +	if (arvif->ndev_pvt && arvif->ndev_pvt->link_ndev)
 +		arvif->ndev_pvt->link_ndev->flags &= ~IFF_UP;
++
+ 	ret = ath12k_wmi_vdev_delete(ar, arvif->vdev_id);
+ 	if (ret) {
+ 		ath12k_warn(ar->ab, "failed to delete WMI scan vdev %d: %d\n",
+@@ -4771,8 +4782,12 @@ static int ath12k_mac_vdev_delete(struct
+ 	arvif->is_created = false;
  
  clean_up:
 -	arvif->ar = NULL;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+	if (arvif->ndev_pvt)
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
 +		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
 +#endif
  
@@ -1009,7 +987,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4763,7 +4777,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4820,7 +4835,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1018,7 +996,19 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -6617,8 +6631,8 @@ static int ath12k_mac_station_add(struct
+@@ -5161,8 +5176,10 @@ static int ath12k_mac_op_hw_scan(struct
+ 	 * delete-create vdev's for the same ar, in case the request is
+ 	 * always on the same band for the vif
+ 	 */
+-	if (!arvif)
++	if (!arvif) {
++		mutex_unlock(&ah->conf_mutex);
+ 		return -ENOMEM;
++	}
+ 
+ 	if (arvif->is_created) {
+ 		if (ar != arvif->ar && arvif->is_started) {
+@@ -6674,8 +6691,8 @@ static int ath12k_mac_station_add(struct
  		}
  	}
  
@@ -1029,7 +1019,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #else
  	ret = ath12k_dp_peer_setup(ar, arvif, arsta, -1);
  #endif
-@@ -9454,6 +9468,7 @@ static void ath12k_update_obss_color_not
+@@ -9511,6 +9528,7 @@ static void ath12k_update_obss_color_not
  static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arvif)
  {
  	struct ieee80211_vif *vif = arvif->ahvif->vif;
@@ -1037,7 +1027,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_hw *hw = ar->ah->hw;
-@@ -9461,6 +9476,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9518,6 +9536,10 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1048,38 +1038,55 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9519,6 +9538,14 @@ static int ath12k_mac_vdev_create(struct
+@@ -9576,6 +9598,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+	link_ndev = vif->link_ndev[link_id];
-+	if (link_ndev) {
-+		link_ndev_pvt = netdev_priv(link_ndev);
-+		link_ndev_pvt->arvif = arvif;
-+		arvif->ndev_pvt = link_ndev_pvt;
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK) {
++		link_ndev = vif->link_ndev[link_id];
++		if (link_ndev) {
++			link_ndev_pvt = netdev_priv(link_ndev);
++			link_ndev_pvt->arvif = arvif;
++			arvif->ndev_pvt = link_ndev_pvt;
++		}
 +	}
 +#endif
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9610,6 +9637,15 @@ static int ath12k_mac_vdev_create(struct
+@@ -9667,6 +9699,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+		if (hweight16(vif->valid_links) == 1 && test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags)) {
-+			ath12k_free_bonddev_for_sfe(wdev, vif, arvif->link_id);	
-+			arvif->ndev_pvt = NULL;
-+		}
-+		else if (link_ndev) {
-+			ath12k_enable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
++		if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK) {
++			if (hweight16(vif->valid_links) == 1 &&
++			    test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags)) {
++				ath12k_free_bonddev_for_sfe(wdev, vif, link_id);
++				arvif->ndev_pvt = NULL;
++				arvif->ppe_vp_num = -1;
++			}
++			else if (link_ndev) {
++				ath12k_enable_ds_for_link_netdev(arvif,
++								 arvif->ndev_pvt->link_ndev);
++			}
 +		}
 +#endif
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -10189,15 +10225,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -9739,6 +9785,9 @@ static int ath12k_mac_vdev_create(struct
+ 	if (ret)
+ 		goto err_peer_del;
+ 
++	if (link_ndev && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK)
++		link_ndev->flags |= IFF_UP;
++
+ 	return ret;
+ 
+ err_peer_del:
+@@ -10246,15 +10295,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1101,7 +1108,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -13944,10 +13982,6 @@ static const struct ieee80211_ops ath12k
+@@ -12062,6 +12113,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+ 	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
+ 	if (!arvif) {
+ 		ath12k_err(NULL, "unable to allocate link vif\n");
++		mutex_unlock(&ah->conf_mutex);
+ 		return -ENOMEM;
+ 	}
+ 
+@@ -14038,10 +14090,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1130,7 +1145,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static const struct pci_device_id ath12k_pci_id_table[] = {
  	{ PCI_VDEVICE(QCOM, QCN9274_DEVICE_ID) },
  	{ PCI_VDEVICE(QCOM, WCN7850_DEVICE_ID) },
-@@ -1363,7 +1372,21 @@ static int ath12k_pci_probe(struct pci_d
+@@ -1358,7 +1367,21 @@ static int ath12k_pci_probe(struct pci_d
  	struct ath12k_pci *ab_pci;
  	u32 soc_hw_version_major, soc_hw_version_minor, addr;
  	int ret;
@@ -1494,7 +1509,17 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	if (local->open_count == 0) {
-@@ -2011,6 +2016,10 @@ static void ieee80211_setup_sdata(struct
+@@ -1933,6 +1938,9 @@ static void ieee80211_setup_sdata(struct
+ 
+ 	/* and set some type-dependent values */
+ 	sdata->vif.type = type;
++	mutex_init(&sdata->vif.bond_mutex);
++	sdata->vif.bond_init = true;
++
+ 	sdata->vif.p2p = false;
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+ 	sdata->vif.ppe_vp_num = -1;
+@@ -2011,6 +2019,10 @@ static void ieee80211_setup_sdata(struct
  	case NUM_NL80211_IFTYPES:
  		WARN_ON(1);
  		break;
@@ -1505,7 +1530,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	/* need to do this after the switch so vif.type is correct */
-@@ -2274,7 +2283,7 @@ static void ieee80211_assign_perm_addr(s
+@@ -2274,7 +2286,7 @@ static void ieee80211_assign_perm_addr(s
  int ieee80211_if_add(struct ieee80211_local *local, const char *name,
  		     unsigned char name_assign_type,
  		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
@@ -1514,7 +1539,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  {
  	struct net_device *ndev = NULL;
  	struct ieee80211_sub_if_data *sdata = NULL;
-@@ -2447,7 +2456,7 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -2447,7 +2459,7 @@ int ieee80211_if_add(struct ieee80211_lo
  #endif
  		}
  
@@ -1523,6 +1548,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		if (ret) {
  			free_netdev(ndev);
  			return ret;
+@@ -2478,7 +2490,7 @@ void ieee80211_if_remove(struct ieee8021
+ 	synchronize_rcu();
+ 
+ 	cfg80211_unregister_wdev(&sdata->wdev);
+-
++	mutex_destroy(&sdata->vif.bond_mutex);
+ 	if (!sdata->dev) {
+ 		ieee80211_teardown_sdata(sdata);
+ 		kfree(sdata);
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
 @@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee802
@@ -1576,6 +1610,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	ieee80211_rx_stats(fast_rx->dev, skb->len);
  
+@@ -4894,7 +4906,7 @@ static void ieee80211_rx_8023(struct iee
+ 	}
+ 
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+-	if (rx->sdata->vif.ppe_vp_num) {
++	if (rx->sdata->vif.ppe_vp_num != -1) {
+ 		ieee80211_netif_rx_ppe(rx, skb);
+ 		atomic_inc(&sta->rx_netif_pkts);
+ 		return;
 @@ -4902,6 +4914,10 @@ static void ieee80211_rx_8023(struct iee
  #endif
  	/* deliver to local stack */
@@ -1721,6 +1764,96 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
+@@ -16993,9 +16997,16 @@ nl80211_remove_link_station(struct sk_bu
+ 		 NL80211_FLAG_NEED_RTNL)		\
+ 	SELECTOR(__sel, NETDEV_UP,			\
+ 		 NL80211_FLAG_NEED_NETDEV_UP)		\
++	SELECTOR(__sel, NETDEV_UP_RTNL,			\
++		 NL80211_FLAG_NEED_RTNL |		\
++		 NL80211_FLAG_NEED_NETDEV_UP)		\
+ 	SELECTOR(__sel, NETDEV_UP_LINK,			\
+ 		 NL80211_FLAG_NEED_NETDEV_UP |		\
+ 		 NL80211_FLAG_MLO_VALID_LINK_ID)	\
++	SELECTOR(__sel, NETDEV_UP_LINK_RTNL,			\
++		 NL80211_FLAG_NEED_NETDEV_UP |		\
++		 NL80211_FLAG_NEED_RTNL |		\
++		 NL80211_FLAG_MLO_VALID_LINK_ID)	\
+ 	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
+ 		 NL80211_FLAG_NEED_NETDEV_UP |		\
+ 		 NL80211_FLAG_NO_WIPHY_MTX |		\
+@@ -17027,7 +17038,13 @@ nl80211_remove_link_station(struct sk_bu
+ 		 NL80211_FLAG_NEED_RTNL)		\
+ 	SELECTOR(__sel, WIPHY_CLEAR,			\
+ 		 NL80211_FLAG_NEED_WIPHY |		\
+-		 NL80211_FLAG_CLEAR_SKB)
++		 NL80211_FLAG_CLEAR_SKB)		\
++	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX_RTNL,	\
++		 NL80211_FLAG_NEED_NETDEV_UP |		\
++		 NL80211_FLAG_NEED_RTNL	|		\
++		 NL80211_FLAG_NO_WIPHY_MTX |		\
++		 NL80211_FLAG_MLO_VALID_LINK_ID)
++
+ 
+ enum nl80211_internal_flags_selector {
+ #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
+@@ -17390,6 +17407,7 @@ static const struct genl_small_ops nl802
+ 		.flags = GENL_UNS_ADMIN_PERM,
+ 		.doit = nl80211_start_ap,
+ 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL |
+ 					 NL80211_FLAG_MLO_VALID_LINK_ID),
+ 	},
+ 	{
+@@ -17398,6 +17416,7 @@ static const struct genl_small_ops nl802
+ 		.flags = GENL_UNS_ADMIN_PERM,
+ 		.doit = nl80211_stop_ap,
+ 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL |
+ 					 NL80211_FLAG_MLO_VALID_LINK_ID),
+ 	},
+ 	{
+@@ -17519,7 +17538,7 @@ static const struct genl_small_ops nl802
+ 		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+ 		.doit = nl80211_trigger_scan,
+ 		.flags = GENL_UNS_ADMIN_PERM,
+-		.internal_flags = IFLAGS(NL80211_FLAG_NEED_WDEV_UP),
++		.internal_flags = IFLAGS(NL80211_FLAG_NEED_WDEV_UP | NL80211_FLAG_NEED_RTNL),
+ 	},
+ 	{
+ 		.cmd = NL80211_CMD_ABORT_SCAN,
+@@ -17902,6 +17921,7 @@ static const struct genl_small_ops nl802
+ 		.doit = nl80211_start_radar_detection,
+ 		.flags = GENL_UNS_ADMIN_PERM,
+ 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL |
+ 					 NL80211_FLAG_NO_WIPHY_MTX |
+ 					 NL80211_FLAG_MLO_VALID_LINK_ID),
+ 	},
+@@ -18098,13 +18118,15 @@ static const struct genl_small_ops nl802
+ 		.cmd = NL80211_CMD_ADD_LINK,
+ 		.doit = nl80211_add_link,
+ 		.flags = GENL_UNS_ADMIN_PERM,
+-		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP),
++		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL),
+ 	},
+ 	{
+ 		.cmd = NL80211_CMD_REMOVE_LINK,
+ 		.doit = nl80211_remove_link,
+ 		.flags = GENL_UNS_ADMIN_PERM,
+ 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL |
+ 					 NL80211_FLAG_MLO_VALID_LINK_ID),
+ 	},
+ 	{
+@@ -18112,6 +18134,7 @@ static const struct genl_small_ops nl802
+ 		.doit = nl80211_add_link_station,
+ 		.flags = GENL_UNS_ADMIN_PERM,
+ 		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
++					 NL80211_FLAG_NEED_RTNL |
+ 					 NL80211_FLAG_MLO_VALID_LINK_ID),
+ 	},
+ 	{
 --- a/net/wireless/util.c
 +++ b/net/wireless/util.c
 @@ -1113,6 +1113,10 @@ int cfg80211_change_iface(struct cfg8021
@@ -1734,3 +1867,17 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		case NL80211_IFTYPE_STATION:
  			if (dev->ieee80211_ptr->use_4addr)
  				break;
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -141,11 +141,6 @@ int ath12k_dp_peer_setup(struct ath12k *
+ 	}
+ 
+ 	/* TODO: Setup other peer specific resource used in data path */
+-
+-	/* TODO: Remove this after validation of MLO DS */
+-	WARN_ON(test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ar->ab->dev_flags) &&
+-		ppe_vp_num == -1);
+-
+ #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+ 	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ar->ab->dev_flags) &&
+ 	    ppe_vp_num != -1)
