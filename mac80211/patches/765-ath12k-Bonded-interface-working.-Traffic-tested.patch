@@ -73,7 +73,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		Say Y to enable Bonded DS Support. If unsure, say N.
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -31,6 +31,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += co
+@@ -33,6 +33,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += co
  ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
  ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
  ath12k-$(CPTCFG_ATH12K_PPE_DS_SUPPORT) += ppe.o
@@ -884,7 +884,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +#endif //__BONDIF_H
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -332,6 +332,17 @@ struct ath12k_vif_tcl_desc_template {
+@@ -334,6 +334,17 @@ struct ath12k_vif_tcl_desc_template {
  	u32 info4;
  };
  
@@ -902,7 +902,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ath12k_link_vif {
  	struct ath12k_base *ab;
  	struct ath12k_dp *dp;
-@@ -385,6 +396,11 @@ struct ath12k_link_vif {
+@@ -387,6 +398,11 @@ struct ath12k_link_vif {
  	u32 tx_vdev_id;
  	u8 link_id;
  	struct ath12k_vif *ahvif;
@@ -975,17 +975,19 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4744,6 +4752,9 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4744,6 +4752,11 @@ static int ath12k_mac_vdev_delete(struct
  
  	reinit_completion(&ar->vdev_delete_done);
  
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	if (arvif->ndev_pvt && arvif->ndev_pvt->link_ndev)
 +		arvif->ndev_pvt->link_ndev->flags &= ~IFF_UP;
++#endif
 +
  	ret = ath12k_wmi_vdev_delete(ar, arvif->vdev_id);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to delete WMI scan vdev %d: %d\n",
-@@ -4771,8 +4782,12 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4771,8 +4784,12 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
@@ -999,7 +1001,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4820,7 +4835,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4820,7 +4837,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1008,7 +1010,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5161,8 +5176,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5161,8 +5178,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1020,26 +1022,19 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -9517,6 +9534,7 @@ static void ath12k_update_obss_color_not
- static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arvif)
- {
- 	struct ieee80211_vif *vif = arvif->ahvif->vif;
-+	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
- 	struct ath12k_base *ab = ar->ab;
- 	struct ath12k_vif *ahvif = arvif->ahvif;
- 	struct ieee80211_hw *hw = ar->ah->hw;
-@@ -9524,6 +9542,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9525,6 +9544,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
 +	struct net_device *link_ndev = NULL;
 +	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +#endif
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9582,6 +9604,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9583,6 +9607,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1056,7 +1051,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9673,6 +9705,19 @@ static int ath12k_mac_vdev_create(struct
+@@ -9674,6 +9708,19 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1076,17 +1071,18 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9745,6 +9790,9 @@ static int ath12k_mac_vdev_create(struct
+@@ -9745,6 +9792,10 @@ static int ath12k_mac_vdev_create(struct
+ 	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
- 
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	if (link_ndev && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK)
 +		link_ndev->flags |= IFF_UP;
-+
++#endif
+ 
  	return ret;
  
- err_peer_del:
-@@ -10252,15 +10300,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10253,15 +10304,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1108,7 +1104,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12068,6 +12118,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12069,6 +12122,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1116,7 +1112,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14044,10 +14095,6 @@ static const struct ieee80211_ops ath12k
+@@ -14045,10 +14099,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1145,7 +1141,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static const struct pci_device_id ath12k_pci_id_table[] = {
  	{ PCI_VDEVICE(QCOM, QCN9274_DEVICE_ID) },
  	{ PCI_VDEVICE(QCOM, WCN7850_DEVICE_ID) },
-@@ -1358,7 +1367,21 @@ static int ath12k_pci_probe(struct pci_d
+@@ -1363,7 +1372,21 @@ static int ath12k_pci_probe(struct pci_d
  	struct ath12k_pci *ab_pci;
  	u32 soc_hw_version_major, soc_hw_version_minor, addr;
  	int ret;
@@ -1474,7 +1470,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		case NL80211_IFTYPE_AP:
  		case NL80211_IFTYPE_AP_VLAN:
  			width = ieee80211_get_max_required_bw(sdata, link_id);
-@@ -1228,6 +1232,10 @@ ieee80211_link_chanctx_reservation_compl
+@@ -1231,6 +1235,10 @@ ieee80211_link_chanctx_reservation_compl
  	struct ieee80211_sub_if_data *sdata = link->sdata;
  
  	switch (sdata->vif.type) {
@@ -1508,7 +1504,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -797,7 +797,7 @@ static int ieee80211_stop(struct net_dev
+@@ -805,7 +805,7 @@ static int ieee80211_stop(struct net_dev
  #endif
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -1517,7 +1513,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		drv_ppeds_detach_vdev(sdata, &sdata->vif, &vp_params);
  		if (sdata->vif.ppe_vp_type != PPE_VP_USER_TYPE_DS)
  			ppe_vp_free(sdata->vif.ppe_vp_num);
-@@ -1427,6 +1427,11 @@ int ieee80211_do_open(struct wireless_de
+@@ -1458,6 +1458,11 @@ int ieee80211_do_open(struct wireless_de
  		/* cannot happen */
  		WARN_ON(1);
  		break;
@@ -1529,17 +1525,19 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	}
  
  	if (local->open_count == 0) {
-@@ -1926,6 +1931,9 @@ static void ieee80211_setup_sdata(struct
+@@ -1957,6 +1962,11 @@ static void ieee80211_setup_sdata(struct
  
  	/* and set some type-dependent values */
  	sdata->vif.type = type;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
 +	mutex_init(&sdata->vif.bond_mutex);
 +	sdata->vif.bond_init = true;
++#endif
 +
  	sdata->vif.p2p = false;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	sdata->vif.ppe_vp_num = -1;
-@@ -2004,6 +2012,10 @@ static void ieee80211_setup_sdata(struct
+@@ -2035,6 +2045,10 @@ static void ieee80211_setup_sdata(struct
  	case NUM_NL80211_IFTYPES:
  		WARN_ON(1);
  		break;
@@ -1550,7 +1548,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	}
  
  	/* need to do this after the switch so vif.type is correct */
-@@ -2267,7 +2279,7 @@ static void ieee80211_assign_perm_addr(s
+@@ -2298,7 +2312,7 @@ static void ieee80211_assign_perm_addr(s
  int ieee80211_if_add(struct ieee80211_local *local, const char *name,
  		     unsigned char name_assign_type,
  		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
@@ -1559,7 +1557,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  {
  	struct net_device *ndev = NULL;
  	struct ieee80211_sub_if_data *sdata = NULL;
-@@ -2440,7 +2452,7 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -2471,7 +2485,7 @@ int ieee80211_if_add(struct ieee80211_lo
  #endif
  		}
  
@@ -1568,12 +1566,14 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		if (ret) {
  			free_netdev(ndev);
  			return ret;
-@@ -2471,7 +2483,7 @@ void ieee80211_if_remove(struct ieee8021
+@@ -2502,7 +2516,9 @@ void ieee80211_if_remove(struct ieee8021
  	synchronize_rcu();
  
  	cfg80211_unregister_wdev(&sdata->wdev);
 -
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
 +	mutex_destroy(&sdata->vif.bond_mutex);
++#endif
  	if (!sdata->dev) {
  		ieee80211_teardown_sdata(sdata);
  		kfree(sdata);
