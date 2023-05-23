@@ -80,6 +80,7 @@ define KernelPackage/mac80211
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-ds:kmod-qca-nss-ppe-ds
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-bonding:kmod-bonding
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ecm:kmod-qca-nss-ecm
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -426,7 +427,7 @@ endef
 define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
-  DEPENDS+= +kmod-ath +kmod-telemetry-agent\
+  DEPENDS+= +kmod-ath +kmod-qca-nss-ecm-premium\
 	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
   FILES:= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
   AUTOLOAD:=$(call AutoProbe,ath12k)

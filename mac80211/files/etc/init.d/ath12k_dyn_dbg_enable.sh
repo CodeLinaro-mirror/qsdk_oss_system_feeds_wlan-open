@@ -19,6 +19,34 @@
 START=03
 STOP=94
 
+get_front_end_mode() {
+	config_load "ecm"
+	config_get front_end global acceleration_engine "auto"
+
+	case $front_end in
+	auto)
+		echo '0'
+		;;
+	nss)
+		echo '1'
+		;;
+	sfe)
+		echo '2'
+		;;
+	ppe)
+		echo '3'
+		;;
+	nss-sfe)
+		echo '4'
+		;;
+	ppe-sfe)
+		echo '5'
+		;;
+	*)
+		echo 'uci_option_acceleration_engine is invalid'
+	esac
+}
+
 boot()
 {
 	ath12k="/etc/modules.d/ath12k"
@@ -33,4 +61,12 @@ boot()
 			sed -i '1s/ath12k/ath12k dyndbg=+p/' $ath12k
 		fi
 	fi
+
+	ecm="/etc/modules.d/ecm"
+	if [ ! -f $ecm ];
+	then
+		touch $ecm
+	fi
+	echo "ecm front_end_selection=$(get_front_end_mode)" > $ecm
+
 }
