@@ -1503,25 +1503,8 @@ mac80211_setup_vif() {
 			else
 				freq="$(get_freq "$phy" "$channel" "$device")"
 			fi
-
 			freq_list=$(get_sta_freq_list $phy $freq)
-			sta_started=0
-			if ([ "$is_sphy_mband" -eq 1 ] &&
-			    [ "$sta_vaps_count" -gt 1 ] && [ "$sta_radio" -gt 1 ]); then
-				sta_cfg_updated=$(ls /var/run/wpa_supplicant-*-updated-cfg | wc -l)
-				tmp_freq_list=$(uci -q -P /var/state get wireless.$mld.freq_list)
-				freq_list="$tmp_freq_list $freq_list"
-				if [ "$sta_cfg_updated" = "$sta_radio" ]; then
-					mac80211_setup_supplicant || failed=1
-					sta_started=1
-				fi
-				uci -q -P /var/state set wireless.$mld.freq_list="$freq_list"
-				tmp_apifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
-				uci -q -P /var/state set wireless.$mld.ap_ifnames="$ap_intf $tmp_apifname"
-			else
-				mac80211_setup_supplicant || failed=1
-				sta_started=1
-			fi
+			mac80211_setup_supplicant || failed=1
 		;;
 		monitor)
 			case "$htmode" in
