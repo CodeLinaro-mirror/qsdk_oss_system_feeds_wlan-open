@@ -24,6 +24,12 @@ configure_service_param() {
 		json_get_var priority priority
 		json_get_var tid tid
 		json_get_var msdu_rate_loss msdu_rate_loss
+		json_get_var ul_service_interval ul_service_interval
+		json_get_var ul_min_tput ul_min_tput
+		json_get_var ul_max_latency ul_max_latency
+		json_get_var ul_burst_size ul_burst_size
+		json_get_var ul_ofdma_disable ul_ofdma_disable
+		json_get_var ul_mu_mimo_disable ul_mu_mimo_disable
 
 		cmd="iw $phy service_class create $svc_id "
 		[ ! -z "$app_name" ] && cmd=$cmd"'$app_name' "
@@ -36,6 +42,12 @@ configure_service_param() {
 		[ ! -z "$priority" ] && cmd=$cmd"priority $priority "
 		[ ! -z "$tid" ] && cmd=$cmd"tid $tid "
 		[ ! -z "$msdu_rate_loss" ] && cmd=$cmd"msdu_loss $msdu_rate_loss "
+		[ ! -z "$ul_service_interval" ] && cmd=$cmd"ul_service_interval $ul_service_interval "
+		[ ! -z "$ul_min_tput" ] && cmd=$cmd"ul_min_tput $ul_min_tput "
+		[ ! -z "$ul_max_latency" ] && cmd=$cmd"ul_max_latency $ul_max_latency "
+		[ ! -z "$ul_burst_size" ] && cmd=$cmd"ul_burst_size $ul_burst_size "
+		[ ! -z "$ul_ofdma_disable" ] && cmd=$cmd"ul_ofdma_disable $ul_ofdma_disable "
+		[ ! -z "$ul_mu_mimo_disable" ] && cmd=$cmd"ul_mu_mimo_disable $ul_mu_mimo_disable "
 
 		eval $cmd
 	elif [ $enable_service -eq 0 ]; then
