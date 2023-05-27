@@ -1,4 +1,4 @@
-#!/bin/sh
+#!bin/sh
 #
 # Copyright (c) 2018, 2020 The Linux Foundation. All rights reserved.
 #
@@ -20,7 +20,8 @@ ap_intf="$2"
 hostapd_conf="$3"
 oper_band="$4"
 dfs_log=1
-
+sta_freq_list="$5"
+ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
 
 # Hostapd VHT and HE calculations
@@ -163,14 +164,14 @@ hostapd_ht40_mode() {
 		fi
 	fi
 	#echo "Secondary offset is $ap_ht_mode" > /dev/ttyMSM0
-	hostapd_cli -i $ap_intf set ht_capab $ap_ht_mode 2> /dev/null
+	hostapd_cli -i $ap_intf $ml_link set ht_capab $ap_ht_mode 2> /dev/null
 }
 
 # Hostapd HT20 mode
 hostapd_ht20_mode() {
         local ht_capab_20=$(echo $ap_ht_capab | sed -e 's/\(\[HT40*+*-*]\)//g')
         #echo "Setting HT capab $ht_capab_20" > /dev/ttyMSM0
-        hostapd_cli -i $ap_intf set ht_capab $ht_capab_20 2> /dev/null
+        hostapd_cli -i $ap_intf $ml_link set ht_capab $ht_capab_20 2> /dev/null
 }
 
 # STA association is completed, hence adjusting hostapd running config
@@ -184,12 +185,12 @@ hostapd_adjust_config() {
 	if [ -z $ieee80211ac ]; then
 		ieee80211ac=0
 	fi
-	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac" > /dev/ttyMSM0
-	hostapd_cli -i $ap_intf set channel $sta_channel 2> /dev/null
+	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac $ml_link" > /dev/ttyMSM0
+	hostapd_cli -i $ap_intf $ml_link set channel $sta_channel 2> /dev/null
 	if [ $sta_channel -ge 36 ] || [ $oper_band == 3 ]; then
-		hostapd_cli -i $ap_intf set hw_mode a 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set hw_mode a 2> /dev/null
 	else
-		hostapd_cli -i $ap_intf set hw_mode g 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set hw_mode g 2> /dev/null
 	fi
 
 	ap_ht_mode=$(echo $ap_ht_capab | sed -n 's/.*\(\[HT40*+*-*]\).*/\1/p')
@@ -197,12 +198,12 @@ hostapd_adjust_config() {
 
 	if [ "$(wpa_cli -i $sta_intf signal_poll 2> /dev/null | grep WIDTH | cut -d'(' -f 2 | cut -d')' -f 1)" = "no HT" ]; then
 		#echo "STA associated in No HT mode, downgrading AP as well" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf set ieee80211ac 0 2> /dev/null
-		hostapd_cli -i $ap_intf set ieee80211n 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ac 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211n 0 2> /dev/null
 		# Set HT capab without HT40+/- config to set secondary channel 0
 		hostapd_ht20_mode
-		hostapd_cli -i $ap_intf set ieee80211ax 0 2> /dev/null
-		hostapd_cli -i $ap_intf set ieee80211be 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ax 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211be 0 2> /dev/null
 
 	 elif [ $wifi_gen == 6 ] || [ $wifi_gen == 7 ]; then
 		#echo "STA associated in HE$sta_width mode, applying same config to AP" > /dev/ttyMSM0
@@ -213,21 +214,21 @@ hostapd_adjust_config() {
                 hostapd_vht_he_eht_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel" "$sta_freq"
 
 				if [ $wifi_gen == 7 ]; then
-					hostapd_cli -i $ap_intf set ieee80211be 1 2> /dev/null
-					hostapd_cli -i $ap_intf set eht_oper_chwidth $ap_vht_he_eht_oper_chwidth
-					hostapd_cli -i $ap_intf set eht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
+					hostapd_cli -i $ap_intf $ml_link set ieee80211be 1 2> /dev/null
+					hostapd_cli -i $ap_intf $ml_link set eht_oper_chwidth $ap_vht_he_eht_oper_chwidth
+					hostapd_cli -i $ap_intf $ml_link set eht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
 				fi
-				hostapd_cli -i $ap_intf set ieee80211ax 1 2> /dev/null
-				hostapd_cli -i $ap_intf set he_oper_chwidth $ap_vht_he_eht_oper_chwidth
-				hostapd_cli -i $ap_intf set he_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
+				hostapd_cli -i $ap_intf $ml_link set ieee80211ax 1 2> /dev/null
+				hostapd_cli -i $ap_intf $ml_link set he_oper_chwidth $ap_vht_he_eht_oper_chwidth
+				hostapd_cli -i $ap_intf $ml_link set he_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
 
 		# VHT Operations is not applicable for 6GHz interface
 		if [ $wifi_6gband == false ]; then
 			#echo "Interface in Wifi 6 gen, but its not a 6GHz interface" > /dev/ttyMSM0
 			#echo "Set 802.11n, ac to 1" > /dev/ttyMSM0
-			hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/nul
-			hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
-			hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_eht_oper_chwidth
+			hostapd_cli -i $ap_intf $ml_link set ieee80211ac 1 2> /dev/nul
+			hostapd_cli -i $ap_intf $ml_link set ieee80211n 1 2> /dev/null
+			hostapd_cli -i $ap_intf $ml_link set vht_oper_chwidth $ap_vht_he_eht_oper_chwidth
 
 			#echo "New vht_oper_chwidth is $ap_vht_he_eht_oper_chwidth" > /dev/ttyMSM0
 			#echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_eht_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
@@ -248,20 +249,20 @@ hostapd_adjust_config() {
 		hostapd_vht_he_eht_oper_chwidth "$sta_width"
 
 		#echo "Set 802.11n & ac to 1" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf set ieee80211ac 1 2> /dev/null
-		hostapd_cli -i $ap_intf set ieee80211n 1 2> /dev/null
-		hostapd_cli -i $ap_intf set ieee80211ax 0 2> /dev/null
-		hostapd_cli -i $ap_intf set ieee80211be 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ac 1 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211n 1 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ax 0 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set ieee80211be 0 2> /dev/null
 
 		#echo "vht_oper_chwidth is $ap_vht_he_eht_oper_chwidth for VHT$sta_width mode" > /dev/ttyMSM0
 
 		hostapd_vht_he_eht_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel" "$sta_freq"
 
 		#echo "New vht_oper_chwidth is $ap_vht_he_eht_oper_chwidth" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf set vht_oper_chwidth $ap_vht_he_eht_oper_chwidth
+		hostapd_cli -i $ap_intf $ml_link set vht_oper_chwidth $ap_vht_he_eht_oper_chwidth
 
 		#echo "vht_oper_centr_freq_seg0_idx is $ap_vht_he_eht_oper_centr_freq_seg0_idx" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf set vht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
+		hostapd_cli -i $ap_intf $ml_link set vht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
 
 		if [ $sta_width = "20" ]; then
                         #echo "Setting VHT20 mode to AP" > /dev/ttyMSM0
@@ -271,10 +272,10 @@ hostapd_adjust_config() {
                 fi
 	else
 		#echo "STA associated in HT$sta_width mode, applying same config to AP" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf set ieee80211n 1
-		hostapd_cli -i $ap_intf set ieee80211ac 0
-		hostapd_cli -i $ap_intf set ieee80211ax 0
-		hostapd_cli -i $ap_intf set ieee80211be 0
+		hostapd_cli -i $ap_intf $ml_link set ieee80211n 1
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ac 0
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ax 0
+		hostapd_cli -i $ap_intf $ml_link set ieee80211be 0
 
 		if [ $sta_width = "20" ]; then
                         #echo "Setting HT20 mode to AP" > /dev/ttyMSM0
@@ -292,6 +293,41 @@ hostapd_is_6ghz_band() {
 	else
 		echo false
 	fi
+}
+
+is_apfreq_in_sta_freq_list() {
+	ap_freq=$1
+	found=0
+
+	for f in $sta_freq_list
+	do
+		if [[ "$ap_freq" == "$f" ]]; then
+			found=1
+		fi
+	done
+	echo $found
+}
+
+get_link_info() {
+	ifname=$1
+	freq=$2
+	ap_freq=
+	num_links=$(hostapd_cli -i $ifname status | grep num_links | cut -d'=' -f 2)
+	if [ $num_links -eq 0 ]; then
+		echo ""
+		return
+	fi
+
+	links=$(hostapd_cli -i $ifname status | grep link_id | cut -d'=' -f 2)
+	for i in $links
+	do
+		ap_freq=$(hostapd_cli -i $ifname -l $i status | grep -w freq | cut -d'=' -f 2)
+		is_freq_present=$(is_apfreq_in_sta_freq_list $ap_freq)
+		if [ $is_freq_present -eq 1 ]; then
+			ml_link="-l $i"
+		fi
+	done
+	echo "$ml_link"
 }
 
 ap_freq=$(iw $ap_intf info 2> /dev/null | grep channel | cut -d' ' -f 3 | cut -b 2-5)
@@ -315,7 +351,7 @@ fi
 
 while true;
 do
-	if [[ ! -e "/var/run/wpa_supplicant/$sta_intf" && ! -e "/var/run/hostapd/$ap_intf" ]]; then
+	if [[ ! -e "/var/run/wpa_supplicant/$sta_intf" && ! -e "/var/run/hostapd/$ap_intf*" ]]; then
 		echo "AP+STA mode not running, exiting script" >> /tmp/apsta_debug.log
 		exit
 	fi
@@ -342,10 +378,13 @@ do
 		wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
 		#echo "Is 6GHz interface: $wifi_6gband" > /dev/ttyMSM0
 
+		ml_link=$(get_link_info $ap_intf $sta_freq)
+		#echo link config command is $ml_link > /dev/console
 		if [ $sta_chan -le 48 -o $sta_chan -ge 149 ] || [ $wifi_6gband == true ]; then
 			hostapd_adjust_config
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
-			hostapd_cli -i $ap_intf status 2> /dev/null
+			hostapd_cli -i $ap_intf $ml_link status 2> /dev/null
+
 			[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ] && hostapd_cli -i $ap_intf enable
 			sleep 4
 			#echo "Hostapd state: $(hostapd_cli status 2> /dev/null | grep state | cut -d'=' -f 2)" > /dev/ttyMSM0
@@ -362,7 +401,7 @@ do
 				echo "REPEATER AP failed bring-up, exiting" > /dev/ttyMSM0
 				echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 				date >> /tmp/apsta_debug.log
-				hostapd_cli -i $ap_intf status >> /tmp/apsta_debug.log
+				hostapd_cli -i $ap_intf $ml_link status >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf list_n >> /tmp/apsta_debug.log
