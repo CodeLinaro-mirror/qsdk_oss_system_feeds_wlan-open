@@ -105,6 +105,103 @@ configure_service_class() {
 	done
 }
 
+configure_sla_param() {
+	json_load "$1"
+	json_get_var svc_id svc_id
+	json_get_var disable disable
+	json_get_var min_thruput_rate min_thruput_rate
+	json_get_var max_thruput_rate max_thruput_rate
+	json_get_var burst_size burst_size
+	json_get_var service_interval service_interval
+	json_get_var delay_bound delay_bound
+	json_get_var msdu_ttl msdu_ttl
+	json_get_var msdu_rate_loss msdu_rate_loss
+
+	[ -z "$min_thruput_rate" ] && min_thruput_rate='X'
+	[ -z "$max_thruput_rate" ] && max_thruput_rate='X'
+	[ -z "$burst_size" ] && burst_size='X'
+	[ -z "$service_interval" ] && service_interval='X'
+	[ -z "$delay_bound" ] && delay_bound='X'
+	[ -z "$msdu_ttl" ] && msdu_ttl='X'
+	[ -z "$msdu_rate_loss" ] && msdu_rate_loss='X'
+	[ -z "$disable" ] && disable='0'
+
+	if [ "$disable" -eq 0 ]; then
+		cmd="iw $phy telemetry sla_thershold "$svc_id" "$min_thruput_rate" "$max_thruput_rate" "$burst_size" "$service_interval" "$delay_bound" "$msdu_ttl" "$msdu_rate_loss""
+		echo "$svc_id" "$min_thruput_rate" "$max_thruput_rate" "$burst_size" "$service_interval" "$delay_bound" "$msdu_ttl" "$msdu_rate_loss"
+		eval $cmd
+	fi
+}
+
+configure_telemetry_sla_thersholds() {
+	json_init
+	json_set_namespace sla_ns
+	json_load_file /lib/wifi/sawf/telemetry/sla.json
+	json_select sla
+	json_get_keys sla_indexes
+	sla_index=0
+
+	sla_index_count=$(echo "$sla_indexes" | wc -w)
+
+	echo "SLA Count: $sla_index_count" > /dev/console
+
+	while [ $sla_index -lt $sla_index_count ]
+	do
+		sla_json=$(jsonfilter -i /lib/wifi/sawf/telemetry/sla.json -e "@.sla[$sla_index]")
+		configure_sla_param "$sla_json"
+
+		sla_index=$(expr $sla_index + 1)
+	done
+}
+
+configure_telemetry_sla_detect() {
+	json_init
+	json_load_file /lib/wifi/sawf/telemetry/sla_detect.json
+	json_select x_packet
+		json_get_var delay_x_packet delay
+		json_get_var msdu_loss_x_packet msdu_loss
+		json_get_var ttl_drop_x_packet ttl_drop
+	json_select ..
+	json_select 1_second
+		json_get_var min_throutput min_throutput
+		json_get_var max_throughput max_throughput
+	json_select ..
+	json_select mov_average
+		json_get_var delay_mov_avg delay
+	json_select ..
+	json_select x_second
+		json_get_var service_interval service_interval
+		json_get_var burst_size burst_size
+		json_get_var msdu_loss_x_sec msdu_loss
+		json_get_var ttl_drop_x_sec ttl_drop
+	json_select ..
+
+	cmd="iw $phy telemetry sla_detection_cfg num_packet 0 0 0 0 $delay_x_packet $ttl_drop_x_packet $msdu_loss_x_packet"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg per_second $min_throutput $max_throughput 0 0 0 0 0"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg moving_avg 0 0 0 0 $delay_mov_avg 0 0"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg num_second 0 0 $burst_size $service_interval 0 $ttl_drop_x_sec $msdu_loss_x_sec"
+	eval $cmd
+}
+
+configure_telemetry_sla_samples() {
+	json_init
+	json_load_file /lib/wifi/sawf/telemetry/config.json
+
+# Parsing the moving average params
+	json_get_var mavg_num_packet mavg_num_packet
+	json_get_var mavg_num_window mavg_num_window
+
+# Parsing the sla params
+	json_get_var sla_num_packet sla_num_packet
+	json_get_var sla_time_secs sla_time_secs
+
+	iw $phy telemetry sla_samples_cfg "$mavg_num_packet" "$mavg_num_window" "$sla_num_packet" "$sla_time_secs"
+}
+
+
 update_mld_vap_details() {
 	local _mlds
 	local _devices_up
@@ -609,6 +706,9 @@ post_mac80211() {
 			sawf_supp="/sys/module/ath12k/parameters/sawf"
 			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
 				configure_service_class 1
+				configure_telemetry_sla_samples
+				configure_telemetry_sla_thersholds
+				configure_telemetry_sla_detect
 			fi
 		;;
 	esac
