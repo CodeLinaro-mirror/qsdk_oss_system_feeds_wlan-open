@@ -13,6 +13,7 @@ include $(INCLUDE_DIR)/package.mk
 
 define KernelPackage/$(PKG_NAME)
   TITLE:=Telemetry Agent
+  DEPENDS+= kmod-ath12k
   FILES:=$(PKG_BUILD_DIR)/telemetry_agent.ko
 endef
 
