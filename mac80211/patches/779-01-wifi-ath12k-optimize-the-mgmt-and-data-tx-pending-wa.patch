@@ -30,7 +30,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -1167,7 +1167,6 @@ void ath12k_dp_pdev_pre_alloc(struct ath
+@@ -1168,7 +1168,6 @@ void ath12k_dp_pdev_pre_alloc(struct ath
  		dp = &ar->dp;
  		dp->mac_id = i;
  		atomic_set(&dp->num_tx_pending, 0);
@@ -88,7 +88,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  }
  
  static void ath12k_mac_tx_mgmt_free(struct ath12k *ar, int buf_id)
-@@ -12917,22 +12917,17 @@ static void ath12k_mac_flush(struct ath1
+@@ -12950,22 +12950,21 @@ static void ath12k_mac_flush(struct ath1
  
  	lockdep_assert_held(&ar->ah->conf_mutex);
  
@@ -98,16 +98,22 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +				       ((atomic_read(&ar->dp.num_tx_pending) == 0) &&
 +					(atomic_read(&ar->num_pending_mgmt_tx) == 0)),
  				       ATH12K_FLUSH_TIMEOUT);
- 	if (time_left == 0)
- 		ath12k_warn(ab, "failed to flush transmit queue %ld\n", time_left);
- 
+-	if (time_left == 0)
+-		ath12k_warn(ab, "failed to flush transmit queue %ld\n", time_left);
+-
 -	time_left = wait_event_timeout(ar->txmgmt_empty_waitq,
 -				       (atomic_read(&ar->num_pending_mgmt_tx) == 0),
 -				       ATH12K_FLUSH_TIMEOUT);
 -	if (time_left == 0)
 -		ath12k_warn(ab, "failed to flush mgmt transmit queue %ld\n",
 -			    time_left);
--
++	if (time_left == 0) {
++		ath12k_warn(ab, "failed to flush transmit queue pending mgmt %d data %d\n",
++			    atomic_read(&ar->num_pending_mgmt_tx),
++			    atomic_read(&ar->dp.num_tx_pending));
++		return;
++	}
+ 
  	ath12k_dbg(ab, ATH12K_DBG_MAC,
 -		   "mac mgmt tx flush mgmt pending %d\n",
 -		   atomic_read(&ar->num_pending_mgmt_tx));
@@ -117,7 +123,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  }
  
  static void ath12k_mac_op_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-@@ -15117,7 +15112,7 @@ static int __ath12k_mac_register(struct
+@@ -15150,7 +15149,7 @@ static int __ath12k_mac_register(struct
  	u32 ht_cap = 0;
  
  	hw = ar->ah->hw;
@@ -128,7 +134,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -931,7 +931,7 @@ struct ath12k {
+@@ -934,7 +934,7 @@ struct ath12k {
  	/* protects txmgmt_idr data */
  	spinlock_t txmgmt_idr_lock;
  	atomic_t num_pending_mgmt_tx;
@@ -139,7 +145,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	 * access protected by data_lock
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -7098,7 +7098,7 @@ skip_mgmt_stats:
+@@ -7129,7 +7129,7 @@ skip_mgmt_stats:
  
  
  	if (!num_mgmt)
