@@ -1,0 +1,131 @@
+From c23813bcf2fd4e4bee95f14cdbe46e87b1b4345b Mon Sep 17 00:00:00 2001
+From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Date: Wed, 31 May 2023 21:05:38 -0700
+Subject: [PATCH] ath12k: Clear the flush flags after ce init and add few more 
+ checks for checking flush flags
+
+    Usually when work threads carry out the process of
+    reconfiguring the chip which was asserted, a lot of other
+    things can happen from upper layers, requesting some
+    actions especially when the chip is down. Adding a check
+    for chip recovery might help at times, but it need not
+    always work because of this worker thread async.
+
+    This change will be checking the chip recovery flag in the mac_op functions.
+    If the flag ATH12K_FLAG_CRASH_FLUSH is set then return -ESTUTDOWN.
+
+    This will ensure, when the  restart_work and reset_work threads
+    take care of the chip recovery and reset work respectively, they set and
+    clear the FLUSH bits at the right places, when the FW is fully down and when
+    the FW has been initialized properly and the upper layers such as mac80211
+    get failure messages when they send out WMI commands when the chip is
+    still down.
+
+Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.c |  2 --
+ drivers/net/wireless/ath/ath12k/htc.c  |  2 ++
+ drivers/net/wireless/ath/ath12k/mac.c  | 11 +++++++++++
+ drivers/net/wireless/ath/ath12k/mhi.c  |  1 +
+ drivers/net/wireless/ath/ath12k/peer.c | 10 ++++++++++
+ 5 files changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index acf30b4..95306b4 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -1737,8 +1737,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+ 	if (ret)
+ 		return ret;
+ 
+-	clear_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+-
+ 	ret = ath12k_core_qmi_firmware_ready(ab);
+ 	if (ret)
+ 		goto err_hal_srng_deinit;
+diff --git a/drivers/net/wireless/ath/ath12k/htc.c b/drivers/net/wireless/ath/ath12k/htc.c
+index d8d0929..9e0aa73 100644
+--- a/drivers/net/wireless/ath/ath12k/htc.c
++++ b/drivers/net/wireless/ath/ath12k/htc.c
+@@ -643,6 +643,8 @@ int ath12k_htc_connect_service(struct ath12k_htc *htc,
+ 
+ 	reinit_completion(&htc->ctl_resp);
+ 
++	if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags))
++		clear_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 	status = ath12k_htc_send(htc, ATH12K_HTC_EP_0, skb);
+ 	if (status) {
+ 		kfree_skb(skb);
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 6dd249b..92e6663 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -5673,6 +5673,16 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+ 		return 0;
+ 	}
+ 
++	if (!(arvif && arvif->ar)) {
++		mutex_unlock(&ah->conf_mutex);
++		return -EINVAL;
++	}
++
++	if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &arvif->ar->ab->dev_flags)) {
++		mutex_unlock(&ah->conf_mutex);
++		return -ESHUTDOWN;
++	}
++
+ 	if (sta) {
+ 		ahsta = (struct ath12k_sta *)sta->drv_priv;
+ 		if (sta->mlo) {
+@@ -7012,6 +7022,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
+ 		ar = arvif->ar;
+ 
+ 		mutex_lock(&ar->conf_mutex);
++
+ 		ath12k_mac_station_post_remove(ar, arvif, arsta);
+ 		mutex_unlock(&ar->conf_mutex);
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/mhi.c b/drivers/net/wireless/ath/ath12k/mhi.c
+index eacb7b5..8c4dd18 100644
+--- a/drivers/net/wireless/ath/ath12k/mhi.c
++++ b/drivers/net/wireless/ath/ath12k/mhi.c
+@@ -331,6 +331,7 @@ static void ath12k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
+ 		break;
+ 	case MHI_CB_EE_RDDM:
+ 		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags))) {
++			set_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 			set_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags);
+ 			queue_work(ab->workqueue_aux, &ab->reset_work);
+ 		}
+diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
+index 126499a..341fd2e 100644
+--- a/drivers/net/wireless/ath/ath12k/peer.c
++++ b/drivers/net/wireless/ath/ath12k/peer.c
+@@ -392,6 +392,11 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
+ 		mutex_lock(&ar->conf_mutex);
+ 		ath12k_dp_peer_cleanup(ar, arvif->vdev_id, arsta->addr);
+ 
++		if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags) ||
++				test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags)) {
++			mutex_unlock(&ar->conf_mutex);
++			continue;
++		}
+ 		ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
+ 		if (ret) {
+ 			mutex_unlock(&ar->conf_mutex);
+@@ -415,6 +420,11 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
+ 		ar = arvif->ar;
+ 
+ 		mutex_lock(&ar->conf_mutex);
++		if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags) ||
++				test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags)) {
++			mutex_unlock(&ar->conf_mutex);
++			continue;
++		}
+ 		ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
+ 		if (ret) {
+ 			err_ret = ret;
+-- 
+2.7.4
+
