@@ -427,7 +427,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.h
 +++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
-@@ -1044,6 +1044,10 @@ struct ath12k_mlo_memory {
+@@ -1049,6 +1049,10 @@ struct ath12k_mlo_memory {
  	bool init_done;
  };
  
@@ -438,7 +438,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  /* Holds info on the group of SOCs that are registered as a single wiphy
   * or single SOC where each radio registered as separate wiphy in non-MLO
   */
-@@ -1056,6 +1060,7 @@ struct ath12k_hw_group {
+@@ -1061,6 +1065,7 @@ struct ath12k_hw_group {
  	u8 num_started;
  	u8 num_hw;
  	bool mlo_capable;
@@ -446,7 +446,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	unsigned long dev_flags;
  	struct ath12k_hw *ah[ATH12K_GROUP_MAX_RADIO];
  	struct ath12k_base *ab[ATH12K_MAX_SOCS];
-@@ -1152,13 +1157,19 @@ struct ath12k_base {
+@@ -1157,13 +1162,19 @@ struct ath12k_base {
  	struct work_struct restart_work;
  	struct workqueue_struct *workqueue_aux;
  	struct work_struct reset_work;
@@ -470,7 +470,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.c
 +++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12779,7 +12779,7 @@ ath12k_mac_op_reconfig_complete(struct i
+@@ -12806,7 +12806,7 @@ ath12k_mac_op_reconfig_complete(struct i
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
@@ -479,7 +479,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	int i;
  
  	if (reconfig_type != IEEE80211_RECONFIG_TYPE_RESTART)
-@@ -12799,6 +12799,28 @@ ath12k_mac_op_reconfig_complete(struct i
+@@ -12826,6 +12826,28 @@ ath12k_mac_op_reconfig_complete(struct i
  			restart_count++;
  		}
  
@@ -508,7 +508,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  		mutex_unlock(&ar->conf_mutex);
  		ar++;
  	}
-@@ -12807,6 +12829,7 @@ ath12k_mac_op_reconfig_complete(struct i
+@@ -12834,6 +12856,7 @@ ath12k_mac_op_reconfig_complete(struct i
  		ieee80211_wake_queues(ah->hw);
  
  	mutex_unlock(&ah->conf_mutex);
@@ -604,7 +604,36 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  	} else {
  		ret = -EINVAL;
  		goto exit;
-@@ -1500,6 +1534,9 @@ int ath12k_debugfs_pdev_create(struct at
+@@ -1204,8 +1238,10 @@ static ssize_t ath12k_debug_write_fw_rec
+ 					      size_t count, loff_t *ppos)
+ {
+ 	struct ath12k_base *ab = file->private_data;
++	struct ath12k_hw_group *ag;
+ 	unsigned int value;
+ 	int ret;
++	int i;
+ 
+ 	if (kstrtouint_from_user(user_buf, count, 0, &value))
+ 	         return -EINVAL;
+@@ -1218,7 +1254,16 @@ static ssize_t ath12k_debug_write_fw_rec
+ 	         goto exit;
+ 	}
+ 
+-	ab->fw_recovery_support = value ? true : false;
++	ag = ab->ag;
++	if (ag->mlo_capable) {
++		for (i = 0; i < ag->num_chip; i++) {
++			ab = ag->ab[i];
++			mutex_lock(&ab->core_lock);
++			ab->fw_recovery_support = value ? true : false;
++			mutex_unlock(&ab->core_lock);
++		}
++	} else
++		ab->fw_recovery_support = value ? true : false;
+ 
+ 	ret = count;
+ 
+@@ -1500,6 +1545,9 @@ int ath12k_debugfs_pdev_create(struct at
  	debugfs_create_file("rx_hash_ix3", 0600, ab->debugfs_soc, ab,
  			    &fops_soc_rx_hash_ix3);
  
@@ -666,7 +695,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.h
 +++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -6944,7 +6944,8 @@ int ath12k_wmi_vdev_set_param_cmd(struct
+@@ -6950,7 +6950,8 @@ int ath12k_wmi_vdev_set_param_cmd(struct
  
  int ath12k_wmi_set_sta_ps_param(struct ath12k *ar, u32 vdev_id,
  				u32 param, u32 param_value);
