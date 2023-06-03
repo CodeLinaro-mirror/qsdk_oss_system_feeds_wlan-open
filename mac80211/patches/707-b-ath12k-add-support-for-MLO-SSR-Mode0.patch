@@ -1,4 +1,4 @@
-From bc837f763aea151c1016f0fc336834db8f460964 Mon Sep 17 00:00:00 2001
+From 13e5eb33fe30e6d08d9167a180ed492f7489f569 Mon Sep 17 00:00:00 2001
 From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 Date: Tue, 17 Jan 2023 17:05:28 -0800
 Subject: [PATCH 2/3] ath12k: add support for MLO SSR Mode0
@@ -19,16 +19,16 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  drivers/net/wireless/ath/ath12k/core.c     | 296 ++++++++++++++-------
  drivers/net/wireless/ath/ath12k/core.h     |  14 +-
  drivers/net/wireless/ath/ath12k/coredump.c |   1 +
- drivers/net/wireless/ath/ath12k/debugfs.c  |  39 ++-
+ drivers/net/wireless/ath/ath12k/debugfs.c  |  52 +++-
  drivers/net/wireless/ath/ath12k/mac.c      |  25 +-
  drivers/net/wireless/ath/ath12k/mhi.c      |   4 +-
  drivers/net/wireless/ath/ath12k/qmi.c      |  36 ++-
  drivers/net/wireless/ath/ath12k/wmi.c      |  10 +-
  drivers/net/wireless/ath/ath12k/wmi.h      |   3 +-
- 9 files changed, 297 insertions(+), 131 deletions(-)
+ 9 files changed, 309 insertions(+), 132 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index cd12abc..69700d9 100644
+index cd12abc..88de5ac 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -43,6 +43,8 @@ static unsigned int ath12k_en_fwlog = true;
@@ -528,7 +528,7 @@ index e2b6683..3096d9b 100644
  		vfree(segment);
  	}
 diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index 437a711..1e8ae05 100644
+index 437a711..e9c66a9 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
 @@ -443,6 +443,40 @@ static const struct file_operations fops_vdev_stats_offload = {
@@ -581,7 +581,36 @@ index 437a711..1e8ae05 100644
  	} else {
  		ret = -EINVAL;
  		goto exit;
-@@ -1209,6 +1243,9 @@ int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
+@@ -913,8 +947,10 @@ static ssize_t ath12k_debug_write_fw_recovery(struct file *file,
+ 					      size_t count, loff_t *ppos)
+ {
+ 	struct ath12k_base *ab = file->private_data;
++	struct ath12k_hw_group *ag;
+ 	unsigned int value;
+ 	int ret;
++	int i;
+ 
+ 	if (kstrtouint_from_user(user_buf, count, 0, &value))
+ 	         return -EINVAL;
+@@ -927,7 +963,16 @@ static ssize_t ath12k_debug_write_fw_recovery(struct file *file,
+ 	         goto exit;
+ 	}
+ 
+-	ab->fw_recovery_support = value ? true : false;
++	ag = ab->ag;
++	if (ag->mlo_capable) {
++		for (i = 0; i < ag->num_chip; i++) {
++			ab = ag->ab[i];
++			mutex_lock(&ab->core_lock);
++			ab->fw_recovery_support = value ? true : false;
++			mutex_unlock(&ab->core_lock);
++		}
++	} else
++		ab->fw_recovery_support = value ? true : false;
+ 
+ 	ret = count;
+ 
+@@ -1209,6 +1254,9 @@ int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
  	debugfs_create_file("rx_hash_ix3", 0600, ab->debugfs_soc, ab,
  			    &fops_soc_rx_hash_ix3);
  
@@ -592,10 +621,10 @@ index 437a711..1e8ae05 100644
  }
  
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 7b9f456..07f076a 100644
+index 6d3556d..0155fab 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12770,7 +12770,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12791,7 +12791,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
@@ -604,7 +633,7 @@ index 7b9f456..07f076a 100644
  	int i;
  
  	if (reconfig_type != IEEE80211_RECONFIG_TYPE_RESTART)
-@@ -12790,6 +12790,28 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12811,6 +12811,28 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
  			restart_count++;
  		}
  
@@ -633,7 +662,7 @@ index 7b9f456..07f076a 100644
  		mutex_unlock(&ar->conf_mutex);
  		ar++;
  	}
-@@ -12798,6 +12820,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12819,6 +12841,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
  		ieee80211_wake_queues(ah->hw);
  
  	mutex_unlock(&ah->conf_mutex);
@@ -773,7 +802,7 @@ index e2e1b2c..1b978d8 100644
  		case ATH12K_QMI_EVENT_REQUEST_MEM:
  			ret = ath12k_qmi_event_mem_request(qmi);
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 6b7cb21..9af8525 100644
+index 721f7d2..475e6d1 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -1745,12 +1745,12 @@ int ath12k_wmi_set_sta_ps_param(struct ath12k *ar, u32 vdev_id,
