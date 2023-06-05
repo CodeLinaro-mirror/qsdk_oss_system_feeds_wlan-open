@@ -69,19 +69,20 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  
  	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return -ESHUTDOWN;
-@@ -224,7 +263,10 @@ tcl_ring_sel:
+@@ -224,7 +263,11 @@ tcl_ring_sel:
  
  	switch (ti.encap_type) {
  	case HAL_TCL_ENCAP_TYPE_NATIVE_WIFI:
 -		ath12k_dp_tx_encap_nwifi(skb);
-+		if (ahvif->vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
++		if ((ahvif->vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED) &&
++		     skb->protocol == cpu_to_be16(ETH_P_PAE))
 +			is_diff_encap = true;
 +		else
 +			ath12k_dp_tx_encap_nwifi(skb);
  		break;
  	case HAL_TCL_ENCAP_TYPE_RAW:
  		if (!test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags)) {
-@@ -243,14 +285,6 @@ tcl_ring_sel:
+@@ -243,14 +286,6 @@ tcl_ring_sel:
  		goto fail_remove_tx_buf;
  	}
  
@@ -96,7 +97,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  	if (unlikely((ahvif->tx_encap_type == HAL_TCL_ENCAP_TYPE_ETHERNET &&
  	     !(info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP)))) {
  		msdu_ext_desc = true;
-@@ -279,10 +313,40 @@ tcl_ring_sel:
+@@ -279,10 +314,40 @@ tcl_ring_sel:
  		}
  	}
  
@@ -104,7 +105,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +	if ((!test_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ar->ab->dev_flags) &&
 +	     !(info->control.flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
 +	     !info->control.hw_key && ieee80211_has_protected(hdr->frame_control)) ||
-+	    (skb->protocol == cpu_to_be16(ETH_P_PAE) && is_diff_encap)) {
++	     is_diff_encap) {
 +		align_pad = ((unsigned long)skb->data) & (HTT_META_DATA_ALIGNMENT - 1);
 +		ret = ath12k_dp_metadata_align_skb(skb, align_pad);
 +		if (unlikely(ret))
@@ -138,7 +139,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  	skb_cb->paddr = ti.paddr;
  	skb_cb->vif = ahvif->vif;
  	skb_cb->ar = ar;
-@@ -373,6 +437,9 @@ fail_unmap_dma:
+@@ -373,6 +438,9 @@ fail_unmap_dma:
  
  fail_remove_tx_buf:
  	ath12k_dp_tx_release_txbuf(dp, tx_desc, ti.ring_id);
@@ -357,7 +358,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  int ath12k_dp_tx(struct ath12k *ar, struct ath12k_link_vif *arvif,
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -14253,6 +14253,9 @@ static int __ath12k_mac_register(struct
+@@ -14254,6 +14254,9 @@ static int __ath12k_mac_register(struct
  	ar->max_num_stations = TARGET_NUM_STATIONS;
  	ar->max_num_peers = TARGET_NUM_PEERS_PDEV;
  
@@ -401,7 +402,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  			break;
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -4745,7 +4745,7 @@ static int nl80211_validate_key_link_id(
+@@ -4737,7 +4737,7 @@ static int nl80211_validate_key_link_id(
  			GENL_SET_ERR_MSG(info, "invalid link ID for MLO group key");
  			return -EINVAL;
  		}
