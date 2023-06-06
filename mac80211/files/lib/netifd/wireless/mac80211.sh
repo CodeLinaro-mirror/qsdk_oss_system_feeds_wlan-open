@@ -119,7 +119,7 @@ drv_mac80211_init_device_config() {
 	       max_amsdu \
                dsss_cck_40
 	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs use_ru_puncture_dfs
-	config_add_boolean disable_eml_cap
+	config_add_boolean disable_eml_cap discard_6g_awgn_event
 	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
 }
 
@@ -280,7 +280,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan he_mu_edca:-he_mu_edca=0 skip_unii1_dfs_switch
 	json_get_vars he_spr_sr_control he_spr_non_srg_obss_pd_max_offset:1 disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
-	json_get_vars disable_eml_cap
+	json_get_vars disable_eml_cap discard_6g_awgn_event
 
 	if [ "$band" != 3 ]; then
 		ieee80211n=1
@@ -733,6 +733,7 @@ mac80211_hostapd_setup_base() {
 		fi
 	fi
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
+	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 	cat >> "$hostapd_conf_file" <<EOF
