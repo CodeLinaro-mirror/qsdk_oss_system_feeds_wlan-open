@@ -154,7 +154,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	int     (*set_fils_aad)(struct wiphy *wiphy, struct net_device *dev,
  				struct cfg80211_fils_aad *fils_aad);
  	int	(*set_radar_background)(struct wiphy *wiphy,
-@@ -9200,64 +9201,74 @@ void cfg80211_bss_flush(struct wiphy *wi
+@@ -9201,64 +9202,74 @@ void cfg80211_bss_flush(struct wiphy *wi
   * @cmd: the actual event we want to notify
   * @count: the number of TBTTs until the color change happens
   * @color_bitmap: representations of the colors that the local BSS is aware of
@@ -304,7 +304,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	ieee80211_free_next_beacon(link);
  
  	/* turn off carrier for this interface and dependent VLANs */
-@@ -4028,13 +4034,13 @@ static int ieee80211_set_csa_beacon(stru
+@@ -4033,13 +4039,13 @@ static int ieee80211_set_csa_beacon(stru
  	return 0;
  }
  
@@ -322,7 +322,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
  
  static int
-@@ -4116,7 +4122,7 @@ __ieee80211_channel_switch(struct wiphy
+@@ -4121,7 +4127,7 @@ __ieee80211_channel_switch(struct wiphy
  
  	/* if there is a color change in progress, abort it */
  	if (link_conf->color_change_active)
@@ -331,7 +331,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	err = ieee80211_set_csa_beacon(link, params, &changed);
  	if (err) {
-@@ -4847,24 +4853,28 @@ static int ieee80211_set_sar_specs(struc
+@@ -4852,24 +4858,28 @@ static int ieee80211_set_sar_specs(struc
  }
  
  static int
@@ -365,7 +365,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		*changed |= ret;
  		break;
  	}
-@@ -4877,18 +4887,19 @@ ieee80211_set_after_color_change_beacon(
+@@ -4882,18 +4892,19 @@ ieee80211_set_after_color_change_beacon(
  }
  
  static int
@@ -388,7 +388,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			return -ENOMEM;
  
  		if (params->count <= 1)
-@@ -4900,13 +4911,16 @@ ieee80211_set_color_change_beacon(struct
+@@ -4905,13 +4916,16 @@ ieee80211_set_color_change_beacon(struct
  			params->counter_offset_presp;
  		color_change.count = params->count;
  
@@ -407,7 +407,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		*changed |= err;
  		break;
  	default:
-@@ -4917,16 +4931,20 @@ ieee80211_set_color_change_beacon(struct
+@@ -4922,16 +4936,20 @@ ieee80211_set_color_change_beacon(struct
  }
  
  static void
@@ -433,7 +433,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		struct ieee80211_sub_if_data *child;
  
  		mutex_lock(&sdata->local->iflist_mtx);
-@@ -4943,8 +4961,9 @@ ieee80211_color_change_bss_config_notify
+@@ -4948,8 +4966,9 @@ ieee80211_color_change_bss_config_notify
  	}
  }
  
@@ -444,7 +444,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	struct ieee80211_local *local = sdata->local;
  	u32 changed = 0;
  	int err;
-@@ -4952,80 +4971,125 @@ static int ieee80211_color_change_finali
+@@ -4957,80 +4976,130 @@ static int ieee80211_color_change_finali
  	sdata_assert_lock(sdata);
  	lockdep_assert_held(&local->mtx);
  
@@ -481,8 +481,15 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_local *local = sdata->local;
 +	struct ieee80211_bss_conf *link_conf = link->conf;
++	struct wireless_dev *wdev = &sdata->wdev;
++
++	/* If is_going_down flag is set, this means that this link is going
++	 * to get removed hence no point in proceeding further
++	 */
++	if (wdev->links[link->link_id].ap.is_going_down)
++		return;
  
--	sdata_lock(sdata);
+ 	sdata_lock(sdata);
  	mutex_lock(&local->mtx);
  
  	/* AP might have been stopped while waiting for the lock. */
@@ -490,20 +497,15 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	if (!link_conf->color_change_active)
  		goto unlock;
  
-+	sdata_lock(sdata);
-+
  	if (!ieee80211_sdata_running(sdata))
--		goto unlock;
-+		goto unlock_all;
+ 		goto unlock;
  
 -	ieee80211_color_change_finalize(sdata);
 +	ieee80211_color_change_finalize(link);
  
-+unlock_all:
-+	sdata_unlock(sdata);
  unlock:
  	mutex_unlock(&local->mtx);
--	sdata_unlock(sdata);
+ 	sdata_unlock(sdata);
  }
  
 -void ieee80211_color_change_finish(struct ieee80211_vif *vif)
@@ -591,7 +593,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		return -EINVAL;
  
  	mutex_lock(&local->mtx);
-@@ -5033,25 +5097,26 @@ ieee80211_color_change(struct wiphy *wip
+@@ -5038,25 +5107,26 @@ ieee80211_color_change(struct wiphy *wip
  	/* don't allow another color change if one is already active or if csa
  	 * is active
  	 */
