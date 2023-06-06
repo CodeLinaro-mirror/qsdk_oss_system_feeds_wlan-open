@@ -147,8 +147,12 @@ boost_performance() {
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
+				tc qdisc replace dev eth2 root noqueue
 				tc qdisc replace dev eth4 root noqueue
 				tc qdisc replace dev eth5 root noqueue
+
 				ethtool -K eth4 gro off
 				ethtool -K eth4 gso off
 				ethtool -K eth5 gro off
@@ -164,6 +168,9 @@ boost_performance() {
 
 				;;
 			ap-al02-c4)
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
+				tc qdisc replace dev eth2 root noqueue
 				tc qdisc replace dev eth4 root noqueue
 				tc qdisc replace dev eth5 root noqueue
 				ethtool -K eth4 gro off
@@ -230,6 +237,9 @@ boost_performance() {
 			ap-al02-c6)
 				#rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
+				tc qdisc replace dev eth2 root noqueue
 				tc qdisc replace dev eth4 root noqueue
 				tc qdisc replace dev eth5 root noqueue
 				ethtool -K eth4 gro off
@@ -290,6 +300,9 @@ boost_performance() {
 			ap-al02-c9)
 				#case for rdp454 (QCN9274 (2.4 and 5 Low) + QCN9274 (5 High and 6 GHz))
 
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
+				tc qdisc replace dev eth2 root noqueue
 				tc qdisc replace dev eth4 root noqueue
 				tc qdisc replace dev eth5 root noqueue
 				ethtool -K eth4 gro off
