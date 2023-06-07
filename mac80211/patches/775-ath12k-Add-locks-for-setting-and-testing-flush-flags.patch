@@ -1,8 +1,8 @@
-From 16005de55b1bb53f963688163d6181f9e929a88d Mon Sep 17 00:00:00 2001
+From cd560c2c1a9dfa6c8731c0f6edee8a78e043bfff Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Fri, 2 Jun 2023 12:18:58 -0700
+Date: Fri, 9 Jun 2023 16:27:12 -0700
 Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
-  checks for checking flush flags
+   checks for checking flush flags
 
     Usually when work threads carry out the process of
     reconfiguring the chip which was asserted, a lot of other
@@ -21,24 +21,41 @@ Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
     get failure messages when they send out WMI commands when the chip is
     still down.
 
+    Also, add BUG_ON, in case SSR fails to recover the chip. This is
+    because the chip will not be in UP state and it is better to crash
+    the system in this case. The goal here is to keep the system in a
+    usable state, when an external event disrupts the recovery
+    process.
+
 Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c |  4 ++--
+ drivers/net/wireless/ath/ath12k/core.c | 16 ++++++++++++++--
  drivers/net/wireless/ath/ath12k/core.h |  1 +
  drivers/net/wireless/ath/ath12k/htc.c  |  2 ++
  drivers/net/wireless/ath/ath12k/mac.c  | 11 +++++++++++
  drivers/net/wireless/ath/ath12k/mhi.c  |  1 +
+ drivers/net/wireless/ath/ath12k/pci.c  |  2 ++
  drivers/net/wireless/ath/ath12k/peer.c |  6 ++++++
  drivers/net/wireless/ath/ath12k/qmi.c  |  1 +
  drivers/net/wireless/ath/ath12k/wmi.c  |  5 +++++
- 8 files changed, 29 insertions(+), 2 deletions(-)
+ 9 files changed, 43 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index acf30b4..6355a92 100644
+index acf30b4..94fb632 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -1225,6 +1225,8 @@ static int ath12k_core_start(struct ath12k_base *ab,
+@@ -52,6 +52,9 @@ module_param_named(ppe_ds_enable, ath12k_ppe_ds_enabled, uint, 0644);
+ MODULE_PARM_DESC(ppe_ds_enable, "ppe_ds_enable: 0-disable, 1-enable");
+ 
+ static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
++unsigned int ath12k_ssr_failsafe_mode = false;
++module_param_named(ssr_failsafe_mode, ath12k_ssr_failsafe_mode, uint, 0644);
++MODULE_PARM_DESC(ssr_failsafe_mode, "ssr failsafe mode: 0-disable, 1-enable");
+ 
+ bool ath12k_mgmt_rx_reordering = false;
+ module_param_named(mgmt_rx_reorder, ath12k_mgmt_rx_reordering, bool, 0644);
+@@ -1225,6 +1228,8 @@ static int ath12k_core_start(struct ath12k_base *ab,
  		goto err_reo_cleanup;
  	}
  
@@ -47,7 +64,7 @@ index acf30b4..6355a92 100644
  	/* put hardware to DBS mode */
  	if (ab->hw_params->single_pdev_only) {
  		ret = ath12k_wmi_set_hw_mode(ab, WMI_HOST_HW_MODE_DBS);
-@@ -1737,8 +1739,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+@@ -1737,8 +1742,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
  	if (ret)
  		return ret;
  
@@ -56,8 +73,31 @@ index acf30b4..6355a92 100644
  	ret = ath12k_core_qmi_firmware_ready(ab);
  	if (ret)
  		goto err_hal_srng_deinit;
+@@ -1905,6 +1908,12 @@ static void ath12k_core_restart(struct work_struct *work)
+ 	ret = ath12k_core_reconfigure_on_crash(ab);
+ 	if (ret) {
+ 		ath12k_err(ab, "failed to reconfigure driver on crash recovery\n");
++		/*
++		 * If for any reason, reconfiguration fails, issue bug on for
++		 * Mode 0
++		 */
++		if (ath12k_ssr_failsafe_mode && ath12k_recovery_mode == ATH12K_MLO_RECOVERY_MODE0)
++			BUG_ON(1);
+ 		return;
+ 	}
+ 
+@@ -1957,6 +1966,9 @@ static void ath12k_core_reset(struct work_struct *work)
+ 		 */
+ 		ath12k_warn(ab, "already resetting count %d\n", reset_count);
+ 
++		if (ath12k_ssr_failsafe_mode && ath12k_recovery_mode == ATH12K_MLO_RECOVERY_MODE0)
++			BUG_ON(1);
++
+ 		reinit_completion(&ab->reset_complete);
+ 		time_left = wait_for_completion_timeout(&ab->reset_complete,
+ 							ATH12K_RESET_TIMEOUT_HZ);
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 565af9c..5e3b8ac 100644
+index 0a19a65..930a949 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -239,6 +239,7 @@ enum ath12k_dev_flags {
@@ -82,7 +122,7 @@ index d8d0929..9e0aa73 100644
  	if (status) {
  		kfree_skb(skb);
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 4b10954..bfc501f 100644
+index 24a808f..dc90407 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -5691,6 +5691,16 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
@@ -102,7 +142,7 @@ index 4b10954..bfc501f 100644
  	if (sta) {
  		ahsta = (struct ath12k_sta *)sta->drv_priv;
  		if (sta->mlo) {
-@@ -7030,6 +7040,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
+@@ -6960,6 +6970,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
  		ar = arvif->ar;
  
  		mutex_lock(&ar->conf_mutex);
@@ -122,6 +162,19 @@ index eacb7b5..8c4dd18 100644
  			set_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags);
  			queue_work(ab->workqueue_aux, &ab->reset_work);
  		}
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index a2cac52..c178aa8 100644
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
+@@ -1546,6 +1546,8 @@ static void ath12k_pci_shutdown(struct pci_dev *pdev)
+ 	struct ath12k_base *ab = pci_get_drvdata(pdev);
+ 
+ 	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags);
++	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags))
++			return;
+         cancel_work_sync(&ab->reset_work);
+         ath12k_core_deinit(ab);
+ }
 diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
 index 126499a..0fdda6f 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.c
@@ -159,7 +212,7 @@ index 4b0f576..2ee6404 100644
  		case ATH12K_QMI_EVENT_REQUEST_MEM:
  			ret = ath12k_qmi_event_mem_request(qmi);
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index ca71791..3571bcd 100644
+index 05e11d6..06f3dd2 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -540,6 +540,10 @@ int ath12k_wmi_cmd_send(struct ath12k_pdev_wmi *wmi, struct sk_buff *skb,
