@@ -83,7 +83,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,752 @@
+@@ -0,0 +1,744 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -266,6 +266,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
 +		link_ndev_pvt->hw = hw;
 +		link_ndev_pvt->link_ndev = link_ndev;
++		link_ndev_pvt->bond_dev = bond_dev;
 +		link_ndev_pvt->is_started = false;
 +		mldev->vif = vif;
 +		mutex_lock(&vif->bond_mutex);
@@ -278,16 +279,6 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +			//TODO: Graceful cleanup
 +			return -EINVAL;
 +		}
-+		ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
-+		ret = bond_enslave(bond_dev, link_ndev, NULL);
-+
-+		if (ret) {
-+			ath12k_err(NULL, "Error bond enslave error\n");
-+			//TODO: Graceful exit
-+			return -EINVAL;
-+		}
-+		else
-+			ath12k_info(NULL, "Successfully register link_ndev(enslave) %s %px. \n", name, link_ndev );
 +
 +		memcpy(&bond_dev->perm_addr, vif->addr, ETH_ALEN);
 +		bond_dev->dev_addr = &bond_dev->perm_addr;
@@ -305,8 +296,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +			mutex_lock(&vif->bond_mutex);
 +			link_ndev = vif->link_ndev[link_num];
 +			if (link_ndev) {
-+				ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+				bond_release(wdev->bond_netdev, link_ndev);
++				ath12k_info(NULL, "Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
 +				unregister_netdevice(link_ndev);
 +				vif->link_ndev[link_num] = NULL;
 +			} else {
@@ -577,6 +567,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		dev_kfree_skb_any(skb);
 +		return 0;
 +	}
++
++	skb->fast_xmit = 0;
 +	return link_dev->netdev_ops->ndo_start_xmit(skb, link_dev);
 +}
 +
@@ -884,7 +876,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +#endif //__BONDIF_H
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -334,6 +334,17 @@ struct ath12k_vif_tcl_desc_template {
+@@ -335,6 +335,18 @@ struct ath12k_vif_tcl_desc_template {
  	u32 info4;
  };
  
@@ -892,6 +884,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +struct ath12k_link_vif_pvt {
 +        struct ath12k_link_vif *arvif;
 +	struct net_device *link_ndev;
++	struct net_device *bond_dev;
 +	struct ieee80211_hw *hw;
 +	bool is_started;
 +	int ppe_vp_profile_idx;
@@ -902,12 +895,13 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ath12k_link_vif {
  	struct ath12k_base *ab;
  	struct ath12k_dp *dp;
-@@ -387,6 +398,11 @@ struct ath12k_link_vif {
+@@ -388,6 +400,12 @@ struct ath12k_link_vif {
  	u32 tx_vdev_id;
  	u8 link_id;
  	struct ath12k_vif *ahvif;
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	struct ath12k_link_vif_pvt *ndev_pvt;
++	struct net_device *link_ndev;
 +	int ppe_vp_type;
 +	int ppe_vp_num;
 +#endif
@@ -975,7 +969,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4744,6 +4752,11 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4748,6 +4756,11 @@ static int ath12k_mac_vdev_delete(struct
  
  	reinit_completion(&ar->vdev_delete_done);
  
@@ -987,7 +981,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ret = ath12k_wmi_vdev_delete(ar, arvif->vdev_id);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to delete WMI scan vdev %d: %d\n",
-@@ -4771,8 +4784,12 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4775,8 +4788,12 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
@@ -1001,7 +995,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4820,7 +4837,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4824,7 +4841,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1010,7 +1004,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5161,8 +5178,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5165,8 +5182,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1022,7 +1016,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -9525,6 +9544,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9555,6 +9574,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1034,7 +1028,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9583,6 +9607,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9621,6 +9645,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1051,7 +1045,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9674,6 +9708,19 @@ static int ath12k_mac_vdev_create(struct
+@@ -9712,6 +9746,19 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1071,7 +1065,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9745,6 +9792,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9783,6 +9830,10 @@ static int ath12k_mac_vdev_create(struct
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
@@ -1082,7 +1076,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	return ret;
  
-@@ -10253,15 +10304,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10291,15 +10342,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1104,7 +1098,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12069,6 +12122,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12107,6 +12160,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1112,7 +1106,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14045,10 +14099,6 @@ static const struct ieee80211_ops ath12k
+@@ -14091,10 +14145,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1165,7 +1159,15 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	if (!ab) {
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -319,7 +319,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
+@@ -13,6 +13,7 @@
+ #include <ppe_drv_sc.h>
+ #include <linux/dma-mapping.h>
+ #include <asm/cacheflush.h>
++#include <net/bonding.h>
+ #include "hif.h"
+ #include "ppe.h"
+ 
+@@ -332,7 +333,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
  	struct ath12k_base *ab = ar->ab;
  	u32 service_code = PPE_DRV_SC_SPF_BYPASS;
  	int ppe_routing_enable = 1;
@@ -1174,7 +1176,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) ||
  	    src_info == -1)
-@@ -351,6 +351,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
+@@ -364,6 +365,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
  
  	if (i == PPE_VP_ENTRIES_MAX) {
  		WARN_ONCE(1, "All ppe vp profile entries are in use!");
@@ -1182,7 +1184,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -ENOSR;
  	}
  
-@@ -528,16 +529,12 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -541,44 +543,49 @@ static void ath12k_dp_ppeds_setup_vp_ent
  	return;
  }
  
@@ -1201,7 +1203,9 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	//TODO: Handle split phy
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_dp_ppe_vp_profile *vp_profile = NULL;
-@@ -546,17 +543,15 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
+ 	int ppe_vp_profile_idx, ppe_vp_idx, vp_num;
+ 	int ppe_vp_search_tbl_idx = -1;
  	int vdev_id = arvif->vdev_id;
  	int ret;
  
@@ -1221,7 +1225,26 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -EINVAL;
  	}
  
-@@ -581,7 +576,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
++	link_ndev_pvt = netdev_priv(vp_params->dev);
+ 	vp_num = ppe_ds_wlan_vp_alloc(ab->ppeds_handle, vp_params->dev, vp_arg);
+ 	if (vp_num < 0) {
+ 		ath12k_err(ab," vp alloc failed\n");
+ 		return -EFAULT;
+ 	}
+ 
++	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px from ppe vdev attach\n", link_ndev_pvt->bond_dev, vp_params->dev);
++	ret = bond_enslave(link_ndev_pvt->bond_dev, vp_params->dev, NULL);
++	if (ret) {
++		ath12k_err(NULL, "Error bond enslave error\n");
++		return -EINVAL;
++	}
++	else
++		ath12k_info(NULL, "Successfully link_ndev(enslave) %s %px. ppe vdev attach\n", vp_params->dev->name, vp_params->dev);
++
+ 	/*Allocate a ppe vp profile for a vap */
+ 	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
+ 	if (!vp_profile) {
+@@ -594,7 +601,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  		goto dealloc_vp_profile;
  	}
  
@@ -1230,7 +1253,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -597,6 +592,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -610,6 +617,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -1238,7 +1261,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
-@@ -619,15 +615,11 @@ vp_free:
+@@ -632,22 +640,27 @@ vp_free:
  	return ret;
  }
  
@@ -1254,9 +1277,25 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 -	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
 -	struct ath12k_link_vif *arvif = &ahvif->link[0];
  	struct ath12k_dp_ppe_vp_profile *vp_profile;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
  	int ppe_vp_profile_idx = -1;
  
-@@ -648,7 +640,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+ 	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
+ 
++	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
+ 	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach\n");
++	if (arvif->ndev_pvt->link_ndev) {
++		        ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
++		        bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
++	} else {
++		        ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
++	}
++
+ 	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
+ 
+ 	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
+@@ -661,7 +674,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -1318,7 +1357,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		if (any_active && vif->mid != 0)
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -6066,6 +6066,7 @@ struct wireless_dev {
+@@ -6064,6 +6064,7 @@ struct wireless_dev {
  	/* the remainder of this struct should be private to cfg80211 */
  	struct list_head list;
  	struct net_device *netdev;
@@ -1326,7 +1365,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	u32 identifier;
  
-@@ -8749,7 +8750,7 @@ void cfg80211_unregister_wdev(struct wir
+@@ -8748,7 +8749,7 @@ void cfg80211_unregister_wdev(struct wir
   *
   * Requires the RTNL and wiphy mutex to be held.
   */
@@ -1352,7 +1391,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	unsigned long ppe_vp_type;
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -3503,6 +3503,9 @@ enum nl80211_iftype {
+@@ -3498,6 +3498,9 @@ enum nl80211_iftype {
  	NL80211_IFTYPE_P2P_DEVICE,
  	NL80211_IFTYPE_OCB,
  	NL80211_IFTYPE_NAN,
@@ -1775,7 +1814,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	wdev->registering = false;
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -1609,6 +1609,10 @@ static int nl80211_key_allowed(struct wi
+@@ -1608,6 +1608,10 @@ static int nl80211_key_allowed(struct wi
  	ASSERT_WDEV_LOCK(wdev);
  
  	switch (wdev->iftype) {
@@ -1786,7 +1825,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -16993,9 +16997,16 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16964,9 +16968,16 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, NETDEV_UP,			\
  		 NL80211_FLAG_NEED_NETDEV_UP)		\
@@ -1803,7 +1842,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
  		 NL80211_FLAG_NEED_NETDEV_UP |		\
  		 NL80211_FLAG_NO_WIPHY_MTX |		\
-@@ -17027,7 +17038,13 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16998,7 +17009,13 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, WIPHY_CLEAR,			\
  		 NL80211_FLAG_NEED_WIPHY |		\
@@ -1818,7 +1857,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  enum nl80211_internal_flags_selector {
  #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
-@@ -17390,6 +17407,7 @@ static const struct genl_small_ops nl802
+@@ -17361,6 +17378,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_start_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1826,7 +1865,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17398,6 +17416,7 @@ static const struct genl_small_ops nl802
+@@ -17369,6 +17387,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_stop_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1834,7 +1873,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17519,7 +17538,7 @@ static const struct genl_small_ops nl802
+@@ -17490,7 +17509,7 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_trigger_scan,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -1843,7 +1882,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_ABORT_SCAN,
-@@ -17902,6 +17921,7 @@ static const struct genl_small_ops nl802
+@@ -17873,6 +17892,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_start_radar_detection,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1851,7 +1890,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					 NL80211_FLAG_NO_WIPHY_MTX |
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
-@@ -18098,13 +18118,15 @@ static const struct genl_small_ops nl802
+@@ -18069,13 +18089,15 @@ static const struct genl_small_ops nl802
  		.cmd = NL80211_CMD_ADD_LINK,
  		.doit = nl80211_add_link,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -1868,7 +1907,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -18112,6 +18134,7 @@ static const struct genl_small_ops nl802
+@@ -18083,6 +18105,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_add_link_station,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1889,135 +1928,9 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		case NL80211_IFTYPE_STATION:
  			if (dev->ieee80211_ptr->use_4addr)
  				break;
-diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
-index 5f5e84b083d1..6ab32139c441 100644
---- a/drivers/net/wireless/ath/ath12k/bondif.c
-+++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -180,6 +180,7 @@ int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
- 		link_ndev->netdev_ops = &ieee80211_link_dataif_8023_ops;
- 		link_ndev_pvt->hw = hw;
- 		link_ndev_pvt->link_ndev = link_ndev;
-+		link_ndev_pvt->bond_dev = bond_dev;
- 		link_ndev_pvt->is_started = false;
- 		mldev->vif = vif;
- 		mutex_lock(&vif->bond_mutex);
-@@ -192,16 +193,6 @@ int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
- 			//TODO: Graceful cleanup
- 			return -EINVAL;
- 		}
--		ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", bond_dev, link_ndev);
--		ret = bond_enslave(bond_dev, link_ndev, NULL);
--
--		if (ret) {
--			ath12k_err(NULL, "Error bond enslave error\n");
--			//TODO: Graceful exit
--			return -EINVAL;
--		}
--		else
--			ath12k_info(NULL, "Successfully register link_ndev(enslave) %s %px. \n", name, link_ndev );
- 
- 		memcpy(&bond_dev->perm_addr, vif->addr, ETH_ALEN);
- 		bond_dev->dev_addr = &bond_dev->perm_addr;
-@@ -219,8 +210,7 @@ int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
- 			mutex_lock(&vif->bond_mutex);
- 			link_ndev = vif->link_ndev[link_num];
- 			if (link_ndev) {
--				ath12k_info(NULL, "Bond_release and Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
--				bond_release(wdev->bond_netdev, link_ndev);
-+				ath12k_info(NULL, "Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
- 				unregister_netdevice(link_ndev);
- 				vif->link_ndev[link_num] = NULL;
- 			} else {
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 5499b920e063..4ab43cfb25e5 100644
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -338,6 +338,7 @@ struct ath12k_vif_tcl_desc_template {
- struct ath12k_link_vif_pvt {
-         struct ath12k_link_vif *arvif;
- 	struct net_device *link_ndev;
-+	struct net_device *bond_dev;
- 	struct ieee80211_hw *hw;
- 	bool is_started;
- 	int ppe_vp_profile_idx;
-@@ -405,6 +406,7 @@ struct ath12k_link_vif {
- 	struct ath12k_vif *ahvif;
- #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
- 	struct ath12k_link_vif_pvt *ndev_pvt;
-+	struct net_device *link_ndev;
- 	int ppe_vp_type;
- 	int ppe_vp_num;
- #endif
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 7e06d93a1b4e..76ae36c2aebc 100644
---- a/drivers/net/wireless/ath/ath12k/ppe.c
-+++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -13,6 +13,7 @@
- #include <ppe_drv_sc.h>
- #include <linux/dma-mapping.h>
- #include <asm/cacheflush.h>
-+#include <net/bonding.h>
- #include "hif.h"
- #include "ppe.h"
- 
-@@ -538,6 +539,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
- 	//TODO: Handle split phy
- 	struct ath12k_base *ab = ar->ab;
- 	struct ath12k_dp_ppe_vp_profile *vp_profile = NULL;
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
- 	int ppe_vp_profile_idx, ppe_vp_idx, vp_num;
- 	int ppe_vp_search_tbl_idx = -1;
- 	int vdev_id = arvif->vdev_id;
-@@ -555,12 +557,22 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
- 		return -EINVAL;
- 	}
- 
-+	link_ndev_pvt = netdev_priv(vp_params->dev);
- 	vp_num = ppe_ds_wlan_vp_alloc(ab->ppeds_handle, vp_params->dev, vp_arg);
- 	if (vp_num < 0) {
- 		ath12k_err(ab," vp alloc failed\n");
- 		return -EFAULT;
- 	}
- 
-+	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px from ppe vdev attach\n", link_ndev_pvt->bond_dev, vp_params->dev);
-+	ret = bond_enslave(link_ndev_pvt->bond_dev, vp_params->dev, NULL);
-+	if (ret) {
-+		ath12k_err(NULL, "Error bond enslave error\n");
-+		return -EINVAL;
-+	}
-+	else
-+		ath12k_info(NULL, "Successfully link_ndev(enslave) %s %px. ppe vdev attach\n", vp_params->dev->name, vp_params->dev);
-+
- 	/*Allocate a ppe vp profile for a vap */
- 	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
- 	if (!vp_profile) {
-@@ -621,12 +633,21 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ath12k_link_vif *arvif,
- 	struct ath12k *ar = arvif->ar;
- 	struct ath12k_base *ab = ar->ab;
- 	struct ath12k_dp_ppe_vp_profile *vp_profile;
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
- 	int ppe_vp_profile_idx = -1;
- 
- 	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
- 		return;
- 
-+	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
- 	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach\n");
-+	if (arvif->ndev_pvt->link_ndev) {
-+		        ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+		        bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
-+	} else {
-+		        ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+	}
-+
- 	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
- 
- 	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
-index 906edbc24957..407412d510e6 100644
 --- a/net/mac80211/mlme.c
 +++ b/net/mac80211/mlme.c
-@@ -2361,7 +2361,7 @@ void ieee80211_dfs_cac_timer_work(struct work_struct *work)
+@@ -2339,7 +2339,7 @@ void ieee80211_dfs_cac_timer_work(struct
  			     dfs_cac_timer_work);
  	struct cfg80211_chan_def chandef = link->conf->chandef;
  	struct ieee80211_sub_if_data *sdata = link->sdata;
@@ -2026,7 +1939,7 @@ index 906edbc24957..407412d510e6 100644
  	mutex_lock(&sdata->local->mtx);
  
  	if (sdata->wdev.links[link->link_id].cac_started) {
-@@ -2372,6 +2372,7 @@ void ieee80211_dfs_cac_timer_work(struct work_struct *work)
+@@ -2350,6 +2350,7 @@ void ieee80211_dfs_cac_timer_work(struct
  	}
  
  	mutex_unlock(&sdata->local->mtx);
@@ -2034,7 +1947,24 @@ index 906edbc24957..407412d510e6 100644
  }
  
  static bool
-
--- 
-2.17.1
-
+--- a/drivers/net/wireless/ath/ath12k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
+@@ -245,6 +245,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 	u8 hal_ring_id, ring_id;
+ 	dma_addr_t paddr;
+ 	int ret;
++	int len = skb->fast_xmit ? 256 : skb->len;
+ 
+ 	ring_id = smp_processor_id();
+ 
+@@ -256,8 +257,8 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 		return -ENOSPC;
+ 	}
+ 
+-	dmac_clean_range_no_dsb(skb->data, skb->data + 256);
+-	paddr = dma_map_single_attrs(dev, skb->data, 256,
++	dmac_clean_range_no_dsb(skb->data, skb->data + len);
++	paddr = dma_map_single_attrs(dev, skb->data, len,
+ 				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+ 	if (unlikely(dma_mapping_error(dev, paddr))) {
+ 		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
