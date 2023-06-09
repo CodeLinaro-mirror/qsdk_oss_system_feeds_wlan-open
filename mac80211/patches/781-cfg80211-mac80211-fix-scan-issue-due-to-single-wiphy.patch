@@ -1,0 +1,164 @@
+From c46aaa7d5cdd615dec9863eb286ba4e253fdbb93 Mon Sep 17 00:00:00 2001
+From: Aditya Kumar Singh <quic_adisi@quicinc.com>
+Date: Fri, 9 Jun 2023 14:27:22 +0530
+Subject: [PATCH] cfg80211/mac80211: fix scan issue due to single wiphy
+ architecture
+
+Currently, irrespective of the links active in an interface, if frequency
+info is not provided in the scan request, all channels across all the
+available bands under the wiphy are selected. This leads to huge scan request
+as well as long time to complete the scan.
+
+However, if an interface is active on a certain num of links, then there
+is no point in scanning for all the bands and their channels.
+
+Add fix to select channels only from bands which are currently active on
+the requested scanning interface.
+
+Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
+---
+ include/net/cfg80211.h |  1 +
+ net/mac80211/scan.c    | 63 +++++++++++++++++++++++++++++++++++++++++-
+ net/wireless/nl80211.c |  3 ++
+ 3 files changed, 66 insertions(+), 1 deletion(-)
+
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -2649,6 +2649,7 @@ struct cfg80211_scan_request {
+ 	u32 n_6ghz_params;
+ 	struct cfg80211_scan_6ghz_params *scan_6ghz_params;
+ 	u8 hw_idx;
++	bool scan_with_freq_info;
+ 
+ 	/* keep last */
+ 	struct ieee80211_channel *channels[];
+--- a/net/mac80211/scan.c
++++ b/net/mac80211/scan.c
+@@ -707,12 +707,70 @@ static void ieee80211_scan_state_send_pr
+ 	local->next_scan_state = SCAN_DECISION;
+ }
+ 
++static void __ieee80211_validate_scan_freqs(struct ieee80211_sub_if_data *sdata,
++					    struct cfg80211_scan_request *req)
++{
++	struct ieee80211_vif *vif = &sdata->vif;
++	unsigned long links = vif->valid_links;
++	struct ieee80211_bss_conf *link_conf;
++	int n_chans = 0, i;
++	u8 link_id, bands_active = 0, band;
++
++	if (req->scan_with_freq_info)
++		return;
++
++	/* In case of single wiphy, if req is without freq info, then it will have all
++	 * possible enabled channels from all bands. Parse and only keep
++	 * those who are active on the given interface
++	 */
++	mutex_lock(&sdata->local->chanctx_mtx);
++
++	if (!vif->valid_links) {
++		link_conf = &vif->bss_conf;
++
++		if (!link_conf->chanctx_conf) {
++			mutex_unlock(&sdata->local->chanctx_mtx);
++			return;
++		}
++
++		band = link_conf->chanctx_conf->def.chan->band;
++		bands_active |= BIT(band);
++	} else {
++		rcu_read_lock();
++		for_each_set_bit(link_id, &links, IEEE80211_MLD_MAX_NUM_LINKS) {
++			link_conf = vif->link_conf[link_id];
++
++			if (!link_conf || !link_conf->chanctx_conf)
++				continue;
++
++			band = link_conf->chanctx_conf->def.chan->band;
++			bands_active |= BIT(band);
++		}
++		rcu_read_unlock();
++	}
++
++	mutex_unlock(&sdata->local->chanctx_mtx);
++
++	if (!bands_active)
++		return;
++
++	for (i = 0; i < req->n_channels; i++) {
++		if (!(bands_active & BIT(req->channels[i]->band)))
++			continue;
++
++		req->channels[n_chans++] = req->channels[i];
++	}
++
++	req->n_channels = n_chans;
++}
++
+ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
+ 				  struct cfg80211_scan_request *req)
+ {
+ 	struct ieee80211_local *local = sdata->local;
+ 	bool hw_scan = local->ops->hw_scan;
+ 	int rc;
++	u32 orig_n_channels;
+ 
+ 	lockdep_assert_held(&local->mtx);
+ 
+@@ -734,6 +792,7 @@ static int __ieee80211_start_scan(struct
+ 		u8 *ies;
+ 
+ 		local->hw_scan_ies_bufsize = local->scan_ies_len + req->ie_len;
++		orig_n_channels = req->n_channels;
+ 
+ 		if (ieee80211_hw_check(&local->hw, SINGLE_SCAN_ON_ALL_BANDS)) {
+ 			int i, n_bands = 0;
+@@ -747,6 +806,8 @@ static int __ieee80211_start_scan(struct
+ 			}
+ 
+ 			local->hw_scan_ies_bufsize *= n_bands;
++		} else {
++			__ieee80211_validate_scan_freqs(sdata, req);
+ 		}
+ 
+ 		local->hw_scan_req = kmalloc(
+@@ -766,9 +827,12 @@ static int __ieee80211_start_scan(struct
+ 		local->hw_scan_req->req.chandef = req->chandef;
+ 		local->hw_scan_req->req.ssids = req->ssids;
+ 		local->hw_scan_req->req.n_ssids = req->n_ssids;
++		/* we might have adjusted the n_channels from above, but ies will be present
++		 * only after the original channel list len. Hence we use the original len
++		 */
+ 		ies = (u8 *)local->hw_scan_req +
+ 			sizeof(*local->hw_scan_req) +
+-			req->n_channels * sizeof(req->channels[0]);
++			orig_n_channels * sizeof(req->channels[0]);
+ 		local->hw_scan_req->req.ie = ies;
+ 		local->hw_scan_req->req.flags = req->flags;
+ 		eth_broadcast_addr(local->hw_scan_req->req.bssid);
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -9730,6 +9730,7 @@ static int nl80211_trigger_scan(struct s
+ 	s8 hw_idx = -1;
+ 	size_t ie_len;
+ 	bool chandef_found = false;
++	bool freq_info_provided = true;
+ 
+ 	wiphy = &rdev->wiphy;
+ 
+@@ -9764,6 +9765,7 @@ static int nl80211_trigger_scan(struct s
+ 		n_channels = 1;
+ 	} else {
+ 		n_channels = ieee80211_get_num_supported_channels(wiphy);
++		freq_info_provided = false;
+ 	}
+ 
+ 	if (info->attrs[NL80211_ATTR_SCAN_SSIDS])
+@@ -9867,6 +9869,7 @@ static int nl80211_trigger_scan(struct s
+ 	}
+ 
+ 	request->n_channels = i;
++	request->scan_with_freq_info = freq_info_provided;
+ 
+ 	wdev_lock(wdev);
+ 	for (i = 0; i < request->n_channels; i++) {
