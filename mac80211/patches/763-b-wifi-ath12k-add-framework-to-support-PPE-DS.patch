@@ -149,7 +149,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		ath12k_config_qdss(ab);
  
  		if (ath12k_en_fwlog == true) {
-@@ -1474,6 +1497,21 @@ int ath12k_core_qmi_firmware_ready(struc
+@@ -1481,6 +1504,21 @@ int ath12k_core_qmi_firmware_ready(struc
  		goto err_firmware_stop;
  	}
  
@@ -184,15 +184,15 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -234,6 +238,7 @@ enum ath12k_dev_flags {
- 	ATH12K_FLAG_QMI_FW_READY_COMPLETE,
+@@ -235,6 +239,7 @@ enum ath12k_dev_flags {
+ 	ATH12K_FLAG_QMI_HOST_CAP_SENT,
  	ATH12K_FLAG_HW_GROUP_ATTACHED,
  	ATH12K_FLAG_FTM_SEGMENTED,
 +	ATH12K_FLAG_PPE_DS_ENABLED,
  };
  
  enum ath12k_monitor_flags {
-@@ -1109,6 +1114,28 @@ struct ath12k_soc_dp_stats {
+@@ -1110,6 +1115,30 @@ struct ath12k_soc_dp_stats {
  	struct ath12k_dp_ring_bp_stats bp_stats;
  };
  
@@ -210,6 +210,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	u32 disable_intr_cnt;
 +	u32 release_tx_single_cnt;
 +	u32 release_rx_desc_cnt;
++	u32 num_rx_desc_freed;
++	u32 num_rx_desc_reused;
 +};
 +
 +struct ath12k_ppeds_napi {
@@ -221,7 +223,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ath12k_reg_freq {
           u32 start_freq;
           u32 end_freq;
-@@ -1228,7 +1255,7 @@ struct ath12k_base {
+@@ -1229,7 +1258,7 @@ struct ath12k_base {
  	bool wmi_ready;
  	u32 wlan_init_status;
  	int irq_num[ATH12K_IRQ_NUM_MAX];
@@ -230,7 +232,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	struct napi_struct *napi;
  	struct ath12k_targ_cap target_caps;
  	u32 ext_service_bitmap[WMI_SERVICE_EXT_BM_SIZE];
-@@ -1315,6 +1342,20 @@ struct ath12k_base {
+@@ -1316,6 +1345,20 @@ struct ath12k_base {
  	u32 max_msduq_per_tid;
  	u32 default_msduq_per_tid;
  
@@ -267,7 +269,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2054,6 +2054,90 @@ static const struct file_operations fops
+@@ -2065,6 +2065,94 @@ static const struct file_operations fops
  	.write = ath12k_write_rx_hash_ix3,
  };
  
@@ -313,6 +315,10 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +			 ppeds_stats->tx_desc_freed);
 +	len += scnprintf(buf + len, size - len, "fw2wbm_pkt_drops %u\n",
 +			 ppeds_stats->fw2wbm_pkt_drops);
++	len += scnprintf(buf + len, size - len, "num_rx_desc_reused %u\n",
++			 ppeds_stats->num_rx_desc_reused);
++	len += scnprintf(buf + len, size - len, "num_rx_desc_freed %u\n",
++			 ppeds_stats->num_rx_desc_freed);
 +
 +	if (len > size)
 +		len = size;
@@ -358,7 +364,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
  {
  	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
-@@ -2086,6 +2170,11 @@ int ath12k_debugfs_pdev_create(struct at
+@@ -2097,6 +2185,11 @@ int ath12k_debugfs_pdev_create(struct at
  	debugfs_create_file("fw_reset_stats", 0400, ab->debugfs_soc, ab,
  			    &fops_fw_reset_stats);
  
@@ -548,7 +554,26 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ret = ath12k_dp_rx_htt_setup(ab);
  	if (ret)
  		goto out;
-@@ -1319,6 +1392,11 @@ static void ath12k_dp_cc_cleanup(struct
+@@ -1269,6 +1342,18 @@ static void ath12k_dp_cc_cleanup(struct
+ 		dev_kfree_skb_any(skb);
+ 	}
+ 
++	list_for_each_entry_safe(desc_info, tmp, &dp->rx_ppeds_reuse_list, list) {
++		list_del(&desc_info->list);
++		skb = desc_info->skb;
++
++		if (!skb)
++			continue;
++
++		dma_unmap_single(ab->dev, ATH12K_SKB_RXCB(skb)->paddr,
++				 skb->len + skb_tailroom(skb), DMA_FROM_DEVICE);
++		dev_kfree_skb_any(skb);
++	}
++
+ 	for (i = 0; i < ATH12K_NUM_RX_SPT_PAGES; i++) {
+ 		if (!dp->spt_info->rxbaddr[i])
+ 			continue;
+@@ -1319,6 +1404,11 @@ static void ath12k_dp_cc_cleanup(struct
  		spin_unlock_bh(&dp->tx_desc_lock[pool_id]);
  	}
  
@@ -560,7 +585,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	/* unmap SPT pages */
  	for (i = 0; i < dp->num_spt_pages; i++) {
  		if (!dp->spt_info[i].vaddr)
-@@ -1470,6 +1548,17 @@ struct ath12k_tx_desc_info *ath12k_dp_ge
+@@ -1470,6 +1560,17 @@ struct ath12k_tx_desc_info *ath12k_dp_ge
  	return *(struct ath12k_tx_desc_info **)desc_addr_ptr;
  }
  
@@ -578,7 +603,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static void ath12k_dp_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp)
  {
  	u32 cmem_base;
-@@ -1477,7 +1566,8 @@ static void ath12k_dp_tx_cmem_init(struc
+@@ -1477,7 +1578,8 @@ static void ath12k_dp_tx_cmem_init(struc
  
  	cmem_base = ab->qmi.dev_mem[ATH12K_QMI_DEVMEM_CMEM_INDEX].start;
  
@@ -588,7 +613,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		/* Write to PPT in CMEM */
  		if (ab->hif.ops->cmem_write32)
  			ath12k_hif_cmem_write32(ab, cmem_base + ATH12K_PPT_ADDR_OFFSET(i),
-@@ -1508,6 +1598,139 @@ static void ath12k_dp_rx_cmem_init(struc
+@@ -1508,6 +1610,139 @@ static void ath12k_dp_rx_cmem_init(struc
  	}
  }
  
@@ -728,7 +753,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static int ath12k_dp_cc_desc_init(struct ath12k_base *ab)
  {
  	struct ath12k_dp *dp = &ab->dp;
-@@ -1572,6 +1795,7 @@ static int ath12k_dp_cc_desc_init(struct
+@@ -1572,6 +1807,7 @@ static int ath12k_dp_cc_desc_init(struct
  		for (j = 0; j < ATH12K_MAX_SPT_ENTRIES; j++) {
  			rx_descs[j].cookie = ath12k_dp_cc_cookie_gen(ppt_idx, j);
  			rx_descs[j].magic = ATH12K_DP_RX_DESC_MAGIC;
@@ -736,7 +761,15 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  			list_add_tail(&rx_descs[j].list, &dp->rx_desc_free_list);
  
  			/* Update descriptor VA in SPT */
-@@ -1661,6 +1885,19 @@ static int ath12k_dp_cc_init(struct ath1
+@@ -1610,6 +1846,7 @@ static int ath12k_dp_cc_init(struct ath1
+ 
+ 	INIT_LIST_HEAD(&dp->rx_desc_free_list);
+ 	INIT_LIST_HEAD(&dp->rx_desc_used_list);
++	INIT_LIST_HEAD(&dp->rx_ppeds_reuse_list);
+ 	spin_lock_init(&dp->rx_desc_lock);
+ 
+ 	for (i = 0; i < ATH12K_HW_MAX_QUEUES; i++) {
+@@ -1661,6 +1898,19 @@ static int ath12k_dp_cc_init(struct ath1
  		goto free;
  	}
  
@@ -889,7 +922,15 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	struct dp_srng reo_status_ring;
  	struct dp_srng reo_dst_ring[DP_REO_DST_RING_MAX];
  	struct dp_tx_ring tx_ring[DP_TCL_NUM_RING_MAX];
-@@ -376,6 +440,19 @@ struct ath12k_dp {
+@@ -368,6 +432,7 @@ struct ath12k_dp {
+ 	u32 rx_spt_base;
+ 	struct list_head rx_desc_free_list;
+ 	struct list_head rx_desc_used_list;
++	struct list_head rx_ppeds_reuse_list;
+ 	/* protects the free and used desc list */
+ 	spinlock_t rx_desc_lock;
+ 
+@@ -376,6 +441,19 @@ struct ath12k_dp {
  	/* protects the free and used desc lists */
  	spinlock_t tx_desc_lock[ATH12K_HW_MAX_QUEUES];
  
@@ -909,7 +950,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	struct dp_rxdma_ring rx_refill_buf_ring;
  	struct dp_srng rx_mac_buf_ring[MAX_RXDMA_PER_PDEV];
  	struct dp_srng rxdma_err_dst_ring[MAX_RXDMA_PER_PDEV];
-@@ -449,6 +526,7 @@ enum htt_h2t_msg_type {
+@@ -449,6 +527,7 @@ enum htt_h2t_msg_type {
  	HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG	= 0xc,
  	HTT_H2T_MSG_TYPE_EXT_STATS_CFG		= 0x10,
  	HTT_H2T_MSG_TYPE_PPDU_STATS_CFG		= 0x11,
@@ -917,7 +958,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	HTT_H2T_MSG_TYPE_VDEV_TXRX_STATS_CFG	= 0x1a,
  	HTT_H2T_MSG_TYPE_TX_MONITOR_CFG		= 0x1b,
  	HTT_H2T_MSG_TYPE_SAWF_DEF_Q_MAP_REQ	= 0x1c,
-@@ -2099,6 +2177,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_
+@@ -2099,6 +2178,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_
  	u32 vdev_id_hi_bitmask;
  };
  
@@ -937,7 +978,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  /* @brief target -> host extended statistics upload
   *
   * @details
-@@ -2239,6 +2330,26 @@ struct ath11k_htt_mlo_peer_unmap_msg {
+@@ -2239,6 +2331,26 @@ struct ath11k_htt_mlo_peer_unmap_msg {
  	u32 info0;
  } __packed;
  
@@ -964,7 +1005,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_service_srng(struct ath12k_base *ab,
  			   struct ath12k_ext_irq_grp *irq_grp,
  			   int budget);
-@@ -2275,4 +2386,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
+@@ -2275,4 +2387,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
  struct ath12k_tx_desc_info *ath12k_dp_get_tx_desc(struct ath12k_base *ab,
  						  u32 desc_id);
  void ath12k_dp_tx_update_bank_profile(struct ath12k_link_vif *arvif);
@@ -1220,7 +1261,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
  				       struct ath12k_tx_desc_info *tx_desc,
  				       u8 ring_id)
-@@ -1071,6 +1142,124 @@ static inline bool ath12k_dp_tx_completi
+@@ -1072,6 +1143,124 @@ static inline bool ath12k_dp_tx_completi
  	return true;
  }
  
@@ -2044,7 +2085,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
  	/* TODO: Do we need to enable ANI? */
-@@ -14064,6 +14075,10 @@ static const struct ieee80211_ops ath12k
+@@ -14072,6 +14083,10 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -2220,7 +2261,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #endif /* ATH12K_PCI_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,890 @@
+@@ -0,0 +1,991 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2343,22 +2384,131 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		ath12k_hif_ppeds_irq_disable(ab, PPEDS_IRQ_PPE2TCL);
 +	}
 +}
++
++int ath12k_dp_rx_bufs_replenish_ppeds(struct ath12k_base *ab,
++				      struct dp_rxdma_ring *rx_ring,
++				      int req_entries,
++				      enum hal_rx_buf_return_buf_manager mgr)
++{
++	struct hal_srng *rxdma_srng;
++	u32 *rxdma_desc;
++	u32 cookie;
++	dma_addr_t paddr;
++	struct sk_buff *skb;
++	struct ath12k_rx_desc_info *rx_desc, *cur;
++	int count = 0, num_remain;
++
++	rxdma_srng = &ab->hal.srng_list[rx_ring->refill_buf_ring.ring_id];
++
++	spin_lock_bh(&rxdma_srng->lock);
++	ath12k_hal_srng_access_begin(ab, rxdma_srng);
++
++	num_remain = req_entries;
++	while (num_remain > 0) {
++		spin_lock_bh(&ab->dp.rx_desc_lock);
++
++		rx_desc = list_first_entry_or_null(&ab->dp.rx_ppeds_reuse_list,
++						   struct ath12k_rx_desc_info,
++						   list);
++		if (!rx_desc) {
++			spin_unlock_bh(&ab->dp.rx_desc_lock);
++			break;
++		}
++
++		skb = rx_desc->skb;
++		if (!skb) {
++			ath12k_err(ab, "ppeds rx desc with no skb when reusing!\n");
++			spin_unlock_bh(&ab->dp.rx_desc_lock);
++			break;
++		}
++		cookie = rx_desc->cookie;
++		list_move_tail(&rx_desc->list, &ab->dp.rx_desc_used_list);
++		spin_unlock_bh(&ab->dp.rx_desc_lock);
++
++		rxdma_desc = ath12k_hal_srng_src_get_next_entry(ab, rxdma_srng);
++		if (!rxdma_desc) {
++			/* Remove desc from used list when no rxdma entry is available */
++			spin_lock_bh(&ab->dp.rx_desc_lock);
++			list_move_tail(&rx_desc->list, &ab->dp.rx_ppeds_reuse_list);
++			spin_unlock_bh(&ab->dp.rx_desc_lock);
++			break;
++		}
++
++		paddr = ATH12K_SKB_RXCB(skb)->paddr;
++		ath12k_hal_rx_buf_addr_info_set(rxdma_desc, paddr, cookie, mgr);
++
++		num_remain--;
++		count++;
++	}
++        ath12k_hal_srng_access_end(ab, rxdma_srng);
++        spin_unlock_bh(&rxdma_srng->lock);
++
++	if (!ab->stats_disable)
++		ab->ppeds_stats.num_rx_desc_reused += count;
++
++	if (count == req_entries)
++		return 0;
++
++	/* move any remaining descriptors to free list */
++	count = 0;
++	while (num_remain) {
++		spin_lock_bh(&ab->dp.rx_desc_lock);
++		cur = list_first_entry_or_null(&ab->dp.rx_ppeds_reuse_list,
++					       struct ath12k_rx_desc_info,
++					       list);
++		if (!cur) {
++			/* break the loop as soon as list is empty */
++			spin_unlock_bh(&ab->dp.rx_desc_lock);
++			break;
++		}
++
++		skb = cur->skb;
++		cur->skb= NULL;
++		list_move_tail(&cur->list, &ab->dp.rx_desc_free_list);
++		spin_unlock_bh(&ab->dp.rx_desc_lock);
++		num_remain--;
++		count++;
++
++		if (!skb) {
++			ath12k_err(ab, "ppeds rx desc with no skb when freeing\n");
++			continue;
++		}
++
++		/* When recycled_for_ds is set, packet is used by DS rings and never has
++		 * touched by host. So, buffer unmap can be skipped. */
++		if (!skb->recycled_for_ds) {
++			dmac_inv_range_no_dsb(skb->data, skb->data + (skb->len +
++					      skb_tailroom(skb)));
++			dma_unmap_single_attrs(ab->dev, ATH12K_SKB_RXCB(skb)->paddr,
++					       skb->len + skb_tailroom(skb),
++					       DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
++		}
++
++		skb->recycled_for_ds = 0;
++		skb->fast_recycled = 0;
++		dev_kfree_skb_any(skb);
++	}
++
++	if (!ab->stats_disable)
++		ab->ppeds_stats.num_rx_desc_freed += count;
++
++	return 0;
++}
++
 +static void ath12k_ppeds_release_rx_desc(ppe_ds_wlan_handle_t *ppeds_handle,
 +                                        struct ppe_ds_wlan_rxdesc_elem *arr, u16 count)
 +{
 +	struct ath12k_base *ab = *(struct ath12k_base **)ppe_ds_wlan_priv(ppeds_handle);
 +	struct ath12k_base *src_ab = NULL;
-+	u32 rx_bufs_reaped[ATH12K_MAX_SOCS][MAX_RADIOS] = {0};
-+	struct sk_buff_head free_list_head;
++	u32 rx_bufs_reaped[ATH12K_MAX_SOCS] = {0};
 +	struct ath12k_rx_desc_info *rx_desc;
 +	struct dp_rxdma_ring *rx_ring;
-+	int chip_id, mac_id;
++	int chip_id;
 +	int i = 0;
 +
 +	if (!ab->stats_disable)
-+		ab->ppeds_stats.release_rx_desc_cnt++;
++		ab->ppeds_stats.release_rx_desc_cnt += count;
 +
-+	skb_queue_head_init(&free_list_head);
 +	for (i = 0; i < count; i++) {
 +		rx_desc = (struct ath12k_rx_desc_info *)arr[i].cookie;
 +		if (rx_desc == NULL) {
@@ -2367,30 +2517,22 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		}
 +		src_ab = rx_desc->ab;
 +		/* TODO: review split phy */
-+		rx_bufs_reaped[src_ab->chip_id][0]++;
-+		__skb_queue_head(&free_list_head, rx_desc->skb);
++		rx_bufs_reaped[src_ab->chip_id]++;
 +
 +		spin_lock_bh(&src_ab->dp.rx_desc_lock);
-+		list_move_tail(&rx_desc->list, &src_ab->dp.rx_desc_free_list);
++		list_move_tail(&rx_desc->list, &src_ab->dp.rx_ppeds_reuse_list);
 +		spin_unlock_bh(&src_ab->dp.rx_desc_lock);
 +	}
 +
-+	dev_kfree_skb_list_fast(&free_list_head);
-+
 +	for (chip_id = 0; chip_id < ATH12K_MAX_SOCS; chip_id++) {
-+	        for (mac_id = 0; mac_id < MAX_RADIOS; mac_id++) {
++		if (!rx_bufs_reaped[chip_id])
++			continue;
 +
-+			if (!rx_bufs_reaped[chip_id][mac_id])
-+				continue;
-+
-+			src_ab = ab->ag->ab[chip_id];
-+			rx_ring = &src_ab->dp.rx_refill_buf_ring;
-+			/* TODO: review src_ab->hw_params->hal_params->rx_buf_rbm */
-+			ath12k_dp_rx_bufs_replenish(src_ab, rx_ring,
-+						    rx_bufs_reaped[chip_id][mac_id],
-+						    src_ab->hw_params->hal_params->rx_buf_rbm,
-+						    true);
-+		}
++		src_ab = ab->ag->ab[chip_id];
++		rx_ring = &src_ab->dp.rx_refill_buf_ring;
++		ath12k_dp_rx_bufs_replenish_ppeds(src_ab, rx_ring,
++						  rx_bufs_reaped[chip_id],
++						  src_ab->hw_params->hal_params->rx_buf_rbm);
 +	}
 +
 +	return;
@@ -3374,7 +3516,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +ATH12K_PPE_DS_SUPPORT=
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -781,7 +781,9 @@ void ieee80211_stop_mbssid(struct ieee80
+@@ -765,7 +765,9 @@ void ieee80211_stop_mbssid(struct ieee80
  static int ieee80211_stop(struct net_device *dev)
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -3384,7 +3526,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* close dependent VLAN and MBSSID interfaces before locking wiphy */
  	if (sdata->vif.type == NL80211_IFTYPE_AP) {
-@@ -1956,7 +1958,9 @@ static void ieee80211_setup_sdata(struct
+@@ -1940,7 +1942,9 @@ static void ieee80211_setup_sdata(struct
  	/* and set some type-dependent values */
  	sdata->vif.type = type;
  	sdata->vif.p2p = false;
