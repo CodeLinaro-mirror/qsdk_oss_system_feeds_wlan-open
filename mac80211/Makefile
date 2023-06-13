@@ -424,6 +424,17 @@ QCA IEEE 802.11ac family of chipsets. For now only
 PCI is supported.
 endef
 
+define KernelPackage/ath12k/config
+  if PACKAGE_kmod-qca-nss-ecm-premium
+	config PACKAGE_ATH12K_SAWF
+	  bool "SAWF and Telemetry support in ATH12K"
+	  default y
+	  help
+		This option enables support for SAWF and Telemetry
+		in ATH12K.
+  endif
+endef
+
 define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
@@ -576,6 +587,13 @@ config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_AL
 config-$(CONFIG_PACKAGE_kmod-ath11k) += ATH11K_SPECTRAL ATH11K_CFR
 
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
+
+# kernel comparison is added since qca-nss-ecm callbacks are not supported
+# in openwrt-ginger project as of now. Once supported this kernel check
+# needs to be removed.
+ifneq "6.1.31" "$(word 1, $(sort 6.1.31 $(LINUX_VERSION)))"
+config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
+endif
 
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH11K_MEM_PROFILE_512M
