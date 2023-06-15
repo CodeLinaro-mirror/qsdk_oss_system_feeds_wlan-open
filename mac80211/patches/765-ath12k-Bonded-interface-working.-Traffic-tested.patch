@@ -1981,3 +1981,104 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
+From fc00ff4a9f13005902988e66dbff549a0aa2d8e2 Mon Sep 17 00:00:00 2001
+From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+Date: Wed, 14 Jun 2023 20:30:30 -0700
+Subject: [PATCH] ath12k: update ppe vp entry with updated bank_id config
+
+When bank_id gets modified after the PPE DS attach, the
+VP entry register needs to be updated to reflect correct
+mapping between vp port, vdev_id and bank_id. Without this
+backbone data packets getting dropped.
+
+Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c  |  7 ++++++
+ drivers/net/wireless/ath/ath12k/ppe.c | 31 +++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/ppe.h |  2 ++
+ 3 files changed, 40 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index dbb0882b7a01..d361c494138b 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -536,6 +536,9 @@ void ath12k_dp_tx_update_bank_profile(struct ath12k_link_vif *arvif)
+ 	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
+ 	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
+ 				       arvif->bank_id);
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	ath12k_dp_ppeds_update_vp_entry(arvif->ar, arvif);
++#endif
+ }
+ 
+ static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
+@@ -1319,6 +1322,10 @@ void ath12k_dp_vdev_tx_attach(struct ath12k *ar, struct ath12k_link_vif *arvif)
+ 		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
+ 		return;
+ 	}
++
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	ath12k_dp_ppeds_update_vp_entry(ar, arvif);
++#endif
+ }
+ 
+ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
+index 30eb971fc3d4..71bc5e4ba81c 100644
+--- a/drivers/net/wireless/ath/ath12k/ppe.c
++++ b/drivers/net/wireless/ath/ath12k/ppe.c
+@@ -644,6 +644,37 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
+ 	return;
+ }
+ 
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif)
++{
++	struct ath12k_base *ab = ar->ab;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = arvif->ndev_pvt;
++	struct ath12k_dp_ppe_vp_profile *vp_profile;
++	int ppe_vp_profile_idx;
++
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
++		return;
++
++	if (!ab->ppeds_handle) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "DS not enabled on this chip\n");
++		return;
++	}
++
++	if (!link_ndev_pvt) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "link netdevice not present for arvif\n");
++		return;
++	}
++
++	ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
++	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
++	if (!vp_profile) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "vp profile not present for arvif\n");
++		return;
++	}
++
++	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
++}
++
+ int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
+ 				void *vp_arg, int *ppe_vp_num,
+ 				struct ieee80211_ppe_vp_ds_params *vp_params)
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
+index 1307d9ad41b7..4aaa1d1817a0 100644
+--- a/drivers/net/wireless/ath/ath12k/ppe.h
++++ b/drivers/net/wireless/ath/ath12k/ppe.h
+@@ -38,5 +38,7 @@ void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
+ irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif);
+ #endif
+ #endif
+
+base-commit: 8785adf62db68cb8ced6e296b4e53afa1dafd03b
+-- 
+2.17.1
+
