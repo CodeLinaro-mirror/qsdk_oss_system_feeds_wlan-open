@@ -1167,7 +1167,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #include "hif.h"
  #include "ppe.h"
  
-@@ -332,7 +333,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
+@@ -433,7 +434,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
  	struct ath12k_base *ab = ar->ab;
  	u32 service_code = PPE_DRV_SC_SPF_BYPASS;
  	int ppe_routing_enable = 1;
@@ -1176,7 +1176,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) ||
  	    src_info == -1)
-@@ -364,6 +365,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
+@@ -465,6 +466,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
  
  	if (i == PPE_VP_ENTRIES_MAX) {
  		WARN_ONCE(1, "All ppe vp profile entries are in use!");
@@ -1184,12 +1184,43 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		return -ENOSR;
  	}
  
-@@ -541,44 +543,49 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -642,44 +644,80 @@ static void ath12k_dp_ppeds_setup_vp_ent
  	return;
  }
  
 -int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
 -				struct ieee80211_vif *vif,
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif)
++{
++	struct ath12k_base *ab = ar->ab;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = arvif->ndev_pvt;
++	struct ath12k_dp_ppe_vp_profile *vp_profile;
++	int ppe_vp_profile_idx;
++
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
++		return;
++
++	if (!ab->ppeds_handle) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "DS not enabled on this chip\n");
++		return;
++	}
++
++	if (!link_ndev_pvt) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "link netdevice not present for arvif\n");
++		return;
++	}
++
++	ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
++	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
++	if (!vp_profile) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "vp profile not present for arvif\n");
++		return;
++	}
++
++	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
++}
++
 +int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
  				void *vp_arg, int *ppe_vp_num,
  				struct ieee80211_ppe_vp_ds_params *vp_params)
@@ -1244,7 +1275,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	/*Allocate a ppe vp profile for a vap */
  	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
  	if (!vp_profile) {
-@@ -594,7 +601,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -695,7 +733,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  		goto dealloc_vp_profile;
  	}
  
@@ -1253,7 +1284,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -610,6 +617,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -711,6 +749,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -1261,7 +1292,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
-@@ -632,22 +640,27 @@ vp_free:
+@@ -733,22 +772,27 @@ vp_free:
  	return ret;
  }
  
@@ -1295,7 +1326,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
  
  	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-@@ -661,7 +674,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+@@ -762,7 +806,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -1314,7 +1345,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  #define ATH12K_PPEDS_DEFAULT_POOL_ID 0
-@@ -26,13 +27,11 @@ void ath12k_dp_ppeds_stop(struct ath12k_
+@@ -26,18 +27,18 @@ void ath12k_dp_ppeds_stop(struct ath12k_
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
  int ath12k_ppeds_attach( struct ath12k_base *ab);
@@ -1333,6 +1364,13 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
  				      struct ath12k_link_sta *arsta);
  void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
+ irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif);
+ #endif
+ #endif
 --- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
 +++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
 @@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_ad
@@ -1968,3 +2006,26 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
+ 	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
+ 	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
+ 				       arvif->bank_id);
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	ath12k_dp_ppeds_update_vp_entry(arvif->ar, arvif);
++#endif
+ }
+ 
+ static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
+@@ -1313,6 +1316,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
+ 		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
+ 		return;
+ 	}
++
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	ath12k_dp_ppeds_update_vp_entry(ar, arvif);
++#endif
+ }
+ 
+ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
