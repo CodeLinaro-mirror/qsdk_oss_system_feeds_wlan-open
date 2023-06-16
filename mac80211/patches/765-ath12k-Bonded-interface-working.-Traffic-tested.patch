@@ -84,7 +84,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,756 @@
+@@ -0,0 +1,759 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -93,6 +93,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +#include <net/mac80211.h>
 +#include <linux/module.h>
 +#include <net/bonding.h>
++#include <linux/ieee80211.h>
 +#include "core.h"
 +#include "ppe.h"
 +#include "bondif.h"
@@ -273,6 +274,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +		mutex_lock(&vif->bond_mutex);
 +		vif->link_ndev[link_num] = link_ndev;
 +		mutex_unlock(&vif->bond_mutex);
++		link_ndev->max_mtu = IEEE80211_MAX_DATA_LEN;
 +		link_ndev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 +		ret = register_netdevice(link_ndev);
 +		if (ret) {
@@ -542,7 +544,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +		for_each_set_bit(link_id, &ahvif->links_map,
 +				IEEE80211_MLD_MAX_NUM_LINKS) {
 +			tmp_arvif = ahvif->link[link_id];
-+			if (tmp_arvif)
++			if (tmp_arvif && tmp_arvif->ar)
 +				tmp_ar = tmp_arvif->ar;
 +			else
 +				break;
@@ -803,6 +805,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +		wdev->bond_netdev = bond_create_mlo(&init_net, name, mlo_info);
 +
 +		if (wdev->bond_netdev) {
++			wdev->bond_netdev->max_mtu = IEEE80211_MAX_DATA_LEN;
 +			set_bit(ATH12K_BOND_REGISTERED, &mldev->bond_state);
 +			ath12k_info(NULL, "Successfully registered bond_netdev %s for netdevice %s\n", wdev->bond_netdev->name, dev->name);
 +		} else {
@@ -982,19 +985,21 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4748,6 +4756,11 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4748,6 +4756,13 @@ static int ath12k_mac_vdev_delete(struct
  
  	reinit_completion(&ar->vdev_delete_done);
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
-+	if (arvif->ndev_pvt && arvif->ndev_pvt->link_ndev)
++	if (arvif->ndev_pvt && arvif->ndev_pvt->link_ndev) {
++		arvif->ndev_pvt->bond_dev->flags &= ~IFF_UP;
 +		arvif->ndev_pvt->link_ndev->flags &= ~IFF_UP;
++	}
 +#endif
 +
  	ret = ath12k_wmi_vdev_delete(ar, arvif->vdev_id);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to delete WMI scan vdev %d: %d\n",
-@@ -4775,8 +4788,12 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4775,8 +4790,12 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
@@ -1008,7 +1013,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4824,7 +4841,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4824,7 +4843,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1017,7 +1022,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5165,8 +5182,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5165,8 +5184,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1029,7 +1034,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -9555,6 +9574,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9555,6 +9576,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1041,7 +1046,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9613,6 +9637,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9621,6 +9647,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1058,7 +1063,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9704,6 +9738,19 @@ static int ath12k_mac_vdev_create(struct
+@@ -9712,6 +9748,19 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1078,7 +1083,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9775,6 +9822,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9783,6 +9832,10 @@ static int ath12k_mac_vdev_create(struct
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
@@ -1089,7 +1094,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  	return ret;
  
-@@ -10283,15 +10334,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10291,15 +10344,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1111,7 +1116,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12099,6 +12152,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12107,6 +12162,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1119,7 +1124,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14083,10 +14137,6 @@ static const struct ieee80211_ops ath12k
+@@ -14091,10 +14147,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1180,7 +1185,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  #include "hif.h"
  #include "ppe.h"
  
-@@ -419,7 +420,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
+@@ -433,7 +434,7 @@ void ath12k_dp_peer_ppeds_route_setup(st
  	struct ath12k_base *ab = ar->ab;
  	u32 service_code = PPE_DRV_SC_SPF_BYPASS;
  	int ppe_routing_enable = 1;
@@ -1189,7 +1194,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) ||
  	    src_info == -1)
-@@ -451,6 +452,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
+@@ -465,6 +466,7 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
  
  	if (i == PPE_VP_ENTRIES_MAX) {
  		WARN_ONCE(1, "All ppe vp profile entries are in use!");
@@ -1197,12 +1202,43 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  		return -ENOSR;
  	}
  
-@@ -628,44 +630,49 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -642,44 +644,80 @@ static void ath12k_dp_ppeds_setup_vp_ent
  	return;
  }
  
 -int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
 -				struct ieee80211_vif *vif,
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif)
++{
++	struct ath12k_base *ab = ar->ab;
++	struct ath12k_link_vif_pvt *link_ndev_pvt = arvif->ndev_pvt;
++	struct ath12k_dp_ppe_vp_profile *vp_profile;
++	int ppe_vp_profile_idx;
++
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
++		return;
++
++	if (!ab->ppeds_handle) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "DS not enabled on this chip\n");
++		return;
++	}
++
++	if (!link_ndev_pvt) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "link netdevice not present for arvif\n");
++		return;
++	}
++
++	ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
++	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
++	if (!vp_profile) {
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "vp profile not present for arvif\n");
++		return;
++	}
++
++	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
++}
++
 +int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
  				void *vp_arg, int *ppe_vp_num,
  				struct ieee80211_ppe_vp_ds_params *vp_params)
@@ -1257,7 +1293,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	/*Allocate a ppe vp profile for a vap */
  	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
  	if (!vp_profile) {
-@@ -681,7 +688,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -695,7 +733,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  		goto dealloc_vp_profile;
  	}
  
@@ -1266,7 +1302,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -697,6 +704,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -711,6 +749,7 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -1274,7 +1310,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
-@@ -719,22 +727,27 @@ vp_free:
+@@ -733,22 +772,27 @@ vp_free:
  	return ret;
  }
  
@@ -1308,7 +1344,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
  
  	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-@@ -748,7 +761,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+@@ -762,7 +806,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -1327,7 +1363,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  };
  
  #define ATH12K_PPEDS_DEFAULT_POOL_ID 0
-@@ -26,13 +27,11 @@ void ath12k_dp_ppeds_stop(struct ath12k_
+@@ -26,18 +27,18 @@ void ath12k_dp_ppeds_stop(struct ath12k_
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
  int ath12k_ppeds_attach( struct ath12k_base *ab);
@@ -1346,6 +1382,13 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
  				      struct ath12k_link_sta *arsta);
  void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
+ irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
+ irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
++void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
++				     struct ath12k_link_vif *arvif);
+ #endif
+ #endif
 --- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
 +++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
 @@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_ad
@@ -1838,7 +1881,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -16987,9 +16991,16 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16964,9 +16968,16 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, NETDEV_UP,			\
  		 NL80211_FLAG_NEED_NETDEV_UP)		\
@@ -1855,7 +1898,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
  		 NL80211_FLAG_NEED_NETDEV_UP |		\
  		 NL80211_FLAG_NO_WIPHY_MTX |		\
-@@ -17021,7 +17032,13 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16998,7 +17009,13 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, WIPHY_CLEAR,			\
  		 NL80211_FLAG_NEED_WIPHY |		\
@@ -1870,7 +1913,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  enum nl80211_internal_flags_selector {
  #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
-@@ -17384,6 +17401,7 @@ static const struct genl_small_ops nl802
+@@ -17361,6 +17378,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_start_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1878,7 +1921,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17392,6 +17410,7 @@ static const struct genl_small_ops nl802
+@@ -17369,6 +17387,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_stop_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1886,7 +1929,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17513,7 +17532,7 @@ static const struct genl_small_ops nl802
+@@ -17490,7 +17509,7 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_trigger_scan,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -1895,7 +1938,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_ABORT_SCAN,
-@@ -17896,6 +17915,7 @@ static const struct genl_small_ops nl802
+@@ -17873,6 +17892,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_start_radar_detection,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1903,7 +1946,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  					 NL80211_FLAG_NO_WIPHY_MTX |
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
-@@ -18092,13 +18112,15 @@ static const struct genl_small_ops nl802
+@@ -18069,13 +18089,15 @@ static const struct genl_small_ops nl802
  		.cmd = NL80211_CMD_ADD_LINK,
  		.doit = nl80211_add_link,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -1920,7 +1963,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -18106,6 +18128,7 @@ static const struct genl_small_ops nl802
+@@ -18083,6 +18105,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_add_link_station,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -1981,28 +2024,9 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
-From fc00ff4a9f13005902988e66dbff549a0aa2d8e2 Mon Sep 17 00:00:00 2001
-From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
-Date: Wed, 14 Jun 2023 20:30:30 -0700
-Subject: [PATCH] ath12k: update ppe vp entry with updated bank_id config
-
-When bank_id gets modified after the PPE DS attach, the
-VP entry register needs to be updated to reflect correct
-mapping between vp port, vdev_id and bank_id. Without this
-backbone data packets getting dropped.
-
-Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
----
- drivers/net/wireless/ath/ath12k/dp.c  |  7 ++++++
- drivers/net/wireless/ath/ath12k/ppe.c | 31 +++++++++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/ppe.h |  2 ++
- 3 files changed, 40 insertions(+)
-
-diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
-index dbb0882b7a01..d361c494138b 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -536,6 +536,9 @@ void ath12k_dp_tx_update_bank_profile(struct ath12k_link_vif *arvif)
+@@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
  	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
  				       arvif->bank_id);
@@ -2012,7 +2036,7 @@ index dbb0882b7a01..d361c494138b 100644
  }
  
  static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
-@@ -1319,6 +1322,10 @@ void ath12k_dp_vdev_tx_attach(struct ath12k *ar, struct ath12k_link_vif *arvif)
+@@ -1313,6 +1316,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
  		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
  		return;
  	}
@@ -2023,62 +2047,3 @@ index dbb0882b7a01..d361c494138b 100644
  }
  
  static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 30eb971fc3d4..71bc5e4ba81c 100644
---- a/drivers/net/wireless/ath/ath12k/ppe.c
-+++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -644,6 +644,37 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
- 	return;
- }
- 
-+void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
-+				     struct ath12k_link_vif *arvif)
-+{
-+	struct ath12k_base *ab = ar->ab;
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = arvif->ndev_pvt;
-+	struct ath12k_dp_ppe_vp_profile *vp_profile;
-+	int ppe_vp_profile_idx;
-+
-+	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
-+		return;
-+
-+	if (!ab->ppeds_handle) {
-+		ath12k_dbg(ab, ATH12K_DBG_PPE, "DS not enabled on this chip\n");
-+		return;
-+	}
-+
-+	if (!link_ndev_pvt) {
-+		ath12k_dbg(ab, ATH12K_DBG_PPE, "link netdevice not present for arvif\n");
-+		return;
-+	}
-+
-+	ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
-+	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-+	if (!vp_profile) {
-+		ath12k_dbg(ab, ATH12K_DBG_PPE, "vp profile not present for arvif\n");
-+		return;
-+	}
-+
-+	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
-+}
-+
- int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
- 				void *vp_arg, int *ppe_vp_num,
- 				struct ieee80211_ppe_vp_ds_params *vp_params)
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
-index 1307d9ad41b7..4aaa1d1817a0 100644
---- a/drivers/net/wireless/ath/ath12k/ppe.h
-+++ b/drivers/net/wireless/ath/ath12k/ppe.h
-@@ -38,5 +38,7 @@ void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
- irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
- irqreturn_t ath12k_ds_reo2ppe_irq_handler(int irq, void *ctxt);
- irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
-+void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
-+				     struct ath12k_link_vif *arvif);
- #endif
- #endif
-
-base-commit: 8785adf62db68cb8ced6e296b4e53afa1dafd03b
--- 
-2.17.1
-
