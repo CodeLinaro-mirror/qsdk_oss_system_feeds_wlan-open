@@ -1076,7 +1076,7 @@ mac80211_get_mld_idx() {
 		return
 	fi
 
-	index=0
+	index=$2
 	for _mld in $_mlds
 	do
 		if [ "$mld_name" == "$_mld" ]; then
@@ -1100,7 +1100,7 @@ mac80211_prepare_vif() {
 		if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ] && [ -n "$mld" ]); then
 			config_get mld_ifname "$mld" ifname
 			if [ -z "$mld_ifname" ]; then
-				ml_idx=$(mac80211_get_mld_idx $mld)
+				ml_idx=$(mac80211_get_mld_idx $mld ${1:5:1})
 				[ -z "$ml_idx" ] || ifname="wlan$ml_idx"
 			else
 				ifname="$mld_ifname"
