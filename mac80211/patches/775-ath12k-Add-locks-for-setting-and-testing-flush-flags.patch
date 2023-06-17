@@ -1,8 +1,8 @@
-From cd560c2c1a9dfa6c8731c0f6edee8a78e043bfff Mon Sep 17 00:00:00 2001
+From 488a23e01534077f31d08974286766c1da904282 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
-Date: Fri, 9 Jun 2023 16:27:12 -0700
+Date: Thu, 15 Jun 2023 10:13:46 -0700
 Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
-   checks for checking flush flags
+      checks for checking flush flags
 
     Usually when work threads carry out the process of
     reconfiguring the chip which was asserted, a lot of other
@@ -30,19 +30,19 @@ Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
 Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c | 16 ++++++++++++++--
+ drivers/net/wireless/ath/ath12k/core.c | 16 +++++++--
  drivers/net/wireless/ath/ath12k/core.h |  1 +
  drivers/net/wireless/ath/ath12k/htc.c  |  2 ++
- drivers/net/wireless/ath/ath12k/mac.c  | 11 +++++++++++
+ drivers/net/wireless/ath/ath12k/mac.c  | 61 ++++++++++++++++++++++++++++++++--
  drivers/net/wireless/ath/ath12k/mhi.c  |  1 +
  drivers/net/wireless/ath/ath12k/pci.c  |  2 ++
- drivers/net/wireless/ath/ath12k/peer.c |  6 ++++++
+ drivers/net/wireless/ath/ath12k/peer.c |  8 +++++
  drivers/net/wireless/ath/ath12k/qmi.c  |  1 +
- drivers/net/wireless/ath/ath12k/wmi.c  |  5 +++++
- 9 files changed, 43 insertions(+), 2 deletions(-)
+ drivers/net/wireless/ath/ath12k/wmi.c  |  5 +++
+ 9 files changed, 93 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index acf30b4..94fb632 100644
+index e029593..dda8398 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -52,6 +52,9 @@ module_param_named(ppe_ds_enable, ath12k_ppe_ds_enabled, uint, 0644);
@@ -55,7 +55,7 @@ index acf30b4..94fb632 100644
  
  bool ath12k_mgmt_rx_reordering = false;
  module_param_named(mgmt_rx_reorder, ath12k_mgmt_rx_reordering, bool, 0644);
-@@ -1225,6 +1228,8 @@ static int ath12k_core_start(struct ath12k_base *ab,
+@@ -1226,6 +1229,8 @@ static int ath12k_core_start(struct ath12k_base *ab,
  		goto err_reo_cleanup;
  	}
  
@@ -64,7 +64,7 @@ index acf30b4..94fb632 100644
  	/* put hardware to DBS mode */
  	if (ab->hw_params->single_pdev_only) {
  		ret = ath12k_wmi_set_hw_mode(ab, WMI_HOST_HW_MODE_DBS);
-@@ -1737,8 +1742,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+@@ -1738,8 +1743,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
  	if (ret)
  		return ret;
  
@@ -73,7 +73,7 @@ index acf30b4..94fb632 100644
  	ret = ath12k_core_qmi_firmware_ready(ab);
  	if (ret)
  		goto err_hal_srng_deinit;
-@@ -1905,6 +1908,12 @@ static void ath12k_core_restart(struct work_struct *work)
+@@ -1906,6 +1909,12 @@ static void ath12k_core_restart(struct work_struct *work)
  	ret = ath12k_core_reconfigure_on_crash(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to reconfigure driver on crash recovery\n");
@@ -86,7 +86,7 @@ index acf30b4..94fb632 100644
  		return;
  	}
  
-@@ -1957,6 +1966,9 @@ static void ath12k_core_reset(struct work_struct *work)
+@@ -1958,6 +1967,9 @@ static void ath12k_core_reset(struct work_struct *work)
  		 */
  		ath12k_warn(ab, "already resetting count %d\n", reset_count);
  
@@ -97,7 +97,7 @@ index acf30b4..94fb632 100644
  		time_left = wait_for_completion_timeout(&ab->reset_complete,
  							ATH12K_RESET_TIMEOUT_HZ);
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 0a19a65..930a949 100644
+index 418c86b..906cfa3 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -239,6 +239,7 @@ enum ath12k_dev_flags {
@@ -122,14 +122,83 @@ index d8d0929..9e0aa73 100644
  	if (status) {
  		kfree_skb(skb);
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 24a808f..dc90407 100644
+index f296251..03f06ba 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -5691,6 +5691,16 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+@@ -4733,7 +4733,12 @@ static void ath12k_mac_op_vif_cfg_changed(struct ieee80211_hw *hw,
+ 	if (changed & BSS_CHANGED_ASSOC) {
+ 		/* TODO Handle STA ML assoc */
+ 		arvif = &ahvif->deflink;
++		if (!(arvif && arvif->ar)) {
++			ath12k_err(NULL, "unable to change vif config\n");
++			return;
++		}
+ 		ar = arvif->ar;
++
+ 		if (vif->cfg.assoc)
+ 			ath12k_bss_assoc(ar, arvif, &vif->bss_conf);
+ 		else
+@@ -4766,6 +4771,15 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+ 	}
+ 	ar = arvif->ar;
+ 
++	if (!ar) {
++		ath12k_info(NULL,
++			    "bss info parameter changes %llx cached to apply after vdev create on channel assign\n",
++			    changed);
++		ahvif->cache[link_id].bss_conf_changed |= changed;
++		mutex_unlock(&ah->conf_mutex);
++		return;
++	}
++
+ 	mutex_lock(&ar->conf_mutex);
+ 
+ 	ath12k_mac_bss_info_changed(ar, arvif, info, changed);
+@@ -4813,14 +4827,13 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	ar->num_created_vdevs--;
+ 	arvif->ahvif->num_vdev_created--;
+ 	arvif->is_created = false;
++	arvif->ar = NULL;
+ 
+ clean_up:
+ #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
+ 	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
+ 		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
+ #endif
+-
+-	arvif->ar = NULL;
+ 	spin_lock_bh(&ar->data_lock);
+ 	list_del(&arvif->list);
+ 	spin_unlock_bh(&ar->data_lock);
+@@ -5228,6 +5241,10 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
+ 			mutex_unlock(&ah->conf_mutex);
+ 			return -EINVAL;
+ 		} else if (ar != arvif->ar) {
++			if (!arvif->ar) {
++				mutex_unlock(&ah->conf_mutex);
++				return -EINVAL;
++			}
+ 			mutex_lock(&arvif->ar->conf_mutex);
+ 			if (arvif->ar->scan.vdev_id != -1)
+ 				arvif->ar->scan.vdev_id = -1;
+@@ -5360,6 +5377,11 @@ static void ath12k_mac_op_cancel_hw_scan(struct ieee80211_hw *hw,
+ 	}
+ 
+ 	ar = arvif->ar;
++	if (!ar) {
++		mutex_unlock(&ah->conf_mutex);
++		ath12k_err(NULL, "unable to select device to cancel scan\n");
++		return;
++	}
+ 	mutex_unlock(&ah->conf_mutex);
+ 
+ 	mutex_lock(&ar->conf_mutex);
+@@ -5691,6 +5713,17 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
  		return 0;
  	}
  
 +	if (!(arvif && arvif->ar)) {
++		ath12k_err(NULL, "Failed to set key.\n");
 +		mutex_unlock(&ah->conf_mutex);
 +		return -EINVAL;
 +	}
@@ -142,13 +211,71 @@ index 24a808f..dc90407 100644
  	if (sta) {
  		ahsta = (struct ath12k_sta *)sta->drv_priv;
  		if (sta->mlo) {
-@@ -6960,6 +6970,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
+@@ -6960,6 +6993,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
  		ar = arvif->ar;
  
  		mutex_lock(&ar->conf_mutex);
 +
  		ath12k_mac_station_post_remove(ar, arvif, arsta);
  		mutex_unlock(&ar->conf_mutex);
+ 
+@@ -7292,6 +7326,11 @@ static int ath12k_mac_op_change_sta_links(struct ieee80211_hw *hw,
+ 		}
+ 
+ 		ar = arvif->ar;
++		if (!ar) {
++			ath12k_err(NULL,
++				   "Failed to get ar to change sta links\n");
++			continue;
++		}
+ 
+ 		mutex_lock(&ar->conf_mutex);
+ 		ret = ath12k_mac_station_add(ar, arvif, arsta);
+@@ -7592,6 +7631,10 @@ static int ath12k_mac_op_conf_tx(struct ieee80211_hw *hw,
+ 	mutex_unlock(&ah->conf_mutex);
+ 
+ 	ar = arvif->ar;
++	if (!ar) {
++		ath12k_err(NULL, "Failed to config tx\n");
++		return -EINVAL;
++	}
+ 
+ 	mutex_lock(&ar->conf_mutex);
+ 	ret = ath12k_mac_conf_tx(ar, arvif, ac, params);
+@@ -10201,6 +10244,7 @@ err_vdev_del:
+ 	spin_unlock_bh(&ar->data_lock);
+ 
+ err:
++	arvif->is_created = false;
+ 	arvif->ar = NULL;
+ 	return ret;
+ }
+@@ -12847,6 +12891,14 @@ static int ath12k_mac_op_set_rts_threshold(struct ieee80211_hw *hw, u32 value,
+ 		}
+ 
+ 		ar = arvif->ar;
++		if (!ar) {
++			ath12k_err(NULL,
++				   "Failed to set rts threshold for link: %d\n",
++				   link_id);
++			mutex_unlock(&ah->conf_mutex);
++			return ret;
++		}
++
+ 		ret = ath12k_set_vdev_param_to_all_vifs(ar, param_id, value);
+ 		if (ret) {
+ 			ath12k_warn(ar->ab, "failed to set RTS config for all vdevs of pdev %d",
+@@ -14095,6 +14147,11 @@ static void ath12k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+ 
+ 	/* TODO accumulate link sta stats here? */
+ 
++	if (!ar) {
++		ath12k_err(NULL,
++			   "unable to determine sta statistics \n");
++		return;
++	}
+ 	sinfo->rx_duration = arsta->rx_duration;
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
  
 diff --git a/drivers/net/wireless/ath/ath12k/mhi.c b/drivers/net/wireless/ath/ath12k/mhi.c
 index eacb7b5..8c4dd18 100644
@@ -176,11 +303,15 @@ index a2cac52..c178aa8 100644
          ath12k_core_deinit(ab);
  }
 diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
-index 126499a..0fdda6f 100644
+index 126499a..749a5bc 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -389,6 +389,9 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
+@@ -387,8 +387,13 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
  
+ 		ar = arvif->ar;
+ 
++		if (!ar)
++			continue;
  		cancel_work_sync(&arsta->update_wk);
  
 +		if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags) ||
@@ -189,7 +320,7 @@ index 126499a..0fdda6f 100644
  		mutex_lock(&ar->conf_mutex);
  		ath12k_dp_peer_cleanup(ar, arvif->vdev_id, arsta->addr);
  
-@@ -414,6 +417,9 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
+@@ -414,6 +419,9 @@ int ath12k_ml_link_peers_delete(struct ath12k_vif *ahvif, struct ath12k_sta *ahs
  
  		ar = arvif->ar;
  
