@@ -1,4 +1,4 @@
-From 98d1396229eaf66c0d2db0ee8418f1df4e9803f9 Mon Sep 17 00:00:00 2001
+From ac0d3754703e11e054269e05650a2fd59bec0070 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Wed, 26 Apr 2023 16:37:13 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
@@ -34,7 +34,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp.c       |   7 +
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  15 +-
  drivers/net/wireless/ath/ath12k/dp_tx.c    |   5 +-
- drivers/net/wireless/ath/ath12k/mac.c      |  78 +-
+ drivers/net/wireless/ath/ath12k/mac.c      |  80 ++-
  drivers/net/wireless/ath/ath12k/pci.c      |  23 +
  drivers/net/wireless/ath/ath12k/ppe.c      |  82 ++-
  drivers/net/wireless/ath/ath12k/ppe.h      |  15 +-
@@ -57,7 +57,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  net/wireless/core.c                        |  50 +-
  net/wireless/nl80211.c                     |  29 +-
  net/wireless/util.c                        |   4 +
- 31 files changed, 1245 insertions(+), 61 deletions(-)
+ 32 files changed, 1268 insertions(+), 89 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -1029,6 +1029,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index fb3a553..0814a6a 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
@@ -1157,18 +1159,20 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9783,6 +9832,10 @@ static int ath12k_mac_vdev_create(struct
+@@ -9783,6 +9832,12 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
-+	if (link_ndev && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK)
++	if (link_ndev && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK) {
 +		link_ndev->flags |= IFF_UP;
++		link_ndev_pvt->bond_dev->flags |= IFF_UP;
++	}
 +#endif
  
  	return ret;
  
-@@ -10291,15 +10344,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10291,15 +10346,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
  	return ret;
  }
  
@@ -1190,7 +1194,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12107,6 +12162,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12107,6 +12164,7 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1198,7 +1202,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14091,10 +14147,6 @@ static const struct ieee80211_ops ath12k
+@@ -14091,10 +14149,6 @@ static const struct ieee80211_ops ath12k_ops = {
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
