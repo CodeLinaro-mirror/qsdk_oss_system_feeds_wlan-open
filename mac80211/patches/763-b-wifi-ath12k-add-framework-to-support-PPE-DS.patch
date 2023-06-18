@@ -1,4 +1,4 @@
-From cdc6765f7c6826e4fcdcc061f7c01a22490b9ee7 Mon Sep 17 00:00:00 2001
+From e6bab678d9958a961b8d46354dd51e58d1f1a926 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Wed, 12 Apr 2023 16:09:58 -0700
 Subject: [PATCH] wifi: ath12k: add framework to support PPE DS
@@ -25,18 +25,19 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
+Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/Kconfig    |   8 +
  drivers/net/wireless/ath/ath12k/Makefile   |   1 +
  drivers/net/wireless/ath/ath12k/core.c     |  40 +-
- drivers/net/wireless/ath/ath12k/core.h     |  43 +-
+ drivers/net/wireless/ath/ath12k/core.h     |  45 +-
  drivers/net/wireless/ath/ath12k/debug.h    |   5 +-
- drivers/net/wireless/ath/ath12k/debugfs.c  |  89 +++
- drivers/net/wireless/ath/ath12k/dp.c       | 226 +++++-
- drivers/net/wireless/ath/ath12k/dp.h       | 121 ++-
+ drivers/net/wireless/ath/ath12k/debugfs.c  |  93 ++
+ drivers/net/wireless/ath/ath12k/dp.c       | 256 +++++-
+ drivers/net/wireless/ath/ath12k/dp.h       | 125 ++-
  drivers/net/wireless/ath/ath12k/dp_rx.c    |  78 +-
  drivers/net/wireless/ath/ath12k/dp_rx.h    |  35 +
- drivers/net/wireless/ath/ath12k/dp_tx.c    | 144 ++++
+ drivers/net/wireless/ath/ath12k/dp_tx.c    | 189 ++++
  drivers/net/wireless/ath/ath12k/dp_tx.h    |   6 +-
  drivers/net/wireless/ath/ath12k/hal.c      |  65 +-
  drivers/net/wireless/ath/ath12k/hal.h      |  29 +-
@@ -45,22 +46,24 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  drivers/net/wireless/ath/ath12k/hal_rx.h   |   4 +
  drivers/net/wireless/ath/ath12k/hal_tx.c   |  10 +
  drivers/net/wireless/ath/ath12k/hal_tx.h   |  16 +
- drivers/net/wireless/ath/ath12k/hif.h      |  49 ++
+ drivers/net/wireless/ath/ath12k/hif.h      |  49 +
  drivers/net/wireless/ath/ath12k/hw.c       |  43 +-
  drivers/net/wireless/ath/ath12k/hw.h       |  30 +-
  drivers/net/wireless/ath/ath12k/mac.c      |  15 +
- drivers/net/wireless/ath/ath12k/pci.c      |  92 ++-
+ drivers/net/wireless/ath/ath12k/pci.c      |  92 +-
  drivers/net/wireless/ath/ath12k/pci.h      |  13 +
- drivers/net/wireless/ath/ath12k/ppe.c      | 877 +++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/ppe.c      | 989 +++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/ppe.h      |  43 +
  drivers/net/wireless/ath/ath12k/wmi.c      |  82 ++
  drivers/net/wireless/ath/ath12k/wmi.h      |  68 ++
  local-symbols                              |   1 +
  net/mac80211/iface.c                       |   4 +
- 31 files changed, 2209 insertions(+), 105 deletions(-)
+ 31 files changed, 2406 insertions(+), 105 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.c
  create mode 100644 drivers/net/wireless/ath/ath12k/ppe.h
 
+diff --git a/drivers/net/wireless/ath/ath12k/Kconfig b/drivers/net/wireless/ath/ath12k/Kconfig
+index 1d1f95e..e790048 100644
 --- a/drivers/net/wireless/ath/ath12k/Kconfig
 +++ b/drivers/net/wireless/ath/ath12k/Kconfig
 @@ -62,3 +62,11 @@ config ATH12K_PKTLOG
@@ -75,9 +78,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		Enable ath12k PPE-DS support
 +
 +		Say Y to enable PPE DS Support. If unsure, say N.
+diff --git a/drivers/net/wireless/ath/ath12k/Makefile b/drivers/net/wireless/ath/ath12k/Makefile
+index ca14839..ec9bb57 100644
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -32,6 +32,7 @@ ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spec
+@@ -32,6 +32,7 @@ ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spectral.o
  ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
  ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
  ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
@@ -85,6 +90,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  # for tracing framework to find trace.h
  CFLAGS_trace.o := -I$(src)
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 9dd95a3..d03de4e 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -19,6 +19,7 @@
@@ -95,7 +102,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  unsigned int ath12k_debug_mask;
  module_param_named(debug_mask, ath12k_debug_mask, uint, 0644);
-@@ -46,6 +47,10 @@ static unsigned int ath12k_en_fwlog = tr
+@@ -46,6 +47,10 @@ static unsigned int ath12k_en_fwlog = true;
  module_param_named(en_fwlog, ath12k_en_fwlog, uint, 0644);
  MODULE_PARM_DESC(en_fwlog, "fwlog: 0-disable, 1-enable");
  
@@ -106,7 +113,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
  
  bool ath12k_mgmt_rx_reordering = false;
-@@ -1078,8 +1083,19 @@ static int ath12k_core_pdev_init(struct
+@@ -1078,8 +1083,19 @@ static int ath12k_core_pdev_init(struct ath12k_base *ab)
  
  	ath12k_sawf_init(ab);
  
@@ -136,7 +143,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ath12k_spectral_deinit(ab);
  	ath12k_thermal_unregister(ab);
  	ath12k_sawf_deinit(ab);
-@@ -1368,7 +1387,11 @@ static int ath12k_core_hw_group_start(st
+@@ -1368,7 +1387,11 @@ static int ath12k_core_hw_group_start(struct ath12k_hw_group *ag)
  			goto pdev_cleanup;
  		}
  		ath12k_hif_irq_enable(ab);
@@ -149,7 +156,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		ath12k_config_qdss(ab);
  
  		if (ath12k_en_fwlog == true) {
-@@ -1481,6 +1504,21 @@ int ath12k_core_qmi_firmware_ready(struc
+@@ -1481,6 +1504,21 @@ int ath12k_core_qmi_firmware_ready(struct ath12k_base *ab)
  		goto err_firmware_stop;
  	}
  
@@ -171,6 +178,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ret = ath12k_dp_alloc(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to init DP: %d\n", ret);
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index d51232d..c9dc5f5 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -28,6 +28,10 @@
@@ -253,6 +262,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	int userpd_id;
  
  	/* must be last */
+diff --git a/drivers/net/wireless/ath/ath12k/debug.h b/drivers/net/wireless/ath/ath12k/debug.h
+index 43a176a..cb6ea36 100644
 --- a/drivers/net/wireless/ath/ath12k/debug.h
 +++ b/drivers/net/wireless/ath/ath12k/debug.h
 @@ -28,7 +28,10 @@ enum ath12k_debug_mask {
@@ -267,9 +278,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ATH12K_DBG_ANY		= 0xffffffff,
  };
  
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
+index 7a92feb..8323c73 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2065,6 +2065,94 @@ static const struct file_operations fops
+@@ -2065,6 +2065,94 @@ static const struct file_operations fops_soc_rx_hash_ix3 = {
  	.write = ath12k_write_rx_hash_ix3,
  };
  
@@ -364,7 +377,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
  {
  	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
-@@ -2097,6 +2185,11 @@ int ath12k_debugfs_pdev_create(struct at
+@@ -2097,6 +2185,11 @@ int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
  	debugfs_create_file("fw_reset_stats", 0400, ab->debugfs_soc, ab,
  			    &fops_fw_reset_stats);
  
@@ -376,6 +389,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	return 0;
  }
  
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index df1ff40..0e49536 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
 @@ -13,6 +13,9 @@
@@ -388,7 +403,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  #define ATH12K_DP_LMAC_PEER_ID_LEGACY	2
  #define ATH12K_DP_LMAC_PEER_ID_MLO	3
-@@ -84,6 +87,10 @@ int ath12k_dp_peer_default_route_setup(s
+@@ -84,6 +87,10 @@ int ath12k_dp_peer_default_route_setup(struct ath12k *ar, struct ath12k_link_vif
  	ath12k_dbg(ab, ATH12K_DBG_DP_RX, "peer %pM set def route id %d sta_link %d\n",
  		   arsta->addr, lmac_peer_routing_id,
  		   hweight16(sta->valid_links));
@@ -399,7 +414,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	return 0;
  }
-@@ -129,9 +136,10 @@ int ath12k_dp_peer_setup(struct ath12k *
+@@ -129,9 +136,10 @@ int ath12k_dp_peer_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
  		goto peer_tid_clean;
  	}
  
@@ -411,7 +426,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	return 0;
  
  peer_tid_clean:
-@@ -164,7 +172,7 @@ static int ath12k_dp_srng_find_ring_in_m
+@@ -164,7 +172,7 @@ static int ath12k_dp_srng_find_ring_in_mask(int ring_num, const u8 *grp_mask)
  	int ext_group_num;
  	u8 mask = 1 << ring_num;
  
@@ -420,7 +435,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	     ext_group_num++) {
  		if (mask & grp_mask[ext_group_num])
  			return ext_group_num;
-@@ -183,6 +191,11 @@ static int ath12k_dp_srng_calculate_msi_
+@@ -183,6 +191,11 @@ static int ath12k_dp_srng_calculate_msi_group(struct ath12k_base *ab,
  		if (ring_num == HAL_WBM2SW_REL_ERR_RING_NUM) {
  			grp_mask = &ab->hw_params->ring_mask->rx_wbm_rel[0];
  			ring_num = 0;
@@ -432,7 +447,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		} else {
  			grp_mask = &ab->hw_params->ring_mask->tx[0];
  		}
-@@ -206,6 +219,12 @@ static int ath12k_dp_srng_calculate_msi_
+@@ -206,6 +219,12 @@ static int ath12k_dp_srng_calculate_msi_group(struct ath12k_base *ab,
  	case HAL_RXDMA_BUF:
  		grp_mask = &ab->hw_params->ring_mask->host2rxdma[0];
  		break;
@@ -445,7 +460,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	case HAL_RXDMA_MONITOR_BUF:
  	case HAL_TCL_DATA:
  	case HAL_TCL_CMD:
-@@ -231,6 +250,7 @@ static void ath12k_dp_srng_msi_setup(str
+@@ -231,6 +250,7 @@ static void ath12k_dp_srng_msi_setup(struct ath12k_base *ab,
  	int msi_group_number, msi_data_count;
  	u32 msi_data_start, msi_irq_start, addr_lo, addr_hi;
  	int ret;
@@ -453,7 +468,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	ret = ath12k_hif_get_user_msi_vector(ab, "DP",
  					     &msi_data_count, &msi_data_start,
-@@ -262,6 +282,12 @@ static void ath12k_dp_srng_msi_setup(str
+@@ -262,6 +282,12 @@ static void ath12k_dp_srng_msi_setup(struct ath12k_base *ab,
  	ring_params->msi_data = (msi_group_number % msi_data_count)
  		+ msi_data_start;
  	ring_params->flags |= HAL_SRNG_FLAGS_MSI_INTR;
@@ -466,7 +481,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
-@@ -316,6 +342,7 @@ int ath12k_dp_srng_setup(struct ath12k_b
+@@ -316,6 +342,7 @@ int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
  
  	switch (type) {
  	case HAL_REO_DST:
@@ -474,7 +489,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		params.intr_batch_cntr_thres_entries =
  					HAL_SRNG_INT_BATCH_THRESHOLD_RX;
  		params.intr_timer_thres_us = HAL_SRNG_INT_TIMER_THRESHOLD_RX;
-@@ -365,6 +392,11 @@ int ath12k_dp_srng_setup(struct ath12k_b
+@@ -365,6 +392,11 @@ int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
  		break;
  	case HAL_RXDMA_DIR_BUF:
  		break;
@@ -486,7 +501,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	default:
  		ath12k_warn(ab, "Not a valid ring type in dp :%d\n", type);
  		return -EINVAL;
-@@ -548,6 +580,10 @@ static void ath12k_dp_srng_common_cleanu
+@@ -548,6 +580,10 @@ static void ath12k_dp_srng_common_cleanup(struct ath12k_base *ab)
  	ath12k_dp_srng_cleanup(ab, &dp->reo_except_ring);
  	ath12k_dp_srng_cleanup(ab, &dp->reo_cmd_ring);
  	ath12k_dp_srng_cleanup(ab, &dp->reo_status_ring);
@@ -497,7 +512,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  static int ath12k_dp_srng_common_setup(struct ath12k_base *ab)
-@@ -665,6 +701,14 @@ static int ath12k_dp_srng_common_setup(s
+@@ -665,6 +701,14 @@ static int ath12k_dp_srng_common_setup(struct ath12k_base *ab)
  
  	ath12k_hal_reo_hw_setup(ab, ring_hash_map);
  
@@ -512,7 +527,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	return 0;
  
  err:
-@@ -1124,12 +1168,41 @@ void ath12k_dp_pdev_pre_alloc(struct ath
+@@ -1124,12 +1168,41 @@ void ath12k_dp_pdev_pre_alloc(struct ath12k_base *ab)
  	}
  }
  
@@ -554,7 +569,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ret = ath12k_dp_rx_htt_setup(ab);
  	if (ret)
  		goto out;
-@@ -1269,6 +1342,18 @@ static void ath12k_dp_cc_cleanup(struct
+@@ -1269,6 +1342,18 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
  		dev_kfree_skb_any(skb);
  	}
  
@@ -573,7 +588,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	for (i = 0; i < ATH12K_NUM_RX_SPT_PAGES; i++) {
  		if (!dp->spt_info->rxbaddr[i])
  			continue;
-@@ -1319,6 +1404,11 @@ static void ath12k_dp_cc_cleanup(struct
+@@ -1319,6 +1404,11 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
  		spin_unlock_bh(&dp->tx_desc_lock[pool_id]);
  	}
  
@@ -585,7 +600,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	/* unmap SPT pages */
  	for (i = 0; i < dp->num_spt_pages; i++) {
  		if (!dp->spt_info[i].vaddr)
-@@ -1470,6 +1560,17 @@ struct ath12k_tx_desc_info *ath12k_dp_ge
+@@ -1470,6 +1560,17 @@ struct ath12k_tx_desc_info *ath12k_dp_get_tx_desc(struct ath12k_base *ab,
  	return *(struct ath12k_tx_desc_info **)desc_addr_ptr;
  }
  
@@ -603,7 +618,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static void ath12k_dp_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp)
  {
  	u32 cmem_base;
-@@ -1477,7 +1578,8 @@ static void ath12k_dp_tx_cmem_init(struc
+@@ -1477,7 +1578,8 @@ static void ath12k_dp_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp)
  
  	cmem_base = ab->qmi.dev_mem[ATH12K_QMI_DEVMEM_CMEM_INDEX].start;
  
@@ -613,7 +628,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		/* Write to PPT in CMEM */
  		if (ab->hif.ops->cmem_write32)
  			ath12k_hif_cmem_write32(ab, cmem_base + ATH12K_PPT_ADDR_OFFSET(i),
-@@ -1508,6 +1610,139 @@ static void ath12k_dp_rx_cmem_init(struc
+@@ -1508,6 +1610,139 @@ static void ath12k_dp_rx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp)
  	}
  }
  
@@ -753,7 +768,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static int ath12k_dp_cc_desc_init(struct ath12k_base *ab)
  {
  	struct ath12k_dp *dp = &ab->dp;
-@@ -1572,6 +1807,7 @@ static int ath12k_dp_cc_desc_init(struct
+@@ -1572,6 +1807,7 @@ static int ath12k_dp_cc_desc_init(struct ath12k_base *ab)
  		for (j = 0; j < ATH12K_MAX_SPT_ENTRIES; j++) {
  			rx_descs[j].cookie = ath12k_dp_cc_cookie_gen(ppt_idx, j);
  			rx_descs[j].magic = ATH12K_DP_RX_DESC_MAGIC;
@@ -761,7 +776,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  			list_add_tail(&rx_descs[j].list, &dp->rx_desc_free_list);
  
  			/* Update descriptor VA in SPT */
-@@ -1610,6 +1846,7 @@ static int ath12k_dp_cc_init(struct ath1
+@@ -1610,6 +1846,7 @@ static int ath12k_dp_cc_init(struct ath12k_base *ab)
  
  	INIT_LIST_HEAD(&dp->rx_desc_free_list);
  	INIT_LIST_HEAD(&dp->rx_desc_used_list);
@@ -769,7 +784,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	spin_lock_init(&dp->rx_desc_lock);
  
  	for (i = 0; i < ATH12K_HW_MAX_QUEUES; i++) {
-@@ -1661,6 +1898,19 @@ static int ath12k_dp_cc_init(struct ath1
+@@ -1661,6 +1898,19 @@ static int ath12k_dp_cc_init(struct ath12k_base *ab)
  		goto free;
  	}
  
@@ -789,6 +804,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	return 0;
  free:
  	ath12k_dp_cc_cleanup(ab);
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index 805b7d5..e34ffa6 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
 @@ -41,6 +41,15 @@ struct dp_rxdma_ring {
@@ -958,7 +975,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	HTT_H2T_MSG_TYPE_VDEV_TXRX_STATS_CFG	= 0x1a,
  	HTT_H2T_MSG_TYPE_TX_MONITOR_CFG		= 0x1b,
  	HTT_H2T_MSG_TYPE_SAWF_DEF_Q_MAP_REQ	= 0x1c,
-@@ -2099,6 +2178,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_
+@@ -2099,6 +2178,19 @@ struct htt_h2t_msg_type_vdev_txrx_stats_req {
  	u32 vdev_id_hi_bitmask;
  };
  
@@ -1005,7 +1022,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_service_srng(struct ath12k_base *ab,
  			   struct ath12k_ext_irq_grp *irq_grp,
  			   int budget);
-@@ -2275,4 +2387,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
+@@ -2275,4 +2387,11 @@ struct ath12k_rx_desc_info *ath12k_dp_get_rx_desc(struct ath12k_base *ab,
  struct ath12k_tx_desc_info *ath12k_dp_get_tx_desc(struct ath12k_base *ab,
  						  u32 desc_id);
  void ath12k_dp_tx_update_bank_profile(struct ath12k_link_vif *arvif);
@@ -1017,9 +1034,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +void ath12k_dp_ppeds_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp);
 +#endif
  #endif
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 67223a7..1267b42 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2795,7 +2795,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2795,7 +2795,7 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  	u32 err_bitmap;
  	u8 tid;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -1028,7 +1047,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #endif
  	struct wireless_dev *wdev = NULL;
  
-@@ -2830,7 +2830,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2830,7 +2830,7 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  				ath12k_dp_rx_h_csum_offload(ar, msdu);
  				msdu->dev = wdev->netdev;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -1037,7 +1056,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					if (likely(ppe_vp_tx_to_ppe(vp, msdu)))
  						return;
  				}
-@@ -3360,6 +3360,31 @@ static void ath12k_dp_rx_process_receive
+@@ -3360,6 +3360,31 @@ static void ath12k_dp_rx_process_received_packets(struct ath12k_base *ab,
  	rcu_read_unlock();
  }
  
@@ -1069,7 +1088,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_rx_process(struct ath12k_base *ab, int ring_id,
  			 struct napi_struct *napi, int budget)
  {
-@@ -4950,6 +4975,55 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7
+@@ -4950,6 +4975,55 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7850(struct ath12k_base *ab)
  	return ret;
  }
  
@@ -1125,6 +1144,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_rx_htt_setup(struct ath12k_base *ab)
  {
  	struct ath12k_dp *dp = &ab->dp;
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.h b/drivers/net/wireless/ath/ath12k/dp_rx.h
+index 3ac3864..6ad43c5 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -12,6 +12,35 @@
@@ -1163,7 +1184,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ath12k_dp_rx_tid {
  	u8 tid;
  	u32 *vaddr;
-@@ -180,4 +209,10 @@ u8 ath12k_dp_rx_h_decap_type(struct ath1
+@@ -180,4 +209,10 @@ u8 ath12k_dp_rx_h_decap_type(struct ath12k_base *ab,
  u32 ath12k_dp_rx_h_mpdu_err(struct ath12k_base *ab,
  			    struct hal_rx_desc *desc);
  void ath12k_dp_rx_h_ppdu(struct ath12k *ar, struct ath12k_dp_rx_info *rx_info);
@@ -1174,6 +1195,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +				 enum ath12k_routing_pkt_type pkt_type,
 +				 u32 meta_data);
  #endif /* ATH12K_DP_RX_H */
+diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
+index 9988d00..c9a502a 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -10,6 +10,7 @@
@@ -1184,7 +1207,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #include <linux/dma-mapping.h>
  #include <asm/cacheflush.h>
  
-@@ -98,6 +99,76 @@ enum hal_encrypt_type ath12k_dp_tx_get_e
+@@ -98,6 +99,76 @@ enum hal_encrypt_type ath12k_dp_tx_get_encrypt_type(u32 cipher)
  	}
  }
  
@@ -1261,7 +1284,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
  				       struct ath12k_tx_desc_info *tx_desc,
  				       u8 ring_id)
-@@ -1072,6 +1143,124 @@ static inline bool ath12k_dp_tx_completi
+@@ -1079,6 +1150,124 @@ static inline bool ath12k_dp_tx_completion_valid(struct hal_wbm_release_ring *de
  	return true;
  }
  
@@ -1347,7 +1370,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		buf_rel_source = FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE,
 +					   tx_status->info0);
 +		if (unlikely(buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)) {
-+			status_desc = desc + HTT_TX_WBM_COMP_STATUS_OFFSET;
++			status_desc = ((void *)tx_status) + HTT_TX_WBM_COMP_STATUS_OFFSET;
 +			htt_status = u32_get_bits(status_desc->info0,
 +						  HTT_TX_WBM_COMP_INFO0_STATUS);
 +			if (htt_status != HAL_WBM_REL_HTT_TX_COMP_STATUS_OK &&
@@ -1355,8 +1378,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +				ab->ppeds_stats.fw2wbm_pkt_drops++;
 +			}
 +			dev_kfree_skb_any(msdu);
-+			ath12k_warn(ab, "ath12k: Frame received from unexpected source %d !\n",
-+				 buf_rel_source);
++			ath12k_warn(ab, "ath12k: Frame received from unexpected source %d status %d!\n",
++				 buf_rel_source, htt_status);
 +			continue;
 +		}
 +
@@ -1386,9 +1409,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
  				    int budget)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.h b/drivers/net/wireless/ath/ath12k/dp_tx.h
+index bfb53c4..afaacf3 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.h
-@@ -220,7 +220,11 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -220,7 +220,11 @@ int ath12k_dp_tx(struct ath12k *ar, struct ath12k_link_vif *arvif,
  		 bool gsn_valid, int mcbc_gsn);
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
  				    int tx_comp_budget);
@@ -1401,6 +1426,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_dp_tx_htt_h2t_ppdu_stats_req(struct ath12k *ar, u32 mask);
  int
  ath12k_dp_tx_htt_h2t_ext_stats_req(struct ath12k *ar, u8 type,
+diff --git a/drivers/net/wireless/ath/ath12k/hal.c b/drivers/net/wireless/ath/ath12k/hal.c
+index 4ce98b4..80cc518 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
 @@ -4,6 +4,7 @@
@@ -1411,7 +1438,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #include "hal_tx.h"
  #include "hal_rx.h"
  #include "debug.h"
-@@ -57,6 +58,14 @@ static const struct hal_srng_config hw_s
+@@ -57,6 +58,14 @@ static const struct hal_srng_config hw_srng_config_template[] = {
  		.ring_dir = HAL_SRNG_DIR_DST,
  		.max_size = HAL_REO_STATUS_RING_BASE_MSB_RING_SIZE,
  	},
@@ -1426,7 +1453,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	[HAL_TCL_DATA] = {
  		.start_ring_id = HAL_SRNG_RING_ID_SW2TCL1,
  		.max_rings = 6,
-@@ -168,15 +177,15 @@ static const struct hal_srng_config hw_s
+@@ -168,15 +177,15 @@ static const struct hal_srng_config hw_srng_config_template[] = {
  		.start_ring_id = HAL_SRNG_RING_ID_PPE2TCL1,
  		.max_rings = 1,
  		.entry_size = sizeof(struct hal_tcl_entrance_from_ppe_ring) >> 2,
@@ -1445,7 +1472,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		.ring_dir = HAL_SRNG_DIR_SRC,
  		.max_size = HAL_WBM2PPE_RELEASE_RING_BASE_MSB_RING_SIZE,
  	},
-@@ -531,6 +540,12 @@ static int ath12k_hal_srng_create_config
+@@ -531,6 +540,12 @@ static int ath12k_hal_srng_create_config_qcn9274(struct ath12k_base *ab)
  	s->reg_start[0] = HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO_STATUS_RING_BASE_LSB(ab);
  	s->reg_start[1] = HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO_STATUS_HP;
  
@@ -1458,7 +1485,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	s = &hal->srng_config[HAL_TCL_DATA];
  	s->reg_start[0] = HAL_SEQ_WCSS_UMAC_TCL_REG + HAL_TCL1_RING_BASE_LSB(ab);
  	s->reg_start[1] = HAL_SEQ_WCSS_UMAC_TCL_REG + HAL_TCL1_RING_HP;
-@@ -598,10 +613,6 @@ static int ath12k_hal_srng_create_config
+@@ -598,10 +613,6 @@ static int ath12k_hal_srng_create_config_qcn9274(struct ath12k_base *ab)
  	s->reg_start[0] = HAL_SEQ_WCSS_UMAC_TCL_REG + HAL_TCL_PPE2TCL1_RING_BASE_LSB;
  	s->reg_start[1] = HAL_SEQ_WCSS_UMAC_TCL_REG + HAL_TCL_PPE2TCL1_RING_HP;
  
@@ -1469,7 +1496,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	return 0;
  }
  
-@@ -1646,6 +1657,37 @@ u32 *ath12k_hal_srng_dst_get_next_cache_
+@@ -1646,6 +1657,37 @@ u32 *ath12k_hal_srng_dst_get_next_cache_entry(struct ath12k_base *ab,
  	return desc;
  }
  
@@ -1507,7 +1534,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_srng_dst_invalidate_entry(struct ath12k_base *ab,
  					  struct hal_srng *srng, int entries)
  {
-@@ -2197,6 +2239,15 @@ void ath12k_hal_srng_shadow_config(struc
+@@ -2197,6 +2239,15 @@ void ath12k_hal_srng_shadow_config(struct ath12k_base *ab)
  	}
  }
  
@@ -1523,6 +1550,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_srng_get_shadow_config(struct ath12k_base *ab,
  				       u32 **cfg, u32 *len)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/hal.h b/drivers/net/wireless/ath/ath12k/hal.h
+index bc33740..3abf95a 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.h
 +++ b/drivers/net/wireless/ath/ath12k/hal.h
 @@ -139,11 +139,6 @@ struct ath12k_base;
@@ -1612,7 +1641,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #define HAL_SRNG_INT_TIMER_THRESHOLD_OTHER 256
  
  enum hal_srng_mac_type {
-@@ -1197,6 +1209,10 @@ void ath12k_hal_srng_shadow_update_hp_tp
+@@ -1197,6 +1209,10 @@ void ath12k_hal_srng_shadow_update_hp_tp(struct ath12k_base *ab,
  					 struct hal_srng *srng);
  u32 *ath12k_hal_srng_dst_get_next_cache_entry(struct ath12k_base *ab,
  					      struct hal_srng *srng);
@@ -1623,7 +1652,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_srng_dst_invalidate_entry(struct ath12k_base *ab,
  					  struct hal_srng *srng, int entries);
  void ath12k_hal_reo_ring_ctrl_hash_ix3_setup(struct ath12k_base *ab,
-@@ -1206,6 +1222,7 @@ void ath12k_hal_reo_ring_ctrl_hash_ix2_s
+@@ -1206,6 +1222,7 @@ void ath12k_hal_reo_ring_ctrl_hash_ix2_setup(struct ath12k_base *ab,
  void ath12k_hal_reo_shared_qaddr_cache_clear(struct ath12k_base *ab);
  void ath12k_hal_srng_prefetch_desc(struct ath12k_base *ab,
  				   struct hal_srng *srng);
@@ -1631,6 +1660,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  static inline
  u32 *ath12k_hal_srng_src_get_next_entry_nolock(struct ath12k_base *ab,
+diff --git a/drivers/net/wireless/ath/ath12k/hal_desc.h b/drivers/net/wireless/ath/ath12k/hal_desc.h
+index 45dc4cf..77e01d6 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -923,53 +923,6 @@ struct hal_reo_dest_ring {
@@ -1687,7 +1718,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  enum hal_reo_entr_rxdma_push_reason {
  	HAL_REO_ENTR_RING_RXDMA_PUSH_REASON_ERR_DETECTED,
  	HAL_REO_ENTR_RING_RXDMA_PUSH_REASON_ROUTING_INSTRUCTION,
-@@ -2936,18 +2889,15 @@ struct hal_reo_desc_thresh_reached_statu
+@@ -2936,18 +2889,15 @@ struct hal_reo_desc_thresh_reached_status {
   *		entries into this Ring has looped around the ring.
   */
  
@@ -1712,9 +1743,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  } __packed;
  
  struct hal_mon_buf_ring {
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.c b/drivers/net/wireless/ath/ath12k/hal_rx.c
+index b634af8..0aee528 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.c
-@@ -835,6 +835,20 @@ void ath12k_hal_reo_init_cmd_ring(struct
+@@ -835,6 +835,20 @@ void ath12k_hal_reo_init_cmd_ring(struct ath12k_base *ab,
  	}
  }
  
@@ -1735,7 +1768,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_reo_ring_ctrl_hash_ix2_setup(struct ath12k_base *ab,
  					     u32 ring_hash_map)
  {
-@@ -883,6 +897,7 @@ void ath12k_hal_reo_hw_setup(struct ath1
+@@ -883,6 +897,7 @@ void ath12k_hal_reo_hw_setup(struct ath12k_base *ab, u32 ring_hash_map)
  	ath12k_hif_write32(ab, reo_base + HAL_REO1_AGING_THRESH_IX_3(ab),
  			   HAL_DEFAULT_VO_REO_TIMEOUT_USEC);
  
@@ -1743,6 +1776,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ath12k_hal_reo_ring_ctrl_hash_ix2_setup(ab, ring_hash_map);
  	ath12k_hal_reo_ring_ctrl_hash_ix3_setup(ab, ring_hash_map);
  
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.h b/drivers/net/wireless/ath/ath12k/hal_rx.h
+index ddc039a..677f5f4 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -959,6 +959,10 @@ enum ath12k_eht_ru_size {
@@ -1756,9 +1791,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab, u32 *reo_desc,
  				       struct hal_reo_status *status);
  void ath12k_hal_reo_flush_queue_status(struct ath12k_base *ab, u32 *reo_desc,
+diff --git a/drivers/net/wireless/ath/ath12k/hal_tx.c b/drivers/net/wireless/ath/ath12k/hal_tx.c
+index 688b329..19f972a 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/hal_tx.c
-@@ -99,6 +99,16 @@ void ath12k_hal_tx_configure_bank_regist
+@@ -99,6 +99,16 @@ void ath12k_hal_tx_configure_bank_register(struct ath12k_base *ab, u32 bank_conf
  			   bank_config);
  }
  
@@ -1775,6 +1812,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_tx_config_rbm_mapping(struct ath12k_base *ab,u8 ring_num,
  				      u8 rbm_id, int ring_type)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/hal_tx.h b/drivers/net/wireless/ath/ath12k/hal_tx.h
+index 54fba8c..1df33d0 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_tx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_tx.h
 @@ -182,6 +182,22 @@ struct hal_tx_fes_status_end {
@@ -1800,6 +1839,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_hal_tx_set_dscp_tid_map(struct ath12k_base *ab, int id);
  int ath12k_hal_reo_cmd_send(struct ath12k_base *ab, struct hal_srng *srng,
  			    enum hal_reo_cmd_type type,
+diff --git a/drivers/net/wireless/ath/ath12k/hif.h b/drivers/net/wireless/ath/ath12k/hif.h
+index 805b139..7898fd7 100644
 --- a/drivers/net/wireless/ath/ath12k/hif.h
 +++ b/drivers/net/wireless/ath/ath12k/hif.h
 @@ -8,6 +8,7 @@
@@ -1867,9 +1908,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static inline int ath12k_hif_map_service_to_pipe(struct ath12k_base *ab, u16 service_id,
  						 u8 *ul_pipe, u8 *dl_pipe)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/hw.c b/drivers/net/wireless/ath/ath12k/hw.c
+index d011d63..c4b38ff 100644
 --- a/drivers/net/wireless/ath/ath12k/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/hw.c
-@@ -158,6 +158,10 @@ static const struct ath12k_hw_ops ipq533
+@@ -158,6 +158,10 @@ static const struct ath12k_hw_ops ipq5332_ops = {
  #define ATH12K_TX_MON_RING_MASK_0 0x1
  #define ATH12K_TX_MON_RING_MASK_1 0x2
  
@@ -1880,7 +1923,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  /* Target firmware's Copy Engine configuration. */
  static const struct ce_pipe_config ath12k_target_ce_config_wlan_qcn9274[] = {
  	/* CE0: host->target HTC control and raw streams */
-@@ -793,13 +797,14 @@ static const struct ath12k_hw_ring_mask
+@@ -793,13 +797,14 @@ static const struct ath12k_hw_ring_mask ath12k_hw_ring_mask_qcn9274 = {
  		ATH12K_TX_RING_MASK_2,
  		0, 0, 0, 0, 0, 0, 0, 0,
  		ATH12K_TX_RING_MASK_4,
@@ -1896,7 +1939,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	},
  	.rx = {
  		0, 0, 0, 0,
-@@ -808,32 +813,52 @@ static const struct ath12k_hw_ring_mask
+@@ -808,32 +813,52 @@ static const struct ath12k_hw_ring_mask ath12k_hw_ring_mask_qcn9274 = {
  		ATH12K_RX_RING_MASK_2,
  		ATH12K_RX_RING_MASK_3,
  		0, 0, 0, 0,
@@ -1932,7 +1975,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 -		0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 +		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 +		0, 0, 0
- 	},
++	},
 +	.ppe2tcl = {
 +		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 +		ATH12K_PPE2TCL_RING_MASK_0, 0, 0
@@ -1940,7 +1983,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	.reo2ppe = {
 +		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 +		0, ATH12K_REO2PPE_RING_MASK_0, 0
-+	},
+ 	},
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	.wbm2sw6_ppeds_tx_cmpln = {
 +		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1950,7 +1993,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static const struct ath12k_hw_ring_mask ath12k_hw_ring_mask_ipq5332 = {
-@@ -990,8 +1015,8 @@ static const struct ath12k_hw_regs qcn92
+@@ -990,8 +1015,8 @@ static const struct ath12k_hw_regs qcn9274_regs = {
  	.hal_wbm0_release_ring_base_lsb = 0x00000dd8,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e50,
  
@@ -1961,7 +2004,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* PCIe base address */
  	.pcie_qserdes_sysclk_en_sel = 0x01e0c0a8,
-@@ -1081,8 +1106,8 @@ const struct ath12k_hw_regs qcn9274_v2_r
+@@ -1081,8 +1106,8 @@ const struct ath12k_hw_regs qcn9274_v2_regs = {
  	.hal_wbm0_release_ring_base_lsb = 0x00000e08,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e80,
  
@@ -1972,7 +2015,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* PCIe base address */
  	.pcie_qserdes_sysclk_en_sel = 0x01e0c0a8,
-@@ -1171,9 +1196,6 @@ const struct ath12k_hw_regs ipq5332_regs
+@@ -1171,9 +1196,6 @@ const struct ath12k_hw_regs ipq5332_regs = {
  	.hal_wbm0_release_ring_base_lsb = 0x00000e08,
  	.hal_wbm1_release_ring_base_lsb = 0x00000e80,
  
@@ -1982,7 +2025,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	/* CE base address */
  	.hal_umac_ce0_src_reg_base = 0x00740000,
  	.hal_umac_ce0_dest_reg_base = 0x00741000,
-@@ -1235,7 +1257,8 @@ static const struct ath12k_hw_hal_params
+@@ -1235,7 +1257,8 @@ static const struct ath12k_hw_hal_params ath12k_hw_hal_params_qcn9274 = {
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW1_EN |
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW2_EN |
  			    HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW3_EN |
@@ -1992,6 +2035,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static const struct ath12k_hw_hal_params ath12k_hw_hal_params_wcn7850 = {
+diff --git a/drivers/net/wireless/ath/ath12k/hw.h b/drivers/net/wireless/ath/ath12k/hw.h
+index 3e9a577..9a0b6ea 100644
 --- a/drivers/net/wireless/ath/ath12k/hw.h
 +++ b/drivers/net/wireless/ath/ath12k/hw.h
 @@ -73,6 +73,7 @@
@@ -2058,6 +2103,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	u32 pcie_qserdes_sysclk_en_sel;
  	u32 pcie_pcs_osc_dtct_config_base;
  
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 5f3667c..fb3a553 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,6 +23,7 @@
@@ -2068,7 +2115,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -9049,6 +9050,16 @@ static int ath12k_mac_radio_start(struct
+@@ -9049,6 +9050,16 @@ static int ath12k_mac_radio_start(struct ath12k *ar)
  		}
  	}
  
@@ -2085,7 +2132,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
  	/* TODO: Do we need to enable ANI? */
-@@ -14072,6 +14083,10 @@ static const struct ieee80211_ops ath12k
+@@ -14080,6 +14091,10 @@ static const struct ieee80211_ops ath12k_ops = {
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -2096,6 +2143,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index 98b254b..4752f9a 100644
 --- a/drivers/net/wireless/ath/ath12k/pci.c
 +++ b/drivers/net/wireless/ath/ath12k/pci.c
 @@ -14,6 +14,7 @@
@@ -2115,7 +2164,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  unsigned int ath12k_fw_mem_seg;
  EXPORT_SYMBOL(ath12k_fw_mem_seg);
-@@ -85,7 +86,7 @@ static const struct ath12k_msi_config at
+@@ -85,7 +86,7 @@ static const struct ath12k_msi_config ath12k_msi_config[] = {
  		.users = (struct ath12k_msi_user[]) {
  			{ .name = "MHI", .num_vectors = 3, .base_vector = 0 },
  			{ .name = "CE", .num_vectors = 5, .base_vector = 3 },
@@ -2124,7 +2173,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		},
  	},
  };
-@@ -545,6 +546,11 @@ static int ath12k_pci_ext_irq_config(str
+@@ -545,6 +546,11 @@ static int ath12k_pci_ext_irq_config(struct ath12k_base *ab)
  		    ab->hw_params->ring_mask->rx_wbm_rel[i] ||
  		    ab->hw_params->ring_mask->reo_status[i] ||
  		    ab->hw_params->ring_mask->host2rxdma[i] ||
@@ -2136,7 +2185,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		    ab->hw_params->ring_mask->rx_mon_dest[i]) {
  			num_irq = 1;
  		}
-@@ -590,6 +596,82 @@ static int ath12k_pci_ext_irq_config(str
+@@ -590,6 +596,82 @@ static int ath12k_pci_ext_irq_config(struct ath12k_base *ab)
  	return 0;
  }
  
@@ -2219,7 +2268,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static int ath12k_pci_config_irq(struct ath12k_base *ab)
  {
  	struct ath12k_ce_pipe *ce_pipe;
-@@ -1266,6 +1348,12 @@ static const struct ath12k_hif_ops ath12
+@@ -1266,6 +1348,12 @@ static const struct ath12k_hif_ops ath12k_pci_hif_ops = {
  	.ce_irq_enable = ath12k_pci_hif_ce_irq_enable,
  	.ce_irq_disable = ath12k_pci_hif_ce_irq_disable,
  	.get_ce_msi_idx = ath12k_pci_get_ce_msi_idx,
@@ -2232,6 +2281,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static int ath12k_pci_probe(struct pci_dev *pdev,
+diff --git a/drivers/net/wireless/ath/ath12k/pci.h b/drivers/net/wireless/ath/ath12k/pci.h
+index 9a5ec93..ffa8155 100644
 --- a/drivers/net/wireless/ath/ath12k/pci.h
 +++ b/drivers/net/wireless/ath/ath12k/pci.h
 @@ -68,6 +68,12 @@
@@ -2247,7 +2298,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ath12k_msi_user {
  	char *name;
  	int num_vectors;
-@@ -133,4 +139,11 @@ void ath12k_pci_stop(struct ath12k_base
+@@ -133,4 +139,11 @@ void ath12k_pci_stop(struct ath12k_base *ab);
  int ath12k_pci_start(struct ath12k_base *ab);
  int ath12k_pci_power_up(struct ath12k_base *ab);
  void ath12k_pci_power_down(struct ath12k_base *ab);
@@ -2259,9 +2310,12 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +void ath12k_pci_ppeds_irq_disable(struct ath12k_base *ab, enum ppeds_irq_type type);
 +#endif
  #endif /* ATH12K_PCI_H */
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
+new file mode 100644
+index 0000000..b4df6cd
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,991 @@
+@@ -0,0 +1,989 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2888,9 +2942,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +				HAL_TX_PPE_VP_CFG_DROP_PREC_EN) |
 +		u32_encode_bits(arvif->bank_id, HAL_TX_PPE_VP_CFG_BANK_ID) |
 +		u32_encode_bits(ar->lmac_id, HAL_TX_PPE_VP_CFG_PMAC_ID) |
-+		u32_encode_bits(arvif->vdev_id, HAL_TX_PPE_VP_CFG_VDEV_ID) |
-+		u32_encode_bits(ppe_vp_profile->ppe_vp_num_idx,
-+				HAL_TX_PPE_VP_CFG_VP_NUM);
++		u32_encode_bits(arvif->vdev_id, HAL_TX_PPE_VP_CFG_VDEV_ID);
 +
 +	ath12k_hal_tx_set_ppe_vp_entry(ab, ppe_vp_config,
 +				       ppe_vp_profile->ppe_vp_num_idx);
@@ -3253,6 +3305,9 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	ath12k_dp_srng_cleanup(ab, &dp->reo2ppe_ring);
 +	ath12k_dp_srng_cleanup(ab, &dp->ppeds_comp_ring.ppe_wbm2sw_ring);
 +}
+diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
+new file mode 100644
+index 0000000..678fc2d
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -0,0 +1,43 @@
@@ -3299,9 +3354,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +irqreturn_t ath12k_dp_ppeds_handle_tx_comp(int irq, void *ctxt);
 +#endif
 +#endif
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 39a6922..75fc223 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -1411,6 +1411,88 @@ int ath12k_wmi_send_peer_delete_cmd(stru
+@@ -1411,6 +1411,88 @@ int ath12k_wmi_send_peer_delete_cmd(struct ath12k *ar,
  	return ret;
  }
  
@@ -3390,6 +3447,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  int ath12k_wmi_send_pdev_set_regdomain(struct ath12k *ar,
  				       struct pdev_set_regdomain_params *param)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index 35ab93b..02f27f5 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -417,6 +417,15 @@ enum wmi_tlv_cmd_id {
@@ -3487,7 +3546,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct wmi_peer_set_param_cmd {
  	__le32 tlv_header;
  	__le32 vdev_id;
-@@ -8247,6 +8307,8 @@ int ath12k_wmi_peer_rx_reorder_queue_set
+@@ -8247,6 +8307,8 @@ int ath12k_wmi_peer_rx_reorder_queue_setup(struct ath12k *ar,
  int
  ath12k_wmi_rx_reord_queue_remove(struct ath12k *ar,
  				 struct rx_reorder_queue_remove_params *param);
@@ -3507,6 +3566,8 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +					 u32 src_info, bool ppe_routing_enable);
 +#endif
  #endif
+diff --git a/local-symbols b/local-symbols
+index a1dd1c5..17bedea 100644
 --- a/local-symbols
 +++ b/local-symbols
 @@ -143,3 +143,4 @@ ATH12K_DEBUGFS=
@@ -3514,9 +3575,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  ATH12K_SPECTRAL=
  ATH12K_PKTLOG=
 +ATH12K_PPE_DS_SUPPORT=
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index fa8961a..2cb5822 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -765,7 +765,9 @@ void ieee80211_stop_mbssid(struct ieee80
+@@ -765,7 +765,9 @@ void ieee80211_stop_mbssid(struct ieee80211_sub_if_data *sdata)
  static int ieee80211_stop(struct net_device *dev)
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
@@ -3526,7 +3589,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* close dependent VLAN and MBSSID interfaces before locking wiphy */
  	if (sdata->vif.type == NL80211_IFTYPE_AP) {
-@@ -1940,7 +1942,9 @@ static void ieee80211_setup_sdata(struct
+@@ -1940,7 +1942,9 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
  	/* and set some type-dependent values */
  	sdata->vif.type = type;
  	sdata->vif.p2p = false;
@@ -3536,3 +3599,6 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	sdata->wdev.iftype = type;
  
  	sdata->control_port_protocol = cpu_to_be16(ETH_P_PAE);
+-- 
+2.17.1
+
