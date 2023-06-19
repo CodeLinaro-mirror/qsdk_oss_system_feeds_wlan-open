@@ -1,8 +1,8 @@
-From 488a23e01534077f31d08974286766c1da904282 Mon Sep 17 00:00:00 2001
+From 06f0ae6ee1707698a11f76a10a7e4e64ce563914 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Thu, 15 Jun 2023 10:13:46 -0700
-Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
-      checks for checking flush flags
+Subject: [PATCH] ath12k: Clear the flush flags after ce init and add few more
+ checks for checking flush flags
 
     Usually when work threads carry out the process of
     reconfiguring the chip which was asserted, a lot of other
@@ -27,25 +27,129 @@ Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
     usable state, when an external event disrupts the recovery
     process.
 
+    Disable ds link netdev before setting arvif->ar to NULL.
+
 Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c | 16 +++++++--
- drivers/net/wireless/ath/ath12k/core.h |  1 +
- drivers/net/wireless/ath/ath12k/htc.c  |  2 ++
- drivers/net/wireless/ath/ath12k/mac.c  | 61 ++++++++++++++++++++++++++++++++--
- drivers/net/wireless/ath/ath12k/mhi.c  |  1 +
- drivers/net/wireless/ath/ath12k/pci.c  |  2 ++
- drivers/net/wireless/ath/ath12k/peer.c |  8 +++++
- drivers/net/wireless/ath/ath12k/qmi.c  |  1 +
- drivers/net/wireless/ath/ath12k/wmi.c  |  5 +++
- 9 files changed, 93 insertions(+), 4 deletions(-)
+ drivers/net/wireless/ath/ath12k/bondif.c | 31 +++++++---
+ drivers/net/wireless/ath/ath12k/bondif.h |  8 ++-
+ drivers/net/wireless/ath/ath12k/core.c   | 16 +++++-
+ drivers/net/wireless/ath/ath12k/core.h   |  1 +
+ drivers/net/wireless/ath/ath12k/htc.c    |  2 +
+ drivers/net/wireless/ath/ath12k/mac.c    | 72 +++++++++++++++++++++---
+ drivers/net/wireless/ath/ath12k/mhi.c    |  1 +
+ drivers/net/wireless/ath/ath12k/pci.c    |  2 +
+ drivers/net/wireless/ath/ath12k/peer.c   |  8 +++
+ drivers/net/wireless/ath/ath12k/qmi.c    |  1 +
+ drivers/net/wireless/ath/ath12k/wmi.c    |  5 ++
+ 11 files changed, 127 insertions(+), 20 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
+index ecfc9a5..5f5485a 100644
+--- a/drivers/net/wireless/ath/ath12k/bondif.c
++++ b/drivers/net/wireless/ath/ath12k/bondif.c
+@@ -64,8 +64,9 @@ int ath12k_ppeds_get_core_mask(struct ath12k *ar)
+ 	return core_mask;
+ }
+ 
+-void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+-				     struct net_device *link_dev)
++void ath12k_enable_ds_for_link_netdev(struct ath12k_base *ab,
++				      struct ath12k_link_vif *arvif,
++				      struct net_device *link_dev)
+ {
+ 	struct ppe_vp_ai vpai;
+ 	struct ieee80211_ppe_vp_ds_params vp_params = {0};
+@@ -77,9 +78,15 @@ void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+ 	if (!g_bonded_interface_model)
+ 		return;
+ 
+-	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
+ 
++	if (!arvif->ar) {
++		ath12k_warn(ab, "failed to enable ds for link id %d \n",
++				arvif->link_id);
++		return;
++	}
++
+ 	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
+ 
+ 	vpai.type = PPE_VP_TYPE_SW_L2;
+@@ -100,7 +107,7 @@ void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+ 		link_ndev_pvt->ppe_vp_profile_idx = vp_params.ppe_vp_profile_idx;
+ 		link_ndev_pvt->vp_num = ppe_vp_num;
+ 		arvif->ppe_vp_num = ppe_vp_num;
+-		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE,
++		ath12k_dbg(ab, ATH12K_DBG_PPE,
+ 			   "Enabling DS index %d vp %d link_id %d %pM core_mask 0x%x\n",
+ 			   vp_params.ppe_vp_profile_idx, ppe_vp_num,
+ 			   arvif->link_id, arvif->addr, vpai.core_mask);
+@@ -112,7 +119,9 @@ void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+ 	return;
+ }
+ 
+-void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++void ath12k_disable_ds_for_link_netdev(struct ath12k_base *ab,
++				       struct ath12k_link_vif *arvif,
++				       struct net_device *link_dev)
+ {
+ 	struct ieee80211_ppe_vp_ds_params vp_params = {0};
+ 	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
+@@ -120,17 +129,23 @@ void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net
+ 	if (!g_bonded_interface_model)
+ 		return;
+ 
+-	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
+ 
++	if (!arvif->ar) {
++		ath12k_warn(ab, "failed to disable ds for link id %d \n",
++				arvif->link_id);
++		return;
++	}
++
+ 	link_ndev_pvt = netdev_priv(link_dev);
+ 	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
+ 	if (arvif->ppe_vp_num != -1) {
+-		ath12k_mac_op_ppeds_detach_vdev (arvif, &vp_params);
++		ath12k_mac_op_ppeds_detach_vdev(arvif, &vp_params);
+ 		if (arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
+ 			ppe_vp_free(arvif->ppe_vp_num);
+ 
+-		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
+ 			   arvif->ppe_vp_num, link_dev->name);
+ 		arvif->ppe_vp_num = -1;
+ 	}
+diff --git a/drivers/net/wireless/ath/ath12k/bondif.h b/drivers/net/wireless/ath/ath12k/bondif.h
+index 2c76caa..0475d52 100644
+--- a/drivers/net/wireless/ath/ath12k/bondif.h
++++ b/drivers/net/wireless/ath/ath12k/bondif.h
+@@ -14,10 +14,12 @@
+ #define ATH12K_PPE_DS_6G_CORE_MASK		0x4
+ #define ATH12K_PPE_DS_DEFAULT_CORE_MASK		0x7
+ 
+-void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++void ath12k_disable_ds_for_link_netdev(struct ath12k_base *ab,
++				       struct ath12k_link_vif *arvif,
+ 				       struct net_device *link_dev);
+-void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+-				     struct net_device *link_dev);
++void ath12k_enable_ds_for_link_netdev(struct ath12k_base *ab,
++				      struct ath12k_link_vif *arvif,
++				      struct net_device *link_dev);
+ int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
+ 				struct ieee80211_vif *vif,
+ 				int link_num);
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index e029593..dda8398 100644
+index beacee0..fc62679 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -52,6 +52,9 @@ module_param_named(ppe_ds_enable, ath12k_ppe_ds_enabled, uint, 0644);
+@@ -53,6 +53,9 @@ module_param_named(ppe_ds_enable, ath12k_ppe_ds_enabled, uint, 0644);
  MODULE_PARM_DESC(ppe_ds_enable, "ppe_ds_enable: 0-disable, 1-enable");
  
  static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
@@ -64,7 +168,7 @@ index e029593..dda8398 100644
  	/* put hardware to DBS mode */
  	if (ab->hw_params->single_pdev_only) {
  		ret = ath12k_wmi_set_hw_mode(ab, WMI_HOST_HW_MODE_DBS);
-@@ -1738,8 +1743,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+@@ -1750,8 +1755,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
  	if (ret)
  		return ret;
  
@@ -73,7 +177,7 @@ index e029593..dda8398 100644
  	ret = ath12k_core_qmi_firmware_ready(ab);
  	if (ret)
  		goto err_hal_srng_deinit;
-@@ -1906,6 +1909,12 @@ static void ath12k_core_restart(struct work_struct *work)
+@@ -1921,6 +1924,12 @@ static void ath12k_core_restart(struct work_struct *work)
  	ret = ath12k_core_reconfigure_on_crash(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to reconfigure driver on crash recovery\n");
@@ -86,7 +190,7 @@ index e029593..dda8398 100644
  		return;
  	}
  
-@@ -1958,6 +1967,9 @@ static void ath12k_core_reset(struct work_struct *work)
+@@ -2060,6 +2069,9 @@ static void ath12k_core_reset(struct work_struct *work)
  		 */
  		ath12k_warn(ab, "already resetting count %d\n", reset_count);
  
@@ -97,10 +201,10 @@ index e029593..dda8398 100644
  		time_left = wait_for_completion_timeout(&ab->reset_complete,
  							ATH12K_RESET_TIMEOUT_HZ);
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 418c86b..906cfa3 100644
+index b9d4a53..1c05726 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -239,6 +239,7 @@ enum ath12k_dev_flags {
+@@ -240,6 +240,7 @@ enum ath12k_dev_flags {
  	ATH12K_FLAG_HW_GROUP_ATTACHED,
  	ATH12K_FLAG_FTM_SEGMENTED,
  	ATH12K_FLAG_PPE_DS_ENABLED,
@@ -122,10 +226,10 @@ index d8d0929..9e0aa73 100644
  	if (status) {
  		kfree_skb(skb);
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index f296251..03f06ba 100644
+index e21c524..76ba75f 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4733,7 +4733,12 @@ static void ath12k_mac_op_vif_cfg_changed(struct ieee80211_hw *hw,
+@@ -4712,7 +4712,12 @@ static void ath12k_mac_op_vif_cfg_changed(struct ieee80211_hw *hw,
  	if (changed & BSS_CHANGED_ASSOC) {
  		/* TODO Handle STA ML assoc */
  		arvif = &ahvif->deflink;
@@ -138,7 +242,7 @@ index f296251..03f06ba 100644
  		if (vif->cfg.assoc)
  			ath12k_bss_assoc(ar, arvif, &vif->bss_conf);
  		else
-@@ -4766,6 +4771,15 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
+@@ -4745,6 +4750,15 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  	}
  	ar = arvif->ar;
  
@@ -154,23 +258,33 @@ index f296251..03f06ba 100644
  	mutex_lock(&ar->conf_mutex);
  
  	ath12k_mac_bss_info_changed(ar, arvif, info, changed);
-@@ -4813,14 +4827,13 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -4789,19 +4803,19 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
+ 	ar->ab->free_vdev_map |= 1LL << arvif->vdev_id;
+ 	spin_unlock_bh(&ar->ab->base_lock);
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
++		ath12k_disable_ds_for_link_netdev(ar->ab, arvif,
++						  arvif->ndev_pvt->link_ndev);
++#endif
+ 	ar->allocated_vdev_map &= ~(1LL << arvif->vdev_id);
+ 	ar->ab->free_vdev_stats_id_map &= ~(1LL << arvif->vdev_stats_id);
  	ar->num_created_vdevs--;
  	arvif->ahvif->num_vdev_created--;
  	arvif->is_created = false;
 +	arvif->ar = NULL;
  
  clean_up:
- #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
- 	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
- 		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
- #endif
+-#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
+-	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
+-		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
+-#endif
 -
 -	arvif->ar = NULL;
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -5228,6 +5241,10 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
+@@ -5209,6 +5223,10 @@ static int ath12k_mac_op_hw_scan(struct ieee80211_hw *hw,
  			mutex_unlock(&ah->conf_mutex);
  			return -EINVAL;
  		} else if (ar != arvif->ar) {
@@ -181,7 +295,7 @@ index f296251..03f06ba 100644
  			mutex_lock(&arvif->ar->conf_mutex);
  			if (arvif->ar->scan.vdev_id != -1)
  				arvif->ar->scan.vdev_id = -1;
-@@ -5360,6 +5377,11 @@ static void ath12k_mac_op_cancel_hw_scan(struct ieee80211_hw *hw,
+@@ -5341,6 +5359,11 @@ static void ath12k_mac_op_cancel_hw_scan(struct ieee80211_hw *hw,
  	}
  
  	ar = arvif->ar;
@@ -193,7 +307,7 @@ index f296251..03f06ba 100644
  	mutex_unlock(&ah->conf_mutex);
  
  	mutex_lock(&ar->conf_mutex);
-@@ -5691,6 +5713,17 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
+@@ -5672,6 +5695,17 @@ static int ath12k_mac_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
  		return 0;
  	}
  
@@ -211,7 +325,7 @@ index f296251..03f06ba 100644
  	if (sta) {
  		ahsta = (struct ath12k_sta *)sta->drv_priv;
  		if (sta->mlo) {
-@@ -6960,6 +6993,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
+@@ -7012,6 +7046,7 @@ static void ath12k_mac_ml_station_remove(struct ath12k_vif *ahvif,
  		ar = arvif->ar;
  
  		mutex_lock(&ar->conf_mutex);
@@ -219,7 +333,7 @@ index f296251..03f06ba 100644
  		ath12k_mac_station_post_remove(ar, arvif, arsta);
  		mutex_unlock(&ar->conf_mutex);
  
-@@ -7292,6 +7326,11 @@ static int ath12k_mac_op_change_sta_links(struct ieee80211_hw *hw,
+@@ -7344,6 +7379,11 @@ static int ath12k_mac_op_change_sta_links(struct ieee80211_hw *hw,
  		}
  
  		ar = arvif->ar;
@@ -231,7 +345,7 @@ index f296251..03f06ba 100644
  
  		mutex_lock(&ar->conf_mutex);
  		ret = ath12k_mac_station_add(ar, arvif, arsta);
-@@ -7592,6 +7631,10 @@ static int ath12k_mac_op_conf_tx(struct ieee80211_hw *hw,
+@@ -7645,6 +7685,10 @@ static int ath12k_mac_op_conf_tx(struct ieee80211_hw *hw,
  	mutex_unlock(&ah->conf_mutex);
  
  	ar = arvif->ar;
@@ -242,7 +356,16 @@ index f296251..03f06ba 100644
  
  	mutex_lock(&ar->conf_mutex);
  	ret = ath12k_mac_conf_tx(ar, arvif, ac, params);
-@@ -10201,6 +10244,7 @@ err_vdev_del:
+@@ -9906,7 +9950,7 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+ 				arvif->ppe_vp_num = -1;
+ 			}
+ 			else if (link_ndev) {
+-				ath12k_enable_ds_for_link_netdev(arvif,
++				ath12k_enable_ds_for_link_netdev(ab, arvif,
+ 								 arvif->ndev_pvt->link_ndev);
+ 			}
+ 		}
+@@ -10013,6 +10057,7 @@ err_vdev_del:
  	spin_unlock_bh(&ar->data_lock);
  
  err:
@@ -250,7 +373,7 @@ index f296251..03f06ba 100644
  	arvif->ar = NULL;
  	return ret;
  }
-@@ -12847,6 +12891,14 @@ static int ath12k_mac_op_set_rts_threshold(struct ieee80211_hw *hw, u32 value,
+@@ -12659,6 +12704,14 @@ static int ath12k_mac_op_set_rts_threshold(struct ieee80211_hw *hw, u32 value,
  		}
  
  		ar = arvif->ar;
@@ -265,7 +388,7 @@ index f296251..03f06ba 100644
  		ret = ath12k_set_vdev_param_to_all_vifs(ar, param_id, value);
  		if (ret) {
  			ath12k_warn(ar->ab, "failed to set RTS config for all vdevs of pdev %d",
-@@ -14095,6 +14147,11 @@ static void ath12k_mac_op_sta_statistics(struct ieee80211_hw *hw,
+@@ -13907,6 +13960,11 @@ static void ath12k_mac_op_sta_statistics(struct ieee80211_hw *hw,
  
  	/* TODO accumulate link sta stats here? */
  
@@ -278,7 +401,7 @@ index f296251..03f06ba 100644
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_DURATION);
  
 diff --git a/drivers/net/wireless/ath/ath12k/mhi.c b/drivers/net/wireless/ath/ath12k/mhi.c
-index eacb7b5..8c4dd18 100644
+index e4895e2..f4b0874 100644
 --- a/drivers/net/wireless/ath/ath12k/mhi.c
 +++ b/drivers/net/wireless/ath/ath12k/mhi.c
 @@ -331,6 +331,7 @@ static void ath12k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
@@ -331,10 +454,10 @@ index 126499a..749a5bc 100644
  		ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
  		if (ret) {
 diff --git a/drivers/net/wireless/ath/ath12k/qmi.c b/drivers/net/wireless/ath/ath12k/qmi.c
-index 4b0f576..2ee6404 100644
+index a798e7d..ff6df9d 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -5713,6 +5713,7 @@ static void ath12k_qmi_driver_event_work(struct work_struct *work)
+@@ -5714,6 +5714,7 @@ static void ath12k_qmi_driver_event_work(struct work_struct *work)
  			break;
  		case ATH12K_QMI_EVENT_SERVER_EXIT:
  			set_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags);
@@ -343,7 +466,7 @@ index 4b0f576..2ee6404 100644
  		case ATH12K_QMI_EVENT_REQUEST_MEM:
  			ret = ath12k_qmi_event_mem_request(qmi);
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 05e11d6..06f3dd2 100644
+index 8eb950d..2295f84 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -540,6 +540,10 @@ int ath12k_wmi_cmd_send(struct ath12k_pdev_wmi *wmi, struct sk_buff *skb,
@@ -357,7 +480,7 @@ index 05e11d6..06f3dd2 100644
  	might_sleep();
  
  	if (ab->hw_params->credit_flow) {
-@@ -13874,6 +13878,7 @@ void ath12k_wmi_detach(struct ath12k_base *ab)
+@@ -13869,6 +13873,7 @@ void ath12k_wmi_detach(struct ath12k_base *ab)
  	for (i = 0; i < ab->htc.wmi_ep_count; i++)
  		ath12k_wmi_pdev_detach(ab, i);
  
@@ -366,5 +489,5 @@ index 05e11d6..06f3dd2 100644
  }
  
 -- 
-2.7.4
+2.17.1
 
