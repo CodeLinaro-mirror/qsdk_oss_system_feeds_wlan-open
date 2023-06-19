@@ -1,4 +1,4 @@
-From bdf050be68794f88ea4754956d4f33bc1f0c3661 Mon Sep 17 00:00:00 2001
+From 98d1396229eaf66c0d2db0ee8418f1df4e9803f9 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Wed, 26 Apr 2023 16:37:13 -0700
 Subject: [PATCH] ath12k: Add support for Bond interface
@@ -54,10 +54,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  net/mac80211/rx.c                          |  18 +-
  net/mac80211/util.c                        |   4 +
  net/wireless/chan.c                        |   8 +
- net/wireless/core.c                        |  37 +-
+ net/wireless/core.c                        |  50 +-
  net/wireless/nl80211.c                     |  29 +-
  net/wireless/util.c                        |   4 +
- 31 files changed, 1232 insertions(+), 61 deletions(-)
+ 31 files changed, 1245 insertions(+), 61 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
@@ -1023,7 +1023,7 @@ index 1267b42..1dc6c58 100644
  
  	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
 diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
-index db4aaef..02f803a 100644
+index 1e57d81..7b33c43 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -276,6 +276,7 @@ int ath12k_dp_tx_direct(struct ath12k_link_vif *arvif, struct sk_buff *skb)
@@ -1270,7 +1270,7 @@ index 4752f9a..a2cac52 100644
  			       &ath12k_pci_bus_params);
  	if (!ab) {
 diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index a1bec38..71bc5e4 100644
+index b4df6cd..a4a07d6 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
 @@ -13,6 +13,7 @@
@@ -1298,7 +1298,7 @@ index a1bec38..71bc5e4 100644
  		return -ENOSR;
  	}
  
-@@ -642,44 +644,80 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
+@@ -640,44 +642,80 @@ static void ath12k_dp_ppeds_setup_vp_entry(struct ath12k_base *ab,
  	return;
  }
  
@@ -1389,7 +1389,7 @@ index a1bec38..71bc5e4 100644
  	/*Allocate a ppe vp profile for a vap */
  	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
  	if (!vp_profile) {
-@@ -695,7 +733,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+@@ -693,7 +731,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  		goto dealloc_vp_profile;
  	}
  
@@ -1398,7 +1398,7 @@ index a1bec38..71bc5e4 100644
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -711,6 +749,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
+@@ -709,6 +747,7 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ieee80211_hw *hw,
  	vp_profile->to_fw = 0;
  	vp_profile->use_ppe_int_pri = 0;
  	vp_profile->drop_prec_enable = 0;
@@ -1406,7 +1406,7 @@ index a1bec38..71bc5e4 100644
  
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
-@@ -733,22 +772,27 @@ vp_free:
+@@ -731,22 +770,27 @@ vp_free:
  	return ret;
  }
  
@@ -1440,7 +1440,7 @@ index a1bec38..71bc5e4 100644
  	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
  
  	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-@@ -762,7 +806,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
+@@ -760,7 +804,7 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ieee80211_hw *hw,
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -1932,7 +1932,7 @@ index 63aebcb..d048d1f 100644
  	case NL80211_IFTYPE_P2P_GO:
  		for_each_valid_link(wdev, link) {
 diff --git a/net/wireless/core.c b/net/wireless/core.c
-index 2e45744..22fab1f 100644
+index 2e45744..510ee69 100644
 --- a/net/wireless/core.c
 +++ b/net/wireless/core.c
 @@ -22,6 +22,9 @@
@@ -1962,14 +1962,27 @@ index 2e45744..22fab1f 100644
  struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
  {
  	struct cfg80211_registered_device *result = NULL, *rdev;
-@@ -1334,8 +1347,15 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
+@@ -1322,6 +1335,9 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
+ {
+ 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
+ 	unsigned int link_id;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	bool skip_bond_netdev = false;
++#endif
+ 
+ 	ASSERT_RTNL();
+ 	lockdep_assert_held(&rdev->wiphy.mtx);
+@@ -1334,8 +1350,18 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
  
  	if (wdev->netdev) {
  		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
 -		if (unregister_netdev)
 +		if (unregister_netdev) {
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
-+			if (wdev->iftype != NL80211_IFTYPE_MESH_POINT &&
++			if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
++			    wdev->iftype == NL80211_IFTYPE_MONITOR)
++				skip_bond_netdev = true;
++			if (!skip_bond_netdev &&
 +			    g_bonded_interface_model && driver_bond_dev_cb) {
 +				(*driver_bond_dev_cb)(wdev, wdev->netdev, false);
 +			}
@@ -1979,7 +1992,7 @@ index 2e45744..22fab1f 100644
  	}
  
  	list_del_rcu(&wdev->list);
-@@ -1423,6 +1443,10 @@ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
+@@ -1423,6 +1449,10 @@ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
  	cfg80211_stop_background_radar_detection(wdev);
  
  	switch (wdev->iftype) {
@@ -1990,7 +2003,7 @@ index 2e45744..22fab1f 100644
  	case NL80211_IFTYPE_ADHOC:
  		__cfg80211_leave_ibss(rdev, dev, true);
  		break;
-@@ -1556,12 +1580,12 @@ void cfg80211_register_wdev(struct cfg80211_registered_device *rdev,
+@@ -1556,16 +1586,19 @@ void cfg80211_register_wdev(struct cfg80211_registered_device *rdev,
  	if (wdev->netdev &&
  	    sysfs_create_link(&wdev->netdev->dev.kobj, &rdev->wiphy.dev.kobj,
  			      "phy80211"))
@@ -2005,14 +2018,25 @@ index 2e45744..22fab1f 100644
  {
  	struct wireless_dev *wdev = dev->ieee80211_ptr;
  	struct cfg80211_registered_device *rdev;
-@@ -1584,6 +1608,13 @@ int cfg80211_register_netdevice(struct net_device *dev)
+ 	int ret;
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++	bool skip_bond_netdev = false;
++#endif
+ 
+ 	ASSERT_RTNL();
+ 
+@@ -1584,6 +1617,17 @@ int cfg80211_register_netdevice(struct net_device *dev)
  		goto out;
  
  	cfg80211_register_wdev(rdev, wdev);
 +
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
-+	if (wdev->iftype != NL80211_IFTYPE_MESH_POINT &&
-+	    g_bonded_interface_model && create_bond_dev && driver_bond_dev_cb) {
++	if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
++	     wdev->iftype == NL80211_IFTYPE_MONITOR)
++		skip_bond_netdev = true;
++
++	if (!skip_bond_netdev && g_bonded_interface_model &&
++	    create_bond_dev && driver_bond_dev_cb) {
 +		(*driver_bond_dev_cb)(wdev, dev, true);
 +	}
 +#endif
