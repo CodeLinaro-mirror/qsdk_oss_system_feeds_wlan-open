@@ -1,8 +1,8 @@
-From 488a23e01534077f31d08974286766c1da904282 Mon Sep 17 00:00:00 2001
+From 06f0ae6ee1707698a11f76a10a7e4e64ce563914 Mon Sep 17 00:00:00 2001
 From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Date: Thu, 15 Jun 2023 10:13:46 -0700
-Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
-      checks for checking flush flags
+Subject: [PATCH] ath12k: Clear the flush flags after ce init and add few more
+ checks for checking flush flags
 
     Usually when work threads carry out the process of
     reconfiguring the chip which was asserted, a lot of other
@@ -27,20 +27,120 @@ Subject: [PATCH] ath12k: Clear the flush flags after ce init  and add few more
     usable state, when an external event disrupts the recovery
     process.
 
+    Disable ds link netdev before setting arvif->ar to NULL.
+
 Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c | 16 +++++++--
- drivers/net/wireless/ath/ath12k/core.h |  1 +
- drivers/net/wireless/ath/ath12k/htc.c  |  2 ++
- drivers/net/wireless/ath/ath12k/mac.c  | 61 ++++++++++++++++++++++++++++++++--
- drivers/net/wireless/ath/ath12k/mhi.c  |  1 +
- drivers/net/wireless/ath/ath12k/pci.c  |  2 ++
- drivers/net/wireless/ath/ath12k/peer.c |  8 +++++
- drivers/net/wireless/ath/ath12k/qmi.c  |  1 +
- drivers/net/wireless/ath/ath12k/wmi.c  |  5 +++
- 9 files changed, 93 insertions(+), 4 deletions(-)
+ drivers/net/wireless/ath/ath12k/bondif.c | 31 +++++++---
+ drivers/net/wireless/ath/ath12k/bondif.h |  8 ++-
+ drivers/net/wireless/ath/ath12k/core.c   | 16 +++++-
+ drivers/net/wireless/ath/ath12k/core.h   |  1 +
+ drivers/net/wireless/ath/ath12k/htc.c    |  2 +
+ drivers/net/wireless/ath/ath12k/mac.c    | 72 +++++++++++++++++++++---
+ drivers/net/wireless/ath/ath12k/mhi.c    |  1 +
+ drivers/net/wireless/ath/ath12k/pci.c    |  2 +
+ drivers/net/wireless/ath/ath12k/peer.c   |  8 +++
+ drivers/net/wireless/ath/ath12k/qmi.c    |  1 +
+ drivers/net/wireless/ath/ath12k/wmi.c    |  5 ++
+ 11 files changed, 127 insertions(+), 20 deletions(-)
 
+--- a/drivers/net/wireless/ath/ath12k/bondif.c
++++ b/drivers/net/wireless/ath/ath12k/bondif.c
+@@ -114,8 +114,9 @@ void ath12k_bond_link_delete(struct ath1
+ 	}
+ }
+ 
+-void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+-				     struct net_device *link_dev)
++void ath12k_enable_ds_for_link_netdev(struct ath12k_base *ab,
++				      struct ath12k_link_vif *arvif,
++				      struct net_device *link_dev)
+ {
+ 	struct ppe_vp_ai vpai;
+ 	struct ieee80211_ppe_vp_ds_params vp_params = {0};
+@@ -127,9 +128,15 @@ void ath12k_enable_ds_for_link_netdev(st
+ 	if (!g_bonded_interface_model)
+ 		return;
+ 
+-	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
+ 
++	if (!arvif->ar) {
++		ath12k_warn(ab, "failed to enable ds for link id %d \n",
++				arvif->link_id);
++		return;
++	}
++
+ 	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
+ 
+ 	vpai.type = PPE_VP_TYPE_SW_L2;
+@@ -150,7 +157,7 @@ void ath12k_enable_ds_for_link_netdev(st
+ 		link_ndev_pvt->ppe_vp_profile_idx = vp_params.ppe_vp_profile_idx;
+ 		link_ndev_pvt->vp_num = ppe_vp_num;
+ 		arvif->ppe_vp_num = ppe_vp_num;
+-		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE,
++		ath12k_dbg(ab, ATH12K_DBG_PPE,
+ 			   "Enabling DS index %d vp %d link_id %d %pM core_mask 0x%x\n",
+ 			   vp_params.ppe_vp_profile_idx, ppe_vp_num,
+ 			   arvif->link_id, arvif->addr, vpai.core_mask);
+@@ -162,7 +169,9 @@ void ath12k_enable_ds_for_link_netdev(st
+ 	return;
+ }
+ 
+-void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++void ath12k_disable_ds_for_link_netdev(struct ath12k_base *ab,
++				       struct ath12k_link_vif *arvif,
++				       struct net_device *link_dev)
+ {
+ 	struct ieee80211_ppe_vp_ds_params vp_params = {0};
+ 	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
+@@ -170,17 +179,23 @@ void ath12k_disable_ds_for_link_netdev(s
+ 	if (!g_bonded_interface_model)
+ 		return;
+ 
+-	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
++	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
+ 
++	if (!arvif->ar) {
++		ath12k_warn(ab, "failed to disable ds for link id %d \n",
++				arvif->link_id);
++		return;
++	}
++
+ 	link_ndev_pvt = netdev_priv(link_dev);
+ 	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
+ 	if (arvif->ppe_vp_num != -1) {
+-		ath12k_mac_op_ppeds_detach_vdev (arvif, &vp_params);
++		ath12k_mac_op_ppeds_detach_vdev(arvif, &vp_params);
+ 		if (arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
+ 			ppe_vp_free(arvif->ppe_vp_num);
+ 
+-		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
++		ath12k_dbg(ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
+ 			   arvif->ppe_vp_num, link_dev->name);
+ 		arvif->ppe_vp_num = -1;
+ 	}
+--- a/drivers/net/wireless/ath/ath12k/bondif.h
++++ b/drivers/net/wireless/ath/ath12k/bondif.h
+@@ -14,10 +14,12 @@
+ #define ATH12K_PPE_DS_6G_CORE_MASK		0x4
+ #define ATH12K_PPE_DS_DEFAULT_CORE_MASK		0x7
+ 
+-void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++void ath12k_disable_ds_for_link_netdev(struct ath12k_base *ab,
++				       struct ath12k_link_vif *arvif,
+ 				       struct net_device *link_dev);
+-void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
+-				     struct net_device *link_dev);
++void ath12k_enable_ds_for_link_netdev(struct ath12k_base *ab,
++				      struct ath12k_link_vif *arvif,
++				      struct net_device *link_dev);
+ int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
+ 				struct ieee80211_vif *vif,
+ 				int link_num);
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -52,6 +52,9 @@ module_param_named(ppe_ds_enable, ath12k
@@ -146,24 +246,37 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	mutex_lock(&ar->conf_mutex);
  
  	ath12k_mac_bss_info_changed(ar, arvif, info, changed);
-@@ -4787,6 +4801,7 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4782,21 +4796,21 @@ static int ath12k_mac_vdev_delete(struct
+ 	ar->ab->free_vdev_map |= 1LL << arvif->vdev_id;
+ 	spin_unlock_bh(&ar->ab->base_lock);
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
++		ath12k_bond_link_delete(arvif);
++		ath12k_disable_ds_for_link_netdev(ar->ab, arvif,
++						  arvif->ndev_pvt->link_ndev);
++	}
++#endif
+ 	ar->allocated_vdev_map &= ~(1LL << arvif->vdev_id);
+ 	ar->ab->free_vdev_stats_id_map &= ~(1LL << arvif->vdev_stats_id);
  	ar->num_created_vdevs--;
  	arvif->ahvif->num_vdev_created--;
  	arvif->is_created = false;
 +	arvif->ar = NULL;
  
  clean_up:
- #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-@@ -4795,8 +4810,6 @@ clean_up:
- 		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
- 	}
- #endif
+-#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
+-	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
+-		ath12k_bond_link_delete(arvif);
+-		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
+-	}
+-#endif
 -
 -	arvif->ar = NULL;
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -5204,6 +5217,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5204,6 +5218,10 @@ static int ath12k_mac_op_hw_scan(struct
  			mutex_unlock(&ah->conf_mutex);
  			return -EINVAL;
  		} else if (ar != arvif->ar) {
@@ -174,7 +287,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  			mutex_lock(&arvif->ar->conf_mutex);
  			if (arvif->ar->scan.vdev_id != -1)
  				arvif->ar->scan.vdev_id = -1;
-@@ -5336,6 +5353,11 @@ static void ath12k_mac_op_cancel_hw_scan
+@@ -5336,6 +5354,11 @@ static void ath12k_mac_op_cancel_hw_scan
  	}
  
  	ar = arvif->ar;
@@ -186,7 +299,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	mutex_unlock(&ah->conf_mutex);
  
  	mutex_lock(&ar->conf_mutex);
-@@ -5667,6 +5689,17 @@ static int ath12k_mac_op_set_key(struct
+@@ -5667,6 +5690,17 @@ static int ath12k_mac_op_set_key(struct
  		return 0;
  	}
  
@@ -204,7 +317,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (sta) {
  		ahsta = (struct ath12k_sta *)sta->drv_priv;
  		if (sta->mlo) {
-@@ -6936,6 +6969,7 @@ static void ath12k_mac_ml_station_remove
+@@ -6936,6 +6970,7 @@ static void ath12k_mac_ml_station_remove
  		ar = arvif->ar;
  
  		mutex_lock(&ar->conf_mutex);
@@ -212,7 +325,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		ath12k_mac_station_post_remove(ar, arvif, arsta);
  		mutex_unlock(&ar->conf_mutex);
  
-@@ -7268,6 +7302,11 @@ static int ath12k_mac_op_change_sta_link
+@@ -7268,6 +7303,11 @@ static int ath12k_mac_op_change_sta_link
  		}
  
  		ar = arvif->ar;
@@ -224,7 +337,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  		mutex_lock(&ar->conf_mutex);
  		ret = ath12k_mac_station_add(ar, arvif, arsta);
-@@ -7568,6 +7607,10 @@ static int ath12k_mac_op_conf_tx(struct
+@@ -7568,6 +7608,10 @@ static int ath12k_mac_op_conf_tx(struct
  	mutex_unlock(&ah->conf_mutex);
  
  	ar = arvif->ar;
@@ -235,7 +348,16 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	mutex_lock(&ar->conf_mutex);
  	ret = ath12k_mac_conf_tx(ar, arvif, ac, params);
-@@ -9940,6 +9983,7 @@ err_vdev_del:
+@@ -9836,7 +9880,7 @@ static int ath12k_mac_vdev_create(struct
+ 				arvif->ppe_vp_num = -1;
+ 			}
+ 			else if (link_ndev) {
+-				ath12k_enable_ds_for_link_netdev(arvif,
++				ath12k_enable_ds_for_link_netdev(ab, arvif,
+ 								 arvif->ndev_pvt->link_ndev);
+ 				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
+ 			}
+@@ -9940,6 +9984,7 @@ err_vdev_del:
  	spin_unlock_bh(&ar->data_lock);
  
  err:
@@ -243,7 +365,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	arvif->ar = NULL;
  	return ret;
  }
-@@ -12586,6 +12630,14 @@ static int ath12k_mac_op_set_rts_thresho
+@@ -12586,6 +12631,14 @@ static int ath12k_mac_op_set_rts_thresho
  		}
  
  		ar = arvif->ar;
@@ -258,7 +380,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		ret = ath12k_set_vdev_param_to_all_vifs(ar, param_id, value);
  		if (ret) {
  			ath12k_warn(ar->ab, "failed to set RTS config for all vdevs of pdev %d",
-@@ -13834,6 +13886,11 @@ static void ath12k_mac_op_sta_statistics
+@@ -13834,6 +13887,11 @@ static void ath12k_mac_op_sta_statistics
  
  	/* TODO accumulate link sta stats here? */
  
@@ -340,7 +462,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	might_sleep();
  
  	if (ab->hw_params->credit_flow) {
-@@ -13879,6 +13883,7 @@ void ath12k_wmi_detach(struct ath12k_bas
+@@ -13869,6 +13873,7 @@ void ath12k_wmi_detach(struct ath12k_bas
  	for (i = 0; i < ab->htc.wmi_ep_count; i++)
  		ath12k_wmi_pdev_detach(ab, i);
  
