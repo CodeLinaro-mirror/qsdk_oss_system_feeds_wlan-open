@@ -120,7 +120,9 @@ drv_mac80211_init_device_config() {
                dsss_cck_40
 	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs use_ru_puncture_dfs
 	config_add_boolean disable_eml_cap discard_6g_awgn_event
+	config_add_int he_su_beamformer he_su_beamformee he_mu_beamformer
 	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
+	config_add_int eht_su_beamformer eht_su_beamformee eht_mu_beamformer
 }
 
 drv_mac80211_init_iface_config() {
@@ -646,11 +648,12 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$enable_be" != "0" ]; then
 			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0 ccfs:0
+			json_get_vars eht_su_beamformee:1 eht_su_beamformer:1 eht_mu_beamformer:1
 
 			append base_cfg "ieee80211be=1" "$N"
-			append base_cfg "eht_su_beamformer=1" "$N"
-			append base_cfg "eht_mu_beamformer=1" "$N"
-			append base_cfg "eht_su_beamformee=1" "$N"
+			append base_cfg "eht_su_beamformer=$eht_su_beamformer" "$N"
+			append base_cfg "eht_mu_beamformer=$eht_mu_beamformer" "$N"
+			append base_cfg "eht_su_beamformee=$eht_su_beamformee" "$N"
 
 			if [ -n "$eht_ulmumimo_80mhz" ]; then
 				if [ $eht_ulmumimo_80mhz -eq 0 ]; then
@@ -1919,8 +1922,11 @@ mac80211_update_bondif() {
 			cmd="ls /sys/class/net"
 			iface=$($cmd | grep "$mld_ifname"_b)
 			if ([ -d /sys/class/net/"$mld_ifname"_b ] && [ -n $network_bridge ]); then
+				bonded_macaddr=$(iw dev $mld_ifname info | grep addr | head -1 | awk '{print $2}')
 				brctl delif $network_bridge $mld_ifname
 				brctl addif $network_bridge "$mld_ifname"_b
+				ifconfig "$mld_ifname"_b down
+				ifconfig "$mld_ifname"_b hw ether $bonded_macaddr
 				ifconfig "$mld_ifname"_b up
 			fi
 		fi
