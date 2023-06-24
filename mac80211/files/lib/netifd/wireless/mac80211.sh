@@ -1476,7 +1476,8 @@ mac80211_setup_vif() {
 			fi
 		;;
 		sta)
-			freq_list="$(get_freq_list "$phy" "$channel" "$device")"
+			freq="$(get_freq "$phy" "$channel" "$device")"
+			freq_list=$(get_sta_freq_list $phy $freq)
 			mac80211_setup_supplicant || failed=1
 		;;
 		monitor)
