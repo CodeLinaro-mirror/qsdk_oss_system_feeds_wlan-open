@@ -241,9 +241,9 @@ ifneq ($(call qstrip,$(_LINUX_SRC)),)
 # --reference option doesn't work on git trees synced with "repo", so instead
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
-	git clone --depth=1 $(_LINUX_SRC) $(2) || \
+	git clone --depth=1 file://$(_LINUX_SRC) $(2) || \
 	(rm -rf $(2) && \
-	git clone --depth=1 $(_LINUX_SRC) $(2))
+	git clone --depth=1 file://$(_LINUX_SRC) $(2))
 	(cd $(2); git remote add src $(1); git fetch src)
   endef
 else
