@@ -88,7 +88,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,842 @@
+@@ -0,0 +1,857 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -205,6 +205,20 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	}
 +}
 +
++static bool ath12k_stats_update_ppe_vp(struct net_device *dev, ppe_vp_hw_stats_t *vp_stats)
++{
++        struct pcpu_sw_netstats *tstats = this_cpu_ptr(netdev_tstats(dev));
++
++        u64_stats_update_begin(&tstats->syncp);
++        tstats->tx_packets += vp_stats->tx_pkt_cnt;
++        tstats->tx_bytes += vp_stats->tx_byte_cnt;
++        tstats->rx_packets += vp_stats->rx_pkt_cnt;
++        tstats->rx_bytes += vp_stats->rx_byte_cnt;
++        u64_stats_update_end(&tstats->syncp);
++
++        return true;
++}
++
 +void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
 +				     struct net_device *link_dev)
 +{
@@ -228,6 +242,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	vpai.dst_cb_data = arvif;
 +	vpai.src_cb = NULL;
 +	vpai.src_cb_data = NULL;
++	vpai.stats_cb = ath12k_stats_update_ppe_vp;
 +	vpai.queue_num = 0;
 +	vpai.usr_type = PPE_VP_USER_TYPE_DS;
 +	vpai.net_dev_type = PPE_VP_NET_DEV_TYPE_WIFI;
@@ -1248,7 +1263,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14091,10 +14146,6 @@ static const struct ieee80211_ops ath12k
+@@ -14093,10 +14148,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1758,7 +1773,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_STATION:
  		if (sdata->u.mgd.mfp != IEEE80211_MFP_DISABLED)
  			key->conf.flags |= IEEE80211_KEY_FLAG_RX_MGMT;
-@@ -1744,9 +1772,23 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1752,9 +1780,23 @@ static int ieee80211_stop_ap(struct wiph
  
  	ieee80211_free_next_beacon(link);
  
@@ -2196,7 +2211,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -16964,9 +16968,16 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16972,9 +16976,16 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, NETDEV_UP,			\
  		 NL80211_FLAG_NEED_NETDEV_UP)		\
@@ -2213,7 +2228,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
  		 NL80211_FLAG_NEED_NETDEV_UP |		\
  		 NL80211_FLAG_NO_WIPHY_MTX |		\
-@@ -16998,7 +17009,13 @@ nl80211_remove_link_station(struct sk_bu
+@@ -17006,7 +17017,13 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, WIPHY_CLEAR,			\
  		 NL80211_FLAG_NEED_WIPHY |		\
@@ -2228,7 +2243,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  enum nl80211_internal_flags_selector {
  #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
-@@ -17361,6 +17378,7 @@ static const struct genl_small_ops nl802
+@@ -17369,6 +17386,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_start_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2236,7 +2251,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17369,6 +17387,7 @@ static const struct genl_small_ops nl802
+@@ -17377,6 +17395,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_stop_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2244,7 +2259,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17490,7 +17509,7 @@ static const struct genl_small_ops nl802
+@@ -17498,7 +17517,7 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_trigger_scan,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2253,7 +2268,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_ABORT_SCAN,
-@@ -17873,6 +17892,7 @@ static const struct genl_small_ops nl802
+@@ -17881,6 +17900,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_start_radar_detection,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2261,7 +2276,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_NO_WIPHY_MTX |
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
-@@ -18069,13 +18089,15 @@ static const struct genl_small_ops nl802
+@@ -18077,13 +18097,15 @@ static const struct genl_small_ops nl802
  		.cmd = NL80211_CMD_ADD_LINK,
  		.doit = nl80211_add_link,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2278,7 +2293,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -18083,6 +18105,7 @@ static const struct genl_small_ops nl802
+@@ -18091,6 +18113,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_add_link_station,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
