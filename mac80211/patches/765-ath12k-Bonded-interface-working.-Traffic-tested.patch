@@ -88,7 +88,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,785 @@
+@@ -0,0 +1,838 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -153,6 +153,53 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		core_mask = ATH12K_PPE_DS_DEFAULT_CORE_MASK;
 +
 +	return core_mask;
++}
++
++int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++{
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++	int ret;
++
++	if (!g_bonded_interface_model)
++		return 0;
++
++	link_ndev_pvt = netdev_priv(link_dev);
++
++	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", link_ndev_pvt->bond_dev, link_dev);
++	ret = bond_enslave(link_ndev_pvt->bond_dev, link_dev, NULL);
++	if (ret) {
++		ath12k_err(NULL, "Error bond enslave error\n");
++		return -EINVAL;
++	}
++	else {
++		ath12k_info(NULL, "Successfully enslaved link_ndev %s %px\n",
++			    link_dev->name, link_dev);
++	}
++
++	return 0;
++}
++
++void ath12k_bond_link_delete(struct ath12k_link_vif *arvif)
++{
++	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++
++	if (!g_bonded_interface_model)
++		return;
++
++	if (!arvif->ndev_pvt || !arvif->ndev_pvt->link_ndev) {
++		ath12k_err(NULL, "ERR no link dev for this vif to release from bond\n");
++		return;
++	}
++
++	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
++	if (link_ndev_pvt && link_ndev_pvt->bond_dev) {
++		ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n",
++			    arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
++		bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
++	} else {
++		ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n",
++			   arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
++	}
 +}
 +
 +void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
@@ -537,6 +584,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	u16 mcbc_gsn;
 +	int ret;
 +	int link_id;
++	struct ath12k_skb_cb *skb_cb;
++	struct ieee80211_tx_info *info;
 +
 +	if (!(bond_dev->flags & IFF_UP)) {
 +		dev_kfree_skb(skb);
@@ -545,6 +594,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	eh = (struct ethhdr *)skb->data;
 +	is_mcast = is_multicast_ether_addr(eh->h_dest);
++	skb_cb = ATH12K_SKB_CB(skb);
++	skb_cb->flags |= ATH12K_SKB_HW_80211_ENCAP;
++	info = IEEE80211_SKB_CB(skb);
++	info->flags |= IEEE80211_TX_CTL_HW_80211_ENCAP;
 +
 +	if (is_mcast) {
 +		uint8_t chip_id = mldev->primary_chipid;
@@ -876,7 +929,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.h
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,44 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -900,7 +953,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
 +				struct ieee80211_vif *vif,
 +				int link_num);
-+
++int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev);
++void ath12k_bond_link_delete(struct ath12k_link_vif *arvif);
 +enum ath12k_bond_state {
 +	ATH12K_BOND_SETUP_INPROGRESS,
 +	ATH12K_BOND_REGISTERED,
@@ -1029,8 +1083,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index fb3a553..0814a6a 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
@@ -1075,21 +1127,23 @@ index fb3a553..0814a6a 100644
  	ret = ath12k_wmi_vdev_delete(ar, arvif->vdev_id);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to delete WMI scan vdev %d: %d\n",
-@@ -4775,8 +4790,12 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4775,8 +4790,14 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
 -	arvif->ar = NULL;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
++		ath12k_bond_link_delete(arvif);
 +		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
++	}
 +#endif
  
 +	arvif->ar = NULL;
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4824,7 +4843,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4824,7 +4845,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1098,7 +1152,7 @@ index fb3a553..0814a6a 100644
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5165,8 +5184,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5165,8 +5186,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1110,7 +1164,21 @@ index fb3a553..0814a6a 100644
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -9555,6 +9576,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9445,6 +9468,13 @@ static void ath12k_mac_update_vif_offloa
+ 		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
+ 					IEEE80211_OFFLOAD_DECAP_ENABLED);
+ 
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	if (vif->type == NL80211_IFTYPE_AP && arvif->ndev_pvt
++			&& (hweight16(vif->valid_links) > 1))
++		vif->offload_flags |= (IEEE80211_OFFLOAD_ENCAP_ENABLED |
++					IEEE80211_OFFLOAD_DECAP_ENABLED);
++#endif
++
+ 	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
+ 		ahvif->tx_encap_type = ATH12K_HW_TXRX_ETHERNET;
+ 	else if (test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags))
+@@ -9555,6 +9585,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1122,7 +1190,7 @@ index fb3a553..0814a6a 100644
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9621,6 +9647,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9621,6 +9656,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1139,7 +1207,7 @@ index fb3a553..0814a6a 100644
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9712,6 +9748,19 @@ static int ath12k_mac_vdev_create(struct
+@@ -9712,6 +9757,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1153,13 +1221,14 @@ index fb3a553..0814a6a 100644
 +			else if (link_ndev) {
 +				ath12k_enable_ds_for_link_netdev(arvif,
 +								 arvif->ndev_pvt->link_ndev);
++				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
 +			}
 +		}
 +#endif
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9783,6 +9832,12 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9783,6 +9842,12 @@ static int ath12k_mac_vdev_create(struct
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
@@ -1172,7 +1241,7 @@ index fb3a553..0814a6a 100644
  
  	return ret;
  
-@@ -10291,15 +10346,17 @@ static int ath12k_mac_op_ampdu_action(struct ieee80211_hw *hw,
+@@ -10291,15 +10356,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1194,7 +1263,7 @@ index fb3a553..0814a6a 100644
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12107,6 +12164,7 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
+@@ -12107,6 +12174,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1202,7 +1271,7 @@ index fb3a553..0814a6a 100644
  		return -ENOMEM;
  	}
  
-@@ -14091,10 +14149,6 @@ static const struct ieee80211_ops ath12k_ops = {
+@@ -14091,10 +14159,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1347,7 +1416,7 @@ index fb3a553..0814a6a 100644
  	ab->num_ppe_vp_search_idx_entries--;
  	mutex_unlock(&ab->ppe_vp_tbl_lock);
  
-@@ -640,44 +640,80 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -640,38 +640,65 @@ static void ath12k_dp_ppeds_setup_vp_ent
  	return;
  }
  
@@ -1424,22 +1493,7 @@ index fb3a553..0814a6a 100644
  	vp_num = ppe_ds_wlan_vp_alloc(ab->ppeds_handle, vp_params->dev, vp_arg);
  	if (vp_num < 0) {
  		ath12k_err(ab," vp alloc failed\n");
- 		return -EFAULT;
- 	}
- 
-+	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px from ppe vdev attach\n", link_ndev_pvt->bond_dev, vp_params->dev);
-+	ret = bond_enslave(link_ndev_pvt->bond_dev, vp_params->dev, NULL);
-+	if (ret) {
-+		ath12k_err(NULL, "Error bond enslave error\n");
-+		return -EINVAL;
-+	}
-+	else
-+		ath12k_info(NULL, "Successfully link_ndev(enslave) %s %px. ppe vdev attach\n", vp_params->dev->name, vp_params->dev);
-+
- 	/*Allocate a ppe vp profile for a vap */
- 	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
- 	if (!vp_profile) {
-@@ -686,14 +722,14 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -686,14 +713,14 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  		goto vp_free;
  	}
  
@@ -1457,7 +1511,7 @@ index fb3a553..0814a6a 100644
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -705,19 +741,23 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -705,19 +732,23 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  	}
  
  	vp_profile->vp_num = vp_num;
@@ -1485,7 +1539,7 @@ index fb3a553..0814a6a 100644
  
  	return 0;
  
-@@ -731,22 +771,27 @@ vp_free:
+@@ -731,22 +762,17 @@ vp_free:
  	return ret;
  }
  
@@ -1501,25 +1555,16 @@ index fb3a553..0814a6a 100644
 -	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
 -	struct ath12k_link_vif *arvif = &ahvif->link[0];
  	struct ath12k_dp_ppe_vp_profile *vp_profile;
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
  	int ppe_vp_profile_idx = -1;
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
  		return;
  
-+	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
- 	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach\n");
-+	if (arvif->ndev_pvt->link_ndev) {
-+		        ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+		        bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
-+	} else {
-+		        ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+	}
-+
+-	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach\n");
  	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
  
  	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-@@ -760,7 +805,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+@@ -760,7 +786,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -2239,164 +2284,3 @@ index fb3a553..0814a6a 100644
  	char ppeds_irq_name[MAX_PPEDS_IRQS][MAX_PPEDS_IRQ_NAME_LEN];
  	int ppeds_irq[MAX_PPEDS_IRQS];
  #endif
-From bc4a9dde5f725a54e1abaf4d9fd1bd107e68db6a Mon Sep 17 00:00:00 2001
-From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
-Date: Wed, 21 Jun 2023 10:07:50 -0700
-Subject: [PATCH] ath12k: un tie bond enslaving from direct switch
-
-Currently, link netdevice is added to the bond when corresponding
-ppe vp port is allocated for enabling direct switching(DS) support
-for that netdev. Due to this bond_enslacing is getting bypasses
-when an interface doesnot support DS. Fix this by moving bonding
-changes seperate from DS enable functions.
-
-Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
----
- drivers/net/wireless/ath/ath12k/bondif.c | 47 ++++++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/bondif.h |  3 +-
- drivers/net/wireless/ath/ath12k/mac.c    |  5 ++-
- drivers/net/wireless/ath/ath12k/ppe.c    | 19 ----------
- 4 files changed, 53 insertions(+), 21 deletions(-)
-
-diff --git a/drivers/net/wireless/ath/ath12k/bondif.c b/drivers/net/wireless/ath/ath12k/bondif.c
-index 3e089b50f466..32d978be8387 100644
---- a/drivers/net/wireless/ath/ath12k/bondif.c
-+++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -64,6 +64,53 @@ int ath12k_ppeds_get_core_mask(struct ath12k *ar)
- 	return core_mask;
- }
- 
-+int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev)
-+{
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
-+	int ret;
-+
-+	if (!g_bonded_interface_model)
-+		return 0;
-+
-+	link_ndev_pvt = netdev_priv(link_dev);
-+
-+	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", link_ndev_pvt->bond_dev, link_dev);
-+	ret = bond_enslave(link_ndev_pvt->bond_dev, link_dev, NULL);
-+	if (ret) {
-+		ath12k_err(NULL, "Error bond enslave error\n");
-+		return -EINVAL;
-+	}
-+	else {
-+		ath12k_info(NULL, "Successfully enslaved link_ndev %s %px\n",
-+			    link_dev->name, link_dev);
-+	}
-+
-+	return 0;
-+}
-+
-+void ath12k_bond_link_delete(struct ath12k_link_vif *arvif)
-+{
-+	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
-+
-+	if (!g_bonded_interface_model)
-+		return;
-+
-+	if (!arvif->ndev_pvt || !arvif->ndev_pvt->link_ndev) {
-+		ath12k_err(NULL, "ERR no link dev for this vif to release from bond\n");
-+		return;
-+	}
-+
-+	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
-+	if (link_ndev_pvt && link_ndev_pvt->bond_dev) {
-+		ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n",
-+			    arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+		bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
-+	} else {
-+		ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n",
-+			   arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
-+	}
-+}
-+
- void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
- 				     struct net_device *link_dev)
- {
-diff --git a/drivers/net/wireless/ath/ath12k/bondif.h b/drivers/net/wireless/ath/ath12k/bondif.h
-index 2c76caa43c6e..aaca9854f857 100644
---- a/drivers/net/wireless/ath/ath12k/bondif.h
-+++ b/drivers/net/wireless/ath/ath12k/bondif.h
-@@ -21,7 +21,8 @@ void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
- int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
- 				struct ieee80211_vif *vif,
- 				int link_num);
--
-+int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev);
-+void ath12k_bond_link_delete(struct ath12k_link_vif *arvif);
- enum ath12k_bond_state {
- 	ATH12K_BOND_SETUP_INPROGRESS,
- 	ATH12K_BOND_REGISTERED,
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 243a681abc5b..1e458017b7b8 100644
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4818,8 +4818,10 @@ static int ath12k_mac_vdev_delete(struct ath12k *ar, struct ath12k_link_vif *arv
- 
- clean_up:
- #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
--	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt)
-+	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
-+		ath12k_bond_link_delete(arvif);
- 		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
-+	}
- #endif
- 
- 	arvif->ar = NULL;
-@@ -10183,6 +10185,7 @@ static int ath12k_mac_vdev_create(struct ath12k *ar, struct ath12k_link_vif *arv
- 			else if (link_ndev) {
- 				ath12k_enable_ds_for_link_netdev(arvif,
- 								 arvif->ndev_pvt->link_ndev);
-+				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
- 			}
- 		}
- #endif
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 937bd6d413c7..97ccf70e3546 100644
---- a/drivers/net/wireless/ath/ath12k/ppe.c
-+++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -705,15 +705,6 @@ int ath12k_mac_op_ppeds_attach_vdev(struct ath12k_link_vif *arvif,
- 		return -EFAULT;
- 	}
- 
--	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px from ppe vdev attach\n", link_ndev_pvt->bond_dev, vp_params->dev);
--	ret = bond_enslave(link_ndev_pvt->bond_dev, vp_params->dev, NULL);
--	if (ret) {
--		ath12k_err(NULL, "Error bond enslave error\n");
--		return -EINVAL;
--	}
--	else
--		ath12k_info(NULL, "Successfully link_ndev(enslave) %s %px. ppe vdev attach\n", vp_params->dev->name, vp_params->dev);
--
- 	/*Allocate a ppe vp profile for a vap */
- 	ppe_vp_profile_idx = ath12k_dp_ppeds_alloc_ppe_vp_profile(ab, &vp_profile);
- 	if (!vp_profile) {
-@@ -777,21 +768,11 @@ void ath12k_mac_op_ppeds_detach_vdev(struct ath12k_link_vif *arvif,
- 	struct ath12k *ar = arvif->ar;
- 	struct ath12k_base *ab = ar->ab;
- 	struct ath12k_dp_ppe_vp_profile *vp_profile;
--	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
- 	int ppe_vp_profile_idx = -1;
- 
- 	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
- 		return;
- 
--	link_ndev_pvt = netdev_priv(arvif->ndev_pvt->link_ndev);
--	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach\n");
--	if (arvif->ndev_pvt->link_ndev) {
--		        ath12k_info(NULL, "Bond_release link netdevice %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
--		        bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
--	} else {
--		        ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n", arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
--	}
--
- 	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
- 
- 	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-
--- 
-2.17.1
-
