@@ -30,16 +30,18 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	/* For now the assoc link will be considered primary */
  	bool is_assoc_link;
-@@ -1014,6 +1015,8 @@ struct ath12k {
+@@ -1014,6 +1015,10 @@ struct ath12k {
  	struct completion mvr_complete;
  	struct cfg80211_chan_def agile_chandef;
  	struct ath12k_mgmt_rx_reo_pdev_info rx_reo_pdev_ctx;
 +
 +	u64 delta_tsf2;
++	u64 delta_tqm;
++	u64 mlo_tstamp_offset;
  };
  
  struct ath12k_band_cap {
-@@ -1075,6 +1078,11 @@ struct ath12k_pdev {
+@@ -1075,6 +1080,11 @@ struct ath12k_pdev {
  	struct mlo_timestamp timestamp;
  };
  
@@ -51,7 +53,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  struct cmem_remap {
  	u32 base;
  	u32 size;
-@@ -1272,10 +1280,13 @@ struct ath12k_base {
+@@ -1272,10 +1282,13 @@ struct ath12k_base {
  	void __iomem *mem;
  	void __iomem *mem_ce;
  	void __iomem *mem_cmem;
@@ -65,15 +67,6 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	unsigned long mem_len;
  
  	struct {
-@@ -1421,6 +1432,8 @@ struct ath12k_base {
- 	int userpd_id;
- 
- 	u32 chwidth_num_peer_caps;
-+	u64 delta_tqm;
-+	u64 mlo_tstamp_offset;
- 
- 	/* must be last */
- 	u8 drv_priv[0] __aligned(sizeof(void *));
 --- a/drivers/net/wireless/ath/ath12k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs_sta.c
 @@ -1506,6 +1506,363 @@ static const struct file_operations fops
@@ -456,21 +449,6 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +#endif
  	mutex_unlock(&ah->conf_mutex);
  }
---- a/drivers/net/wireless/ath/ath12k/dp.c
-+++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -1231,7 +1231,12 @@ int ath12k_dp_pdev_alloc(struct ath12k_b
- 				    i);
- 			goto err;
- 		}
-+
-+		if (ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
-+			ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg(ab, ar->lmac_id, &ar->delta_tsf2);
- 	}
-+	if (ab->hw_params->hal_ops->hal_get_tqm_scratch_reg)
-+		ab->hw_params->hal_ops->hal_get_tqm_scratch_reg(ab, &ab->delta_tqm);
- 
- 	return 0;
- 
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
 @@ -325,6 +325,7 @@ struct ath12k_tx_desc_info {
@@ -483,11 +461,13 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1960,6 +1960,8 @@ static void ath12k_htt_mlo_offset_event_
+@@ -1960,6 +1960,10 @@ static void ath12k_htt_mlo_offset_event_
  	pdev->timestamp.mlo_comp_clks = __le32_to_cpu(msg->mlo_comp_clks);
  	pdev->timestamp.mlo_comp_timer = __le32_to_cpu(msg->mlo_comp_timer);
  
-+	ar->ab->mlo_tstamp_offset =  ((u64)pdev->timestamp.mlo_offset_hi << 32 | pdev->timestamp.mlo_offset_lo);
++	ar->mlo_tstamp_offset =  ((u64)pdev->timestamp.mlo_offset_hi << 32 | pdev->timestamp.mlo_offset_lo);
++	if (ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
++		ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg(ab, ar->lmac_id, &ar->delta_tsf2);
 +
  	spin_unlock_bh(&ar->data_lock);
  }
@@ -826,7 +806,8 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	return;
  }
  
-+#define HW_TX_DELAY_MAX                       0x1000000
++#define	HW_TX_DELAY_MAX				0x1000000
++
 +#define TX_COMPL_SHIFT_BUFFER_TIMESTAMP_US    10
 +#define HW_TX_DELAY_MASK                      0x1FFFFFFF
 +#define TX_COMPL_BUFFER_TSTAMP_US(TSTAMP) \
@@ -839,7 +820,6 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +void ath12k_sawf_compute_hw_delay(struct ath12k *ar, struct hal_tx_status *ts,
 +				  u32 *hw_delay)
 +{
-+	struct ath12k_base *ab = ar->ab;
 +	u32 msdu_tqm_enqueue_tstamp_us, final_msdu_tqm_enqueue_tstamp_us;
 +	u32 msdu_compl_tsf_tstamp_us, final_msdu_compl_tsf_tstamp_us;
 +	u32 delta_tsf2, delta_tqm;
@@ -848,8 +828,8 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +	msdu_tqm_enqueue_tstamp_us =
 +		TX_COMPL_BUFFER_TSTAMP_US(ts->buffer_timestamp);
 +	msdu_compl_tsf_tstamp_us = ts->tsf;
-+	delta_tsf2 = ab->mlo_tstamp_offset - ar->delta_tsf2;
-+	delta_tqm = ab->mlo_tstamp_offset - ab->delta_tqm;
++	delta_tsf2 = ar->mlo_tstamp_offset - ar->delta_tsf2;
++	delta_tqm = ar->mlo_tstamp_offset - ar->delta_tqm;
 +
 +	final_msdu_tqm_enqueue_tstamp_us =
 +		(msdu_tqm_enqueue_tstamp_us + delta_tqm) & HW_TX_DELAY_MASK;
@@ -864,7 +844,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +
 +void ath12k_update_hist_stats(struct ath12k_delay_hist_stats *hist_stats, u32 value)
 +{
-+	if (value < hist_stats->min)
++	if (!hist_stats->min || value < hist_stats->min)
 +		hist_stats->min = value;
 +
 +	if (value > hist_stats->max)
@@ -1189,3 +1169,14 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  };
  
  /* BRINGUP: move to dp.h */
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -13065,6 +13065,8 @@ skip_lookup:
+ 	}
+ 
+ 	ar->mlo_setup_status = ev->status;
++	if (ab->hw_params->hal_ops->hal_get_tqm_scratch_reg)
++		ab->hw_params->hal_ops->hal_get_tqm_scratch_reg(ab, &ar->delta_tqm);
+ 	complete(&ar->mlo_setup_done);
+ 
+ out:
