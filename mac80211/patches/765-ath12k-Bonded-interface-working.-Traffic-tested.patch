@@ -61,8 +61,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.c
  create mode 100644 drivers/net/wireless/ath/ath12k/bondif.h
 
---- a/drivers/net/wireless/ath/ath12k/Kconfig
-+++ b/drivers/net/wireless/ath/ath12k/Kconfig
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Kconfig
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/Kconfig
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Kconfig
 @@ -70,3 +70,12 @@ config ATH12K_PPE_DS_SUPPORT
  		Enable ath12k PPE-DS support
  
@@ -76,8 +78,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		Enable ath12k Bonded-DS support
 +
 +		Say Y to enable Bonded DS Support. If unsure, say N.
---- a/drivers/net/wireless/ath/ath12k/Makefile
-+++ b/drivers/net/wireless/ath/ath12k/Makefile
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Makefile
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/Makefile
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/Makefile
 @@ -33,6 +33,7 @@ ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += co
  ath12k-$(CPTCFG_ATH12K_PKTLOG) += pktlog.o
  ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
@@ -86,9 +90,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  # for tracing framework to find trace.h
  CFLAGS_trace.o := -I$(src)
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/bondif.c
+===================================================================
 --- /dev/null
-+++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,863 @@
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/bondif.c
+@@ -0,0 +1,890 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -539,6 +545,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	hal_ring_id = tx_ring->tcl_data_ring.ring_id;
 +	tcl_ring = &ab->hal.srng_list[hal_ring_id];
 +
++	spin_lock_bh(&tcl_ring->lock);
 +	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
 +	hal_tcl_desc = ath12k_hal_srng_src_get_next_entry(ab, tcl_ring);
 +	if (unlikely(!hal_tcl_desc)) {
@@ -546,6 +553,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		 * desc because the desc is directly enqueued onto hw queue.
 +		 */
 +		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
 +		ab->soc_stats.tx_err.desc_na[ti.ring_id]++;
 +		ret = -ENOMEM;
 +
@@ -574,6 +582,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	dsb(st);
 +	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
 +
 +	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ", skb->data, skb->len);
 +	arvif->link_stats.tx_enqueued++;
@@ -607,7 +616,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	int is_mcast;
 +	u16 mcbc_gsn;
 +	int ret;
-+	int link_id;
++	int link_id, ring_id = 0;
 +	struct ath12k_skb_cb *skb_cb;
 +	struct ieee80211_tx_info *info;
 +
@@ -655,15 +664,25 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			else
 +				break;
 +
++			ring_id = tmp_arvif->ar->ab->hw_params->hw_ops->get_ring_selector(skb);
++
++			if (test_bit(ATH12K_FLAG_RECOVERY, &tmp_ar->ab->dev_flags)) {
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
++				break;
++			}
++
++			tmp_ar->ab->soc_stats.bond_tx_mcast_enqueued[ring_id]++;
 +			msdu_copied = skb_copy(skb, GFP_ATOMIC);
 +			if (!msdu_copied) {
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
 +				continue;
 +			}
 +
 +			ret = ath12k_mcast_dp_tx(tmp_ar, tmp_arvif, msdu_copied, true, mcbc_gsn);
 +			if (ret) {
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
 +				dev_kfree_skb_any(msdu_copied);
-+				return ret;
++				return NETDEV_TX_OK;
 +			}
 +		}
 +		dev_kfree_skb_any(skb);
@@ -722,8 +741,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +{
 +	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
 +	struct ath12k_link_vif *arvif = arvif_pvt->arvif;
++	struct ath12k_base *ab;
 +	int ret;
-+	int is_mcast;
++	int is_mcast, ring_id = 0;
 +	struct ethhdr *eh = NULL;
 +	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 +
@@ -749,14 +769,27 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		return NETDEV_TX_OK;
 +	}
 +
++	ab = arvif->ar->ab;
++	ring_id = ab->hw_params->hw_ops->get_ring_selector(skb);
++
++	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags)) {
++		ath12k_dbg(NULL, ATH12K_DBG_PPE, "Dropping frames as radio is in recovery\n");
++		ab->soc_stats.bond_tx_ucast_dropped[ring_id]++;
++		dev_kfree_skb_any(skb);
++		return NETDEV_TX_OK;
++	}
++
++
++	ab->soc_stats.bond_tx_ucast_enqueued[ring_id]++;
 +	/* TODO: debug why queue is always 15 */
 +	info->hw_queue = 0;
 +	ret = ath12k_dp_tx_direct(arvif, skb);
 +	if (unlikely(ret)) {
-+		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
++		ath12k_dbg(ab, ATH12K_DBG_PPE,
 +			   "failed to transmit frame %d\n", ret);
-+		ieee80211_free_txskb(arvif_pvt->hw, skb);
-+		return ret;
++		dev_kfree_skb_any(skb);
++		ab->soc_stats.bond_tx_ucast_dropped[ring_id]++;
++		return NETDEV_TX_OK;
 +	}
 +	return NETDEV_TX_OK;
 +}
@@ -952,8 +985,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	}
 +	return 0;
 +}
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/bondif.h
+===================================================================
 --- /dev/null
-+++ b/drivers/net/wireless/ath/ath12k/bondif.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/bondif.h
 @@ -0,0 +1,44 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
@@ -999,8 +1034,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +};
 +
 +#endif //__BONDIF_H
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
 @@ -335,6 +335,18 @@ struct ath12k_vif_tcl_desc_template {
  	u32 info4;
  };
@@ -1033,8 +1070,21 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	bool mvr_processing;
  	bool pending_csa_up;
---- a/drivers/net/wireless/ath/ath12k/dp.c
-+++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -1108,6 +1126,10 @@ struct ath12k_soc_dp_stats {
+ 	u32 fw_tx_status[MAX_FW_TX_STATUS];
+ 	u32 tx_enqueued[MAX_TCL_RING];
+ 	u32 tx_completed[MAX_TCL_RING];
++	u32 bond_tx_ucast_enqueued[MAX_TCL_RING];
++	u32 bond_tx_mcast_enqueued[MAX_TCL_RING];
++	u32 bond_tx_ucast_dropped[MAX_TCL_RING];
++	u32 bond_tx_mcast_dropped[MAX_TCL_RING];
+ 	u32 reo_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
+ 	u32 fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
+ 	u32 non_fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
 @@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
  	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
@@ -1056,8 +1106,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  }
  
  static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
---- a/drivers/net/wireless/ath/ath12k/dp_rx.c
-+++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
 @@ -2767,6 +2767,10 @@ static bool ath12k_dp_rx_check_fast_rx(s
  	if (is_multicast_ether_addr(ehdr->h_dest))
  	        return false;
@@ -1110,8 +1162,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -EINVAL;
  
  	param.opcode = ATH12K_WMI_PKTROUTE_ADD;
---- a/drivers/net/wireless/ath/ath12k/dp_tx.c
-+++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_tx.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -276,6 +276,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
  	u8 hal_ring_id, ring_id;
  	dma_addr_t paddr;
@@ -1131,8 +1185,60 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -311,7 +312,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 
+ 	hal_ring_id = ring_id + HAL_SRNG_RING_ID_SW2TCL1;
+ 	tcl_ring = &ab->hal.srng_list[hal_ring_id];
+-
++	spin_lock_bh(&tcl_ring->lock);
+ 	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
+ 
+ 	hal_tcl_desc = (void *)ath12k_hal_srng_src_get_next_entry_nolock(ab, tcl_ring);
+@@ -320,6 +321,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 		 * desc because the desc is directly enqueued onto hw queue.
+ 		 */
+ 		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
+ 		ab->soc_stats.tx_err.desc_na[ring_id]++;
+ 		ret = -ENOMEM;
+ 		goto fail_unmap_dma;
+@@ -355,6 +357,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 	memcpy(hal_tcl_desc, &tcl_desc, sizeof(tcl_desc));
+ 	dsb(st);
+ 	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
+ 
+ 	atomic_inc(&ar->dp.num_tx_pending);
+ 
+@@ -594,7 +597,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 
+ 	hal_ring_id = tx_ring->tcl_data_ring.ring_id;
+ 	tcl_ring = &ab->hal.srng_list[hal_ring_id];
+-
++	spin_lock_bh(&tcl_ring->lock);
+ 	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
+ 	hal_tcl_desc = ath12k_hal_srng_src_get_next_entry(ab, tcl_ring);
+ 	if (unlikely(!hal_tcl_desc)) {
+@@ -602,6 +605,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 		 * desc because the desc is directly enqueued onto hw queue.
+ 		 */
+ 		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
+ 		ab->soc_stats.tx_err.desc_na[ti.ring_id]++;
+ 		ret = -ENOMEM;
+ 
+@@ -640,6 +644,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 
+ 	dsb(st);
+ 	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
+ 
+ 	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ",
+ 			skb->data, skb->len);
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
  #include "testmode.h"
  #include "peer.h"
@@ -1368,8 +1474,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
---- a/drivers/net/wireless/ath/ath12k/pci.c
-+++ b/drivers/net/wireless/ath/ath12k/pci.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/pci.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.c
 @@ -65,6 +65,15 @@ EXPORT_SYMBOL(ath12k_napi_poll_budget);
  module_param_named(napi_budget, ath12k_napi_poll_budget, uint, 0644);
  MODULE_PARM_DESC(napi_budget, "Napi budget processing per rx intr");
@@ -1408,8 +1516,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ab = ath12k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH12K_BUS_PCI,
  			       &ath12k_pci_bus_params);
  	if (!ab) {
---- a/drivers/net/wireless/ath/ath12k/ppe.c
-+++ b/drivers/net/wireless/ath/ath12k/ppe.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/ppe.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.c
 @@ -13,6 +13,7 @@
  #include <ppe_drv_sc.h>
  #include <linux/dma-mapping.h>
@@ -1675,8 +1785,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		ath12k_dp_ppeds_dealloc_vp_search_idx_tbl_entry(ab, vp_profile->search_idx_reg_num);
  
  	ath12k_dp_ppeds_dealloc_vp_tbl_entry(ab, vp_profile->ppe_vp_num_idx);
---- a/drivers/net/wireless/ath/ath12k/ppe.h
-+++ b/drivers/net/wireless/ath/ath12k/ppe.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/ppe.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -6,16 +6,6 @@
  #ifndef ATH12K_PPE_H
  #define ATH12K_PPE_H
@@ -1720,8 +1832,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +				     struct ath12k_link_vif *arvif);
  #endif
  #endif
---- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
-+++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath6kl/cfg80211.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath6kl/cfg80211.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath6kl/cfg80211.c
 @@ -3824,7 +3824,7 @@ struct wireless_dev *ath6kl_interface_ad
  
  	netdev_set_default_ethtool_ops(ndev, &ath6kl_ethtool_ops);
@@ -1731,8 +1845,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		goto err;
  
  	ar->avail_idx_map &= ~BIT(fw_vif_idx);
---- a/drivers/net/wireless/ath/wil6210/netdev.c
-+++ b/drivers/net/wireless/ath/wil6210/netdev.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/wil6210/netdev.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/wil6210/netdev.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/wil6210/netdev.c
 @@ -432,7 +432,7 @@ int wil_vif_add(struct wil6210_priv *wil
  		if (rc)
  			return rc;
@@ -1742,8 +1858,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (rc < 0) {
  		dev_err(&ndev->dev, "Failed to register netdev: %d\n", rc);
  		if (any_active && vif->mid != 0)
---- a/include/net/cfg80211.h
-+++ b/include/net/cfg80211.h
+Index: backports-20220822-5.4.213-ef7197996efe/include/net/cfg80211.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/include/net/cfg80211.h
++++ backports-20220822-5.4.213-ef7197996efe/include/net/cfg80211.h
 @@ -6064,6 +6064,7 @@ struct wireless_dev {
  	/* the remainder of this struct should be private to cfg80211 */
  	struct list_head list;
@@ -1761,8 +1879,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  /**
   * cfg80211_unregister_netdevice - unregister the given netdev
---- a/include/net/mac80211.h
-+++ b/include/net/mac80211.h
+Index: backports-20220822-5.4.213-ef7197996efe/include/net/mac80211.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/include/net/mac80211.h
++++ backports-20220822-5.4.213-ef7197996efe/include/net/mac80211.h
 @@ -1965,7 +1965,11 @@ struct ieee80211_vif {
  
  	bool txqs_stopped[IEEE80211_NUM_ACS];
@@ -1776,8 +1896,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	int ppe_vp_num;
  	unsigned long ppe_vp_type;
---- a/include/uapi/linux/nl80211.h
-+++ b/include/uapi/linux/nl80211.h
+Index: backports-20220822-5.4.213-ef7197996efe/include/uapi/linux/nl80211.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/include/uapi/linux/nl80211.h
++++ backports-20220822-5.4.213-ef7197996efe/include/uapi/linux/nl80211.h
 @@ -3498,6 +3498,9 @@ enum nl80211_iftype {
  	NL80211_IFTYPE_P2P_DEVICE,
  	NL80211_IFTYPE_OCB,
@@ -1788,8 +1910,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	/* keep last */
  	NUM_NL80211_IFTYPES,
---- a/local-symbols
-+++ b/local-symbols
+Index: backports-20220822-5.4.213-ef7197996efe/local-symbols
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/local-symbols
++++ backports-20220822-5.4.213-ef7197996efe/local-symbols
 @@ -67,6 +67,7 @@ MAC80211_DEBUG_COUNTERS=
  MAC80211_STA_HASH_MAX_SIZE=
  MAC80211_NSS_SUPPORT=
@@ -1803,8 +1927,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  ATH12K_PKTLOG=
  ATH12K_PPE_DS_SUPPORT=
 +ATH12K_BONDED_DS_SUPPORT=
---- a/net/mac80211/Kconfig
-+++ b/net/mac80211/Kconfig
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/Kconfig
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/Kconfig
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/Kconfig
 @@ -122,6 +122,24 @@ config MAC80211_PPE_SUPPORT
  
  	  If unsure, say N.
@@ -1830,9 +1956,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  config MAC80211_NOINLINE
  	bool "Do not inline TX/RX handlers"
  	depends on MAC80211_DEBUG_MENU
---- a/net/mac80211/cfg.c
-+++ b/net/mac80211/cfg.c
-@@ -194,7 +194,11 @@ static struct wireless_dev *ieee80211_ad
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/cfg.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/cfg.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/cfg.c
+@@ -201,7 +201,11 @@ static struct wireless_dev *ieee80211_ad
  	struct ieee80211_sub_if_data *sdata;
  	int err;
  
@@ -1845,7 +1973,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (err)
  		return ERR_PTR(err);
  
-@@ -218,6 +222,26 @@ static int ieee80211_del_iface(struct wi
+@@ -225,6 +229,26 @@ static int ieee80211_del_iface(struct wi
  	return 0;
  }
  
@@ -1872,7 +2000,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static int ieee80211_change_iface(struct wiphy *wiphy,
  				  struct net_device *dev,
  				  enum nl80211_iftype type,
-@@ -542,6 +566,10 @@ static int ieee80211_add_key(struct wiph
+@@ -549,6 +573,10 @@ static int ieee80211_add_key(struct wiph
  	}
  
  	switch (sdata->vif.type) {
@@ -1883,7 +2011,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_STATION:
  		if (sdata->u.mgd.mfp != IEEE80211_MFP_DISABLED)
  			key->conf.flags |= IEEE80211_KEY_FLAG_RX_MGMT;
-@@ -1752,9 +1780,23 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1759,9 +1787,23 @@ static int ieee80211_stop_ap(struct wiph
  
  	ieee80211_free_next_beacon(link);
  
@@ -1907,8 +2035,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	netif_carrier_off(dev);
  
  	/* remove beacon and probe response */
---- a/net/mac80211/chan.c
-+++ b/net/mac80211/chan.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/chan.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/chan.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/chan.c
 @@ -294,6 +294,10 @@ ieee80211_get_chanctx_vif_max_required_b
  			continue;
  
@@ -1931,8 +2061,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_ADHOC:
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_MESH_POINT:
---- a/net/mac80211/ieee80211_i.h
-+++ b/net/mac80211/ieee80211_i.h
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/ieee80211_i.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/ieee80211_i.h
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/ieee80211_i.h
 @@ -26,6 +26,9 @@
  #include <linux/idr.h>
  #include <linux/rhashtable.h>
@@ -1952,8 +2084,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
  			     enum nl80211_iftype type);
  void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata);
---- a/net/mac80211/iface.c
-+++ b/net/mac80211/iface.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/iface.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/iface.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/iface.c
 @@ -417,6 +417,16 @@ static void ieee80211_do_stop(struct iee
  	/*
  	 * Stop TX on this interface first.
@@ -1971,7 +2105,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (sdata->dev)
  		netif_tx_stop_all_queues(sdata->dev);
  
-@@ -768,10 +778,24 @@ static int ieee80211_stop(struct net_dev
+@@ -769,10 +779,24 @@ static int ieee80211_stop(struct net_dev
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	struct ieee80211_ppe_vp_ds_params vp_params = {0};
  #endif
@@ -1996,7 +2130,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  		list_for_each_entry_safe(vlan, tmpsdata, &sdata->u.ap.vlans,
  					 u.vlan.list)
-@@ -789,7 +813,7 @@ static int ieee80211_stop(struct net_dev
+@@ -787,7 +811,7 @@ static int ieee80211_stop(struct net_dev
  #endif
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -2005,7 +2139,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		drv_ppeds_detach_vdev(sdata, &sdata->vif, &vp_params);
  		if (sdata->vif.ppe_vp_type != PPE_VP_USER_TYPE_DS)
  			ppe_vp_free(sdata->vif.ppe_vp_num);
-@@ -1442,6 +1466,11 @@ int ieee80211_do_open(struct wireless_de
+@@ -1448,6 +1472,11 @@ int ieee80211_do_open(struct wireless_de
  		/* cannot happen */
  		WARN_ON(1);
  		break;
@@ -2017,7 +2151,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	}
  
  	if (local->open_count == 0) {
-@@ -1941,6 +1970,11 @@ static void ieee80211_setup_sdata(struct
+@@ -1947,6 +1976,11 @@ static void ieee80211_setup_sdata(struct
  
  	/* and set some type-dependent values */
  	sdata->vif.type = type;
@@ -2029,7 +2163,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	sdata->vif.p2p = false;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	sdata->vif.ppe_vp_num = -1;
-@@ -2019,6 +2053,10 @@ static void ieee80211_setup_sdata(struct
+@@ -2025,6 +2059,10 @@ static void ieee80211_setup_sdata(struct
  	case NUM_NL80211_IFTYPES:
  		WARN_ON(1);
  		break;
@@ -2040,7 +2174,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	}
  
  	/* need to do this after the switch so vif.type is correct */
-@@ -2282,7 +2320,7 @@ static void ieee80211_assign_perm_addr(s
+@@ -2288,7 +2326,7 @@ static void ieee80211_assign_perm_addr(s
  int ieee80211_if_add(struct ieee80211_local *local, const char *name,
  		     unsigned char name_assign_type,
  		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
@@ -2049,7 +2183,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  {
  	struct net_device *ndev = NULL;
  	struct ieee80211_sub_if_data *sdata = NULL;
-@@ -2455,7 +2493,7 @@ int ieee80211_if_add(struct ieee80211_lo
+@@ -2461,7 +2499,7 @@ int ieee80211_if_add(struct ieee80211_lo
  #endif
  		}
  
@@ -2058,7 +2192,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		if (ret) {
  			free_netdev(ndev);
  			return ret;
-@@ -2486,7 +2524,9 @@ void ieee80211_if_remove(struct ieee8021
+@@ -2492,7 +2530,9 @@ void ieee80211_if_remove(struct ieee8021
  	synchronize_rcu();
  
  	cfg80211_unregister_wdev(&sdata->wdev);
@@ -2069,8 +2203,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (!sdata->dev) {
  		ieee80211_teardown_sdata(sdata);
  		kfree(sdata);
---- a/net/mac80211/main.c
-+++ b/net/mac80211/main.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/main.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/main.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/main.c
 @@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee802
  	    !ieee80211_hw_check(hw, NO_AUTO_VIF)) {
  		struct vif_params params = {0};
@@ -2087,8 +2223,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		if (result)
  			wiphy_warn(local->hw.wiphy,
  				   "Failed to add default virtual iface\n");
---- a/net/mac80211/mlme.c
-+++ b/net/mac80211/mlme.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/mlme.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/mlme.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/mlme.c
 @@ -2339,7 +2339,7 @@ void ieee80211_dfs_cac_timer_work(struct
  			     dfs_cac_timer_work);
  	struct cfg80211_chan_def chandef = link->conf->chandef;
@@ -2106,8 +2244,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  }
  
  static bool
---- a/net/mac80211/rx.c
-+++ b/net/mac80211/rx.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/rx.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/rx.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/rx.c
 @@ -2727,6 +2727,9 @@ static void ieee80211_netif_rx_ppe(struc
  out:
  	skb->protocol = eth_type_trans(skb, sdata->dev);
@@ -2161,8 +2301,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ieee80211_deliver_skb_to_local_stack(skb, rx);
  }
  
---- a/net/mac80211/util.c
-+++ b/net/mac80211/util.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/util.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/util.c
++++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/util.c
 @@ -2415,6 +2415,10 @@ static int ieee80211_reconfig_link_bss(s
  		changed |= BSS_CHANGED_MU_GROUPS;
  
@@ -2186,8 +2328,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	if (radar_chandef)
  		radar_chandef->radar_bitmap = radar_bitmap;
---- a/net/wireless/chan.c
-+++ b/net/wireless/chan.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/chan.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/wireless/chan.c
++++ backports-20220822-5.4.213-ef7197996efe/net/wireless/chan.c
 @@ -683,6 +683,10 @@ int cfg80211_chandef_dfs_required(struct
  		return -EINVAL;
  
@@ -2210,8 +2354,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_P2P_GO:
  		for_each_valid_link(wdev, link) {
---- a/net/wireless/core.c
-+++ b/net/wireless/core.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/wireless/core.c
++++ backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
 @@ -22,6 +22,9 @@
  #include <linux/etherdevice.h>
  #include <linux/rtnetlink.h>
@@ -2341,8 +2487,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	rdev = wiphy_to_rdev(wdev->wiphy);
  
  	WARN_ON(wdev->iftype == NL80211_IFTYPE_UNSPECIFIED);
---- a/net/wireless/nl80211.c
-+++ b/net/wireless/nl80211.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/nl80211.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/wireless/nl80211.c
++++ backports-20220822-5.4.213-ef7197996efe/net/wireless/nl80211.c
 @@ -1608,6 +1608,10 @@ static int nl80211_key_allowed(struct wi
  	ASSERT_WDEV_LOCK(wdev);
  
@@ -2354,7 +2502,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -16964,9 +16968,16 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16972,9 +16976,16 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, NETDEV_UP,			\
  		 NL80211_FLAG_NEED_NETDEV_UP)		\
@@ -2371,7 +2519,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
  		 NL80211_FLAG_NEED_NETDEV_UP |		\
  		 NL80211_FLAG_NO_WIPHY_MTX |		\
-@@ -16998,7 +17009,13 @@ nl80211_remove_link_station(struct sk_bu
+@@ -17006,7 +17017,13 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, WIPHY_CLEAR,			\
  		 NL80211_FLAG_NEED_WIPHY |		\
@@ -2386,7 +2534,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  enum nl80211_internal_flags_selector {
  #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
-@@ -17361,6 +17378,7 @@ static const struct genl_small_ops nl802
+@@ -17369,6 +17386,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_start_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2394,7 +2542,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17369,6 +17387,7 @@ static const struct genl_small_ops nl802
+@@ -17377,6 +17395,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_stop_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2402,7 +2550,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17490,7 +17509,7 @@ static const struct genl_small_ops nl802
+@@ -17498,7 +17517,7 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_trigger_scan,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2411,7 +2559,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_ABORT_SCAN,
-@@ -17873,6 +17892,7 @@ static const struct genl_small_ops nl802
+@@ -17881,6 +17900,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_start_radar_detection,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2419,7 +2567,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_NO_WIPHY_MTX |
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
-@@ -18069,13 +18089,15 @@ static const struct genl_small_ops nl802
+@@ -18077,13 +18097,15 @@ static const struct genl_small_ops nl802
  		.cmd = NL80211_CMD_ADD_LINK,
  		.doit = nl80211_add_link,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2436,7 +2584,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -18083,6 +18105,7 @@ static const struct genl_small_ops nl802
+@@ -18091,6 +18113,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_add_link_station,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2444,8 +2592,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
---- a/net/wireless/util.c
-+++ b/net/wireless/util.c
+Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/util.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/wireless/util.c
++++ backports-20220822-5.4.213-ef7197996efe/net/wireless/util.c
 @@ -1113,6 +1113,10 @@ int cfg80211_change_iface(struct cfg8021
  	if (!err) {
  		dev->priv_flags &= ~IFF_DONT_BRIDGE;
@@ -2457,8 +2607,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		case NL80211_IFTYPE_STATION:
  			if (dev->ieee80211_ptr->use_4addr)
  				break;
---- a/drivers/net/wireless/ath/ath12k/dp.h
-+++ b/drivers/net/wireless/ath/ath12k/dp.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.h
 @@ -369,7 +369,7 @@ struct host_link_stats {
  #define PPE_VP_ENTRIES_MAX 32
  #define MAX_PPEDS_IRQ_NAME_LEN 20
@@ -2485,8 +2637,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	char ppeds_irq_name[MAX_PPEDS_IRQS][MAX_PPEDS_IRQ_NAME_LEN];
  	int ppeds_irq[MAX_PPEDS_IRQS];
  #endif
---- a/drivers/net/wireless/ath/ath12k/dp_rx.h
-+++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_rx.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -40,6 +40,7 @@ enum ath12k_routing_pkt_type {
  #define ATH12K_RX_PROTOCOL_TAG_START_OFFSET  128
  #define ATH12K_ROUTE_WBM_RELEASE        3
@@ -2495,8 +2649,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  struct ath12k_dp_rx_tid {
  	u8 tid;
---- a/drivers/net/wireless/ath/ath12k/hal.c
-+++ b/drivers/net/wireless/ath/ath12k/hal.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.c
 @@ -358,6 +358,13 @@ static u8 ath12k_hw_qcn9274_rx_desc_get_
  			    RX_MSDU_END_INFO5_TID);
  }
@@ -2519,8 +2675,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	.rx_desc_mac_addr2_valid = ath12k_hw_qcn9274_rx_desc_mac_addr2_valid,
  	.rx_desc_mpdu_start_addr2 = ath12k_hw_qcn9274_rx_desc_mpdu_start_addr2,
  	.rx_desc_is_mcbc = ath12k_hw_qcn9274_rx_desc_is_mcbc,
---- a/drivers/net/wireless/ath/ath12k/hal.h
-+++ b/drivers/net/wireless/ath/ath12k/hal.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/hal.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/hal.h
 @@ -1126,6 +1126,7 @@ struct hal_ops {
  	u8 *(*rx_desc_get_msdu_payload)(struct hal_rx_desc *desc);
  	u32 (*rx_desc_get_mpdu_start_offset)(void);
@@ -2529,8 +2687,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	bool (*rx_desc_mac_addr2_valid)(struct hal_rx_desc *desc);
  	u8* (*rx_desc_mpdu_start_addr2)(struct hal_rx_desc *desc);
  	bool (*rx_desc_is_mcbc)(struct hal_rx_desc *desc);
---- a/drivers/net/wireless/ath/ath12k/rx_desc.h
-+++ b/drivers/net/wireless/ath/ath12k/rx_desc.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/rx_desc.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/rx_desc.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/rx_desc.h
 @@ -691,7 +691,7 @@ enum rx_msdu_start_reception_type {
  
  #define RX_MSDU_END_INFO9_SERVICE_CODE		GENMASK(14, 6)
@@ -2540,8 +2700,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #define RX_MSDU_END_INFO9_DEST_CHIP_ID		GENMASK(18, 17)
  #define RX_MSDU_END_INFO9_MCAST_ECHO		BIT(19)
  #define RX_MSDU_END_INFO9_WDS_LEARN_EVENT	BIT(20)
---- a/drivers/net/wireless/ath/ath12k/wmi.c
-+++ b/drivers/net/wireless/ath/ath12k/wmi.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -1455,7 +1455,72 @@ int ath12k_wmi_config_peer_ppeds_routing
  
  	return ret;
@@ -2616,8 +2778,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  int ath12k_wmi_send_pdev_pkt_route(struct ath12k *ar,
  				   struct ath12k_wmi_pkt_route_param *param)
---- a/drivers/net/wireless/ath/ath12k/wmi.h
-+++ b/drivers/net/wireless/ath/ath12k/wmi.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -395,6 +395,8 @@ enum wmi_tlv_cmd_id {
          WMI_VDEV_GET_BIG_DATA_P2_CMDID,
          /** set TPC PSD/non-PSD power */
