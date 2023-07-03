@@ -87,7 +87,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,844 @@
+@@ -0,0 +1,871 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -531,6 +531,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	hal_ring_id = tx_ring->tcl_data_ring.ring_id;
 +	tcl_ring = &ab->hal.srng_list[hal_ring_id];
 +
++	spin_lock_bh(&tcl_ring->lock);
 +	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
 +	hal_tcl_desc = ath12k_hal_srng_src_get_next_entry(ab, tcl_ring);
 +	if (unlikely(!hal_tcl_desc)) {
@@ -538,6 +539,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		 * desc because the desc is directly enqueued onto hw queue.
 +		 */
 +		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
 +		ab->soc_stats.tx_err.desc_na[ti.ring_id]++;
 +		ret = -ENOMEM;
 +
@@ -566,6 +568,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	dsb(st);
 +	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
 +
 +	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ", skb->data, skb->len);
 +	arvif->link_stats.tx_enqueued++;
@@ -599,7 +602,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	int is_mcast;
 +	u16 mcbc_gsn;
 +	int ret;
-+	int link_id;
++	int link_id, ring_id = 0;
 +	struct ath12k_skb_cb *skb_cb;
 +	struct ieee80211_tx_info *info;
 +
@@ -647,15 +650,25 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			else
 +				break;
 +
++			ring_id = tmp_arvif->ar->ab->hw_params->hw_ops->get_ring_selector(skb);
++
++			if (test_bit(ATH12K_FLAG_RECOVERY, &tmp_ar->ab->dev_flags)) {
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
++				break;
++			}
++
++			tmp_ar->ab->soc_stats.bond_tx_mcast_enqueued[ring_id]++;
 +			msdu_copied = skb_copy(skb, GFP_ATOMIC);
 +			if (!msdu_copied) {
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
 +				continue;
 +			}
 +
 +			ret = ath12k_mcast_dp_tx(tmp_ar, tmp_arvif, msdu_copied, true, mcbc_gsn);
 +			if (ret) {
 +				dev_kfree_skb_any(msdu_copied);
-+				return ret;
++				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
++				return NETDEV_TX_OK;
 +			}
 +		}
 +		dev_kfree_skb_any(skb);
@@ -704,8 +717,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +{
 +	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
 +	struct ath12k_link_vif *arvif = arvif_pvt->arvif;
++	struct ath12k_base *ab;
 +	int ret;
-+	int is_mcast;
++	int is_mcast, ring_id = 0;
 +	struct ethhdr *eh = NULL;
 +	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 +
@@ -729,14 +743,27 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		return NETDEV_TX_OK;
 +	}
 +
++	ab = arvif->ar->ab;
++	ring_id = ab->hw_params->hw_ops->get_ring_selector(skb);
++
++	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags)) {
++		ath12k_dbg(NULL, ATH12K_DBG_PPE, "Dropping frames as radio is in recovery\n");
++		ab->soc_stats.bond_tx_ucast_dropped[ring_id]++;
++		dev_kfree_skb_any(skb);
++		return NETDEV_TX_OK;
++	}
++
++
++	ab->soc_stats.bond_tx_ucast_enqueued[ring_id]++;
 +	/* TODO: debug why queue is always 15 */
 +	info->hw_queue = 0;
 +	ret = ath12k_dp_tx_direct(arvif, skb);
 +	if (unlikely(ret)) {
-+		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
++		ath12k_dbg(ab, ATH12K_DBG_PPE,
 +			   "failed to transmit frame %d\n", ret);
-+		ieee80211_free_txskb(arvif_pvt->hw, skb);
-+		return ret;
++		dev_kfree_skb_any(skb);
++		ab->soc_stats.bond_tx_ucast_dropped[ring_id]++;
++		return NETDEV_TX_OK;
 +	}
 +	return NETDEV_TX_OK;
 +}
@@ -1013,6 +1040,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	bool mvr_processing;
  	bool pending_csa_up;
+@@ -1108,6 +1126,10 @@ struct ath12k_soc_dp_stats {
+ 	u32 fw_tx_status[MAX_FW_TX_STATUS];
+ 	u32 tx_enqueued[MAX_TCL_RING];
+ 	u32 tx_completed[MAX_TCL_RING];
++	u32 bond_tx_ucast_enqueued[MAX_TCL_RING];
++	u32 bond_tx_mcast_enqueued[MAX_TCL_RING];
++	u32 bond_tx_ucast_dropped[MAX_TCL_RING];
++	u32 bond_tx_mcast_dropped[MAX_TCL_RING];
+ 	u32 reo_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
+ 	u32 fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
+ 	u32 non_fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
 @@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
@@ -1088,6 +1126,56 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  				     DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(dma_mapping_error(dev, paddr))) {
  		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
+@@ -280,7 +281,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 
+ 	hal_ring_id = ring_id + HAL_SRNG_RING_ID_SW2TCL1;
+ 	tcl_ring = &ab->hal.srng_list[hal_ring_id];
+-
++	spin_lock_bh(&tcl_ring->lock);
+ 	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
+ 
+ 	hal_tcl_desc = (void *)ath12k_hal_srng_src_get_next_entry_nolock(ab, tcl_ring);
+@@ -289,6 +290,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 		 * desc because the desc is directly enqueued onto hw queue.
+ 		 */
+ 		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
+ 		ab->soc_stats.tx_err.desc_na[ring_id]++;
+ 		ret = -ENOMEM;
+ 		goto fail_unmap_dma;
+@@ -311,6 +313,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
+ 	memcpy(hal_tcl_desc, &tcl_desc, sizeof(tcl_desc));
+ 	dsb(st);
+ 	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
+ 
+ 	atomic_inc(&ar->dp.num_tx_pending);
+ 
+@@ -540,7 +543,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 
+ 	hal_ring_id = tx_ring->tcl_data_ring.ring_id;
+ 	tcl_ring = &ab->hal.srng_list[hal_ring_id];
+-
++	spin_lock_bh(&tcl_ring->lock);
+ 	ath12k_hal_srng_access_src_ring_begin_nolock(tcl_ring);
+ 	hal_tcl_desc = ath12k_hal_srng_src_get_next_entry(ab, tcl_ring);
+ 	if (unlikely(!hal_tcl_desc)) {
+@@ -548,6 +551,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 		 * desc because the desc is directly enqueued onto hw queue.
+ 		 */
+ 		ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++		spin_unlock_bh(&tcl_ring->lock);
+ 		ab->soc_stats.tx_err.desc_na[ti.ring_id]++;
+ 		ret = -ENOMEM;
+ 
+@@ -576,6 +580,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 
+ 	dsb(st);
+ 	ath12k_hal_srng_access_umac_src_ring_end_nolock(tcl_ring);
++	spin_unlock_bh(&tcl_ring->lock);
+ 
+ 	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ",
+ 			skb->data, skb->len);
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
