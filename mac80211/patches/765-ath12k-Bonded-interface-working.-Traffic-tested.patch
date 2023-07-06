@@ -87,7 +87,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,877 @@
+@@ -0,0 +1,908 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -107,6 +107,19 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +extern struct ath12k_link_vif *ath12k_mac_assign_link_vif( struct ath12k_hw *ah,
 +					struct ieee80211_vif *vif, u8 link_id);
 +extern int g_bonded_interface_model;
++
++static bool ath12k_mac_tx_check_max_limit(struct ath12k *ar, struct sk_buff *skb)
++{
++        if (atomic_read(&ar->dp.num_tx_pending) > ATH12K_DP_PDEV_TX_LIMIT) {
++                /* Allow EAPOL */
++                if (!(skb->protocol == cpu_to_be16(ETH_P_PAE))) {
++                        ar->ab->soc_stats.tx_err.threshold_limit++;
++                        return true;
++                }
++        }
++
++        return false;
++}
 +
 +static void ath12k_ieee80211_if_free(struct net_device *dev)
 +{
@@ -656,6 +669,14 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			else
 +				break;
 +
++			ret = ath12k_mac_tx_check_max_limit(tmp_ar, skb);
++			if (ret) {
++				ath12k_dbg(tmp_ar->ab, ATH12K_DBG_MAC,
++						"failed fast tx due to limit check pdev idx %d\n",
++						tmp_ar->pdev_idx);
++				continue;
++			}
++
 +			ring_id = tmp_arvif->ar->ab->hw_params->hw_ops->get_ring_selector(skb);
 +
 +			if (test_bit(ATH12K_FLAG_RECOVERY, &tmp_ar->ab->dev_flags)) {
@@ -674,7 +695,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			if (ret) {
 +				dev_kfree_skb_any(msdu_copied);
 +				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
-+				return NETDEV_TX_OK;
++				continue;
 +			}
 +		}
 +		dev_kfree_skb_any(skb);
@@ -685,7 +706,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	if (!link_dev) {
 +		dev_kfree_skb_any(skb);
-+		return 0;
++		return NETDEV_TX_OK;
 +	}
 +
 +	skb->fast_xmit = 0;
@@ -763,6 +784,16 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	ab->soc_stats.bond_tx_ucast_enqueued[ring_id]++;
 +	/* TODO: debug why queue is always 15 */
 +	info->hw_queue = 0;
++
++	ret = ath12k_mac_tx_check_max_limit(arvif->ar, skb);
++	if (ret) {
++		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
++				"failed fast tx due to limit check pdev idx %d\n",
++				arvif->ar->pdev_idx);
++		dev_kfree_skb_any(skb);
++		return NETDEV_TX_OK;
++	}
++
 +	ret = ath12k_dp_tx_direct(arvif, skb);
 +	if (unlikely(ret)) {
 +		ath12k_dbg(ab, ATH12K_DBG_PPE,
@@ -1059,7 +1090,18 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	u32 non_fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
+@@ -21,6 +21,10 @@
+ #define ATH12K_DP_LMAC_PEER_ID_MLO	3
+ #define ATH12K_DP_PEER_ROUTING_LMAC_ID_MASK	GENMASK(7,6)
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++extern int g_bonded_interface_model;
++#endif
++
+ static void ath12k_dp_htt_htc_tx_complete(struct ath12k_base *ab,
+ 					  struct sk_buff *skb)
+ {
+@@ -531,6 +535,9 @@ void ath12k_dp_tx_update_bank_profile(st
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
  	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
  				       arvif->bank_id);
@@ -1069,7 +1111,46 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  }
  
  static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
-@@ -1313,6 +1316,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
+@@ -1168,11 +1175,15 @@ void ath12k_dp_pdev_pre_alloc(struct ath
+ 	}
+ }
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ static int ath12k_dp_ppe_rxole_rxdma_cfg(struct ath12k_base *ab)
+ {
+ 	struct ath12k_dp_htt_rxdma_ppe_cfg_param param = {0};
+ 	int ret;
+ 
++	if (!g_bonded_interface_model)
++		return 0;
++
+ 	param.override = 1;
+ 	param.reo_dst_ind = HAL_REO2PPE_DST_IND;
+ 	param.multi_buffer_msdu_override_en = 0;
+@@ -1189,6 +1200,7 @@ static int ath12k_dp_ppe_rxole_rxdma_cfg
+ 
+ 	return ret;
+ }
++#endif
+ 
+ int ath12k_dp_pdev_alloc(struct ath12k_base *ab)
+ {
+@@ -1196,12 +1208,14 @@ int ath12k_dp_pdev_alloc(struct ath12k_b
+ 	int ret;
+ 	int i;
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ 	ret = ath12k_dp_ppe_rxole_rxdma_cfg(ab);
+ 	if (ret) {
+ 		ath12k_err(ab, "Failed to send htt RxOLE and RxDMA messages to target :%d\n",
+ 			   ret);
+ 		goto out;
+ 	}
++#endif
+ 
+ 	ret = ath12k_dp_rx_htt_setup(ab);
+ 	if (ret)
+@@ -1313,6 +1327,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
  		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
  		return;
  	}
@@ -1218,7 +1299,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -51,9 +53,15 @@
+@@ -51,9 +53,16 @@
  	.max_antenna_gain       = 0, \
  	.max_power              = 30, \
  }
@@ -1231,11 +1312,12 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +					  struct ieee80211_vif *vif,
 +					  u16 old_links, u16 new_links,
 +					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS]);
++extern int g_bonded_interface_model;
 +#endif
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4775,8 +4783,14 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4775,8 +4784,14 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
@@ -1251,7 +1333,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4824,7 +4838,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4824,7 +4839,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1260,7 +1342,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5165,8 +5179,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5165,8 +5180,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1272,7 +1354,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -6114,6 +6130,15 @@ static int ath12k_station_assoc(struct a
+@@ -6114,6 +6131,15 @@ static int ath12k_station_assoc(struct a
  		return ret;
  	}
  
@@ -1288,20 +1370,13 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (!sta->wme) {
  		arvif->num_legacy_stations++;
  		ret = ath12k_recalc_rtscts_prot(arvif);
-@@ -8970,6 +8995,7 @@ err_setup:
- 	return ret;
- }
- 
-+extern int g_bonded_interface_model;
- static int ath12k_mac_radio_start(struct ath12k *ar)
- {
- 	struct ath12k_base *ab = ar->ab;
-@@ -9050,14 +9076,21 @@ static int ath12k_mac_radio_start(struct
+@@ -9050,15 +9076,24 @@ static int ath12k_mac_radio_start(struct
  		}
  	}
  
 -	/* PPE DS requires eapol packets to be routed to wbm release ring */
 -	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ar->ab->dev_flags)) {
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	/* program CCE rule for eapol packets to be routed to wbm release ring */
 +	if (g_bonded_interface_model) {
  		ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_EAP,
@@ -1318,9 +1393,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			goto err;
 +		}
  	}
++#endif
  
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
-@@ -9445,6 +9478,13 @@ static void ath12k_mac_update_vif_offloa
+ 
+@@ -9445,6 +9480,13 @@ static void ath12k_mac_update_vif_offloa
  		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
  					IEEE80211_OFFLOAD_DECAP_ENABLED);
  
@@ -1334,7 +1411,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
  		ahvif->tx_encap_type = ATH12K_HW_TXRX_ETHERNET;
  	else if (test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags))
-@@ -9555,6 +9595,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9555,6 +9597,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1346,7 +1423,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9621,6 +9666,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9621,6 +9668,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1363,7 +1440,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9712,6 +9767,20 @@ static int ath12k_mac_vdev_create(struct
+@@ -9712,6 +9769,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1384,7 +1461,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9780,6 +9849,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9780,6 +9851,16 @@ static int ath12k_mac_vdev_create(struct
  	    test_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags))
  		ath12k_mac_monitor_vdev_create(ar);
  
@@ -1401,7 +1478,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
-@@ -10291,15 +10370,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10291,15 +10372,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1423,7 +1500,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12107,6 +12188,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12107,6 +12190,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1431,7 +1508,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14093,10 +14175,6 @@ static const struct ieee80211_ops ath12k
+@@ -14093,10 +14177,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1442,6 +1519,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
+@@ -15274,7 +15354,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+ 			ret = -ENOMEM;
+ 			goto err_mac_destroy;
+ 		}
+-
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++		ieee80211_enable_bond_dev(hw);
++#endif
+ 		ah = hw->priv;
+ 		ah->hw = hw;
+ 		ah->ops = ops;
 --- a/drivers/net/wireless/ath/ath12k/pci.c
 +++ b/drivers/net/wireless/ath/ath12k/pci.c
 @@ -65,6 +65,15 @@ EXPORT_SYMBOL(ath12k_napi_poll_budget);
@@ -1850,6 +1938,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	int ppe_vp_num;
  	unsigned long ppe_vp_type;
+@@ -4715,6 +4719,10 @@ struct ieee80211_hw *ieee80211_alloc_hw(
+ 	return ieee80211_alloc_hw_nm(priv_data_len, ops, NULL);
+ }
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++void ieee80211_enable_bond_dev(struct ieee80211_hw *hw);
++#endif
++
+ /**
+  * ieee80211_register_hw - Register hardware device
+  *
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
 @@ -3498,6 +3498,9 @@ enum nl80211_iftype {
@@ -2145,16 +2244,34 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		kfree(sdata);
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee802
+@@ -630,6 +630,17 @@ static const struct ieee80211_vht_cap ma
+ 	},
+ };
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++void cfg80211_enable_bond_dev(struct wiphy *wiphy);
++void ieee80211_enable_bond_dev(struct ieee80211_hw *hw)
++{
++	struct wiphy *wiphy = hw->wiphy;
++	cfg80211_enable_bond_dev(wiphy);
++
++}
++EXPORT_SYMBOL(ieee80211_enable_bond_dev);
++#endif
++
+ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
+ 					   const struct ieee80211_ops *ops,
+ 					   const char *requested_name)
+@@ -1494,8 +1505,14 @@ int ieee80211_register_hw(struct ieee802
  	    !ieee80211_hw_check(hw, NO_AUTO_VIF)) {
  		struct vif_params params = {0};
  
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
- 		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
--					  NL80211_IFTYPE_STATION, &params);
++		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
 +					  NL80211_IFTYPE_STATION, &params, true);
 +#else
-+		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
+ 		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
+-					  NL80211_IFTYPE_STATION, &params);
 +					  NL80211_IFTYPE_STATION, &params, false);
 +#endif
 +
@@ -2301,7 +2418,23 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
  {
  	struct cfg80211_registered_device *result = NULL, *rdev;
-@@ -1322,6 +1335,9 @@ static void _cfg80211_unregister_wdev(st
+@@ -70,6 +83,15 @@ struct cfg80211_registered_device *cfg80
+ 	return result;
+ }
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++void cfg80211_enable_bond_dev(struct wiphy *wiphy)
++{
++	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
++	rdev->enable_bond_dev = 1;
++}
++EXPORT_SYMBOL(cfg80211_enable_bond_dev);
++#endif
++
+ int get_wiphy_idx(struct wiphy *wiphy)
+ {
+ 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
+@@ -1322,6 +1344,9 @@ static void _cfg80211_unregister_wdev(st
  {
  	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
  	unsigned int link_id;
@@ -2311,15 +2444,16 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	ASSERT_RTNL();
  	lockdep_assert_held(&rdev->wiphy.mtx);
-@@ -1336,6 +1352,19 @@ static void _cfg80211_unregister_wdev(st
+@@ -1336,6 +1361,20 @@ static void _cfg80211_unregister_wdev(st
  		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
  		if (unregister_netdev)
  			unregister_netdevice(wdev->netdev);
 +
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
 +		if (wdev->bond_netdev) {
-+			if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
-+			     wdev->iftype == NL80211_IFTYPE_MONITOR)
++			if (wdev->iftype == NL80211_IFTYPE_MESH_POINT || \
++			     wdev->iftype == NL80211_IFTYPE_MONITOR || \
++			     rdev->enable_bond_dev == 0)
 +				skip_bond_netdev = true;
 +
 +			if (!skip_bond_netdev &&
@@ -2331,7 +2465,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	}
  
  	list_del_rcu(&wdev->list);
-@@ -1423,6 +1452,10 @@ void __cfg80211_leave(struct cfg80211_re
+@@ -1423,6 +1462,10 @@ void __cfg80211_leave(struct cfg80211_re
  	cfg80211_stop_background_radar_detection(wdev);
  
  	switch (wdev->iftype) {
@@ -2342,7 +2476,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_ADHOC:
  		__cfg80211_leave_ibss(rdev, dev, true);
  		break;
-@@ -1556,22 +1589,29 @@ void cfg80211_register_wdev(struct cfg80
+@@ -1556,22 +1599,29 @@ void cfg80211_register_wdev(struct cfg80
  	if (wdev->netdev &&
  	    sysfs_create_link(&wdev->netdev->dev.kobj, &rdev->wiphy.dev.kobj,
  			      "phy80211"))
@@ -2374,14 +2508,15 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	rdev = wiphy_to_rdev(wdev->wiphy);
  
  	lockdep_assert_held(&rdev->wiphy.mtx);
-@@ -1584,6 +1624,17 @@ int cfg80211_register_netdevice(struct n
+@@ -1584,6 +1634,18 @@ int cfg80211_register_netdevice(struct n
  		goto out;
  
  	cfg80211_register_wdev(rdev, wdev);
 +
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
-+	if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
-+	     wdev->iftype == NL80211_IFTYPE_MONITOR)
++	if (wdev->iftype == NL80211_IFTYPE_MESH_POINT || \
++	     wdev->iftype == NL80211_IFTYPE_MONITOR || \
++	     rdev->enable_bond_dev == 0)
 +		skip_bond_netdev = true;
 +
 +	if (!skip_bond_netdev && g_bonded_interface_model &&
@@ -2392,7 +2527,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = 0;
  out:
  	wdev->registering = false;
-@@ -1604,6 +1655,11 @@ static int cfg80211_netdev_notifier_call
+@@ -1604,6 +1666,11 @@ static int cfg80211_netdev_notifier_call
  	if (!wdev)
  		return NOTIFY_DONE;
  
@@ -2417,7 +2552,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
  	case NL80211_IFTYPE_P2P_GO:
-@@ -16964,9 +16968,16 @@ nl80211_remove_link_station(struct sk_bu
+@@ -16972,9 +16976,16 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, NETDEV_UP,			\
  		 NL80211_FLAG_NEED_NETDEV_UP)		\
@@ -2434,7 +2569,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	SELECTOR(__sel, NETDEV_UP_LINK_NOMTX,		\
  		 NL80211_FLAG_NEED_NETDEV_UP |		\
  		 NL80211_FLAG_NO_WIPHY_MTX |		\
-@@ -16998,7 +17009,13 @@ nl80211_remove_link_station(struct sk_bu
+@@ -17006,7 +17017,13 @@ nl80211_remove_link_station(struct sk_bu
  		 NL80211_FLAG_NEED_RTNL)		\
  	SELECTOR(__sel, WIPHY_CLEAR,			\
  		 NL80211_FLAG_NEED_WIPHY |		\
@@ -2449,7 +2584,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  enum nl80211_internal_flags_selector {
  #define SELECTOR(_, name, value)	NL80211_IFL_SEL_##name,
-@@ -17361,6 +17378,7 @@ static const struct genl_small_ops nl802
+@@ -17369,6 +17386,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_start_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2457,7 +2592,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17369,6 +17387,7 @@ static const struct genl_small_ops nl802
+@@ -17377,6 +17395,7 @@ static const struct genl_small_ops nl802
  		.flags = GENL_UNS_ADMIN_PERM,
  		.doit = nl80211_stop_ap,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2465,7 +2600,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -17490,7 +17509,7 @@ static const struct genl_small_ops nl802
+@@ -17498,7 +17517,7 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_trigger_scan,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2474,7 +2609,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_ABORT_SCAN,
-@@ -17873,6 +17892,7 @@ static const struct genl_small_ops nl802
+@@ -17881,6 +17900,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_start_radar_detection,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2482,7 +2617,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_NO_WIPHY_MTX |
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
-@@ -18069,13 +18089,15 @@ static const struct genl_small_ops nl802
+@@ -18077,13 +18097,15 @@ static const struct genl_small_ops nl802
  		.cmd = NL80211_CMD_ADD_LINK,
  		.doit = nl80211_add_link,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -2499,7 +2634,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  					 NL80211_FLAG_MLO_VALID_LINK_ID),
  	},
  	{
-@@ -18083,6 +18105,7 @@ static const struct genl_small_ops nl802
+@@ -18091,6 +18113,7 @@ static const struct genl_small_ops nl802
  		.doit = nl80211_add_link_station,
  		.flags = GENL_UNS_ADMIN_PERM,
  		.internal_flags = IFLAGS(NL80211_FLAG_NEED_NETDEV_UP |
@@ -2743,3 +2878,50 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  int ath12k_wmi_config_peer_ppeds_routing(struct ath12k *ar,
  					 const u8 *peer_addr, u8 vdev_id,
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -1580,12 +1580,14 @@ static ssize_t ath12k_debugfs_dump_soc_r
+ 
+ 	return len;
+ }
++extern struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id);
+ 
+ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+ 						char __user *user_buf,
+ 						size_t count, loff_t *ppos)
+ {
+ 	struct ath12k_base *ab = file->private_data;
++	struct ath12k *ar;
+ 	struct ath12k_soc_dp_stats *soc_stats = &ab->soc_stats;
+ 	int len = 0, i, retval;
+ 	const int size = 4096;
+@@ -1719,6 +1721,17 @@ static ssize_t ath12k_debugfs_dump_soc_d
+ 			soc_stats->tx_completed[2],
+ 			soc_stats->tx_completed[3]);
+ 
++	for (i = 0; i < 3; i++) {
++
++		ar = ath12k_mac_get_ar_by_pdev_id(ab, i);
++		if (ar) {
++			len += scnprintf(buf + len, size - len,
++				"\ntx_pending [%d]: 0:%d\n",
++				i, 
++				atomic_read(&ar->dp.num_tx_pending));
++		}
++	}
++
+ 	len += scnprintf(buf + len, size - len, "\nREO Rx Received:\n");
+ 	for (i = 0; i < DP_REO_DST_RING_MAX; i++)
+ 		len += scnprintf(buf + len, size - len,
+--- a/net/wireless/core.h
++++ b/net/wireless/core.h
+@@ -107,6 +107,9 @@ struct cfg80211_registered_device {
+ 	struct work_struct mgmt_registrations_update_wk;
+ 	/* lock for all wdev lists */
+ 	spinlock_t mgmt_registrations_lock;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	bool enable_bond_dev;
++#endif
+ 
+ 	/* must be last because of the way we do wiphy_priv(),
+ 	 * and it should at least be aligned to NETDEV_ALIGN */
