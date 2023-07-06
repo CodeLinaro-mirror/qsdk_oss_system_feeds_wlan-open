@@ -94,7 +94,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 ===================================================================
 --- /dev/null
 +++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,890 @@
+@@ -0,0 +1,909 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -114,6 +114,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 +extern struct ath12k_link_vif *ath12k_mac_assign_link_vif( struct ath12k_hw *ah,
 +					struct ieee80211_vif *vif, u8 link_id);
 +extern int g_bonded_interface_model;
++extern bool ath12k_mac_tx_check_max_limit(struct ath12k *ar, struct sk_buff *skb);
 +
 +static void ath12k_ieee80211_if_free(struct net_device *dev)
 +{
@@ -664,6 +665,14 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 +			else
 +				break;
 +
++			ret = ath12k_mac_tx_check_max_limit(tmp_ar, skb);
++			if (ret) {
++				ath12k_dbg(tmp_ar->ab, ATH12K_DBG_MAC,
++						"failed fast tx due to limit check pdev idx %d\n",
++						tmp_ar->pdev_idx);
++				continue;
++			}
++
 +			ring_id = tmp_arvif->ar->ab->hw_params->hw_ops->get_ring_selector(skb);
 +
 +			if (test_bit(ATH12K_FLAG_RECOVERY, &tmp_ar->ab->dev_flags)) {
@@ -682,7 +691,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 +			if (ret) {
 +				tmp_ar->ab->soc_stats.bond_tx_mcast_dropped[ring_id]++;
 +				dev_kfree_skb_any(msdu_copied);
-+				return NETDEV_TX_OK;
++				continue;
 +			}
 +		}
 +		dev_kfree_skb_any(skb);
@@ -693,7 +702,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 +
 +	if (!link_dev) {
 +		dev_kfree_skb_any(skb);
-+		return 0;
++		return NETDEV_TX_OK;
 +	}
 +
 +	skb->fast_xmit = 0;
@@ -783,6 +792,16 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/b
 +	ab->soc_stats.bond_tx_ucast_enqueued[ring_id]++;
 +	/* TODO: debug why queue is always 15 */
 +	info->hw_queue = 0;
++
++	ret = ath12k_mac_tx_check_max_limit(arvif->ar, skb);
++	if (ret) {
++		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_MAC,
++				"failed fast tx due to limit check pdev idx %d\n",
++				arvif->ar->pdev_idx);
++		dev_kfree_skb_any(skb);
++		return NETDEV_TX_OK;
++	}
++
 +	ret = ath12k_dp_tx_direct(arvif, skb);
 +	if (unlikely(ret)) {
 +		ath12k_dbg(ab, ATH12K_DBG_PPE,
@@ -1085,7 +1104,18 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.c
 +++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
-@@ -531,6 +531,9 @@ void ath12k_dp_tx_update_bank_profile(st
+@@ -21,6 +21,10 @@
+ #define ATH12K_DP_LMAC_PEER_ID_MLO	3
+ #define ATH12K_DP_PEER_ROUTING_LMAC_ID_MASK	GENMASK(7,6)
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++extern int g_bonded_interface_model;
++#endif
++
+ static void ath12k_dp_htt_htc_tx_complete(struct ath12k_base *ab,
+ 					  struct sk_buff *skb)
+ {
+@@ -531,6 +535,9 @@ void ath12k_dp_tx_update_bank_profile(st
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
  	arvif->desc.info0 = FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_BANK_ID,
  				       arvif->bank_id);
@@ -1095,7 +1125,46 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  }
  
  static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
-@@ -1313,6 +1316,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
+@@ -1168,11 +1175,15 @@ void ath12k_dp_pdev_pre_alloc(struct ath
+ 	}
+ }
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ static int ath12k_dp_ppe_rxole_rxdma_cfg(struct ath12k_base *ab)
+ {
+ 	struct ath12k_dp_htt_rxdma_ppe_cfg_param param = {0};
+ 	int ret;
+ 
++	if (!g_bonded_interface_model)
++		return 0;
++
+ 	param.override = 1;
+ 	param.reo_dst_ind = HAL_REO2PPE_DST_IND;
+ 	param.multi_buffer_msdu_override_en = 0;
+@@ -1189,6 +1200,7 @@ static int ath12k_dp_ppe_rxole_rxdma_cfg
+ 
+ 	return ret;
+ }
++#endif
+ 
+ int ath12k_dp_pdev_alloc(struct ath12k_base *ab)
+ {
+@@ -1196,12 +1208,14 @@ int ath12k_dp_pdev_alloc(struct ath12k_b
+ 	int ret;
+ 	int i;
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ 	ret = ath12k_dp_ppe_rxole_rxdma_cfg(ab);
+ 	if (ret) {
+ 		ath12k_err(ab, "Failed to send htt RxOLE and RxDMA messages to target :%d\n",
+ 			   ret);
+ 		goto out;
+ 	}
++#endif
+ 
+ 	ret = ath12k_dp_rx_htt_setup(ab);
+ 	if (ret)
+@@ -1313,6 +1327,10 @@ void ath12k_dp_vdev_tx_attach(struct ath
  		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
  		return;
  	}
@@ -1250,7 +1319,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -51,9 +53,15 @@
+@@ -51,9 +53,16 @@
  	.max_antenna_gain       = 0, \
  	.max_power              = 30, \
  }
@@ -1263,11 +1332,12 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
 +					  struct ieee80211_vif *vif,
 +					  u16 old_links, u16 new_links,
 +					  struct ieee80211_bss_conf *old[IEEE80211_MLD_MAX_NUM_LINKS]);
++extern int g_bonded_interface_model;
 +#endif
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
  	CHAN2G(2, 2417, 0),
-@@ -4775,8 +4783,14 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4775,8 +4784,14 @@ static int ath12k_mac_vdev_delete(struct
  	arvif->is_created = false;
  
  clean_up:
@@ -1283,7 +1353,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	spin_lock_bh(&ar->data_lock);
  	list_del(&arvif->list);
  	spin_unlock_bh(&ar->data_lock);
-@@ -4824,7 +4838,7 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -4824,7 +4839,7 @@ void ath12k_mac_unassign_link_vif(struct
  		kfree(arvif);
  }
  
@@ -1292,7 +1362,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  ath12k_mac_assign_link_vif( struct ath12k_hw *ah, struct ieee80211_vif *vif, u8 link_id)
  {
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -5165,8 +5179,10 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5165,8 +5180,10 @@ static int ath12k_mac_op_hw_scan(struct
  	 * delete-create vdev's for the same ar, in case the request is
  	 * always on the same band for the vif
  	 */
@@ -1304,7 +1374,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  	if (arvif->is_created) {
  		if (ar != arvif->ar && arvif->is_started) {
-@@ -6114,6 +6130,15 @@ static int ath12k_station_assoc(struct a
+@@ -6114,6 +6131,15 @@ static int ath12k_station_assoc(struct a
  		return ret;
  	}
  
@@ -1320,20 +1390,13 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	if (!sta->wme) {
  		arvif->num_legacy_stations++;
  		ret = ath12k_recalc_rtscts_prot(arvif);
-@@ -8970,6 +8995,7 @@ err_setup:
- 	return ret;
- }
- 
-+extern int g_bonded_interface_model;
- static int ath12k_mac_radio_start(struct ath12k *ar)
- {
- 	struct ath12k_base *ab = ar->ab;
-@@ -9050,14 +9076,21 @@ static int ath12k_mac_radio_start(struct
+@@ -9050,15 +9076,24 @@ static int ath12k_mac_radio_start(struct
  		}
  	}
  
 -	/* PPE DS requires eapol packets to be routed to wbm release ring */
 -	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ar->ab->dev_flags)) {
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	/* program CCE rule for eapol packets to be routed to wbm release ring */
 +	if (g_bonded_interface_model) {
  		ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_EAP,
@@ -1350,9 +1413,11 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
 +			goto err;
 +		}
  	}
++#endif
  
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
-@@ -9445,6 +9478,13 @@ static void ath12k_mac_update_vif_offloa
+ 
+@@ -9445,6 +9480,13 @@ static void ath12k_mac_update_vif_offloa
  		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
  					IEEE80211_OFFLOAD_DECAP_ENABLED);
  
@@ -1366,7 +1431,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
  		ahvif->tx_encap_type = ATH12K_HW_TXRX_ETHERNET;
  	else if (test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags))
-@@ -9555,6 +9595,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9555,6 +9597,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1378,7 +1443,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9621,6 +9666,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9621,6 +9668,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1395,7 +1460,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9712,6 +9767,20 @@ static int ath12k_mac_vdev_create(struct
+@@ -9712,6 +9769,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1416,7 +1481,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9780,6 +9849,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9780,6 +9851,16 @@ static int ath12k_mac_vdev_create(struct
  	    test_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags))
  		ath12k_mac_monitor_vdev_create(ar);
  
@@ -1433,7 +1498,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
-@@ -10291,15 +10370,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10291,15 +10372,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1455,7 +1520,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12107,6 +12188,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12107,6 +12190,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1463,7 +1528,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  		return -ENOMEM;
  	}
  
-@@ -14093,10 +14175,6 @@ static const struct ieee80211_ops ath12k
+@@ -14093,10 +14177,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1474,6 +1539,16 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
+@@ -15276,6 +15356,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+ 			goto err_mac_destroy;
+ 		}
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++		ieee80211_enable_bond_dev(hw);
++#endif
+ 		ah = hw->priv;
+ 		ah->hw = hw;
+ 		ah->ops = ops;
 Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/pci.c
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/pci.c
@@ -1896,6 +1971,17 @@ Index: backports-20220822-5.4.213-ef7197996efe/include/net/mac80211.h
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	int ppe_vp_num;
  	unsigned long ppe_vp_type;
+@@ -4715,6 +4719,10 @@ struct ieee80211_hw *ieee80211_alloc_hw(
+ 	return ieee80211_alloc_hw_nm(priv_data_len, ops, NULL);
+ }
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++void ieee80211_enable_bond_dev(struct ieee80211_hw *hw);
++#endif
++
+ /**
+  * ieee80211_register_hw - Register hardware device
+  *
 Index: backports-20220822-5.4.213-ef7197996efe/include/uapi/linux/nl80211.h
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/include/uapi/linux/nl80211.h
@@ -2207,16 +2293,34 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/mac80211/main.c
 ===================================================================
 --- backports-20220822-5.4.213-ef7197996efe.orig/net/mac80211/main.c
 +++ backports-20220822-5.4.213-ef7197996efe/net/mac80211/main.c
-@@ -1494,8 +1494,14 @@ int ieee80211_register_hw(struct ieee802
+@@ -630,6 +630,17 @@ static const struct ieee80211_vht_cap ma
+ 	},
+ };
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++void cfg80211_enable_bond_dev(struct wiphy *wiphy);
++void ieee80211_enable_bond_dev(struct ieee80211_hw *hw)
++{
++	struct wiphy *wiphy = hw->wiphy;
++	cfg80211_enable_bond_dev(wiphy);
++
++}
++EXPORT_SYMBOL(ieee80211_enable_bond_dev);
++#endif
++
+ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
+ 					   const struct ieee80211_ops *ops,
+ 					   const char *requested_name)
+@@ -1494,8 +1505,14 @@ int ieee80211_register_hw(struct ieee802
  	    !ieee80211_hw_check(hw, NO_AUTO_VIF)) {
  		struct vif_params params = {0};
  
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
- 		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
--					  NL80211_IFTYPE_STATION, &params);
++		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
 +					  NL80211_IFTYPE_STATION, &params, true);
 +#else
-+		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
+ 		result = ieee80211_if_add(local, "wlan%d", NET_NAME_ENUM, NULL,
+-					  NL80211_IFTYPE_STATION, &params);
 +					  NL80211_IFTYPE_STATION, &params, false);
 +#endif
 +
@@ -2385,7 +2489,23 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
  {
  	struct cfg80211_registered_device *result = NULL, *rdev;
-@@ -1322,6 +1335,9 @@ static void _cfg80211_unregister_wdev(st
+@@ -70,6 +83,15 @@ struct cfg80211_registered_device *cfg80
+ 	return result;
+ }
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++void cfg80211_enable_bond_dev(struct wiphy *wiphy)
++{
++	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
++	rdev->enable_bond_dev = 1;
++}
++EXPORT_SYMBOL(cfg80211_enable_bond_dev);
++#endif
++
+ int get_wiphy_idx(struct wiphy *wiphy)
+ {
+ 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
+@@ -1322,6 +1344,9 @@ static void _cfg80211_unregister_wdev(st
  {
  	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
  	unsigned int link_id;
@@ -2395,7 +2515,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  
  	ASSERT_RTNL();
  	lockdep_assert_held(&rdev->wiphy.mtx);
-@@ -1336,6 +1352,18 @@ static void _cfg80211_unregister_wdev(st
+@@ -1336,6 +1361,19 @@ static void _cfg80211_unregister_wdev(st
  		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
  		if (unregister_netdev)
  			unregister_netdevice(wdev->netdev);
@@ -2403,7 +2523,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
 +		if (wdev->bond_netdev) {
 +			if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
-+			    wdev->iftype == NL80211_IFTYPE_MONITOR)
++			    wdev->iftype == NL80211_IFTYPE_MONITOR ||
++				rdev->enable_bond_dev == 0)
 +				skip_bond_netdev = true;
 +			if (!skip_bond_netdev &&
 +			    g_bonded_interface_model && driver_bond_dev_cb) {
@@ -2414,7 +2535,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  	}
  
  	list_del_rcu(&wdev->list);
-@@ -1423,6 +1451,10 @@ void __cfg80211_leave(struct cfg80211_re
+@@ -1423,6 +1461,10 @@ void __cfg80211_leave(struct cfg80211_re
  	cfg80211_stop_background_radar_detection(wdev);
  
  	switch (wdev->iftype) {
@@ -2425,7 +2546,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  	case NL80211_IFTYPE_ADHOC:
  		__cfg80211_leave_ibss(rdev, dev, true);
  		break;
-@@ -1556,22 +1588,29 @@ void cfg80211_register_wdev(struct cfg80
+@@ -1556,22 +1598,29 @@ void cfg80211_register_wdev(struct cfg80
  	if (wdev->netdev &&
  	    sysfs_create_link(&wdev->netdev->dev.kobj, &rdev->wiphy.dev.kobj,
  			      "phy80211"))
@@ -2457,14 +2578,15 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  	rdev = wiphy_to_rdev(wdev->wiphy);
  
  	lockdep_assert_held(&rdev->wiphy.mtx);
-@@ -1584,6 +1623,17 @@ int cfg80211_register_netdevice(struct n
+@@ -1584,6 +1633,18 @@ int cfg80211_register_netdevice(struct n
  		goto out;
  
  	cfg80211_register_wdev(rdev, wdev);
 +
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
 +	if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
-+	     wdev->iftype == NL80211_IFTYPE_MONITOR)
++	     wdev->iftype == NL80211_IFTYPE_MONITOR ||
++		 rdev->enable_bond_dev == 0)
 +		skip_bond_netdev = true;
 +
 +	if (!skip_bond_netdev && g_bonded_interface_model &&
@@ -2475,7 +2597,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.c
  	ret = 0;
  out:
  	wdev->registering = false;
-@@ -1604,6 +1654,11 @@ static int cfg80211_netdev_notifier_call
+@@ -1604,6 +1665,11 @@ static int cfg80211_netdev_notifier_call
  	if (!wdev)
  		return NOTIFY_DONE;
  
@@ -2844,3 +2966,54 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  int ath12k_wmi_config_peer_ppeds_routing(struct ath12k *ar,
  					 const u8 *peer_addr, u8 vdev_id,
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debugfs.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/debugfs.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -1581,12 +1581,14 @@ static ssize_t ath12k_debugfs_dump_soc_r
+ 	return len;
+ }
+ 
++extern struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id);
+ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+ 						char __user *user_buf,
+ 						size_t count, loff_t *ppos)
+ {
+ 	struct ath12k_base *ab = file->private_data;
+ 	struct ath12k_soc_dp_stats *soc_stats = &ab->soc_stats;
++	struct ath12k *ar;
+ 	int len = 0, i, retval;
+ 	const int size = 4096;
+ 	static const char *rxdma_err[HAL_REO_ENTR_RING_RXDMA_ECODE_MAX] = {
+@@ -1719,6 +1721,17 @@ static ssize_t ath12k_debugfs_dump_soc_d
+ 			soc_stats->tx_completed[2],
+ 			soc_stats->tx_completed[3]);
+ 
++	for (i = 0; i < 3; i++) {
++
++		ar = ath12k_mac_get_ar_by_pdev_id(ab, i);
++		if (ar) {
++			len += scnprintf(buf + len, size - len,
++					"\ntx_pending [%d]: 0:%d\n",
++					i,
++					atomic_read(&ar->dp.num_tx_pending));
++		}
++	}
++
+ 	len += scnprintf(buf + len, size - len, "\nREO Rx Received:\n");
+ 	for (i = 0; i < DP_REO_DST_RING_MAX; i++)
+ 		len += scnprintf(buf + len, size - len,
+Index: backports-20220822-5.4.213-ef7197996efe/net/wireless/core.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/net/wireless/core.h
++++ backports-20220822-5.4.213-ef7197996efe/net/wireless/core.h
+@@ -108,6 +108,9 @@ struct cfg80211_registered_device {
+ 	/* lock for all wdev lists */
+ 	spinlock_t mgmt_registrations_lock;
+ 
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	bool enable_bond_dev;
++#endif
+ 	/* must be last because of the way we do wiphy_priv(),
+ 	 * and it should at least be aligned to NETDEV_ALIGN */
+ 	struct wiphy wiphy __aligned(NETDEV_ALIGN);
