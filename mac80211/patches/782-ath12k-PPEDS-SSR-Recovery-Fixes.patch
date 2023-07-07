@@ -49,7 +49,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  unsigned int ath12k_debug_mask;
  module_param_named(debug_mask, ath12k_debug_mask, uint, 0644);
  MODULE_PARM_DESC(debug_mask, "Debugging mask");
-@@ -2038,6 +2043,49 @@ static int ath12k_rproc_recovery_power_u
+@@ -2040,6 +2045,46 @@ static int ath12k_rproc_recovery_power_u
  	return 0;
  }
  
@@ -60,9 +60,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	struct ath12k_pdev *pdev;
 +	struct ath12k_link_vif *arvif;
 +	int i;
-+
-+	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
-+		return;
 +
 +	rtnl_lock();
 +
@@ -84,7 +81,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +				if (arvif->ndev_pvt->link_ndev) {
 +					netif_tx_stop_all_queues(arvif->ndev_pvt->link_ndev);
-+					ath12k_bond_link_delete(arvif);
++					ath12k_bond_link_release(arvif);
 +					ath12k_disable_ds_for_link_netdev(ab, arvif, arvif->ndev_pvt->link_ndev);
 +				}
 +			}
@@ -99,11 +96,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static void ath12k_core_reset(struct work_struct *work)
  {
  	struct ath12k_base *ab = container_of(work, struct ath12k_base, reset_work);
-@@ -2046,6 +2094,14 @@ static void ath12k_core_reset(struct wor
+@@ -2048,6 +2093,14 @@ static void ath12k_core_reset(struct wor
  	int reset_count, fail_cont_count, i;
  	long time_left;
  
-+#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	if (!ab->is_reset) {
 +		ath12k_hif_ppeds_irq_disable(ab, PPEDS_IRQ_PPE2TCL);
 +		ath12k_hif_ppeds_irq_disable(ab, PPEDS_IRQ_REO2PPE);
@@ -116,7 +113,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	 */
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -290,6 +290,179 @@ static void ath12k_dp_srng_msi_setup(str
+@@ -294,6 +294,179 @@ static void ath12k_dp_srng_msi_setup(str
  #endif
  }
  
@@ -296,7 +293,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
  			 enum hal_ring_type type, int ring_num,
  			 int mac_id, int num_entries)
-@@ -412,7 +585,7 @@ int ath12k_dp_srng_setup(struct ath12k_b
+@@ -416,7 +589,7 @@ int ath12k_dp_srng_setup(struct ath12k_b
  		ring->cached = 1;
  	}
  
@@ -556,24 +553,33 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  void ath12k_hal_dump_srng_stats(struct ath12k_base *ab);
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4819,7 +4819,8 @@ static int ath12k_mac_vdev_delete(struct
+@@ -4821,7 +4821,8 @@ static int ath12k_mac_vdev_delete(struct
  
  #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
  	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
--		ath12k_bond_link_delete(arvif);
-+		if (!test_bit(ATH12K_FLAG_RECOVERY, &arvif->ar->ab->dev_flags))
-+			ath12k_bond_link_delete(arvif);
+-		ath12k_bond_link_release(arvif);
++		if (arvif->ndev_pvt->is_bond_enslaved)
++			ath12k_bond_link_release(arvif);
  		ath12k_disable_ds_for_link_netdev(ar->ab, arvif,
  						  arvif->ndev_pvt->link_ndev);
  	}
-@@ -10209,6 +10210,9 @@ static int ath12k_mac_vdev_create(struct
+@@ -10310,7 +10311,7 @@ static int ath12k_mac_vdev_create(struct
+ 		}
+ #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
+ 		if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK) {
+-			if (hweight16(vif->valid_links) <= 1) {
++			if (hweight16(vif->valid_links) <= 1 && link_ndev) {
+ 				ath12k_free_bonddev_for_sfe(wdev, vif, link_id);
+ 				arvif->ndev_pvt = NULL;
+ 				arvif->ppe_vp_num = -1;
+@@ -10318,6 +10319,9 @@ static int ath12k_mac_vdev_create(struct
  			else if (link_ndev) {
  				ath12k_enable_ds_for_link_netdev(ab, arvif,
  								 arvif->ndev_pvt->link_ndev);
 +				netif_tx_start_all_queues(arvif->ndev_pvt->bond_dev);
 +				netif_tx_start_all_queues(arvif->ndev_pvt->link_ndev);
 +				arvif->ndev_pvt->bond_dev->flags |= IFF_UP;
- 				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
+ 				ath12k_bond_link_enslave(arvif, arvif->ndev_pvt->link_ndev);
  			}
  		}
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
@@ -744,3 +750,101 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  void ath12k_dp_ppeds_stop(struct ath12k_base *ab);
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
+--- a/drivers/net/wireless/ath/ath12k/ahb.c
++++ b/drivers/net/wireless/ath/ath12k/ahb.c
+@@ -1087,13 +1087,9 @@ err_core_free:
+ 
+ static void ath12k_ahb_remove_prepare(struct ath12k_base *ab)
+ {
+-	unsigned long left;
+-
+ 	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags)) {
+-		left = wait_for_completion_timeout(&ab->driver_recovery,
+-						   ATH12K_AHB_RECOVERY_TIMEOUT);
+-		if (!left)
+-			ath12k_warn(ab, "failed to receive recovery response completion\n");
++		ath12k_warn(ab, "SSR recovery in progress, interrupting ssr recovery due to shutdown request\n");
++		return;
+ 	}
+ 
+ 	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags);
+--- a/drivers/net/wireless/ath/ath12k/bondif.c
++++ b/drivers/net/wireless/ath/ath12k/bondif.c
+@@ -78,10 +78,12 @@ int ath12k_bond_link_enslave(struct ath1
+ 	ath12k_info(NULL, "Enslave bond_dev %px link_ndev %px\n", link_ndev_pvt->bond_dev, link_dev);
+ 	ret = bond_enslave(link_ndev_pvt->bond_dev, link_dev, NULL);
+ 	if (ret) {
++		arvif->ndev_pvt->is_bond_enslaved = false;
+ 		ath12k_err(NULL, "Error bond enslave error\n");
+ 		return -EINVAL;
+ 	}
+ 	else {
++		arvif->ndev_pvt->is_bond_enslaved = true;
+ 		ath12k_info(NULL, "Successfully enslaved link_ndev %s %px\n",
+ 			    link_dev->name, link_dev);
+ 	}
+@@ -116,6 +118,7 @@ void ath12k_bond_link_release(struct ath
+ 					link_ndev_pvt->bond_dev->name, err);
+ 			return;
+ 		}
++		arvif->ndev_pvt->is_bond_enslaved = false;
+ 	} else {
+ 		ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n",
+ 			   arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
+@@ -244,6 +247,8 @@ int ath12k_mac_op_change_vif_links(struc
+ 	struct net_device *bond_dev = NULL;
+ 	char name[20] = {0};
+ 	int ret = 0, chip_id = 0, pdev_id = 0;
++	struct ath12k_link_vif *arvif = NULL;
++	struct ath12k_base *ab = NULL;
+ 
+ 	if (!g_bonded_interface_model)
+ 		return 0;
+@@ -276,6 +281,7 @@ int ath12k_mac_op_change_vif_links(struc
+ 		link_ndev_pvt->link_ndev = link_ndev;
+ 		link_ndev_pvt->bond_dev = bond_dev;
+ 		link_ndev_pvt->is_started = false;
++		link_ndev_pvt->is_bond_enslaved = false;
+ 		mldev->vif = vif;
+ 		mutex_lock(&vif->bond_mutex);
+ 		vif->link_ndev[link_num] = link_ndev;
+@@ -306,6 +312,14 @@ int ath12k_mac_op_change_vif_links(struc
+ 			link_ndev = vif->link_ndev[link_num];
+ 			link_ndev_pvt = netdev_priv(link_ndev);
+ 			if (link_ndev) {
++				if (link_ndev_pvt->is_bond_enslaved) {
++					arvif = link_ndev_pvt->arvif;
++					ab = arvif->ar->ab;
++					ath12k_bond_link_release(link_ndev_pvt->arvif);
++					if (link_ndev_pvt->vp_num)
++						ath12k_disable_ds_for_link_netdev(ab, arvif,
++										  arvif->ndev_pvt->link_ndev);
++				}
+ 				ath12k_info(NULL, "Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
+ 				unregister_netdevice(link_ndev);
+ 				link_ndev_pvt->link_ndev = NULL;
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
+@@ -1549,8 +1549,10 @@ static void ath12k_pci_shutdown(struct p
+ 	struct ath12k_base *ab = pci_get_drvdata(pdev);
+ 
+ 	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags);
+-	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags))
+-			return;
++	if (test_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags)) {
++		ath12k_warn(ab, "SSR recovery in progress, interrupting ssr recovery due to shutdown request\n");
++		return;
++	}
+         cancel_work_sync(&ab->reset_work);
+         ath12k_core_deinit(ab);
+ }
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -344,6 +344,7 @@ struct ath12k_link_vif_pvt {
+ 	struct net_device *bond_dev;
+ 	struct ieee80211_hw *hw;
+ 	bool is_started;
++	bool is_bond_enslaved;
+ 	int ppe_vp_profile_idx;
+ 	int vp_num;
+ };
