@@ -227,6 +227,24 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					tc qdisc replace dev wlan0_b root noqueue
+					tc qdisc replace dev wlan0_l0 root noqueue
+					tc qdisc replace dev wlan0_l1 root noqueue
+					tc qdisc replace dev wlan0_l2 root noqueue
+
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+					tc qdisc replace dev eth2 root noqueue
+					tc qdisc replace dev eth3 root noqueue
+					tc qdisc replace dev eth4 root noqueue
+					tc qdisc replace dev eth5 root noqueue
+
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
@@ -292,6 +310,25 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					tc qdisc replace dev wlan0_b root noqueue
+					tc qdisc replace dev wlan0_l0 root noqueue
+					tc qdisc replace dev wlan0_l1 root noqueue
+					tc qdisc replace dev wlan0_l2 root noqueue
+
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+					tc qdisc replace dev eth2 root noqueue
+					tc qdisc replace dev eth3 root noqueue
+					tc qdisc replace dev eth4 root noqueue
+					tc qdisc replace dev eth5 root noqueue
+
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
+
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
@@ -352,6 +389,25 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan3/queues/rx-0/rps_cpus
+
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					tc qdisc replace dev wlan0_b root noqueue
+					tc qdisc replace dev wlan0_l0 root noqueue
+					tc qdisc replace dev wlan0_l1 root noqueue
+					tc qdisc replace dev wlan0_l2 root noqueue
+
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+					tc qdisc replace dev eth2 root noqueue
+					tc qdisc replace dev eth3 root noqueue
+					tc qdisc replace dev eth4 root noqueue
+					tc qdisc replace dev eth5 root noqueue
+
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
+
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
@@ -408,6 +464,24 @@ boost_performance() {
 				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
 				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
 
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					tc qdisc replace dev wlan0_b root noqueue
+					tc qdisc replace dev wlan0_l0 root noqueue
+					tc qdisc replace dev wlan0_l1 root noqueue
+					tc qdisc replace dev wlan0_l2 root noqueue
+
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+					tc qdisc replace dev eth2 root noqueue
+					tc qdisc replace dev eth3 root noqueue
+					tc qdisc replace dev eth4 root noqueue
+					tc qdisc replace dev eth5 root noqueue
+
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
+
 				tc qdisc replace dev wlan0 root noqueue
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
@@ -458,6 +532,23 @@ boost_performance() {
                                 echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
                                 echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
                                 echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+                                if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+                                    tc qdisc replace dev wlan0_b root noqueue
+                                    tc qdisc replace dev wlan0_l0 root noqueue
+                                    tc qdisc replace dev wlan0_l1 root noqueue
+                                    tc qdisc replace dev wlan0_l2 root noqueue
+
+                                    tc qdisc replace dev eth0 root noqueue
+                                    tc qdisc replace dev eth1 root noqueue
+                                    tc qdisc replace dev eth2 root noqueue
+                                    tc qdisc replace dev eth3 root noqueue
+                                    tc qdisc replace dev eth4 root noqueue
+                                    tc qdisc replace dev eth5 root noqueue
+
+                                    echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+                                    echo f > /proc/net/nf_conntrack
+                                fi
 
                                 tc qdisc replace dev wlan0 root noqueue
                                 tc qdisc replace dev wlan1 root noqueue
