@@ -73,8 +73,15 @@ define KernelPackage/mac80211
   TITLE:=Linux 802.11 Wireless Networking Stack
   DEPENDS+= @TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq807x||TARGET_ipq806x||TARGET_ipq||TARGET_ar71xx \
 	+LINUX_4_4:kmod-crypto-arc4 +LINUX_4_4:kmod-crypto-aes +kmod-cfg80211 +hostapd-common \
-	+!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv-wifi-meshmgr +!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv +TARGET_ipq95xx:kmod-qca-nss-ppe +TARGET_ipq95xx:kmod-qca-nss-ppe-vp \
-	+TARGET_ipq53xx:kmod-qca-nss-ppe +TARGET_ipq53xx:kmod-qca-nss-ppe-vp +TARGET_ipq95xx:kmod-qca-nss-ppe-ds +TARGET_ipq53xx:kmod-qca-nss-ppe-ds +TARGET_ipq95xx:kmod-bonding +TARGET_ipq53xx:kmod-bonding
+	+!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv-wifi-meshmgr +!(TARGET_ipq95xx||TARGET_ipq53xx):kmod-qca-nss-drv \
+	+(TARGET_ipq95xx&&PACKAGE_kmod-qca-nss-ppe):kmod-qca-nss-ppe \
+	+(TARGET_ipq53xx&&PACKAGE_kmod-qca-nss-ppe):kmod-qca-nss-ppe \
+	+(TARGET_ipq95xx&&PACKAGE_kmod-qca-nss-ppe-vp):kmod-qca-nss-ppe-vp \
+	+(TARGET_ipq53xx&&PACKAGE_kmod-qca-nss-ppe-vp):kmod-qca-nss-ppe-vp \
+	+(TARGET_ipq95xx&&PACKAGE_kmod-qca-nss-ppe-ds):kmod-qca-nss-ppe-ds \
+	+(TARGET_ipq53xx&&PACKAGE_kmod-qca-nss-ppe-ds):kmod-qca-nss-ppe-ds \
+	+(TARGET_ipq95xx&&PACKAGE_kmod-bonding):kmod-bonding \
+	+(TARGET_ipq53xx&&PACKAGE_kmod-bonding):kmod-bonding
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe:kmod-qca-nss-ppe
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
@@ -95,8 +102,7 @@ define KernelPackage/mac80211/config
 		bool "Enable NSS support for IPQ platform"
 		default y
 		help
-		  This option enables support for NSS in boards
-		  like AP148.
+		  This option enables support for NSS in QCA boards.
     endif
 
     if PACKAGE_kmod-qca-nss-ppe-vp
@@ -104,14 +110,23 @@ define KernelPackage/mac80211/config
 		bool "Enable PPE support for IPQ platform"
 		default y
 		help
-		  This option enables support for PPE in boards
-		  like RDP433
-	config PACKAGE_MAC80211_BONDED_SUPPORT
-		bool "Enable bonded  support for IPQ platform"
+		  This option enables support for PPE in QCA boards
+    endif
+
+    if PACKAGE_kmod-qca-nss-ppe-ds
+	config PACKAGE_MAC80211_DS_SUPPORT
+		bool "Enable DS support for IPQ platform"
 		default y
 		help
-		  This option enables support for Bonded netdev in boards
-		  like RDP433
+		  This option enables support for ds netdev in QCA boards.
+     endif
+
+    if PACKAGE_kmod-qca-nss-sfe
+	config PACKAGE_MAC80211_SFE_SUPPORT
+		bool "Enable sfe support for IPQ platform"
+		default y
+		help
+		  This option enables support for qca sfe in QCA boards
      endif
 
 	config PACKAGE_MAC80211_DEBUGFS
@@ -303,7 +318,7 @@ define DownloadBackports
 	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0105-remove-const-from-rchan_callbacks.patch)
 	$(call backports_mlo_support,$(TMP_DIR)/dl/$(PKG_NAME)-source)
 	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && \
-	./gentree.py --clean --copy-list ./copy-list.ath \
+	python2 gentree.py --clean --copy-list ./copy-list.ath \
 		$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
 
 ifeq ($(CONFIG_LINUX_4_4),y)
@@ -438,8 +453,9 @@ endef
 define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
-  DEPENDS+= +kmod-ath +kmod-qca-nss-ecm-premium\
-	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT
+  DEPENDS+= +kmod-ath\
+	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT \
+	+PACKAGE_kmod-qca-nss-ecm-premium:kmod-qca-nss-ecm-premium
   FILES:= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
   AUTOLOAD:=$(call AutoProbe,ath12k)
 endef
@@ -550,7 +566,8 @@ endif
 
 config-$(CONFIG_PACKAGE_MAC80211_NSS_SUPPORT) += MAC80211_NSS_SUPPORT
 config-$(CONFIG_PACKAGE_MAC80211_PPE_SUPPORT) += MAC80211_PPE_SUPPORT
-config-$(CONFIG_PACKAGE_MAC80211_BONDED_SUPPORT) += MAC80211_BONDED_SUPPORT
+config-$(CONFIG_PACKAGE_MAC80211_DS_SUPPORT) += MAC80211_BONDED_SUPPORT ATH12K_PPE_DS_SUPPORT ATH12K_BONDED_DS_SUPPORT
+config-$(CONFIG_PACKAGE_MAC80211_SFE_SUPPORT) += MAC80211_SFE_SUPPORT
 config-$(CONFIG_PACKAGE_MAC80211_MESSAGE_TRACING) += MAC80211_MESSAGE_TRACING ATH10K_TRACING ATH11K_TRACING ATH12K_TRACING
 config-$(CONFIG_PACKAGE_MAC80211_DEBUG_MENU) += MAC80211_DEBUG_MENU
 config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
@@ -566,8 +583,7 @@ config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH10K_DEBUG ATH11K_DEBUG ATH12K
 config-$(call config_package,ath9k) += ATH9K
 config-$(call config_package,ath9k-common) += ATH9K_COMMON
 config-$(CONFIG_TARGET_ar71xx) += ATH9K_AHB
-config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB ATH12K_PPE_DS_SUPPORT ATH12K_BONDED_DS_SUPPORT MAC80211_PPE_SUPPORT MAC80211_BONDED_SUPPORT
-config-$(CONFIG_TARGET_ipq95xx) += ATH12K_PPE_DS_SUPPORT ATH12K_BONDED_DS_SUPPORT MAC80211_PPE_SUPPORT MAC80211_BONDED_SUPPORT
+config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB
 config-$(CONFIG_PCI) += ATH9K_PCI
 config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD \
 				      ATH_REG_DYNAMIC_USER_REG_HINTS \
@@ -656,13 +672,13 @@ endef
 ifneq ($(CONFIG_PACKAGE_kmod-cfg80211)$(CONFIG_PACKAGE_kmod-lib80211),)
  define Build/Compile/kmod
 	rm -rf $(PKG_BUILD_DIR)/modules
-	+$(MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
+	+$(KERNEL_MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
  endef
 endif
 
 define Build/Compile
 	$(SH_FUNC) var2file "$(call shvar,mac80211_config)" $(PKG_BUILD_DIR)/.config
-	$(MAKE) $(MAKE_OPTS) olddefconfig
+	$(KERNEL_MAKE) $(MAKE_OPTS) olddefconfig
 	$(call Build/Compile/kmod)
 endef
 
