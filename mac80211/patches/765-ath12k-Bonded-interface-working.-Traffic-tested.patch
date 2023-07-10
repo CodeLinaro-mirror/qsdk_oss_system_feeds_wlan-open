@@ -1078,7 +1078,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	bool mvr_processing;
  	bool pending_csa_up;
-@@ -1108,6 +1126,10 @@ struct ath12k_soc_dp_stats {
+@@ -1110,6 +1128,10 @@ struct ath12k_soc_dp_stats {
  	u32 fw_tx_status[MAX_FW_TX_STATUS];
  	u32 tx_enqueued[MAX_TCL_RING];
  	u32 tx_completed[MAX_TCL_RING];
@@ -1287,6 +1287,89 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ",
  			skb->data, skb->len);
+@@ -1101,6 +1106,70 @@ static inline bool ath12k_dp_tx_completi
+ }
+ 
+ #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++static void ath12k_ppeds_tx_update_stats(struct ath12k *ar, struct sk_buff *msdu,
++					 struct hal_wbm_release_ring *tx_status)
++{
++	struct ath12k_base *ab = ar->ab;
++	struct ieee80211_tx_info *info;
++	struct ath12k_peer *peer;
++	struct ath12k_link_sta *arsta;
++	struct hal_tx_status ts = { 0 };
++
++	info = IEEE80211_SKB_CB(msdu);
++	memset(&info->status, 0, sizeof(info->status));
++	info->status.rates[0].idx = -1;
++
++	ath12k_dp_tx_status_parse(ab, tx_status, &ts);
++	if (ts.status == HAL_WBM_TQM_REL_REASON_FRAME_ACKED &&
++	    !(info->flags & IEEE80211_TX_CTL_NO_ACK)) {
++		info->flags |= IEEE80211_TX_STAT_ACK;
++		info->status.ack_signal = ATH12K_DEFAULT_NOISE_FLOOR +
++					  ts.ack_rssi;
++		info->status.flags = IEEE80211_TX_STATUS_ACK_SIGNAL_VALID;
++	}
++
++	if (ts.status == HAL_WBM_TQM_REL_REASON_CMD_REMOVE_TX &&
++	    (info->flags & IEEE80211_TX_CTL_NO_ACK))
++		info->flags |= IEEE80211_TX_STAT_NOACK_TRANSMITTED;
++
++	if (ts.status != HAL_WBM_TQM_REL_REASON_FRAME_ACKED) {
++		switch (ts.status) {
++		case HAL_WBM_TQM_REL_REASON_CMD_REMOVE_MPDU:
++		case HAL_WBM_TQM_REL_REASON_DROP_THRESHOLD:
++		case HAL_WBM_TQM_REL_REASON_CMD_REMOVE_AGED_FRAMES:
++		case HAL_WBM_TQM_REL_REASON_CMD_REMOVE_TX:
++			return;
++		default:
++			//TODO: Remove this print and add as a stats
++			ath12k_dbg(ab, ATH12K_DBG_DP_TX, "tx frame is not acked status %d\n", ts.status);
++		}
++	}
++
++	spin_lock_bh(&ab->base_lock);
++
++	peer = ath12k_peer_find_by_id(ab, ts.peer_id);
++	if (unlikely(!peer || !peer->sta)) {
++		ath12k_dbg(ab, ATH12K_DBG_DATA,
++			   "dp_tx: failed to find the peer with peer_id %d\n",
++			   ts.peer_id);
++		spin_unlock_bh(&ab->base_lock);
++		return;
++	}
++
++	arsta = ath12k_peer_get_link_sta(ab, peer);
++	if (!arsta) {
++		ath12k_warn(ab, "link sta not found on peer %pM id %d\n",
++			    peer->addr, peer->peer_id);
++		spin_unlock_bh(&ab->base_lock);
++		return;
++	}
++
++	ieee80211_ppeds_tx_update_stats(ar->ah->hw, peer->sta, info, arsta->txrate,
++					peer->link_id, msdu->len);
++
++	spin_unlock_bh(&ab->base_lock);
++}
++
+ int ath12k_ppeds_tx_completion_handler(struct ath12k_base *ab, int budget)
+ {
+ 	struct ath12k_dp *dp = &ab->dp;
+@@ -1174,6 +1243,11 @@ int ath12k_ppeds_tx_completion_handler(s
+ 		}
+ 
+ 		mac_id = tx_desc->mac_id;
++
++		if (!ab->stats_disable)
++			ath12k_ppeds_tx_update_stats(ab->pdevs[mac_id].ar, tx_desc->skb,
++						     tx_status);
++
+ 		/* Release descriptor as soon as extracting necessary info
+ 		 * to reduce contention
+ 		 */
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -23,7 +23,9 @@
@@ -1412,7 +1495,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
-@@ -9445,6 +9491,13 @@ static void ath12k_mac_update_vif_offloa
+@@ -9446,6 +9492,13 @@ static void ath12k_mac_update_vif_offloa
  		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
  					IEEE80211_OFFLOAD_DECAP_ENABLED);
  
@@ -1426,7 +1509,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
  		ahvif->tx_encap_type = ATH12K_HW_TXRX_ETHERNET;
  	else if (test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags))
-@@ -9555,6 +9608,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9556,6 +9609,11 @@ static int ath12k_mac_vdev_create(struct
  	struct peer_create_params peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1438,7 +1521,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9621,6 +9679,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9622,6 +9680,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1455,7 +1538,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9712,6 +9780,20 @@ static int ath12k_mac_vdev_create(struct
+@@ -9713,6 +9781,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1476,7 +1559,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9780,6 +9862,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9781,6 +9863,16 @@ static int ath12k_mac_vdev_create(struct
  	    test_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags))
  		ath12k_mac_monitor_vdev_create(ar);
  
@@ -1493,7 +1576,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
-@@ -10291,15 +10383,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10292,15 +10384,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1515,7 +1598,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12107,6 +12201,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12111,6 +12205,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1523,7 +1606,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14093,10 +14188,6 @@ static const struct ieee80211_ops ath12k
+@@ -14107,10 +14202,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1534,7 +1617,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -15274,7 +15365,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+@@ -15288,7 +15379,9 @@ int ath12k_mac_allocate(struct ath12k_hw
  			ret = -ENOMEM;
  			goto err_mac_destroy;
  		}
@@ -1975,6 +2058,39 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
  /**
   * ieee80211_rx_napi - receive frame from NAPI context
+  *
+@@ -5314,6 +5327,32 @@ void ieee80211_tx_status_8023(struct iee
+ 			       struct ieee80211_vif *vif,
+ 			       struct sk_buff *skb);
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++/**
++ * ieee80211_ppeds_tx_update_stats - update tx stats for PPE DS path
++ *
++ * Call this function for all transmitted data frames after their transmit
++ * completion. This callback should only be called for data frames which
++ * are using driver's (or hardware's) offload capability of encap/decap
++ * 802.11 frames.
++ *
++ * This function may not be called in IRQ context. Calls to this function
++ * for a single hardware must be synchronized against each other and all
++ * calls in the same tx status family.
++ *
++ * @hw: the hardware the frame was transmitted by
++ * @pubsta: the station to update the tx rate for.
++ * @info: tx status information
++ * @rate: tx rate information
++ * @link_id: link id
++ * @len: length
++ */
++void ieee80211_ppeds_tx_update_stats(struct ieee80211_hw *hw,
++				     struct ieee80211_sta *pubsta,
++				     struct ieee80211_tx_info *info,
++				     struct rate_info rate, int link_id, u32 len);
++#endif /* CPTCFG_MAC80211_BONDED_SUPPORT */
++
+ /**
+  * ieee80211_report_low_ack - report non-responding station
   *
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
@@ -3037,7 +3153,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static void ath12k_dp_mon_rx_handle_ofdma_info(void *rx_tlv,
  					       struct hal_rx_user_status *rx_user_status)
  {
-@@ -3323,6 +3327,76 @@ ath12k_dp_mon_rx_update_peer_rate_table_
+@@ -3323,6 +3327,84 @@ ath12k_dp_mon_rx_update_peer_rate_table_
  		rx_stats->byte_stats.rx_rate[bw_idx][gi_idx][nss_idx][mcs_idx] += ppdu_info->mpdu_len;
  }
  
@@ -3057,12 +3173,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	memset(&status, 0 , sizeof(status));
 +	if (arsta) { // SU stats
-+		sta = container_of((void *)arsta->ahsta, struct ieee80211_sta, drv_priv);
++		if (arsta->arvif && (arsta->arvif->ppe_vp_num == -1 ||
++		    (arsta->arvif->ahvif &&
++		     hweight16(arsta->arvif->ahvif->links_map) <= 1)))
++			return;
 +
 +		if (!rx_status) {
 +			ath12k_dp_mon_fill_rx_stats(ar, ppdu_info, &status);
 +			rx_status = &status;
 +		}
++
++		sta = container_of((void *)arsta->ahsta, struct ieee80211_sta, drv_priv);
 +		ieee80211_rx_update_stats(ar->ah->hw, sta, arsta->link_id,
 +					  ppdu_info->mpdu_len, rx_status);
 +		return;
@@ -3094,16 +3215,19 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			continue;
 +		}
 +
-+		sta = container_of((void *)arsta->ahsta, struct ieee80211_sta, drv_priv);
-+		if (hweight16(sta->valid_links) <= 1) {
++		if (arsta->arvif && (arsta->arvif->ppe_vp_num == -1 ||
++		    (arsta->arvif->ahvif &&
++		     hweight16(arsta->arvif->ahvif->links_map) <= 1))) {
 +			spin_unlock_bh(&ar->ab->base_lock);
-+			return;
++			continue;
 +		}
 +
 +		if (!rx_status) {
 +			ath12k_dp_mon_fill_rx_stats(ar, ppdu_info, &status);
 +			rx_status = &status;
 +		}
++
++		sta = container_of((void *)arsta->ahsta, struct ieee80211_sta, drv_priv);
 +		ieee80211_rx_update_stats(ar->ah->hw, sta, arsta->link_id,
 +					  ppdu_info->mpdu_len, rx_status);
 +		spin_unlock_bh(&ar->ab->base_lock);
@@ -3114,7 +3238,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static void ath12k_dp_mon_rx_update_peer_su_stats(struct ath12k *ar,
  						  struct ath12k_link_sta *arsta,
  						  struct hal_rx_mon_ppdu_info *ppdu_info)
-@@ -3775,10 +3849,18 @@ move_next:
+@@ -3775,10 +3857,18 @@ move_next:
  
  			ath12k_dp_mon_rx_update_peer_su_stats(ar, arsta,
  							      ppdu_info);
@@ -3133,7 +3257,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		}
  
  next_skb:
-@@ -3952,10 +4034,18 @@ move_next:
+@@ -3952,10 +4042,18 @@ move_next:
  
  			ath12k_dp_mon_rx_update_peer_su_stats(ar, arsta,
  							      ppdu_info);
@@ -3152,3 +3276,45 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
   		}
  
  		if (ath12k_debugfs_is_pktlog_peer_valid(ar, peer->addr)) {
+--- a/net/mac80211/status.c
++++ b/net/mac80211/status.c
+@@ -1279,6 +1279,39 @@ void ieee80211_tx_status_8023(struct iee
+ }
+ EXPORT_SYMBOL(ieee80211_tx_status_8023);
+ 
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++void ieee80211_ppeds_tx_update_stats(struct ieee80211_hw *hw,
++				     struct ieee80211_sta *pubsta,
++				     struct ieee80211_tx_info *info,
++				     struct rate_info rate, int link_id, u32 len)
++{
++	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
++	struct link_sta_info *link_sta;
++	int rates_idx, retry_count;
++
++	rcu_read_lock();
++	if (link_id >= 0) {
++		link_sta = rcu_dereference(sta->link[link_id]);
++		if (WARN_ON_ONCE(!link_sta)) {
++			rcu_read_unlock();
++			return;
++		}
++	} else {
++		link_sta = &sta->deflink;
++	}
++
++	link_sta->tx_stats.packets[0]++;
++	link_sta->tx_stats.bytes[0] += len;
++	rates_idx = ieee80211_tx_get_rates(hw, info, &retry_count);
++	link_sta->tx_stats.last_rate = info->status.rates[rates_idx];
++	link_sta->tx_stats.last_rate_info = rate;
++
++	rcu_read_unlock();
++}
++EXPORT_SYMBOL(ieee80211_ppeds_tx_update_stats);
++#endif /* CPTCFG_MAC80211_BONDED_SUPPORT */
++
++
+ void ieee80211_report_low_ack(struct ieee80211_sta *pubsta, u32 num_packets)
+ {
+ 	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
