@@ -120,7 +120,9 @@ drv_mac80211_init_device_config() {
                dsss_cck_40
 	config_add_boolean multiple_bssid ema ru_punct_ofdma disable_csa_dfs use_ru_puncture_dfs
 	config_add_boolean disable_eml_cap discard_6g_awgn_event
+	config_add_int he_su_beamformer he_su_beamformee he_mu_beamformer
 	config_add_int he_ul_mumimo eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz
+	config_add_int eht_su_beamformer eht_su_beamformee eht_mu_beamformer
 }
 
 drv_mac80211_init_iface_config() {
@@ -646,11 +648,12 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$enable_be" != "0" ]; then
 			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0 ccfs:0
+			json_get_vars eht_su_beamformee:1 eht_su_beamformer:1 eht_mu_beamformer:1
 
 			append base_cfg "ieee80211be=1" "$N"
-			append base_cfg "eht_su_beamformer=1" "$N"
-			append base_cfg "eht_mu_beamformer=1" "$N"
-			append base_cfg "eht_su_beamformee=1" "$N"
+			append base_cfg "eht_su_beamformer=$eht_su_beamformer" "$N"
+			append base_cfg "eht_mu_beamformer=$eht_mu_beamformer" "$N"
+			append base_cfg "eht_su_beamformee=$eht_su_beamformee" "$N"
 
 			if [ -n "$eht_ulmumimo_80mhz" ]; then
 				if [ $eht_ulmumimo_80mhz -eq 0 ]; then
@@ -1888,11 +1891,72 @@ mac80211_update_mld_configs() {
 	done
 }
 
+mac80211_derive_ml_info() {
+	local _mlds
+	local _devices_up
+	local _ifaces
+	config_load wireless
+	mld_vaps_count=0
+	radio_up_count=0
+
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	if [ -z "$_mlds" ]; then
+		return
+	fi
+
+	mac80211_get_wifi_ifaces() {
+		config_get iface_mode $1 mode
+		if [ -n "$iface_mode" ] && [[ "$iface_mode" == "ap" ]]; then
+			append _ifaces $1
+		fi
+	}
+	config_foreach mac80211_get_wifi_ifaces wifi-iface
+
+	for _mld in $_mlds
+	do
+		for _ifname in $_ifaces
+		do
+			config_get mld_name $_ifname mld
+			config_get mldevice $_ifname device
+			config_get mlcaps  $mldevice mlo_capable
+
+			if ! [[ "$mldevices" =~ "$mldevice" ]]; then
+				append mldevices $mldevice
+			fi
+
+			if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+			   [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+				mld_vaps_count=$((mld_vaps_count+1))
+			fi
+		done
+	done
+
+	for mldev in $mldevices
+	do
+		# Length of radio name should be 12 in order to ensure only single wiphy wifi-devices are taken into account
+		if [ ${#mldev} -ne 12 ]; then
+			continue;
+		fi
+
+		config_get disabled "$mldev" disabled
+
+		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+			radio_up_count=$((radio_up_count+1))
+		fi
+	done
+}
+
 mac80211_export_mld_info() {
 	if [ -f $MLD_VAP_DETAILS ]; then
 		source $MLD_VAP_DETAILS
 		radio_up_count=$radio_up_count
 		mld_vaps_count=$mld_vaps_count
+	else
+		mac80211_derive_ml_info
 	fi
 	mac80211_update_mld_configs
 }
@@ -1919,8 +1983,11 @@ mac80211_update_bondif() {
 			cmd="ls /sys/class/net"
 			iface=$($cmd | grep "$mld_ifname"_b)
 			if ([ -d /sys/class/net/"$mld_ifname"_b ] && [ -n $network_bridge ]); then
+				bonded_macaddr=$(iw dev $mld_ifname info | grep addr | head -1 | awk '{print $2}')
 				brctl delif $network_bridge $mld_ifname
 				brctl addif $network_bridge "$mld_ifname"_b
+				ifconfig "$mld_ifname"_b down
+				ifconfig "$mld_ifname"_b hw ether $bonded_macaddr
 				ifconfig "$mld_ifname"_b up
 			fi
 		fi
