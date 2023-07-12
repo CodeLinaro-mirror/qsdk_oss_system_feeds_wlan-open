@@ -20,9 +20,63 @@ ap_intf="$2"
 hostapd_conf="$3"
 oper_band="$4"
 dfs_log=1
-sta_freq_list="$5"
+phy="$5"
 ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
+
+get_sta_freq_list() {
+	phy=$1
+	sta_freq=$2
+
+	hw_indices=$(iw phy ${phy} info | grep -e "channel list" | cut -d' ' -f 2)
+
+	if [ -z "$hw_indices" ]; then
+		return
+	fi
+
+	for i in $hw_indices
+	do
+		#fetch hw idx channels from phy info
+		hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+
+		for _b in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
+			expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
+			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
+			band_freq=$(eval ${expr_freq} | awk '{ print $2 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
+
+			# band_freq list has the sta freq in it
+			if [[ "$band_freq" =~ "${sta_freq}" ]]; then
+				sta_chan=$(eval $expr_freq | grep -E -m1 "(\* ${sta_freq:-....} MHz${sta_freq:+|\\[$sta_freq\\]})" | grep MHz | awk '{print $4}' | sed -e "s/\[//g" | sed -e "s/\]//g")
+
+				#fetch band channels from phy info
+				band_nchans=$(echo $(eval ${expr_freq} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g") | tr -d ' ')
+				hw_chans=$(echo $hw_nchans | tr -d ' ')
+
+				#check if the list is present in band info
+				if echo "$band_nchans" | grep -q "${hw_chans}";
+				then
+					found=false
+					for chan in $hw_nchans
+					do
+						if [[ "$chan" == "$sta_chan" ]]; then
+							found=true
+						fi
+					done
+					if [[ "$found" == "true" ]]; then
+						sta_freq_list=""
+						for chidx in ${hw_nchans}; do
+							frqs=$(eval $expr_freq | grep -E -m1 "(\* ${chidx:-....} MHz${chidx:+|\\[$chidx\\]})" | grep MHz | awk '{print $2}')
+							sta_freq_list="${sta_freq_list}${frqs} "
+						done
+						echo $sta_freq_list
+					fi
+				fi
+			else
+				continue;
+			fi
+		done
+	done
+}
 
 # Hostapd VHT and HE calculations
 hostapd_vht_he_eht_oper_chwidth() {
@@ -308,6 +362,7 @@ is_apfreq_in_sta_freq_list() {
 	echo $found
 }
 
+
 get_link_info() {
 	ifname=$1
 	freq=$2
@@ -322,9 +377,12 @@ get_link_info() {
 	for i in $links
 	do
 		ap_freq=$(hostapd_cli -i $ifname -l $i status | grep -w freq | cut -d'=' -f 2)
-		is_freq_present=$(is_apfreq_in_sta_freq_list $ap_freq)
+		sta_freq_list="$(get_sta_freq_list $phy $freq)"
+		is_freq_present=$(is_apfreq_in_sta_freq_list $ap_freq "$sta_freq_list")
 		if [ $is_freq_present -eq 1 ]; then
 			ml_link="-l $i"
+			echo "$ml_link"
+			return
 		fi
 	done
 	echo "$ml_link"
@@ -356,15 +414,23 @@ do
 		exit
 	fi
 
+	res=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2)
+	if [ -z $res ]; then
+		ap_link=$(iw dev $ap_intf info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+		if [ -n "$ap_link" ]; then
+			ml_link="-l $ap_link"
+		fi
+	fi
+
 	if [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "DISCONNECTED"  -o \
 			 $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "SCANNING" ] &&
-				[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "ENABLED" ]; then
+				$(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "ENABLED" ]; then
 		#echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), stopping AP" > /dev/ttyMSM0
-		hostapd_cli -i $ap_intf disable
+		hostapd_cli -i $ap_intf $ml_link disable
 	fi
 
 	if [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ] &&
-		[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+		[ $(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
 		#echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), starting AP" > /dev/ttyMSM0
 		wpa_cli -i $sta_intf signal_poll
 		sta_chan=$(iw $sta_intf info 2> /dev/null | grep channel | cut -d' ' -f 2)
@@ -385,19 +451,19 @@ do
 			#echo "Enabling below hostapd config:" > /dev/ttyMSM0
 			hostapd_cli -i $ap_intf $ml_link status 2> /dev/null
 
-			[ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ] && hostapd_cli -i $ap_intf enable
+			[ $(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ] && hostapd_cli -i $ap_intf enable
 			sleep 4
 			#echo "Hostapd state: $(hostapd_cli status 2> /dev/null | grep state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
 			# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
-			if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
-				hostapd_cli -i $ap_intf disable
+			if [ $(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+				hostapd_cli -i $ap_intf $ml_link disable
 				sleep 1
-				hostapd_cli -i $ap_intf enable
+				hostapd_cli -i $ap_intf $ml_link enable
 				sleep 4
 			fi
 
-			if [ $(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
+			if [ $(hostapd_cli -i $ap_intf $ml_link  status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
 				echo "REPEATER AP failed bring-up, exiting" > /dev/ttyMSM0
 				echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 				date >> /tmp/apsta_debug.log
