@@ -27,10 +27,8 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  drivers/net/wireless/ath/ath12k/wmi.h   |   4 +
  9 files changed, 1204 insertions(+), 138 deletions(-)
 
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -11,6 +11,7 @@
  #include <linux/of.h>
  #include <linux/of_platform.h>
@@ -47,33 +45,41 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  unsigned int ath12k_ssr_failsafe_mode = false;
  module_param_named(ssr_failsafe_mode, ath12k_ssr_failsafe_mode, uint, 0644);
  MODULE_PARM_DESC(ssr_failsafe_mode, "ssr failsafe mode: 0-disable, 1-enable");
-@@ -1432,6 +1432,12 @@ static int ath12k_core_hw_group_start(st
+@@ -162,6 +162,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max
+ 	mutex_init(&ag->mutex_lock);
+ 	mutex_init(&ag->mlomem_arena.mutex_lock);
+ 	ag->hw_queues_stopped = false;
++	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
+ 
+ 	return ag;
+ }
+@@ -1432,6 +1433,12 @@ static int ath12k_core_hw_group_start(st
  	for (i = 0; i < ag->num_chip; i++) {
  		ab = ag->ab[i];
  
 +		/* pdev create needs to be done only for recovered
 +		 * ab during Mode1 scenario
 +		 */
-+		if (!ab->recovery_start && is_registered)
++		if (ag->recovery_mode == ATH12K_MLO_RECOVERY_MODE1 && !ab->recovery_start)
 +			continue;
 +
  		mutex_lock(&ab->core_lock);
  		ret = ath12k_core_pdev_create(ab);
  		if (ret) {
-@@ -1460,6 +1466,12 @@ static int ath12k_core_hw_group_start(st
+@@ -1460,6 +1467,12 @@ static int ath12k_core_hw_group_start(st
  	for (i = 0; i < ag->num_chip; i++) {
  		ab = ag->ab[i];
  
 +		/* pdev init needs to be done only for recovered
 +		 * ab during Mode1 scenario
 +		 */
-+		if (!ab->recovery_start && is_registered)
++		if (ag->recovery_mode == ATH12K_MLO_RECOVERY_MODE1 && !ab->recovery_start)
 +			continue;
 +
  		mutex_lock(&ab->core_lock);
  
  		ret = ath12k_core_pdev_init(ab);
-@@ -1575,7 +1587,7 @@ static void ath12k_core_trigger_partner(
+@@ -1575,7 +1588,7 @@ static void ath12k_core_trigger_partner(
  				ab->qmi.num_radios, ag->num_chip);
  
  		if (found) {
@@ -82,7 +88,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  			    !test_bit(ATH12K_FLAG_QMI_HOST_CAP_SENT, &partner_ab->dev_flags)) {
  				ath12k_qmi_trigger_host_cap(partner_ab);
  			}
-@@ -1714,7 +1726,10 @@ void ath12k_core_issue_bug_on(struct ath
+@@ -1714,7 +1727,10 @@ void ath12k_core_issue_bug_on(struct ath
  {
  	struct ath12k_hw_group *ag = ab->ag;
  
@@ -94,7 +100,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	    (atomic_read(&ath12k_coredump_ram_info.num_chip) >= ab->ag->num_started)) ||
  	    (!ag->mlo_capable))
  		BUG_ON(1);
-@@ -1833,6 +1848,7 @@ static int ath12k_core_reconfigure_on_cr
+@@ -1833,6 +1849,7 @@ static int ath12k_core_reconfigure_on_cr
  
  	ath12k_dp_free(ab);
  	ath12k_hal_srng_deinit(ab);
@@ -102,7 +108,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  
  	ab->free_vdev_map = (1LL << (ab->num_radios * TARGET_NUM_VDEVS)) - 1;
  	ab->num_db_cap = 0;
-@@ -1852,7 +1868,8 @@ err_hal_srng_deinit:
+@@ -1852,7 +1869,8 @@ err_hal_srng_deinit:
  	return ret;
  }
  
@@ -112,7 +118,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  {
  	struct ath12k_base *ab;
  	struct ath12k_hw *ah;
-@@ -1869,6 +1886,12 @@ static void ath12k_core_mlo_hw_queues_st
+@@ -1869,6 +1887,12 @@ static void ath12k_core_mlo_hw_queues_st
  	}
  	ag->hw_queues_stopped = true;
  
@@ -125,7 +131,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	for (i = 0; i < ag->num_chip; i++) {
  		ab = ag->ab[i];
  
-@@ -1876,7 +1899,7 @@ static void ath12k_core_mlo_hw_queues_st
+@@ -1876,7 +1900,7 @@ static void ath12k_core_mlo_hw_queues_st
  		* In Mode0, partner chips are expected to be asserted, hence reset
  		* qmi.num_radios count to ensure avoiding duplicate host cap triggers.
  		*/
@@ -134,7 +140,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  			ab->qmi.num_radios = ATH12K_QMI_INVALID_RADIO;
  			clear_bit(ATH12K_FLAG_QMI_HOST_CAP_SENT, &ab->dev_flags);
  		}
-@@ -1990,6 +2013,7 @@ static void ath12k_core_post_reconfigure
+@@ -1990,6 +2014,7 @@ static void ath12k_core_post_reconfigure
  void ath12k_core_halt(struct ath12k *ar)
  {
  	struct ath12k_base *ab = ar->ab;
@@ -142,7 +148,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -2000,16 +2024,731 @@ void ath12k_core_halt(struct ath12k *ar)
+@@ -2000,16 +2025,732 @@ void ath12k_core_halt(struct ath12k *ar)
  	cancel_work_sync(&ar->regd_update_work);
  	rcu_assign_pointer(ab->pdevs_active[ar->pdev_idx], NULL);
  	synchronize_rcu();
@@ -862,6 +868,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
 +	}
 +
 +	partner_ab->recovery_start = false;
++	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
 +	return ret;
 +}
 +
@@ -875,7 +882,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	int i;
  
  	if (!ab->is_reset)
-@@ -2022,16 +2761,20 @@ static void ath12k_core_restart(struct w
+@@ -2022,16 +2763,20 @@ static void ath12k_core_restart(struct w
  		 * If for any reason, reconfiguration fails, issue bug on for
  		 * Mode 0
  		 */
@@ -898,7 +905,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  		for (i = 0; i < ag->num_hw; i++) {
  			ah = ag->ah[i];
  			if (!ah)
-@@ -2046,6 +2789,19 @@ static void ath12k_core_restart(struct w
+@@ -2046,6 +2791,19 @@ static void ath12k_core_restart(struct w
  	if (ath12k_sawf_reconfigure_on_crash(ab))
  		ath12k_warn(ab, "SAWF SLA reconfiguring failed\n");
  #endif /* CPTCFG_ATH12K_SAWF */
@@ -918,7 +925,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  }
  
  static void ath12k_rproc_recovery_do_coredump(struct rproc *rproc)
-@@ -2149,7 +2905,7 @@ static int ath12k_rproc_recovery_power_u
+@@ -2149,7 +2907,7 @@ static int ath12k_rproc_recovery_power_u
   * is identified by waiting for MLO Teardown complete for all
   * chipsets
   */
@@ -927,7 +934,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  {
  	struct ath12k_hw_group *ag = ab->ag;
  	long time_left;
-@@ -2222,6 +2978,7 @@ static void ath12k_core_reset(struct wor
+@@ -2222,6 +2980,7 @@ static void ath12k_core_reset(struct wor
  	struct ath12k_base *partner_ab;
  	int reset_count, fail_cont_count, i;
  	long time_left;
@@ -935,9 +942,11 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  	if (!ab->is_reset) {
-@@ -2234,7 +2991,17 @@ static void ath12k_core_reset(struct wor
+@@ -2232,9 +2991,18 @@ static void ath12k_core_reset(struct wor
+ 	}
+ #endif
  
- 	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
+-	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
  	if (ab->recovery_mode_address) {
 -		ag->recovery_mode = *ab->recovery_mode_address;
 +		switch (*ab->recovery_mode_address) {
@@ -954,7 +963,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	}
  
  	/* Sometimes the recovery will fail and then the next all recovery fail,
-@@ -2266,7 +3033,7 @@ static void ath12k_core_reset(struct wor
+@@ -2266,7 +3034,7 @@ static void ath12k_core_reset(struct wor
  		 */
  		ath12k_warn(ab, "already resetting count %d\n", reset_count);
  
@@ -963,7 +972,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  			BUG_ON(1);
  
  		reinit_completion(&ab->reset_complete);
-@@ -2294,6 +3061,56 @@ static void ath12k_core_reset(struct wor
+@@ -2294,6 +3062,56 @@ static void ath12k_core_reset(struct wor
  	ab->is_reset = true;
  	atomic_set(&ab->recovery_count, 0);
  
@@ -1020,7 +1029,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	for (i = 0; i < ag->num_chip; i++) {
  		partner_ab = ag->ab[i];
  		if (ab == partner_ab)
-@@ -2303,15 +3120,19 @@ static void ath12k_core_reset(struct wor
+@@ -2303,15 +3121,19 @@ static void ath12k_core_reset(struct wor
  		 * method to ensure recovery of all partner chips in MODE0 instead of
  		 * relying on firmware to crash partner chips
  		 */
@@ -1043,7 +1052,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  
  	ath12k_core_pre_reconfigure_recovery(ab);
  
-@@ -2331,10 +3152,6 @@ static void ath12k_core_reset(struct wor
+@@ -2331,10 +3153,6 @@ static void ath12k_core_reset(struct wor
  	if (ab->is_qdss_tracing)
  		ab->is_qdss_tracing = false;
  
@@ -1054,7 +1063,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	if (ab->fw_recovery_support) {
  		if (ab->hif.bus == ATH12K_BUS_PCI) {
  			ath12k_hif_power_down(ab);
-@@ -2347,6 +3164,9 @@ static void ath12k_core_reset(struct wor
+@@ -2347,6 +3165,9 @@ static void ath12k_core_reset(struct wor
  		}
  		ath12k_dbg(ab, ATH12K_DBG_BOOT, "reset started\n");
  	}
@@ -1064,7 +1073,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	mutex_unlock(&ag->mutex_lock);
  }
  
-@@ -2663,6 +3483,7 @@ struct ath12k_base *ath12k_core_alloc(st
+@@ -2663,6 +3484,7 @@ struct ath12k_base *ath12k_core_alloc(st
  	init_waitqueue_head(&ab->ssr_dump_wq);
  	INIT_WORK(&ab->restart_work, ath12k_core_restart);
  	INIT_WORK(&ab->reset_work, ath12k_core_reset);
@@ -1072,10 +1081,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	timer_setup(&ab->rx_replenish_retry, ath12k_ce_rx_replenish_retry, 0);
  	init_completion(&ab->htc_suspend);
  	init_completion(&ab->wow.wakeup_completed);
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -255,6 +255,7 @@ enum ath12k_dev_flags {
  	ATH12K_FLAG_WMI_INIT_DONE,
  	ATH12K_FLAG_UMAC_PRERESET_START,
@@ -1145,10 +1152,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/c
  	/* must be last */
  	u8 drv_priv[0] __aligned(sizeof(void *));
  };
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/debug.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
+--- a/drivers/net/wireless/ath/ath12k/debug.h
++++ b/drivers/net/wireless/ath/ath12k/debug.h
 @@ -34,6 +34,7 @@ enum ath12k_debug_mask {
  	ATH12K_DBG_SAWF		= 0x00040000,
  	ATH12K_DBG_PPE          = 0x00080000,
@@ -1157,10 +1162,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  	ATH12K_DBG_ANY		= 0xffffffff,
  };
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -264,12 +264,8 @@ static const u32 ath12k_smps_map[] = {
  	[WLAN_HT_CAP_SM_PS_DISABLED] = WMI_PEER_SMPS_PS_NONE,
  };
@@ -1908,10 +1911,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  static void
  ath12k_mac_update_bss_chan_survey(struct ath12k *ar,
  				  struct ieee80211_channel *channel)
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.h
+--- a/drivers/net/wireless/ath/ath12k/mac.h
++++ b/drivers/net/wireless/ath/ath12k/mac.h
 @@ -14,6 +14,7 @@ struct ath12k;
  struct ath12k_base;
  struct ath12k_hw;
@@ -1964,10 +1965,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
 +				  struct ath12k *asserted_radio);
 +int ath12k_mac_partner_peer_cleanup(struct ath12k_base *ab);
  #endif
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/peer.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/peer.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/peer.c
+--- a/drivers/net/wireless/ath/ath12k/peer.c
++++ b/drivers/net/wireless/ath/ath12k/peer.c
 @@ -387,7 +387,7 @@ int ath12k_wait_for_peer_delete_done(str
  	return 0;
  }
@@ -1977,10 +1976,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
  {
  	struct ath12k_peer *peer;
  	struct ath12k_base *ab = ar->ab;
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/peer.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/peer.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/peer.h
+--- a/drivers/net/wireless/ath/ath12k/peer.h
++++ b/drivers/net/wireless/ath/ath12k/peer.h
 @@ -118,6 +118,7 @@ void ath12k_peer_rhash_tbl_destroy(struc
  int ath12k_peer_rhash_delete(struct ath12k_base *ab, struct ath12k_peer *peer);
  void ath12k_peer_mlo_map_event(struct ath12k_base *ab, struct sk_buff *skb);
@@ -1989,10 +1986,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/p
  
  static inline
  struct ath12k_link_sta *ath12k_peer_get_link_sta(struct ath12k_base *ab,
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
 @@ -8499,6 +8499,14 @@ static const char *ath12k_wmi_vdev_resp_
  		return "dfs violation";
  	case WMI_VDEV_START_RESPONSE_INVALID_REGDOMAIN:
@@ -2041,10 +2036,8 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/w
  	return ret;
  }
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.h
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
+--- a/drivers/net/wireless/ath/ath12k/wmi.h
++++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -4817,6 +4817,10 @@ enum wmi_vdev_start_resp_status_code {
  	WMI_VDEV_START_RESPONSE_NOT_SUPPORTED = 2,
  	WMI_VDEV_START_RESPONSE_DFS_VIOLATION = 3,
