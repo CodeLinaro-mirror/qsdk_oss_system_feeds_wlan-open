@@ -1480,9 +1480,26 @@ mac80211_setup_vif() {
 			fi
 		;;
 		sta)
-			if [ "$auto_channel" -gt 0 ]; then
+			if [ $auto_channel -gt 0 ]; then
 				chan=$(echo ${channel_list} | cut -d '-' -f 1)
 				freq="$(get_freq "$phy" "$chan" "$device")"
+			else
+				freq="$(get_freq "$phy" "$channel" "$device")"
+			fi
+			freq_list=$(get_sta_freq_list $phy $freq)
+			sta_started=0
+			if ([ "$is_sphy_mband" -eq 1 ] &&
+			    [ "$sta_vaps_count" -gt 1 ] && [ "$sta_radio" -gt 1 ]); then
+				sta_cfg_updated=$(ls /var/run/wpa_supplicant-*-updated-cfg | wc -l)
+				tmp_freq_list=$(uci -q -P /var/state get wireless.$mld.freq_list)
+				freq_list="$tmp_freq_list $freq_list"
+				if [ "$sta_cfg_updated" = "$sta_radio" ]; then
+					mac80211_setup_supplicant || failed=1
+					sta_started=1
+				fi
+				uci -q -P /var/state set wireless.$mld.freq_list="$freq_list"
+				tmp_apifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
+				uci -q -P /var/state set wireless.$mld.ap_ifnames="$ap_intf $tmp_apifname"
 			else
 				freq="$(get_freq "$phy" "$channel" "$device")"
 			fi
@@ -1629,7 +1646,7 @@ get_sta_freq_list() {
 	hw_indices=$(iw phy ${phy} info | grep -e "channel list" | cut -d' ' -f 2)
 
 	if [ -z $hw_indices ]; then
-		#non-single wiphy architecture does not need freq list
+		#non-single wiphy arch doesn't need freq list
 		return
 	fi
 
@@ -2226,13 +2243,6 @@ drv_mac80211_setup() {
 		fi
 	}
 
-	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
-		if [ "$channel" -gt 48 ] && [ "$channel" -lt 149 ]; then
-			hostapd_cli -i $ap_ifname set ieee80211h 0
-			hostapd_cli -i $ap_ifname set ieee80211d 0
-			echo "disable dfs support for repeater AP($ifname)" > /dev/ttyMSM0
-		fi
-	fi
 
 	for_each_interface "ap sta adhoc monitor" mac80211_setup_vif
 
@@ -2253,9 +2263,13 @@ drv_mac80211_setup() {
 
 	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
 		[ -f "/lib/apsta_mode.sh" ] && {
-			sta_freq_list=$(get_sta_freq_list $phy $freq)
-			. /lib/apsta_mode.sh $sta_ifname $ap_ifname $hostapd_conf_file $band "$sta_freq_list"
-			echo "$!" >> /tmp/apsta_mode.pid
+                       if [ $sta_started -eq 1 ]; then
+				if ([ $sta_vaps_count -eq 1 ] && [ $sta_radio -eq 1 ]); then
+                                       ap_ifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
+				fi
+				. /lib/apsta_mode.sh "$sta_ifname" "$ap_ifname" "$hostapd_conf_file" "$band" "$phy"
+				echo "$!" >> /tmp/apsta_mode.pid
+                       fi
 		}
 	fi
 
