@@ -1,0 +1,172 @@
+From 2769c164dd105fe7d9511b7d833276e16c4266ed Mon Sep 17 00:00:00 2001
+From: Aishwarya R <quic_aisr@quicinc.com>
+Date: Wed, 5 Jul 2023 16:51:07 +0530
+Subject: [PATCH] ath12k: Add mhi_soc_reset in PCI remove flow
+
+SOC_GLOBAL_RESET would be ignored if there is any pending
+PCIe transaction. To handle all pending PCIe transactions
+cleanly mhi host reset request needs to be done before calling
+SOC_GLOBAL_RESET. mhi_soc_reset triggers a WDOG reset on
+the target which will cleanly handle any pending PCIe transactions
+and put the device in RDDM mode. After device enters in RDDM mode
+SOC_GLOBAL_RESET can be called safely.
+
+previous sequence flow
+power_down -> soc_global_reset
+
+current sequence will be
+power_down -> mhi_soc_reset -> wdog_reset -> RDDM -> soc_global_reset
+
+Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.c |  1 +
+ drivers/net/wireless/ath/ath12k/core.h |  1 +
+ drivers/net/wireless/ath/ath12k/mhi.c  | 19 ++++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/mhi.h  |  4 +++-
+ drivers/net/wireless/ath/ath12k/pci.c  |  7 ++++++-
+ 5 files changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 4ac7ccf..77c271a 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -2455,6 +2455,7 @@ struct ath12k_base *ath12k_core_alloc(struct device *dev, size_t priv_size,
+ 	timer_setup(&ab->rx_replenish_retry, ath12k_ce_rx_replenish_retry, 0);
+ 	init_completion(&ab->htc_suspend);
+ 	init_completion(&ab->wow.wakeup_completed);
++	init_completion(&ab->rddm_reset_done);
+ 
+ 	ab->dev = dev;
+ 	ab->bus_params = *bus_params;
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 5db880d..19581db 100644
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -1403,6 +1403,7 @@ struct ath12k_base {
+ 	int userpd_id;
+ 
+ 	u32 chwidth_num_peer_caps;
++	struct completion rddm_reset_done;
+ 
+ 	/* must be last */
+ 	u8 drv_priv[0] __aligned(sizeof(void *));
+diff --git a/drivers/net/wireless/ath/ath12k/mhi.c b/drivers/net/wireless/ath/ath12k/mhi.c
+index b68a90d..ccdcc92 100644
+--- a/drivers/net/wireless/ath/ath12k/mhi.c
++++ b/drivers/net/wireless/ath/ath12k/mhi.c
+@@ -321,6 +321,7 @@ static void ath12k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
+ 				    enum mhi_callback cb)
+ {
+ 	struct ath12k_base *ab = dev_get_drvdata(mhi_cntrl->cntrl_dev);
++	struct ath12k_pci *ab_pci = ath12k_pci_priv(ab);
+ 
+ 	ath12k_dbg(ab, ATH12K_DBG_BOOT, "mhi notify status reason %s\n",
+ 		   ath12k_mhi_op_callback_to_str(cb));
+@@ -330,6 +331,12 @@ static void ath12k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
+ 		ath12k_warn(ab, "firmware crashed: MHI_CB_SYS_ERROR\n");
+ 		break;
+ 	case MHI_CB_EE_RDDM:
++		if(test_bit(ATH12K_MHI_SOC_RESET, &ab_pci->mhi_state)) {
++			ath12k_dbg(ab, ATH12K_DBG_BOOT, "Triggering RDDM from mhi soc reset\n");
++			clear_bit(ATH12K_MHI_SOC_RESET, &ab_pci->mhi_state);
++			complete(&ab->rddm_reset_done);
++			return;
++		}
+ 		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags))) {
+ 			set_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags);
+ 			queue_work(ab->workqueue_aux, &ab->reset_work);
+@@ -488,6 +495,8 @@ static char *ath12k_mhi_state_to_str(enum ath12k_mhi_state mhi_state)
+ 		return "TRIGGER_RDDM";
+ 	case ATH12K_MHI_RDDM_DONE:
+ 		return "RDDM_DONE";
++	case ATH12K_MHI_SOC_RESET:
++		return "SOC_RESET";
+ 	default:
+ 		return "UNKNOWN";
+ 	}
+@@ -526,6 +535,9 @@ static void ath12k_mhi_set_state_bit(struct ath12k_pci *ab_pci,
+ 	case ATH12K_MHI_RDDM_DONE:
+ 		set_bit(ATH12K_MHI_RDDM_DONE, &ab_pci->mhi_state);
+ 		break;
++	case ATH12K_MHI_SOC_RESET:
++		set_bit(ATH12K_MHI_SOC_RESET, &ab_pci->mhi_state);
++                break;
+ 	default:
+ 		ath12k_err(ab, "unhandled mhi state (%d)\n", mhi_state);
+ 	}
+@@ -568,6 +580,8 @@ static int ath12k_mhi_check_state_bit(struct ath12k_pci *ab_pci,
+ 		break;
+ 	case ATH12K_MHI_RDDM_DONE:
+ 		return 0;
++	case ATH12K_MHI_SOC_RESET:
++		return 0;
+ 	default:
+ 		ath12k_err(ab, "unhandled mhi state: %s(%d)\n",
+ 			   ath12k_mhi_state_to_str(mhi_state), mhi_state);
+@@ -580,7 +594,7 @@ static int ath12k_mhi_check_state_bit(struct ath12k_pci *ab_pci,
+ 	return -EINVAL;
+ }
+ 
+-static int ath12k_mhi_set_state(struct ath12k_pci *ab_pci,
++int ath12k_mhi_set_state(struct ath12k_pci *ab_pci,
+ 				enum ath12k_mhi_state mhi_state)
+ {
+ 	struct ath12k_base *ab = ab_pci->ab;
+@@ -623,6 +637,9 @@ static int ath12k_mhi_set_state(struct ath12k_pci *ab_pci,
+ 		break;
+ 	case ATH12K_MHI_RDDM_DONE:
+ 		break;
++	case ATH12K_MHI_SOC_RESET:
++		mhi_soc_reset(ab_pci->mhi_ctrl);
++		break;
+ 	default:
+ 		ath12k_err(ab, "unhandled MHI state (%d)\n", mhi_state);
+ 		ret = -EINVAL;
+diff --git a/drivers/net/wireless/ath/ath12k/mhi.h b/drivers/net/wireless/ath/ath12k/mhi.h
+index e20c4f8..68d96e3 100644
+--- a/drivers/net/wireless/ath/ath12k/mhi.h
++++ b/drivers/net/wireless/ath/ath12k/mhi.h
+@@ -29,6 +29,7 @@ enum ath12k_mhi_state {
+ 	ATH12K_MHI_TRIGGER_RDDM,
+ 	ATH12K_MHI_RDDM,
+ 	ATH12K_MHI_RDDM_DONE,
++	ATH12K_MHI_SOC_RESET,
+ };
+ 
+ extern struct mhi_controller_config ath12k_mhi_config_qcn9274;
+@@ -44,5 +45,6 @@ void ath12k_mhi_clear_vector(struct ath12k_base *ab);
+ void ath12k_mhi_suspend(struct ath12k_pci *ar_pci);
+ void ath12k_mhi_resume(struct ath12k_pci *ar_pci);
+ void ath12k_mhi_coredump(struct mhi_controller *mhi_ctrl, bool state);
+-
++int ath12k_mhi_set_state(struct ath12k_pci *ab_pci,
++                                enum ath12k_mhi_state mhi_state);
+ #endif
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index a2cac52..282b968 100644
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
+@@ -8,7 +8,7 @@
+ #include <linux/msi.h>
+ #include <linux/pci.h>
+ #include <linux/of.h>
+-
++#include <linux/delay.h>
+ #include "pci.h"
+ #include "core.h"
+ #include "hif.h"
+@@ -1330,6 +1330,11 @@ void ath12k_pci_power_down(struct ath12k_base *ab)
+ 	if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags))) {
+ 		ath12k_qmi_free_target_mem_chunk(ab);
+ 	}
++
++	ath12k_mhi_set_state(ab_pci, ATH12K_MHI_SOC_RESET);
++	if (!wait_for_completion_timeout(&ab->rddm_reset_done, msecs_to_jiffies(200))) {
++		ath12k_warn(ab, "failed to set RDDM mode\n");
++	}
+ 	/* restore aspm in case firmware bootup fails */
+ 	ath12k_pci_aspm_restore(ab_pci);
+ 
+-- 
+2.17.1
+
