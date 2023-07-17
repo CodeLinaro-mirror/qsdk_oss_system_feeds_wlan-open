@@ -1479,7 +1479,13 @@ mac80211_setup_vif() {
 			fi
 		;;
 		sta)
-			freq="$(get_freq "$phy" "$channel" "$device")"
+			if [ "$auto_channel" -gt 0 ]; then
+				chan=$(echo ${channel_list} | cut -d '-' -f 1)
+				freq="$(get_freq "$phy" "$chan" "$device")"
+			else
+				freq="$(get_freq "$phy" "$channel" "$device")"
+			fi
+
 			freq_list=$(get_sta_freq_list $phy $freq)
 			mac80211_setup_supplicant || failed=1
 		;;
@@ -1604,6 +1610,11 @@ get_sta_freq_list() {
 	sta_freq=$2
 
 	hw_indices=$(iw phy ${phy} info | grep -e "channel list" | cut -d' ' -f 2)
+
+	if [ -z $hw_indices ]; then
+		#non-single wiphy architecture does not need freq list
+		return
+	fi
 
 	for i in $hw_indices
 	do
@@ -2026,6 +2037,7 @@ drv_mac80211_setup() {
 
 
 	json_get_values basic_rate_list basic_rate
+	json_get_values channel_list channels
 	json_select ..
 
 	find_phy $1 || {
