@@ -352,6 +352,7 @@ hostapd_is_6ghz_band() {
 is_apfreq_in_sta_freq_list() {
 	ap_freq=$1
 	found=0
+	sta_freq_list="$2"
 
 	for f in $sta_freq_list
 	do
@@ -424,7 +425,7 @@ do
 
 	if [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "DISCONNECTED"  -o \
 			 $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "SCANNING" ] &&
-				$(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "ENABLED" ]; then
+				[ $(hostapd_cli -i $ap_intf $ml_link status 2> /dev/null | grep state | cut -d'=' -f 2) = "ENABLED" ]; then
 		#echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), stopping AP" > /dev/ttyMSM0
 		hostapd_cli -i $ap_intf $ml_link disable
 	fi
@@ -465,7 +466,9 @@ do
 
 			if [ $(hostapd_cli -i $ap_intf $ml_link  status 2> /dev/null | grep state | cut -d'=' -f 2) = "DISABLED" ]; then
 				echo "REPEATER AP failed bring-up, exiting" > /dev/ttyMSM0
+				echo "Please check logs at /tmp/apsta_debug.log"  > /dev/ttyMSM0
 				echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
+				echo "link config command is $ml_link" >> /tmp/apsta_debug.log
 				date >> /tmp/apsta_debug.log
 				hostapd_cli -i $ap_intf $ml_link status >> /tmp/apsta_debug.log
 				wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
