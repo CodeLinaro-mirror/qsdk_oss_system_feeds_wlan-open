@@ -1501,10 +1501,9 @@ mac80211_setup_vif() {
 				tmp_apifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
 				uci -q -P /var/state set wireless.$mld.ap_ifnames="$ap_intf $tmp_apifname"
 			else
-				freq="$(get_freq "$phy" "$channel" "$device")"
+				mac80211_setup_supplicant || failed=1
+				sta_started=1
 			fi
-			freq_list=$(get_sta_freq_list $phy $freq)
-			mac80211_setup_supplicant || failed=1
 		;;
 		monitor)
 			case "$htmode" in
