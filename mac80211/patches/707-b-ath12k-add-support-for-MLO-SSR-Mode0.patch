@@ -27,11 +27,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  drivers/net/wireless/ath/ath12k/wmi.h      |   3 +-
  9 files changed, 309 insertions(+), 132 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index cd12abc..88de5ac 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -43,6 +43,8 @@ static unsigned int ath12k_en_fwlog = true;
+@@ -43,6 +43,8 @@ static unsigned int ath12k_en_fwlog = tr
  module_param_named(en_fwlog, ath12k_en_fwlog, uint, 0644);
  MODULE_PARM_DESC(en_fwlog, "fwlog: 0-disable, 1-enable");
  
@@ -40,7 +38,7 @@ index cd12abc..88de5ac 100644
  static DEFINE_MUTEX(ath12k_hw_lock);
  static struct list_head ath12k_hw_groups = LIST_HEAD_INIT(ath12k_hw_groups);
  
-@@ -132,6 +134,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max_chip)
+@@ -132,6 +134,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max
  	ag->mlo_capable = !!ath12k_mlo_capable;
  	list_add(&ag->list, &ath12k_hw_groups);
  	mutex_init(&ag->mutex_lock);
@@ -48,7 +46,7 @@ index cd12abc..88de5ac 100644
  
  	return ag;
  }
-@@ -957,10 +960,8 @@ static int ath12k_core_start(struct ath12k_base *ab,
+@@ -957,10 +960,8 @@ static int ath12k_core_start(struct ath1
  		goto err_reo_cleanup;
  	}
  
@@ -61,26 +59,18 @@ index cd12abc..88de5ac 100644
  
  	return 0;
  
-@@ -1189,9 +1190,16 @@ static void ath12k_core_trigger_partner(struct ath12k_base *ab)
+@@ -1189,6 +1190,10 @@ static void ath12k_core_trigger_partner(
  		if (!partner_ab)
  			continue;
  
--		if (found)
--			ath12k_qmi_trigger_host_cap(partner_ab);
 +		ath12k_dbg(ab, ATH12K_DBG_QMI, "QMI Trigger Host Cap AB:%p Partner AB:%p Found:%d Num Radios: %d ag->num_chip:%d\n",
 +				ab, partner_ab, found,
 +				ab->qmi.num_radios, ag->num_chip);
++
+ 		if (found)
+ 			ath12k_qmi_trigger_host_cap(partner_ab);
  
-+		if (found) {
-+			if (ath12k_recovery_mode == ATH12K_MLO_RECOVERY_MODE0 &&
-+			    !test_bit(ATH12K_FLAG_QMI_HOST_CAP_SENT, &partner_ab->dev_flags)) {
-+				ath12k_qmi_trigger_host_cap(partner_ab);
-+			}
-+		}
- 		found = (partner_ab == ab) ? true : false;
- 	}
- }
-@@ -1310,8 +1318,6 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+@@ -1310,8 +1315,6 @@ static int ath12k_core_reconfigure_on_cr
  	if (ret)
  		goto err_hal_srng_deinit;
  
@@ -89,7 +79,7 @@ index cd12abc..88de5ac 100644
  	return 0;
  
  err_hal_srng_deinit:
-@@ -1319,106 +1325,101 @@ err_hal_srng_deinit:
+@@ -1319,106 +1322,101 @@ err_hal_srng_deinit:
  	return ret;
  }
  
@@ -164,19 +154,10 @@ index cd12abc..88de5ac 100644
  			continue;
  
 -		ieee80211_stop_queues(ah->hw);
--	}
--
--	for (i = 0; i < ag->num_chip; i++) {
--		ab = ag->ab[i];
 +		list_for_each_entry(arvif, &ar->arvifs, list)
 +			if (arvif->is_started)
 +				ath12k_debugfs_remove_interface(arvif);
- 
--		for (j = 0; j < ab->num_radios; j++) {
--			pdev = &ab->pdevs[j];
--			ar = pdev->ar;
--			if (!ar || ar->state == ATH12K_STATE_OFF)
--				continue;
++
 +		ath12k_mac_drain_tx(ar);
 +		complete(&ar->scan.started);
 +		complete(&ar->scan.completed);
@@ -187,18 +168,33 @@ index cd12abc..88de5ac 100644
 +		complete(&ar->vdev_delete_done);
 +		complete(&ar->bss_survey_done);
 +		complete(&ar->thermal.wmi_sync);
- 
--			list_for_each_entry(arvif, &ar->arvifs, list) {
--				if (arvif->is_started) {
--					ath12k_debugfs_remove_interface(arvif);
--				}
--			}
++
 +		wake_up(&ar->dp.tx_empty_waitq);
 +		idr_for_each(&ar->txmgmt_idr,
 +			     ath12k_mac_tx_mgmt_pending_free, ar);
 +		idr_destroy(&ar->txmgmt_idr);
 +		wake_up(&ar->txmgmt_empty_waitq);
++
++		ar->monitor_vdev_id = -1;
++		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
++		clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
+ 	}
  
+-	for (i = 0; i < ag->num_chip; i++) {
+-		ab = ag->ab[i];
+-
+-		for (j = 0; j < ab->num_radios; j++) {
+-			pdev = &ab->pdevs[j];
+-			ar = pdev->ar;
+-			if (!ar || ar->state == ATH12K_STATE_OFF)
+-				continue;
+-
+-			list_for_each_entry(arvif, &ar->arvifs, list) {
+-				if (arvif->is_started) {
+-					ath12k_debugfs_remove_interface(arvif);
+-				}
+-			}
+-
 -			ath12k_mac_drain_tx(ar);
 -			complete(&ar->scan.started);
 -			complete(&ar->scan.completed);
@@ -220,11 +216,7 @@ index cd12abc..88de5ac 100644
 -			clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
 -			clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
 -		}
-+		ar->monitor_vdev_id = -1;
-+		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
-+		clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
-+	}
- 
+-
 -		wake_up(&ab->wmi_ab.tx_credits_wq);
 -		wake_up(&ab->peer_mapping_wq);
 +	wake_up(&ab->wmi_ab.tx_credits_wq);
@@ -264,7 +256,7 @@ index cd12abc..88de5ac 100644
  			case ATH12K_STATE_ON:
  				ar->state = ATH12K_STATE_RESTARTING;
  				ath12k_core_halt(ar);
-@@ -1426,50 +1427,108 @@ static void ath12k_core_restart(struct work_struct *work)
+@@ -1426,50 +1424,108 @@ static void ath12k_core_restart(struct w
  			case ATH12K_STATE_OFF:
  				ath12k_warn(ab,
  					    "cannot restart radio %d that hasn't been started\n",
@@ -392,7 +384,7 @@ index cd12abc..88de5ac 100644
  	reset_count = atomic_inc_return(&ab->reset_count);
  
  	if (reset_count > 1) {
-@@ -1488,11 +1547,45 @@ static void ath12k_core_reset(struct work_struct *work)
+@@ -1488,11 +1544,45 @@ static void ath12k_core_reset(struct wor
  			return;
  		}
  
@@ -438,7 +430,7 @@ index cd12abc..88de5ac 100644
  	/* reset host fixed mem off to zero */
  	ab->host_ddr_fixed_mem_off = 0;
  	/* prepare coredump */
-@@ -1504,6 +1597,7 @@ static void ath12k_core_reset(struct work_struct *work)
+@@ -1504,6 +1594,7 @@ static void ath12k_core_reset(struct wor
  
  		ath12k_dbg(ab, ATH12K_DBG_BOOT, "reset started\n");
  	}
@@ -446,7 +438,7 @@ index cd12abc..88de5ac 100644
  }
  
  int ath12k_core_pre_init(struct ath12k_base *ab)
-@@ -1746,8 +1840,6 @@ struct ath12k_base *ath12k_core_alloc(struct device *dev, size_t priv_size,
+@@ -1746,8 +1837,6 @@ struct ath12k_base *ath12k_core_alloc(st
  	if (!ab)
  		return NULL;
  
@@ -455,8 +447,6 @@ index cd12abc..88de5ac 100644
  	ab->workqueue = create_singlethread_workqueue("ath12k_wq");
  	if (!ab->workqueue)
  		goto err_sc_free;
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index f2ebae0..c5dcdc8 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -42,7 +42,7 @@
@@ -476,7 +466,7 @@ index f2ebae0..c5dcdc8 100644
  	ATH12K_FLAG_HW_GROUP_ATTACHED,
  	ATH12K_FLAG_FTM_SEGMENTED,
  };
-@@ -1042,6 +1043,10 @@ struct ath12k_mlo_memory {
+@@ -1052,6 +1053,10 @@ struct ath12k_mlo_memory {
  	bool init_done;
  };
  
@@ -487,7 +477,7 @@ index f2ebae0..c5dcdc8 100644
  /* Holds info on the group of SOCs that are registered as a single wiphy
   * or single SOC where each radio registered as separate wiphy in non-MLO
   */
-@@ -1054,6 +1059,7 @@ struct ath12k_hw_group {
+@@ -1064,6 +1069,7 @@ struct ath12k_hw_group {
  	u8 num_started;
  	u8 num_hw;
  	bool mlo_capable;
@@ -495,7 +485,7 @@ index f2ebae0..c5dcdc8 100644
  	unsigned long dev_flags;
  	struct ath12k_hw *ah[ATH12K_GROUP_MAX_RADIO];
  	struct ath12k_base *ab[ATH12K_MAX_SOCS];
-@@ -1150,13 +1156,19 @@ struct ath12k_base {
+@@ -1160,13 +1166,19 @@ struct ath12k_base {
  	struct work_struct restart_work;
  	struct workqueue_struct *workqueue_aux;
  	struct work_struct reset_work;
@@ -515,11 +505,9 @@ index f2ebae0..c5dcdc8 100644
  	} stats;
  	bool ftm_segment_handler;
  	struct ath12k_ftm_event_obj ftm_event_obj;
-diff --git a/drivers/net/wireless/ath/ath12k/coredump.c b/drivers/net/wireless/ath/ath12k/coredump.c
-index e2b6683..3096d9b 100644
 --- a/drivers/net/wireless/ath/ath12k/coredump.c
 +++ b/drivers/net/wireless/ath/ath12k/coredump.c
-@@ -327,6 +327,7 @@ void ath12k_coredump_download_rddm(struct ath12k_base *ab)
+@@ -327,6 +327,7 @@ void ath12k_coredump_download_rddm(struc
  				    atomic_read(&ath12k_coredump_ram_info.num_chip));
  	} else {
  		/* TODO dump collection for MLO when fw_recovery set */
@@ -527,11 +515,9 @@ index e2b6683..3096d9b 100644
  		ath12k_coredump_build_inline(ab, segment, num_seg);
  		vfree(segment);
  	}
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index 437a711..e9c66a9 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -443,6 +443,40 @@ static const struct file_operations fops_vdev_stats_offload = {
+@@ -734,6 +734,40 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -572,7 +558,7 @@ index 437a711..e9c66a9 100644
  static ssize_t ath12k_read_simulate_fw_crash(struct file *file,
  					     char __user *user_buf,
  					     size_t count, loff_t *ppos)
-@@ -502,7 +536,7 @@ static ssize_t ath12k_write_simulate_fw_crash(struct file *file,
+@@ -793,7 +827,7 @@ static ssize_t ath12k_write_simulate_fw_
  		ath12k_info(ab, "simulating firmware assert crash\n");
  		ret = ath12k_wmi_force_fw_hang_cmd(ar,
  						   ATH12K_WMI_FW_HANG_ASSERT_TYPE,
@@ -581,7 +567,7 @@ index 437a711..e9c66a9 100644
  	} else {
  		ret = -EINVAL;
  		goto exit;
-@@ -913,8 +947,10 @@ static ssize_t ath12k_debug_write_fw_recovery(struct file *file,
+@@ -1204,8 +1238,10 @@ static ssize_t ath12k_debug_write_fw_rec
  					      size_t count, loff_t *ppos)
  {
  	struct ath12k_base *ab = file->private_data;
@@ -592,7 +578,7 @@ index 437a711..e9c66a9 100644
  
  	if (kstrtouint_from_user(user_buf, count, 0, &value))
  	         return -EINVAL;
-@@ -927,7 +963,16 @@ static ssize_t ath12k_debug_write_fw_recovery(struct file *file,
+@@ -1218,7 +1254,16 @@ static ssize_t ath12k_debug_write_fw_rec
  	         goto exit;
  	}
  
@@ -610,7 +596,7 @@ index 437a711..e9c66a9 100644
  
  	ret = count;
  
-@@ -1209,6 +1254,9 @@ int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
+@@ -1500,6 +1545,9 @@ int ath12k_debugfs_pdev_create(struct at
  	debugfs_create_file("rx_hash_ix3", 0600, ab->debugfs_soc, ab,
  			    &fops_soc_rx_hash_ix3);
  
@@ -620,11 +606,9 @@ index 437a711..e9c66a9 100644
  	return 0;
  }
  
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 6d3556d..0155fab 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12791,7 +12791,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12822,7 +12822,7 @@ ath12k_mac_op_reconfig_complete(struct i
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
@@ -633,7 +617,7 @@ index 6d3556d..0155fab 100644
  	int i;
  
  	if (reconfig_type != IEEE80211_RECONFIG_TYPE_RESTART)
-@@ -12811,6 +12811,28 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12842,6 +12842,28 @@ ath12k_mac_op_reconfig_complete(struct i
  			restart_count++;
  		}
  
@@ -662,7 +646,7 @@ index 6d3556d..0155fab 100644
  		mutex_unlock(&ar->conf_mutex);
  		ar++;
  	}
-@@ -12819,6 +12841,7 @@ ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+@@ -12850,6 +12872,7 @@ ath12k_mac_op_reconfig_complete(struct i
  		ieee80211_wake_queues(ah->hw);
  
  	mutex_unlock(&ah->conf_mutex);
@@ -670,11 +654,9 @@ index 6d3556d..0155fab 100644
  }
  
  static void
-diff --git a/drivers/net/wireless/ath/ath12k/mhi.c b/drivers/net/wireless/ath/ath12k/mhi.c
-index 0c369f8..e4895e2 100644
 --- a/drivers/net/wireless/ath/ath12k/mhi.c
 +++ b/drivers/net/wireless/ath/ath12k/mhi.c
-@@ -330,8 +330,10 @@ static void ath12k_mhi_op_status_cb(struct mhi_controller *mhi_cntrl,
+@@ -330,8 +330,10 @@ static void ath12k_mhi_op_status_cb(stru
  		ath12k_warn(ab, "firmware crashed: MHI_CB_SYS_ERROR\n");
  		break;
  	case MHI_CB_EE_RDDM:
@@ -686,11 +668,9 @@ index 0c369f8..e4895e2 100644
  		ath12k_hal_dump_srng_stats(ab);
  		break;
  	default:
-diff --git a/drivers/net/wireless/ath/ath12k/qmi.c b/drivers/net/wireless/ath/ath12k/qmi.c
-index e2e1b2c..1b978d8 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -3237,12 +3237,9 @@ static void ath12k_qmi_free_mlo_mem_chunk(struct ath12k_base *ab,
+@@ -3237,12 +3237,9 @@ static void ath12k_qmi_free_mlo_mem_chun
  
  	lockdep_assert_held(&ag->mutex_lock);
  
@@ -704,7 +684,7 @@ index e2e1b2c..1b978d8 100644
  	if (idx >= ARRAY_SIZE(ag->mlo_mem.chunk)) {
  		ath12k_warn(ab, "invalid idx %d for MLO memory chunk free\n", idx);
  		return;
-@@ -3268,7 +3265,6 @@ static void ath12k_qmi_free_mlo_mem_chunk(struct ath12k_base *ab,
+@@ -3268,7 +3265,6 @@ static void ath12k_qmi_free_mlo_mem_chun
  	mlo_chunk->paddr = NULL;
  	mlo_chunk->size = 0;
  
@@ -712,57 +692,7 @@ index e2e1b2c..1b978d8 100644
  	if (fixed_mem)
  		chunk->v.ioaddr = NULL;
  	else
-@@ -4413,10 +4409,10 @@ static bool ath12k_qmi_hw_group_host_cap_ready(struct ath12k_hw_group *ag)
- 	return true;
- }
- 
--static struct ath12k_base *
--ath12k_qmi_hw_group_find_blocked_chip(struct ath12k_hw_group *ag)
-+static int 
-+ath12k_qmi_hw_grp_find_blocked_chip_n_send_host_cap(struct ath12k_hw_group *ag)
- {
--	struct ath12k_base *ab;
-+	struct ath12k_base *blocked_ab;
- 	struct ath12k_qmi *qmi;
- 	bool block;
- 	int i;
-@@ -4424,26 +4420,28 @@ ath12k_qmi_hw_group_find_blocked_chip(struct ath12k_hw_group *ag)
- 	lockdep_assert_held(&ag->mutex_lock);
- 
- 	for (i = 0; i < ag->num_chip; i++) {
--		ab = ag->ab[i];
--		if (!ab)
-+		blocked_ab = ag->ab[i];
-+
-+		if (!blocked_ab)
- 			continue;
- 
--		qmi = &ab->qmi;
-+		qmi = &blocked_ab->qmi;
- 
- 		spin_lock(&qmi->event_lock);
- 		block = ath12k_qmi_get_event_block(qmi);
- 		spin_unlock(&qmi->event_lock);
- 
--		if (block)
--			return ab;
-+		if (block) {
-+			ath12k_qmi_trigger_host_cap(blocked_ab);
-+		}
- 	}
- 
--	return NULL;
-+	return 0;
- }
- 
- static int ath12k_qmi_event_server_arrive(struct ath12k_qmi *qmi)
- {
--	struct ath12k_base *ab = qmi->ab, *block_ab;
-+	struct ath12k_base *ab = qmi->ab;
- 	struct ath12k_hw_group *ag = ab->ag;
- 	bool host_cap_ready;
- 	int ret;
-@@ -4455,7 +4453,6 @@ static int ath12k_qmi_event_server_arrive(struct ath12k_qmi *qmi)
+@@ -4434,7 +4430,6 @@ static int ath12k_qmi_event_server_arriv
  	}
  
  	ath12k_qmi_phy_cap_send(ab);
@@ -770,18 +700,7 @@ index e2e1b2c..1b978d8 100644
  	if (ath12k_cold_boot_cal && ab->qmi.cal_done == 0 &&
  			ab->hw_params->cold_boot_calib &&
  			ab->qmi.cal_timeout == 0) {
-@@ -4469,9 +4466,7 @@ static int ath12k_qmi_event_server_arrive(struct ath12k_qmi *qmi)
- 		mutex_lock(&ag->mutex_lock);
- 		host_cap_ready = ath12k_qmi_hw_group_host_cap_ready(ag);
- 		if (host_cap_ready) {
--			block_ab = ath12k_qmi_hw_group_find_blocked_chip(ag);
--			if (block_ab)
--				ath12k_qmi_trigger_host_cap(block_ab);
-+			ret = ath12k_qmi_hw_grp_find_blocked_chip_n_send_host_cap(ag);
- 		}
- 		mutex_unlock(&ag->mutex_lock);
- 	}
-@@ -4486,9 +4481,11 @@ static int ath12k_qmi_event_host_cap(struct ath12k_qmi *qmi)
+@@ -4465,9 +4460,11 @@ static int ath12k_qmi_event_host_cap(str
  
  	ret = ath12k_qmi_host_cap_send(ab);
  	if (ret < 0) {
@@ -793,7 +712,7 @@ index e2e1b2c..1b978d8 100644
  
  	return ret;
  }
-@@ -5091,7 +5088,6 @@ static void ath12k_qmi_driver_event_work(struct work_struct *work)
+@@ -5076,7 +5073,6 @@ static void ath12k_qmi_driver_event_work
  			break;
  		case ATH12K_QMI_EVENT_SERVER_EXIT:
  			set_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags);
@@ -801,11 +720,9 @@ index e2e1b2c..1b978d8 100644
  			break;
  		case ATH12K_QMI_EVENT_REQUEST_MEM:
  			ret = ath12k_qmi_event_mem_request(qmi);
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 721f7d2..475e6d1 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -1745,12 +1745,12 @@ int ath12k_wmi_set_sta_ps_param(struct ath12k *ar, u32 vdev_id,
+@@ -1746,12 +1746,12 @@ int ath12k_wmi_set_sta_ps_param(struct a
  	return ret;
  }
  
@@ -820,7 +737,7 @@ index 721f7d2..475e6d1 100644
  
  	len = sizeof(*cmd);
  
-@@ -1765,8 +1765,10 @@ int ath12k_wmi_force_fw_hang_cmd(struct ath12k *ar, u32 type, u32 delay_time_ms)
+@@ -1766,8 +1766,10 @@ int ath12k_wmi_force_fw_hang_cmd(struct
  	cmd->type = cpu_to_le32(type);
  	cmd->delay_time_ms = cpu_to_le32(delay_time_ms);
  
@@ -833,11 +750,9 @@ index 721f7d2..475e6d1 100644
  	if (ret) {
  		ath12k_warn(ar->ab, "Failed to send WMI_FORCE_FW_HANG_CMDID");
  		dev_kfree_skb(skb);
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
-index 773f7ff..f2046b8 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -6681,7 +6681,8 @@ int ath12k_wmi_vdev_set_param_cmd(struct ath12k *ar, u32 vdev_id,
+@@ -6950,7 +6950,8 @@ int ath12k_wmi_vdev_set_param_cmd(struct
  
  int ath12k_wmi_set_sta_ps_param(struct ath12k *ar, u32 vdev_id,
  				u32 param, u32 param_value);
@@ -847,6 +762,3 @@ index 773f7ff..f2046b8 100644
  int ath12k_wmi_send_peer_delete_cmd(struct ath12k *ar,
  				    const u8 *peer_addr, u8 vdev_id);
  int ath12k_wmi_vdev_delete(struct ath12k *ar, u8 vdev_id);
--- 
-2.17.1
-
