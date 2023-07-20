@@ -21,7 +21,15 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
 
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -5404,6 +5404,11 @@ static void __ieee80211_rx_handle_packet
+@@ -5342,6 +5342,7 @@ static void __ieee80211_rx_handle_packet
+ 	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
+ 	struct ieee80211_sub_if_data *sdata;
+ 	struct ieee80211_hdr *hdr;
++	struct wiphy *wiphy = hw->wiphy;
+ 	__le16 fc;
+ 	struct ieee80211_rx_data rx;
+ 	struct ieee80211_sub_if_data *prev;
+@@ -5457,6 +5458,11 @@ static void __ieee80211_rx_handle_packet
  	prev = NULL;
  
  	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
@@ -33,27 +41,31 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
  		if (!ieee80211_sdata_running(sdata))
  			continue;
  
-@@ -5411,28 +5416,76 @@ static void __ieee80211_rx_handle_packet
+@@ -5464,28 +5470,91 @@ static void __ieee80211_rx_handle_packet
  		    sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
  			continue;
  
-+		if (valid_links) {
-+			for_each_set_bit(link_id, &valid_links,
-+					 IEEE80211_MLD_MAX_NUM_LINKS) {
-+				conf = rcu_dereference(sdata->vif.link_conf[link_id]);
++		if (wiphy->num_hw) {
++			if (valid_links) {
++				for_each_set_bit(link_id, &valid_links,
++						IEEE80211_MLD_MAX_NUM_LINKS) {
++					conf = rcu_dereference(sdata->vif.link_conf[link_id]);
++
++					if (conf && conf->chandef.chan)
++						if (cfg80211_get_hw_idx_by_freq(hw->wiphy, conf->chandef.chan->center_freq) ==
++								cfg80211_get_hw_idx_by_freq(hw->wiphy, status->freq)) {
++							flag = true;
++							break;
++						}
++				}
++			} else {
++				conf = &sdata->vif.bss_conf;
 +
 +				if (conf && conf->chandef.chan)
-+					if (conf->chandef.chan->center_freq == status->freq) {
++					if (cfg80211_get_hw_idx_by_freq(hw->wiphy, conf->chandef.chan->center_freq) ==
++							cfg80211_get_hw_idx_by_freq(hw->wiphy, status->freq))
 +						flag = true;
-+						break;
-+					}
 +			}
-+		} else {
-+			conf = &sdata->vif.bss_conf;
-+
-+			if (conf && conf->chandef.chan)
-+				if (conf->chandef.chan->center_freq == status->freq)
-+					flag = true;
 +		}
 +
  		/*
@@ -63,57 +75,68 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
  		 */
  
 -		if (!prev) {
--			prev = sdata;
--			continue;
--		}
-+		if (flag) {
++		if (!wiphy->num_hw || flag) {
 +			if (!prev) {
 +				prev = sdata;
 +				continue;
 +			}
++
++			rx.sdata = prev;
++			ieee80211_rx_for_interface(&rx, skb, false);
++
+ 			prev = sdata;
+-			continue;
+ 		}
++	}
  
 -		rx.sdata = prev;
 -		ieee80211_rx_for_interface(&rx, skb, false);
-+			rx.sdata = prev;
-+			ieee80211_rx_for_interface(&rx, skb, false);
- 
--		prev = sdata;
-+			prev = sdata;
-+		}
- 	}
- 
- 	if (prev) {
--		rx.sdata = prev;
-+		unsigned int link_id;
-+		struct ieee80211_bss_conf *conf;
-+		u16 valid_links = prev->vif.valid_links;
-+		bool flag = false;
++	if (wiphy->num_hw) {
++		if (prev) {
++			unsigned int link_id;
++			struct ieee80211_bss_conf *conf;
++			u16 valid_links = prev->vif.valid_links;
++			bool flag = false;
 +
-+		if (valid_links) {
-+			for_each_set_bit(link_id, &valid_links,
-+					 IEEE80211_MLD_MAX_NUM_LINKS) {
-+				conf = rcu_dereference(prev->vif.link_conf[link_id]);
++			if (valid_links) {
++				for_each_set_bit(link_id, &valid_links,
++						IEEE80211_MLD_MAX_NUM_LINKS) {
++					conf = rcu_dereference(prev->vif.link_conf[link_id]);
 +
-+				if (conf && conf->chandef.chan) {
-+					if (conf->chandef.chan->center_freq == status->freq) {
-+						flag = true;
-+						break;
++					if (conf && conf->chandef.chan) {
++						if (cfg80211_get_hw_idx_by_freq(hw->wiphy, conf->chandef.chan->center_freq) ==
++								cfg80211_get_hw_idx_by_freq(hw->wiphy, status->freq)) {
++							flag = true;
++							break;
++						}
 +					}
 +				}
-+			}
-+		} else {
-+			conf = &prev->vif.bss_conf;
++			} else {
++				conf = &prev->vif.bss_conf;
 +
-+			if (conf && conf->chandef.chan)
-+				if (conf->chandef.chan->center_freq == status->freq)
-+					flag = true;
++				if (conf && conf->chandef.chan)
++					if (cfg80211_get_hw_idx_by_freq(hw->wiphy, conf->chandef.chan->center_freq) ==
++							cfg80211_get_hw_idx_by_freq(hw->wiphy, status->freq))
++						flag = true;
++			}
+ 
+-		prev = sdata;
+-	}
++			if (flag) {
++				rx.sdata = prev;
+ 
+-	if (prev) {
+-		rx.sdata = prev;
++				if (ieee80211_rx_for_interface(&rx, skb, true))
++					return;
++			}
 +		}
++	} else {
++		if (prev) {
++			rx.sdata = prev;
  
 -		if (ieee80211_rx_for_interface(&rx, skb, true))
 -			return;
-+		if (flag) {
-+			rx.sdata = prev;
-+
 +			if (ieee80211_rx_for_interface(&rx, skb, true))
 +				return;
 +		}
