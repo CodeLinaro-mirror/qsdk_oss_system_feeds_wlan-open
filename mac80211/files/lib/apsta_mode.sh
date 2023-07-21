@@ -495,6 +495,13 @@ do
 		else
 			sta_chan=$(iw $sta_intf info 2> /dev/null | grep channel | cut -d' ' -f 2)
 			local sta_freq=$(wpa_cli -i $sta_intf status 2> /dev/null | grep freq | cut -d'=' -f 2)
+
+			# workaround for upstream station mld failed to get sta freq list
+			if [ $sta_freq -eq 0 ] && [ $wifi_gen -eq 6 ]; then
+				sta_freq=$(wpa_cli -i $sta_intf mlo_status 2> /dev/null | grep freq | cut -d'=' -f 2)
+			#	echo "sta freq $sta_freq" >> /tmp/apsta_debug.log
+			fi
+
 			wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
 
 			for ap_intf in $ap_intfs
