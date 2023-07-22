@@ -30,18 +30,17 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	/* For now the assoc link will be considered primary */
  	bool is_assoc_link;
-@@ -1014,6 +1015,10 @@ struct ath12k {
+@@ -1014,6 +1015,9 @@ struct ath12k {
  	struct completion mvr_complete;
  	struct cfg80211_chan_def agile_chandef;
  	struct ath12k_mgmt_rx_reo_pdev_info rx_reo_pdev_ctx;
 +
 +	u64 delta_tsf2;
 +	u64 delta_tqm;
-+	u64 mlo_tstamp_offset;
  };
  
  struct ath12k_band_cap {
-@@ -1075,6 +1080,11 @@ struct ath12k_pdev {
+@@ -1075,6 +1079,11 @@ struct ath12k_pdev {
  	struct mlo_timestamp timestamp;
  };
  
@@ -53,7 +52,15 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  struct cmem_remap {
  	u32 base;
  	u32 size;
-@@ -1272,10 +1282,13 @@ struct ath12k_base {
+@@ -1250,6 +1259,7 @@ struct ath12k_hw_group {
+ 	struct ath12k_mgmt_rx_reo_context rx_reo;
+ 	struct ath12k_host_mlo_mem_arena mlomem_arena;
+ 	atomic_t num_dp_tx_pending;
++	u64 mlo_tstamp_offset;
+ };
+ 
+ /* Master structure to hold the hw data which may be used in core module */
+@@ -1274,10 +1284,13 @@ struct ath12k_base {
  	void __iomem *mem;
  	void __iomem *mem_ce;
  	void __iomem *mem_cmem;
@@ -461,13 +468,44 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1960,6 +1960,10 @@ static void ath12k_htt_mlo_offset_event_
+@@ -1936,9 +1936,11 @@ static void ath12k_htt_mlo_offset_event_
+ 						struct sk_buff *skb)
+ {
+ 	struct ath12k_htt_mlo_offset_msg *msg;
++	struct ath12k_hw_group *ag = ab->ag;
+ 	struct ath12k_pdev *pdev;
+ 	struct ath12k *ar;
+ 	u8 pdev_id;
++	int i, j;
+ 
+ 	msg = (struct ath12k_htt_mlo_offset_msg *)skb->data;
+ 	pdev_id = u32_get_bits(__le32_to_cpu(msg->info),
+@@ -1960,6 +1962,29 @@ static void ath12k_htt_mlo_offset_event_
  	pdev->timestamp.mlo_comp_clks = __le32_to_cpu(msg->mlo_comp_clks);
  	pdev->timestamp.mlo_comp_timer = __le32_to_cpu(msg->mlo_comp_timer);
  
-+	ar->mlo_tstamp_offset =  ((u64)pdev->timestamp.mlo_offset_hi << 32 | pdev->timestamp.mlo_offset_lo);
-+	if (ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
-+		ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg(ab, ar->lmac_id, &ar->delta_tsf2);
++	ag->mlo_tstamp_offset =  ((u64)pdev->timestamp.mlo_offset_hi << 32 | pdev->timestamp.mlo_offset_lo);
++
++	/* MLO TSAMP OFFSET is common for all chips and
++	 * fetch delta_tsf2 for all the radios for this event
++	 */
++	for (i = 0; i < ag->num_chip; i++) {
++		struct ath12k_base *tmp_ab = ag->ab[i];
++
++		for (j = 0; j < tmp_ab->num_radios; j++) {
++			struct ath12k *tmp_ar;
++
++			pdev = &tmp_ab->pdevs[j];
++			tmp_ar = pdev->ar;
++			if (!tmp_ar)
++				continue;
++
++			if (tmp_ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
++				tmp_ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg(tmp_ab, tmp_ar->lmac_id,
++										     &tmp_ar->delta_tsf2);
++		}
++	}
++
 +
  	spin_unlock_bh(&ar->data_lock);
  }
@@ -508,7 +546,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	}
  #endif
  	memcpy(hal_tcl_desc, &tcl_desc, sizeof(tcl_desc));
-@@ -405,6 +413,9 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -406,6 +414,9 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  	struct ath12k_peer *peer;
  	struct hal_tx_info ti = {0};
  	struct ath12k_tx_desc_info *tx_desc = NULL;
@@ -518,7 +556,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	struct ath12k_skb_cb *skb_cb = ATH12K_SKB_CB(skb);
  	struct hal_tx_msdu_ext_desc *msg;
  	struct sk_buff *skb_ext_desc;
-@@ -583,6 +594,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -584,6 +595,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  	tx_desc->skb = skb;
  	tx_desc->mac_id = ar->pdev_idx;
  	tx_desc->recycler_fast_xmit = 0;
@@ -526,7 +564,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	ti.desc_id = tx_desc->desc_id;
  	ti.data_len = skb->len - ti.pkt_offset;
  	skb_cb->pkt_offset = ti.pkt_offset;
-@@ -675,6 +687,12 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -676,6 +688,12 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  				ath12k_sawf_tx_enqueue_peer_stats(ab, peer, msduq_id, ti.data_len);
  			spin_unlock_bh(&ab->base_lock);
  		}
@@ -539,7 +577,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	}
  #endif /* CPTCFG_ATH12K_SAWF */
  
-@@ -773,6 +791,9 @@ static inline void ath12k_dp_tx_status_p
+@@ -777,6 +795,9 @@ static inline void ath12k_dp_tx_status_p
  	ts->peer_id = FIELD_GET(HAL_WBM_RELEASE_TX_INFO3_PEER_ID, desc->info3);
  	ts->flags = FIELD_GET(HAL_WBM_RELEASE_TX_INFO2_FIRST_MSDU, desc->info2) |
  		    FIELD_GET(HAL_WBM_RELEASE_TX_INFO2_LAST_MSDU, desc->info2);
@@ -549,7 +587,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  }
  
  static void
-@@ -781,7 +802,7 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+@@ -785,7 +806,7 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  				 struct dp_tx_ring *tx_ring,
  				 struct ath12k_dp_htt_wbm_tx_status *ts,
  				 struct sk_buff *skb_ext_desc, u8 mac_id,
@@ -558,7 +596,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  {
  	struct ieee80211_tx_info *info;
  	struct ath12k_skb_cb *skb_cb;
-@@ -888,7 +909,7 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+@@ -892,7 +913,7 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  				   "dp_tx: failed to find the peer with peer_id %d\n",
  				   ts_status.peer_id);
  		else
@@ -567,7 +605,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		spin_unlock_bh(&ab->base_lock);
  	}
  
-@@ -903,7 +924,8 @@ ath12k_dp_tx_process_htt_tx_complete(str
+@@ -907,7 +928,8 @@ ath12k_dp_tx_process_htt_tx_complete(str
  				     void *desc, u8 mac_id,
  				     struct sk_buff *msdu,
  				     struct dp_tx_ring *tx_ring,
@@ -577,7 +615,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  {
  	struct htt_tx_wbm_completion *status_desc;
  	struct ath12k_dp_htt_wbm_tx_status ts = {0};
-@@ -923,7 +945,7 @@ ath12k_dp_tx_process_htt_tx_complete(str
+@@ -927,7 +949,7 @@ ath12k_dp_tx_process_htt_tx_complete(str
  		ts.acked = (htt_status == HAL_WBM_REL_HTT_TX_COMP_STATUS_OK);
  		ts.ack_rssi = u32_get_bits(status_desc->info2,
  					   HTT_TX_WBM_COMP_INFO2_ACK_RSSI);
@@ -586,7 +624,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  		break;
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_REINJ:
-@@ -1074,7 +1096,7 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1078,7 +1100,7 @@ static void ath12k_dp_tx_complete_msdu(s
  				       struct sk_buff *msdu,
  				       struct hal_wbm_release_ring *tx_status,
  				       enum hal_wbm_rel_src_module buf_rel_source,
@@ -595,7 +633,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  {
  	struct ieee80211_tx_status status = { 0 };
  	struct ieee80211_rate_status status_rate = { 0 };
-@@ -1160,7 +1182,7 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1164,7 +1186,7 @@ static void ath12k_dp_tx_complete_msdu(s
  						   "dp_tx: failed to find the peer with peer_id %d\n",
  						   ts.peer_id);
  				else
@@ -604,7 +642,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  				spin_unlock_bh(&ab->base_lock);
  			}
  			dev_kfree_skb_any(msdu);
-@@ -1234,7 +1256,7 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1238,7 +1260,7 @@ static void ath12k_dp_tx_complete_msdu(s
  	}
  
  	if (unlikely(ath12k_debugfs_is_sawf_stats_enabled(ar)))
@@ -613,7 +651,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	spin_unlock_bh(&ab->base_lock);
  
-@@ -1398,6 +1420,7 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1402,6 +1424,7 @@ int ath12k_dp_tx_completion_handler(stru
  	int orig_budget = budget;
  	struct hal_wbm_completion_ring_tx *tx_status;
  	enum hal_wbm_rel_src_module buf_rel_source;
@@ -621,7 +659,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	enum hal_wbm_tqm_rel_reason rel_status;
  	struct sk_buff_head free_list_head;
  	int recycler_fast_xmit;
-@@ -1443,6 +1466,7 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1447,6 +1470,7 @@ int ath12k_dp_tx_completion_handler(stru
  		mac_id = tx_desc->mac_id;
  		recycler_fast_xmit = tx_desc->recycler_fast_xmit;
  		skb_ext_desc = tx_desc->skb_ext_desc;
@@ -629,7 +667,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		/* Release descriptor as soon as extracting necessary info
  		 * to reduce contention
  		 */
-@@ -1460,7 +1484,8 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1464,7 +1488,8 @@ int ath12k_dp_tx_completion_handler(stru
  							     (void *)tx_status,
  							     mac_id, msdu,
  							     tx_ring,
@@ -639,7 +677,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  			continue;
  		}
  		ar = ab->pdevs[mac_id].ar;
-@@ -1516,7 +1541,7 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1520,7 +1545,7 @@ int ath12k_dp_tx_completion_handler(stru
  
  			ath12k_dp_tx_complete_msdu(ar, msdu, tx_status,
  						   buf_rel_source,
@@ -806,7 +844,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  /* When fimware crash occurs/simulated with firmware recovery
   * enabled, the service class records in the driver will be sent
   * to the crashed chip for configuring in the firmware.
-@@ -1309,16 +1328,73 @@ void ath12k_sawf_tx_enqueue_peer_stats(s
+@@ -1309,16 +1328,80 @@ void ath12k_sawf_tx_enqueue_peer_stats(s
  	return;
  }
  
@@ -824,16 +862,23 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +void ath12k_sawf_compute_hw_delay(struct ath12k *ar, struct hal_tx_status *ts,
 +				  u32 *hw_delay)
 +{
++	/* low 32 alone will be filled for TSF2 from FW and the value can be
++	 * negative for both TSF2 and TQM delta
++	 */
++	int tmp_delta_tsf2 = ar->delta_tsf2, tmp_delta_tqm = ar->delta_tqm;
 +	u32 msdu_tqm_enqueue_tstamp_us, final_msdu_tqm_enqueue_tstamp_us;
 +	u32 msdu_compl_tsf_tstamp_us, final_msdu_compl_tsf_tstamp_us;
-+	u32 delta_tsf2, delta_tqm;
-+
++	struct ath12k_hw_group *ag = ar->ab->ag;
++	/* MLO TSTAMP OFFSET can be negative
++	 */
++	int mlo_offset = ag->mlo_tstamp_offset;
++	int delta_tsf2, delta_tqm;
 +
 +	msdu_tqm_enqueue_tstamp_us =
 +		TX_COMPL_BUFFER_TSTAMP_US(ts->buffer_timestamp);
 +	msdu_compl_tsf_tstamp_us = ts->tsf;
-+	delta_tsf2 = ar->mlo_tstamp_offset - ar->delta_tsf2;
-+	delta_tqm = ar->mlo_tstamp_offset - ar->delta_tqm;
++	delta_tsf2 = mlo_offset - tmp_delta_tsf2;
++	delta_tqm = mlo_offset - tmp_delta_tqm;
 +
 +	final_msdu_tqm_enqueue_tstamp_us =
 +		(msdu_tqm_enqueue_tstamp_us + delta_tqm) & HW_TX_DELAY_MASK;
@@ -882,7 +927,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		return;
  
  	if (u32_get_bits(skb->mark, SAWF_TAG_ID) != SAWF_VALID_TAG)
-@@ -1385,5 +1461,50 @@ void ath12k_sawf_stats_update(struct ath
+@@ -1385,5 +1468,50 @@ void ath12k_sawf_stats_update(struct ath
  	tx_stats->queue_depth--;
  
  latency_stats_update:
