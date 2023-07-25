@@ -25,7 +25,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -2457,6 +2457,7 @@ struct ath12k_base *ath12k_core_alloc(st
+@@ -2522,6 +2522,7 @@ struct ath12k_base *ath12k_core_alloc(st
  		goto err_free_wq;
  
  	mutex_init(&ab->core_lock);
@@ -43,7 +43,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  #include "qmi.h"
  #include "htc.h"
  #include "wmi.h"
-@@ -1290,6 +1291,18 @@ struct ath12k_base {
+@@ -1303,6 +1304,18 @@ struct ath12k_base {
  	struct ath12k_hal_reg_capabilities_ext hal_reg_cap[MAX_RADIOS];
  	unsigned long long free_vdev_map;
  	unsigned long long free_vdev_stats_id_map;
@@ -64,7 +64,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  	u8 mac_addr[ETH_ALEN];
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -1031,13 +1031,16 @@ void ath12k_mac_peer_cleanup_all(struct
+@@ -1033,13 +1033,16 @@ void ath12k_mac_peer_cleanup_all(struct
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -81,11 +81,12 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  	if (!list_empty(&ab->neighbor_peers))
  		ath12k_debugfs_nrp_cleanup_all(ar);
-@@ -6711,16 +6714,19 @@ static void ath12k_mac_station_post_remo
+@@ -6663,17 +6666,20 @@ static void ath12k_mac_station_post_remo
+ 
  	ath12k_mac_dec_num_stations(arvif, arsta);
  
- 	spin_lock_bh(&ar->ab->base_lock);
 +	mutex_lock(&ar->ab->tbl_mtx_lock);
+ 	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath12k_peer_find(ar->ab, arvif->vdev_id, arsta->addr);
  	if (peer && peer->sta == sta) {
  		ath12k_warn(ar->ab, "Found peer entry %pM n vdev %i after it was supposedly removed\n",
@@ -101,7 +102,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  	kfree(arsta->tx_stats);
  	arsta->tx_stats = NULL;
-@@ -15862,6 +15868,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+@@ -15911,6 +15917,9 @@ int ath12k_mac_allocate(struct ath12k_hw
  				spin_lock_bh(&ab->base_lock);
  				ab->free_vdev_map = (1LL << (ab->num_radios * TARGET_NUM_VDEVS)) - 1;
  				spin_unlock_bh(&ab->base_lock);
@@ -111,7 +112,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  				ath12k_dp_pdev_pre_alloc(ab);
  			}
-@@ -15910,6 +15919,7 @@ void ath12k_mac_destroy(struct ath12k_hw
+@@ -15959,6 +15968,7 @@ void ath12k_mac_destroy(struct ath12k_hw
  
  			pdev->ar = NULL;
  		}
@@ -376,7 +377,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  			    "failed to delete peer vdev_id %d addr %pM ret %d\n",
  			    vdev_id, addr, ret);
  		return ret;
-@@ -448,7 +543,7 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -450,7 +545,7 @@ int ath12k_peer_create(struct ath12k *ar
  	u8 link_id = arvif->link_id;
  	struct ieee80211_vif *vif = arvif->ahvif->vif;
  	struct ath12k_ml_peer *ml_peer;
@@ -385,7 +386,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -476,13 +571,20 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -478,13 +573,20 @@ int ath12k_peer_create(struct ath12k *ar
  		spin_unlock_bh(&ar->ah->data_lock);
  	}
  
@@ -409,7 +410,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  	ret = ath12k_wmi_send_peer_create_cmd(ar, param);
  	if (ret) {
-@@ -497,21 +599,24 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -499,21 +601,24 @@ int ath12k_peer_create(struct ath12k *ar
  	if (ret)
  		return ret;
  
@@ -440,7 +441,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  
  	peer->pdev_idx = ar->pdev_idx;
  	peer->sta = sta;
-@@ -558,8 +663,18 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -560,8 +665,18 @@ int ath12k_peer_create(struct ath12k *ar
  	ath12k_dbg(ar->ab, ATH12K_DBG_PEER, "peer created %pM\n", param->peer_addr);
  
  	spin_unlock_bh(&ar->ab->base_lock);
@@ -459,7 +460,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  }
  
  static u16 ath12k_mac_alloc_ml_peer_id(struct ath12k_hw *ah)
-@@ -659,3 +774,204 @@ int ath12k_ml_peer_delete(struct ath12k_
+@@ -661,3 +776,204 @@ int ath12k_ml_peer_delete(struct ath12k_
  		   sta->addr);
  	return 0;
  }
@@ -666,7 +667,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
 +
 --- a/drivers/net/wireless/ath/ath12k/peer.h
 +++ b/drivers/net/wireless/ath/ath12k/peer.h
-@@ -43,6 +43,11 @@ struct ath12k_peer {
+@@ -45,6 +45,11 @@ struct ath12k_peer {
  	 */
  	struct ath12k_dp_rx_tid rx_tid[IEEE80211_NUM_TIDS + 1];
  
@@ -678,7 +679,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  	/* Info used in MMIC verification of
  	 * RX fragments
  	 */
-@@ -69,6 +74,9 @@ struct ath12k_peer {
+@@ -71,6 +76,9 @@ struct ath12k_peer {
  	/* To ensure only certain work related to dp is done once */
  	bool primary_link;
  
@@ -688,7 +689,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  	/* any other ML info common for all partners can be added
  	 * here and would be same for all partner peers
  	 */
-@@ -86,6 +94,8 @@ void ath12k_peer_map_event(struct ath12k
+@@ -88,6 +96,8 @@ void ath12k_peer_map_event(struct ath12k
  			   u8 *mac_addr, u16 ast_hash, u16 hw_peer_id);
  struct ath12k_peer *ath12k_peer_find(struct ath12k_base *ab, int vdev_id,
  				     const u8 *addr);
@@ -697,7 +698,7 @@ Signed-off-by: Avula Sri Charan <quic_asrichar@quicinc.com>
  struct ath12k_peer *ath12k_peer_find_by_addr(struct ath12k_base *ab,
  					     const u8 *addr);
  struct ath12k_peer *ath12k_peer_find_by_id(struct ath12k_base *ab, int peer_id);
-@@ -100,6 +110,9 @@ int ath12k_wait_for_peer_delete_done(str
+@@ -102,6 +112,9 @@ int ath12k_wait_for_peer_delete_done(str
  				     const u8 *addr);
  struct ath12k_peer *ath12k_peer_find_by_vdev_id(struct ath12k_base *ab,
  						int vdev_id);
