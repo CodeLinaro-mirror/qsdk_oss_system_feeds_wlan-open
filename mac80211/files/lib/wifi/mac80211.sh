@@ -318,6 +318,7 @@ pre_wifi_updown() {
 
 
 	update_mld_vap_details
+	rm -rf /tmp/*_freq_list
 }
 
 post_wifi_updown() {

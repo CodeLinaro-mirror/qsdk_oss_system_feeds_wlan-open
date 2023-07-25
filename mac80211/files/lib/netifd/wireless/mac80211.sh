@@ -1491,13 +1491,22 @@ mac80211_setup_vif() {
 			if ([ "$is_sphy_mband" -eq 1 ] &&
 			    [ "$sta_vaps_count" -gt 1 ] && [ "$sta_radio" -gt 1 ]); then
 				sta_cfg_updated=$(ls /var/run/wpa_supplicant-*-updated-cfg | wc -l)
-				tmp_freq_list=$(uci -q -P /var/state get wireless.$mld.freq_list)
-				freq_list="$tmp_freq_list $freq_list"
+				if [ -n "$freq_list" ]; then
+					if [ -f  "/tmp/${mld}_freq_list" ]; then
+						tmp_freq="$(cat /tmp/${mld}_freq_list)"
+						if ! [[ "$tmp_freq" =~ "$freq_list" ]]; then
+							echo -n "$freq_list " >> /tmp/${mld}_freq_list
+						fi
+					else
+						echo -n "$freq_list " >> /tmp/${mld}_freq_list
+					fi
+					freq_list=$(cat /tmp/${mld}_freq_list)
+				fi
+
 				if [ "$sta_cfg_updated" = "$sta_radio" ]; then
 					mac80211_setup_supplicant || failed=1
 					sta_started=1
 				fi
-				uci -q -P /var/state set wireless.$mld.freq_list="$freq_list"
 				tmp_apifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
 				uci -q -P /var/state set wireless.$mld.ap_ifnames="$ap_intf $tmp_apifname"
 			else
