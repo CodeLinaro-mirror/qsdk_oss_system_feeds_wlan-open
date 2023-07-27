@@ -1,0 +1,78 @@
+From fc107a93307165d5bf966767e4456832ef3940ef Mon Sep 17 00:00:00 2001
+From: Jouni Malinen <jouni@codeaurora.org>
+Date: Thu, 11 Oct 2018 00:21:19 +0300
+Subject: [PATCH 1/4] mac80211: Helper function for marking STA authenticated
+
+Authentication exchange can be completed in both TX and RX paths for
+SAE, so move this common functionality into a helper function to avoid
+having to implement practically the same operations in two places when
+extending SAE implementation in the following commits.
+
+Signed-off-by: Jouni Malinen <jouni@codeaurora.org>
+Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+---
+ net/mac80211/mlme.c | 34 ++++++++++++++++++++++------------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
+index ec50a99..806a6e4 100644
+--- a/net/mac80211/mlme.c
++++ b/net/mac80211/mlme.c
+@@ -2573,13 +2573,33 @@ static void ieee80211_auth_challenge(struct ieee80211_sub_if_data *sdata,
+ 			    auth_data->key_idx, tx_flags);
+ }
+ 
++static bool ieee80211_mark_sta_auth(struct ieee80211_sub_if_data *sdata,
++				    const u8 *bssid)
++{
++	struct sta_info *sta;
++
++	/* move station state to auth */
++	mutex_lock(&sdata->local->sta_mtx);
++	sta = sta_info_get(sdata, bssid);
++	if (!sta) {
++		WARN_ONCE(1, "%s: STA %pM not found", sdata->name, bssid);
++		return false;
++	}
++	if (sta_info_move_state(sta, IEEE80211_STA_AUTH)) {
++		sdata_info(sdata, "failed moving %pM to auth\n", bssid);
++		return false;
++	}
++	mutex_unlock(&sdata->local->sta_mtx);
++
++	return true;
++}
++
+ static void ieee80211_rx_mgmt_auth(struct ieee80211_sub_if_data *sdata,
+ 				   struct ieee80211_mgmt *mgmt, size_t len)
+ {
+ 	struct ieee80211_if_managed *ifmgd = &sdata->u.mgd;
+ 	u8 bssid[ETH_ALEN];
+ 	u16 auth_alg, auth_transaction, status_code;
+-	struct sta_info *sta;
+ 	struct ieee80211_event event = {
+ 		.type = MLME_EVENT,
+ 		.u.mlme.data = AUTH_EVENT,
+@@ -2659,18 +2679,8 @@ static void ieee80211_rx_mgmt_auth(struct ieee80211_sub_if_data *sdata,
+ 		return;
+ 	}
+ 
+-	/* move station state to auth */
+-	mutex_lock(&sdata->local->sta_mtx);
+-	sta = sta_info_get(sdata, bssid);
+-	if (!sta) {
+-		WARN_ONCE(1, "%s: STA %pM not found", sdata->name, bssid);
++	if (!ieee80211_mark_sta_auth(sdata, bssid))
+ 		goto out_err;
+-	}
+-	if (sta_info_move_state(sta, IEEE80211_STA_AUTH)) {
+-		sdata_info(sdata, "failed moving %pM to auth\n", bssid);
+-		goto out_err;
+-	}
+-	mutex_unlock(&sdata->local->sta_mtx);
+ 
+ 	cfg80211_rx_mlme_mgmt(sdata->dev, (u8 *)mgmt, len);
+ 	return;
+-- 
+2.7.4
+
