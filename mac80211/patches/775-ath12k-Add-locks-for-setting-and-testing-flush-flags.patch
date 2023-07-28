@@ -418,7 +418,18 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	if (sta) {
  		ahsta = (struct ath12k_sta *)sta->drv_priv;
  		if (sta->mlo) {
-@@ -6947,6 +6985,7 @@ static void ath12k_mac_ml_station_remove
+@@ -6592,6 +6630,10 @@ static void ath12k_mac_dec_num_stations(
+ 	struct ath12k_sta *ahsta = arsta->ahsta;
+ 	struct ieee80211_sta *sta;
+ 
++	if (ar && !ar->num_stations &&
++			test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags))
++		return;
++
+ 	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
+ 
+ 	lockdep_assert_held(&ar->conf_mutex);
+@@ -6947,6 +6989,7 @@ static void ath12k_mac_ml_station_remove
  		ar = arvif->ar;
  
  		mutex_lock(&ar->conf_mutex);
@@ -426,7 +437,36 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  		ath12k_mac_station_post_remove(ar, arvif, arsta);
  		mutex_unlock(&ar->conf_mutex);
  
-@@ -7279,6 +7318,11 @@ static int ath12k_mac_op_change_sta_link
+@@ -7157,6 +7200,9 @@ static int ath12k_mac_op_sta_state(struc
+ 
+ 		ret = ath12k_mac_handle_link_sta_state(hw, arvif, arsta,
+ 						       old_state, new_state);
++		if (arvif->ar &&
++				test_bit(ATH12K_FLAG_RECOVERY, &arvif->ar->ab->dev_flags))
++			ret = 0;
+ 		mutex_unlock(&ah->conf_mutex);
+ 		return ret;
+ 	}
+@@ -7206,6 +7252,18 @@ static int ath12k_mac_op_sta_state(struc
+ 			ath12k_err(NULL, "unable to move link sta %d of sta %pM from state %d to %d",
+ 				   link_id, arsta->addr, old_state, new_state);
+ 
++			/* If FW recovery is ongoing, no need to move down sta states
++			 * as FW will wake up with a clean slate. Hence we set the
++			 * return value to 0, so that upper layers are not aware
++			 * of the FW being in recovery state.
++			 */
++			if (old_state > new_state) {
++				if (!arvif->ar)
++					continue;
++				if (test_bit(ATH12K_FLAG_RECOVERY, &arvif->ar->ab->dev_flags))
++					ret = 0;
++			}
++
+ 			if (old_state == IEEE80211_STA_NOTEXIST && new_state == IEEE80211_STA_NONE) {
+ 
+ 				/* Unassign this link sta which couldnt be added to FW and
+@@ -7279,6 +7337,11 @@ static int ath12k_mac_op_change_sta_link
  		}
  
  		ar = arvif->ar;
@@ -438,7 +478,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  		mutex_lock(&ar->conf_mutex);
  		ret = ath12k_mac_station_add(ar, arvif, arsta);
-@@ -7579,6 +7623,10 @@ static int ath12k_mac_op_conf_tx(struct
+@@ -7579,6 +7642,10 @@ static int ath12k_mac_op_conf_tx(struct
  	mutex_unlock(&ah->conf_mutex);
  
  	ar = arvif->ar;
@@ -449,7 +489,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  
  	mutex_lock(&ar->conf_mutex);
  	ret = ath12k_mac_conf_tx(ar, arvif, ac, params);
-@@ -9866,7 +9914,7 @@ static int ath12k_mac_vdev_create(struct
+@@ -9866,7 +9933,7 @@ static int ath12k_mac_vdev_create(struct
  				arvif->ppe_vp_num = -1;
  			}
  			else if (link_ndev) {
@@ -458,7 +498,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  								 arvif->ndev_pvt->link_ndev);
  				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
  			}
-@@ -9980,6 +10028,7 @@ err_vdev_del:
+@@ -9980,6 +10047,7 @@ err_vdev_del:
  	spin_unlock_bh(&ar->data_lock);
  
  err:
@@ -466,7 +506,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  	arvif->ar = NULL;
  	return ret;
  }
-@@ -12626,6 +12675,14 @@ static int ath12k_mac_op_set_rts_thresho
+@@ -12626,6 +12694,14 @@ static int ath12k_mac_op_set_rts_thresho
  		}
  
  		ar = arvif->ar;
@@ -481,7 +521,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/m
  		ret = ath12k_set_vdev_param_to_all_vifs(ar, param_id, value);
  		if (ret) {
  			ath12k_warn(ar->ab, "failed to set RTS config for all vdevs of pdev %d",
-@@ -13874,6 +13931,11 @@ static void ath12k_mac_op_sta_statistics
+@@ -13874,6 +13950,11 @@ static void ath12k_mac_op_sta_statistics
  
  	/* TODO accumulate link sta stats here? */
  
