@@ -700,9 +700,7 @@ endef
 
 define KernelPackage/cfg80211/install
 	$(INSTALL_DIR) $(1)/lib/wifi
-ifeq ($(CONFIG_LINUX_5_4),y)
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/ieee80211
-endif
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/devcoredump
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
 	$(INSTALL_DIR) $(1)/lib/wifi/sawf
@@ -719,9 +717,7 @@ endif
 	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/coredump.sh $(1)/etc/hotplug.d/devcoredump
-ifeq ($(CONFIG_LINUX_5_4),y)
 	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
-endif
 endef
 
 define KernelPackage/ath9k-htc/install
