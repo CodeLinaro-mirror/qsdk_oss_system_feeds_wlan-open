@@ -21,7 +21,19 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
 
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -5342,6 +5342,7 @@ static void __ieee80211_rx_handle_packet
+@@ -4327,8 +4327,10 @@ static bool ieee80211_rx_data_set_sta(st
+ 		rx->link_sta = &sta->deflink;
+ 	}
+ 
+-	if (link_id < 0)
++	if (link_id < 0) {
+ 		rx->link = &rx->sdata->deflink;
++		WARN_ON(!!rx->sdata->vif.valid_links);
++	}
+ 	else if (!ieee80211_rx_data_set_link(rx, link_id))
+ 		return false;
+ 
+@@ -5344,11 +5346,13 @@ static void __ieee80211_rx_handle_packet
  	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
  	struct ieee80211_sub_if_data *sdata;
  	struct ieee80211_hdr *hdr;
@@ -29,8 +41,19 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
  	__le16 fc;
  	struct ieee80211_rx_data rx;
  	struct ieee80211_sub_if_data *prev;
-@@ -5457,6 +5458,11 @@ static void __ieee80211_rx_handle_packet
+ 	struct rhlist_head *tmp;
+-	int err = 0;
++	int err = 0, prev_linkid;
++	bool prev_flag;
+ 
+ 	fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
+ 	memset(&rx, 0, sizeof(rx));
+@@ -5457,8 +5461,15 @@ static void __ieee80211_rx_handle_packet
+ 	}
+ 
  	prev = NULL;
++	prev_linkid = -1;
++	prev_flag = false;
  
  	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
 +		unsigned int link_id;
@@ -41,7 +64,7 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
  		if (!ieee80211_sdata_running(sdata))
  			continue;
  
-@@ -5464,28 +5470,91 @@ static void __ieee80211_rx_handle_packet
+@@ -5466,28 +5477,103 @@ static void __ieee80211_rx_handle_packet
  		    sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
  			continue;
  
@@ -77,15 +100,24 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
 -		if (!prev) {
 +		if (!wiphy->num_hw || flag) {
 +			if (!prev) {
++				prev_linkid = valid_links ? link_id : -1;
 +				prev = sdata;
++				prev_flag = flag;
 +				continue;
 +			}
 +
 +			rx.sdata = prev;
++			if (prev_flag) {
++				status->link_valid = (prev_linkid >= 0);
++				if (status->link_valid)
++					status->link_id = prev_linkid;
++			}
 +			ieee80211_rx_for_interface(&rx, skb, false);
 +
++			prev_linkid = valid_links ? link_id : -1;
  			prev = sdata;
 -			continue;
++			prev_flag = flag;
  		}
 +	}
  
@@ -124,6 +156,9 @@ Signed-off-by: Rahul Bhattacharjee <quic_rbhattac@quicinc.com>
 -	}
 +			if (flag) {
 +				rx.sdata = prev;
++				status->link_valid = !!valid_links;
++				if (status->link_valid)
++					status->link_id = link_id;
  
 -	if (prev) {
 -		rx.sdata = prev;
