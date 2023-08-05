@@ -266,10 +266,10 @@ ifneq ($(call qstrip,$(_LINUX_SRC)),)
 else
   define FastCloneKernel
 	GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
-	git clone --depth=1 $(1) $(2) || \
+	git clone $(1) $(2) || \
 	([ -n "${CONFIG_GIT_MIRROR}" ] && \
 	rm -rf $(2) && \
-	git clone --depth=1 $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
+	git clone $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
   endef
 endif
 
@@ -635,6 +635,8 @@ MAKE_OPTS:= -C "$(PKG_BUILD_DIR)" \
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
+	cmd_syscalls= \
+	$(if $(__package_mk),KBUILD_EXTRA_SYMBOLS="$(wildcard $(PKG_SYMVERS_DIR)/*.symvers)") \
 	KBUILD_LDFLAGS_MODULE_PREREQ=
 
 ifneq ($(findstring c,$(OPENWRT_VERBOSE)),)
@@ -676,13 +678,13 @@ endef
 ifneq ($(CONFIG_PACKAGE_kmod-cfg80211)$(CONFIG_PACKAGE_kmod-lib80211),)
  define Build/Compile/kmod
 	rm -rf $(PKG_BUILD_DIR)/modules
-	+$(KERNEL_MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
+	+$(MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
  endef
 endif
 
 define Build/Compile
 	$(SH_FUNC) var2file "$(call shvar,mac80211_config)" $(PKG_BUILD_DIR)/.config
-	$(KERNEL_MAKE) $(MAKE_OPTS) olddefconfig
+	$(MAKE) $(MAKE_OPTS) olddefconfig
 	$(call Build/Compile/kmod)
 endef
 
