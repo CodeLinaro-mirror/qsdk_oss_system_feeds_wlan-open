@@ -87,7 +87,6 @@ define KernelPackage/mac80211
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-vp:kmod-qca-nss-ppe-vp
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ppe-ds:kmod-qca-nss-ppe-ds
   PKG_BUILD_DEPENDS+= PACKAGE_kmod-bonding:kmod-bonding
-  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-ecm:kmod-qca-nss-ecm
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -440,22 +439,19 @@ PCI is supported.
 endef
 
 define KernelPackage/ath12k/config
-  if PACKAGE_kmod-qca-nss-ecm-premium
 	config PACKAGE_ATH12K_SAWF
 	  bool "SAWF and Telemetry support in ATH12K"
 	  default y
 	  help
 		This option enables support for SAWF and Telemetry
 		in ATH12K.
-  endif
 endef
 
 define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
   DEPENDS+= +kmod-ath\
-	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT \
-	+PACKAGE_kmod-qca-nss-ecm-premium:kmod-qca-nss-ecm-premium
+	+TARGET_ipq_ipq95xx:kmod-qrtr_mproc +TARGET_ipq_ipq95xx_64:kmod-qrtr_mproc +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT 
   FILES:= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
   AUTOLOAD:=$(call AutoProbe,ath12k)
 endef
@@ -603,12 +599,10 @@ config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_AL
 config-$(CONFIG_PACKAGE_kmod-ath11k) += ATH11K_SPECTRAL ATH11K_CFR
 
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
-
-# kernel comparison is added since qca-nss-ecm callbacks are not supported
-# in openwrt-ginger project as of now. Once supported this kernel check
-# needs to be removed.
-ifneq "6.1.31" "$(word 1, $(sort 6.1.31 $(LINUX_VERSION)))"
 config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
+
+ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
+config-y += ATH12K_MEM_PROFILE_512M
 endif
 
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
@@ -725,6 +719,11 @@ ifeq ($(CONFIG_LINUX_5_4),y)
 endif
 endef
 
+define KernelPackage/ath/install
+	$(INSTALL_DIR) $(STAGING_DIR)/usr/include/
+	$(CP) $(PKG_BUILD_DIR)/include/ath/ath_sawf.h $(STAGING_DIR)/usr/include/
+endef
+
 define KernelPackage/ath9k-htc/install
 	$(INSTALL_DIR) $(1)/lib/firmware
 	$(INSTALL_DATA) \
@@ -749,6 +748,7 @@ define KernelPackage/ath11k/install
 endef
 
 define KernelPackage/ath12k/install
+	$(call KernelPackage/ath/install)
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
 endef
