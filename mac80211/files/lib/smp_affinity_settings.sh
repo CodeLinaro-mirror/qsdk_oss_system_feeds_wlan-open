@@ -736,22 +736,22 @@ enable_affinity_mi01_2() {
 		irq_rps=`grep edma_ppeds_txcmpl_1 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_rps" ] && echo 2 > /proc/irq/$irq_rps/smp_affinity
 
-		irq_num=`grep pci0_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci0_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_rps=`grep pci0_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_rps=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
 
-		irq_rps=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_rps=`grep pci0_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_rps" ] && echo 2 > /proc/irq/$irq_rps/smp_affinity
 
-		irq_rps=`grep pci0_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_rps=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
 
-		irq_rps=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_rps=`grep pci0_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_rps" ] && echo 2 > /proc/irq/$irq_rps/smp_affinity
 	fi
 }
