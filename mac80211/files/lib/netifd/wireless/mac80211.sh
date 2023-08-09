@@ -730,8 +730,8 @@ mac80211_hostapd_setup_base() {
 
 		if [ -z $mlo_capable ] || [ $mlo_capable -eq 0 ] || [ "$is_6ghz" == "1" ]; then
 			if [ "$has_ap" -gt 1 ]; then
-				[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && append base_cfg "mbssid=1" "$N"
-				[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "ema=1" "$N"
+				[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && ([ -z $ema ] || ([ -n $ema ] && [ $ema -eq 0 ])) && append base_cfg "mbssid=1" "$N"
+				[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "mbssid=2" "$N" && append base_cfg "ema=1" "$N"
 			fi
 		fi
 	fi
