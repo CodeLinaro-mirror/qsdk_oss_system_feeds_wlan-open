@@ -716,6 +716,7 @@ define KernelPackage/cfg80211/install
 	$(INSTALL_BIN) ./files/lib/performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/coredump.sh $(1)/etc/hotplug.d/devcoredump
 	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
