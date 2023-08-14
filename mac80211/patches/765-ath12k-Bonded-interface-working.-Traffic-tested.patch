@@ -89,7 +89,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,923 @@
+@@ -0,0 +1,956 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -122,6 +122,22 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
 +	dev->netdev_ops = &ieee80211_link_dataif_8023_ops;
 +	netdev_set_priv_destructor(dev, ath12k_ieee80211_if_free);
++}
++
++static bool ath12k_ppe_vp_set_mtu(struct net_device *dev, struct ath12k_link_vif *arvif,
++				  const int mtu)
++{
++	if (!arvif->ndev_pvt->vp_num)
++		return true;
++
++	if (ppe_vp_mtu_set(arvif->ndev_pvt->vp_num, mtu) != PPE_VP_STATUS_SUCCESS) {
++		ath12k_err(NULL, "Setting mtu to %d for link_ndev:%s (vp num:%d) failed\n",
++			   mtu, arvif->ndev_pvt->link_ndev->name,
++			   arvif->ndev_pvt->vp_num);
++		return false;
++	}
++
++	return true;
 +}
 +
 +static bool ath12k_dst_ppe_vp(struct net_device *dev,
@@ -827,6 +843,22 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	return;
 +}
 +
++static int ieee80211_link_set_mtu(struct net_device *dev, int mtu)
++{
++	struct ath12k_link_vif_pvt *arvif_pvt = netdev_priv(dev);
++	struct ath12k_link_vif *arvif = arvif_pvt->arvif;
++
++	if (!(IEEE80211_MTU_MIN < mtu && mtu < IEEE80211_MTU_MAX))
++		return -EINVAL;
++
++	if (!ath12k_ppe_vp_set_mtu(dev, arvif, mtu))
++		return -EINVAL;
++
++	dev->mtu = mtu;
++
++	return 0;
++}
++
 +int ieee80211_link_change_mac(struct net_device *dev, void *addr)
 +{
 +	return 0;
@@ -862,6 +894,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	.ndo_uninit		= ieee80211_link_uninit,
 +	.ndo_start_xmit		= ieee80211_link_subif_start_xmit_8023,
 +	.ndo_set_rx_mode	= ieee80211_link_set_multicast_list,
++	.ndo_change_mtu		= ieee80211_link_set_mtu,
 +	.ndo_set_mac_address	= ieee80211_link_change_mac,
 +	.ndo_select_queue	= ieee80211_link_netdev_select_queue,
 +	.ndo_get_stats64	= ieee80211_link_get_stats64,
@@ -3340,3 +3373,23 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  void ieee80211_report_low_ack(struct ieee80211_sta *pubsta, u32 num_packets)
  {
  	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -216,6 +216,17 @@ static inline u16 ieee80211_sn_sub(u16 s
+ #define IEEE80211_MAX_AID_S1G		8191
+ #define IEEE80211_MAX_TIM_LEN		251
+ #define IEEE80211_MAX_MESH_PEERINGS	63
++
++/*
++ * Maximum acceptable MTU is:
++ *  IEEE80211_MAX_LEN - WEP overhead - CRC -
++ *      QoS overhead - RSN/WPA overhead
++ * Min is arbitrarily chosen > IEEE80211_MIN_LEN.  The default
++ * mtu is Ethernet-compatible; it's set by ether_ifattach.
++ */
++#define IEEE80211_MTU_MAX       2290
++#define IEEE80211_MTU_MIN       32
++
+ /* Maximum size for the MA-UNITDATA primitive, 802.11 standard section
+    6.2.1.1.2.
+ 
