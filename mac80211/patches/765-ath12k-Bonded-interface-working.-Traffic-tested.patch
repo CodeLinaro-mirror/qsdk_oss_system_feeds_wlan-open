@@ -89,7 +89,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,909 @@
+@@ -0,0 +1,923 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -157,7 +157,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	return core_mask;
 +}
 +
-+int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++int ath12k_bond_link_enslave(struct ath12k_link_vif *arvif, struct net_device *link_dev)
 +{
 +	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +	int ret;
@@ -181,9 +181,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	return 0;
 +}
 +
-+void ath12k_bond_link_delete(struct ath12k_link_vif *arvif)
++void ath12k_bond_link_release(struct ath12k_link_vif *arvif)
 +{
 +	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
++	int err;
 +
 +	if (!g_bonded_interface_model)
 +		return;
@@ -200,7 +201,13 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +		/* bond_release expects slave netdevices to be in down state */
 +		link_ndev_pvt->link_ndev->flags &= ~IFF_UP;
-+		bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
++		err = bond_release(link_ndev_pvt->bond_dev, link_ndev_pvt->link_ndev);
++		if (err) {
++			ath12k_err(NULL, "Error bond release link ndev:%s from bond ndev:%s: due to err: %d\n",
++					link_ndev_pvt->link_ndev->name,
++					link_ndev_pvt->bond_dev->name, err);
++			return;
++		}
 +	} else {
 +		ath12k_err(NULL, "ERR unable to release Bond %s link ndev %px \n",
 +			   arvif->ndev_pvt->link_ndev->name, arvif->ndev_pvt->link_ndev);
@@ -280,6 +287,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
 +		return;
++
++	if (!arvif->ndev_pvt || !arvif->ndev_pvt->link_ndev) {
++		ath12k_err(NULL, "ERR no link dev for this vif to disable DS.\n");
++		return;
++	}
 +
 +	link_ndev_pvt = netdev_priv(link_dev);
 +	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
@@ -369,9 +381,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			/* Delete Link operation */
 +			mutex_lock(&vif->bond_mutex);
 +			link_ndev = vif->link_ndev[link_num];
++			link_ndev_pvt = netdev_priv(link_ndev);
 +			if (link_ndev) {
 +				ath12k_info(NULL, "Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
-+				rtnl_is_locked() ? unregister_netdevice(link_ndev) : unregister_netdev(link_ndev);
++				unregister_netdevice(link_ndev);
++				link_ndev_pvt->link_ndev = NULL;
 +				vif->link_ndev[link_num] = NULL;
 +			} else {
 +				ath12k_err(NULL, "ERR Unregister link netdevice %s link ndev %px link_num %d\n", link_ndev->name, link_ndev, link_num);
@@ -1025,8 +1039,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
 +				struct ieee80211_vif *vif,
 +				int link_num);
-+int ath12k_bond_link_add(struct ath12k_link_vif *arvif, struct net_device *link_dev);
-+void ath12k_bond_link_delete(struct ath12k_link_vif *arvif);
++int ath12k_bond_link_enslave(struct ath12k_link_vif *arvif, struct net_device *link_dev);
++void ath12k_bond_link_release(struct ath12k_link_vif *arvif);
 +enum ath12k_bond_state {
 +	ATH12K_BOND_SETUP_INPROGRESS,
 +	ATH12K_BOND_REGISTERED,
@@ -1407,7 +1421,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 -	arvif->ar = NULL;
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
-+		ath12k_bond_link_delete(arvif);
++		ath12k_bond_link_release(arvif);
 +		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
 +	}
 +#endif
@@ -1554,7 +1568,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			else if (link_ndev) {
 +				ath12k_enable_ds_for_link_netdev(arvif,
 +								 arvif->ndev_pvt->link_ndev);
-+				ath12k_bond_link_add(arvif, arvif->ndev_pvt->link_ndev);
++				ath12k_bond_link_enslave(arvif, arvif->ndev_pvt->link_ndev);
 +			}
 +		}
 +#endif
