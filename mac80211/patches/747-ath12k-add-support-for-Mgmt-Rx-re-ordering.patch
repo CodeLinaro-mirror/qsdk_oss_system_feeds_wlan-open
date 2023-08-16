@@ -34,8 +34,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  drivers/net/wireless/ath/ath12k/wmi.h   |  742 +++++++
  6 files changed, 3515 insertions(+), 155 deletions(-)
 
---- a/drivers/net/wireless/ath/ath12k/core.c
-+++ b/drivers/net/wireless/ath/ath12k/core.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.c
 @@ -47,6 +47,10 @@ MODULE_PARM_DESC(en_fwlog, "fwlog: 0-dis
  
  static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
@@ -321,18 +323,28 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  err_thermal_unregister:
  	ath12k_thermal_unregister(ab);
  	return ret;
-@@ -1270,6 +1525,10 @@ int ath12k_core_qmi_firmware_ready(struc
+@@ -1264,6 +1519,11 @@ int ath12k_core_qmi_firmware_ready(struc
+ 	mutex_unlock(&ab->core_lock);
+ 
+ 	if (ath12k_core_hw_group_start_ready(ag)) {
++		/* initialize the mgmt rx re-order after
++		 * mlo mem is available
++		 */
++		ath12k_mgmt_rx_reo_init_context(ab);
++		ath12k_qmi_mlo_global_snapshot_mem_init(ab);
+ 		ret = ath12k_core_hw_group_start(ag);
+ 		if (ret) {
+ 			ath12k_warn(ab, "unable to start hw group\n");
+@@ -1277,8 +1537,6 @@ int ath12k_core_qmi_firmware_ready(struc
  
  	mutex_unlock(&ag->mutex_lock);
  
-+	/* initialize the mgmt rx re-order after
-+	 * mlo mem is available
-+	 */
-+	ath12k_mgmt_rx_reo_init_context(ab);
- 	ath12k_qmi_mlo_global_snapshot_mem_init(ab);
- 
+-	ath12k_qmi_mlo_global_snapshot_mem_init(ab);
+-
  	/* Add code here carefully */
-@@ -1821,6 +2080,8 @@ int ath12k_core_init(struct ath12k_base
+ 	return 0;
+ 
+@@ -1842,6 +2100,8 @@ int ath12k_core_init(struct ath12k_base
  		}
  	}
  
@@ -341,9 +353,11 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	return 0;
  
  err_hw_group:
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -959,6 +959,7 @@ struct ath12k {
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/core.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/core.h
+@@ -964,6 +964,7 @@ struct ath12k {
  
  	struct completion mvr_complete;
  	struct cfg80211_chan_def agile_chandef;
@@ -351,7 +365,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  struct ath12k_band_cap {
-@@ -1140,12 +1141,14 @@ struct ath12k_hw_group {
+@@ -1146,12 +1147,14 @@ struct ath12k_hw_group {
  	u8 num_hw;
  	bool mlo_capable;
  	bool hw_queues_stopped;
@@ -366,7 +380,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	struct ath12k_host_mlo_mem_arena mlomem_arena;
  };
  
-@@ -1264,7 +1267,6 @@ struct ath12k_base {
+@@ -1270,7 +1273,6 @@ struct ath12k_base {
  		u32 fw_crash_counter;
  		u32 last_recovery_time;
  	} stats;
@@ -374,8 +388,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	bool ftm_segment_handler;
  	struct ath12k_ftm_event_obj ftm_event_obj;
  	u32 pktlog_defs_checksum;
---- a/drivers/net/wireless/ath/ath12k/debug.h
-+++ b/drivers/net/wireless/ath/ath12k/debug.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/debug.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/debug.h
 @@ -27,6 +27,7 @@ enum ath12k_debug_mask {
  	ATH12K_DBG_DP_TX	= 0x00002000,
  	ATH12K_DBG_DP_RX	= 0x00004000,
@@ -384,9 +400,11 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ATH12K_DBG_ANY		= 0xffffffff,
  };
  
---- a/drivers/net/wireless/ath/ath12k/wmi.c
-+++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6722,7 +6722,57 @@ static int ath12k_wmi_tlv_mgmt_rx_parse(
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -6741,10 +6741,60 @@ static int ath12k_wmi_tlv_mgmt_rx_parse(
  			parse->frame_buf_done = true;
  		}
  		break;
@@ -396,10 +414,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	case WMI_TAG_MLO_MGMT_RX_FW_CONSUMED_HDR:
 +		parse->fw_consumed_reo_params = (struct ath12k_wmi_mgmt_rx_fw_consumed_hdr *)ptr;
 +		break;
-+	}
-+	return 0;
-+}
-+
+ 	}
+ 	return 0;
+ }
+ 
 +static int ath12k_pull_fw_consumed_mgmt_rx_params_tlv(struct ath12k_base *ab,
 +					  struct sk_buff *skb,
 +					  struct mgmt_rx_event_params *hdr)
@@ -414,7 +432,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (ret) {
 +		ath12k_warn(ab, "failed to parse mgmt rx tlv %d\n", ret);
 +		return ret;
- 	}
++	}
 +
 +
 +	fw_con_reo_params_tlv = parse.fw_consumed_reo_params;
@@ -441,10 +459,13 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			hdr->reo_params.global_timestamp,
 +			hdr->reo_params.mgmt_pkt_ctr);
 +
- 	return 0;
- }
- 
-@@ -6734,6 +6784,7 @@ static int ath12k_pull_mgmt_rx_params_tl
++	return 0;
++}
++
+ static int ath12k_pull_mgmt_rx_params_tlv(struct ath12k_base *ab,
+ 					  struct sk_buff *skb,
+ 					  struct mgmt_rx_event_params *hdr)
+@@ -6753,6 +6803,7 @@ static int ath12k_pull_mgmt_rx_params_tl
  	const struct wmi_mgmt_rx_hdr *ev;
  	const u8 *frame;
  	int ret;
@@ -452,7 +473,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
  				  ath12k_wmi_tlv_mgmt_rx_parse,
-@@ -6746,6 +6797,13 @@ static int ath12k_pull_mgmt_rx_params_tl
+@@ -6765,6 +6816,13 @@ static int ath12k_pull_mgmt_rx_params_tl
  	ev = parse.fixed;
  	frame = parse.frame_buf;
  
@@ -466,7 +487,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	if (!ev || !frame) {
  		ath12k_warn(ab, "failed to fetch mgmt rx hdr");
  		return -EPROTO;
-@@ -6764,6 +6822,24 @@ static int ath12k_pull_mgmt_rx_params_tl
+@@ -6783,6 +6841,24 @@ static int ath12k_pull_mgmt_rx_params_tl
  	hdr->tsf_delta =  ev->tsf_delta;
  	memcpy(hdr->rssi_ctl, ev->rssi_ctl, sizeof(hdr->rssi_ctl));
  
@@ -491,216 +512,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	if (skb->len < (frame - skb->data) + hdr->buf_len) {
  		ath12k_warn(ab, "invalid length in mgmt rx hdr ev");
  		return -EPROTO;
-@@ -8026,207 +8102,2527 @@ static int ath12k_wmi_tlv_rdy_parse(stru
- 		rdy_parse->num_extra_mac_addr =
- 			fixed_param.ready_event_min.num_extra_mac_addr;
+@@ -8243,9 +8319,2329 @@ static void ath12k_vdev_stopped_event(st
+ 	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev stopped for vdev id %d", vdev_id);
+ }
  
--		ether_addr_copy(ab->mac_addr,
--				fixed_param.ready_event_min.mac_addr.addr);
--		ab->pktlog_defs_checksum = fixed_param.pktlog_defs_checksum;
--		ab->wmi_ready = true;
--		break;
--	case WMI_TAG_ARRAY_FIXED_STRUCT:
--		addr_list = (struct wmi_mac_addr *)ptr;
--		num_mac_addr = rdy_parse->num_extra_mac_addr;
-+		ether_addr_copy(ab->mac_addr,
-+				fixed_param.ready_event_min.mac_addr.addr);
-+		ab->pktlog_defs_checksum = fixed_param.pktlog_defs_checksum;
-+		ab->wmi_ready = true;
-+		break;
-+	case WMI_TAG_ARRAY_FIXED_STRUCT:
-+		addr_list = (struct wmi_mac_addr *)ptr;
-+		num_mac_addr = rdy_parse->num_extra_mac_addr;
-+
-+		if (!(ab->num_radios > 1 && num_mac_addr >= ab->num_radios))
-+			break;
-+
-+		for (i = 0; i < ab->num_radios; i++) {
-+			pdev = &ab->pdevs[i];
-+			ether_addr_copy(pdev->mac_addr, addr_list[i].addr);
-+		}
-+		ab->pdevs_macaddr_valid = true;
-+		break;
-+	default:
-+		break;
-+	}
-+
-+	return 0;
-+}
-+
-+static int ath12k_ready_event(struct ath12k_base *ab, struct sk_buff *skb)
-+{
-+	struct wmi_tlv_rdy_parse rdy_parse = { };
-+	int ret;
-+
-+	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
-+				  ath12k_wmi_tlv_rdy_parse, &rdy_parse);
-+	if (ret) {
-+		ath12k_warn(ab, "failed to parse tlv %d\n", ret);
-+		return ret;
-+	}
-+
-+	complete(&ab->wmi_ab.unified_ready);
-+	return 0;
-+}
-+
-+static void ath12k_peer_delete_resp_event(struct ath12k_base *ab, struct sk_buff *skb)
-+{
-+	struct wmi_peer_delete_resp_event peer_del_resp;
-+	struct ath12k *ar;
-+
-+	if (ath12k_pull_peer_del_resp_ev(ab, skb, &peer_del_resp) != 0) {
-+		ath12k_warn(ab, "failed to extract peer delete resp");
-+		return;
-+	}
-+
-+	rcu_read_lock();
-+	ar = ath12k_mac_get_ar_by_vdev_id(ab, peer_del_resp.vdev_id);
-+	if (!ar) {
-+		ath12k_warn(ab, "invalid vdev id in peer delete resp ev %d",
-+			    peer_del_resp.vdev_id);
-+		rcu_read_unlock();
-+		return;
-+	}
-+
-+	complete(&ar->peer_delete_done);
-+	rcu_read_unlock();
-+	ath12k_dbg(ab, ATH12K_DBG_WMI, "peer delete resp for vdev id %d addr %pM\n",
-+		   peer_del_resp.vdev_id, peer_del_resp.peer_macaddr.addr);
-+}
-+
-+static void ath12k_vdev_delete_resp_event(struct ath12k_base *ab,
-+					  struct sk_buff *skb)
-+{
-+	struct ath12k *ar;
-+	u32 vdev_id = 0;
-+
-+	if (ath12k_pull_vdev_del_resp_ev(ab, skb, &vdev_id) != 0) {
-+		ath12k_warn(ab, "failed to extract vdev delete resp");
-+		return;
-+	}
-+
-+	rcu_read_lock();
-+	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_id);
-+	if (!ar) {
-+		ath12k_warn(ab, "invalid vdev id in vdev delete resp ev %d",
-+			    vdev_id);
-+		rcu_read_unlock();
-+		return;
-+	}
-+
-+	complete(&ar->vdev_delete_done);
-+
-+	rcu_read_unlock();
-+
-+	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev delete resp for vdev id %d\n",
-+		   vdev_id);
-+}
-+
-+static const char *ath12k_wmi_vdev_resp_print(u32 vdev_resp_status)
-+{
-+	switch (vdev_resp_status) {
-+	case WMI_VDEV_START_RESPONSE_INVALID_VDEVID:
-+		return "invalid vdev id";
-+	case WMI_VDEV_START_RESPONSE_NOT_SUPPORTED:
-+		return "not supported";
-+	case WMI_VDEV_START_RESPONSE_DFS_VIOLATION:
-+		return "dfs violation";
-+	case WMI_VDEV_START_RESPONSE_INVALID_REGDOMAIN:
-+		return "invalid regdomain";
-+	default:
-+		return "unknown";
-+	}
-+}
-+
-+static void ath12k_vdev_start_resp_event(struct ath12k_base *ab, struct sk_buff *skb)
-+{
-+	struct wmi_vdev_start_resp_event vdev_start_resp;
-+	struct ath12k *ar;
-+	u32 status;
-+
-+	if (ath12k_pull_vdev_start_resp_tlv(ab, skb, &vdev_start_resp) != 0) {
-+		ath12k_warn(ab, "failed to extract vdev start resp");
-+		return;
-+	}
-+
-+	rcu_read_lock();
-+	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_start_resp.vdev_id);
-+	if (!ar) {
-+		ath12k_warn(ab, "invalid vdev id in vdev start resp ev %d",
-+			    vdev_start_resp.vdev_id);
-+		rcu_read_unlock();
-+		return;
-+	}
-+
-+	ar->last_wmi_vdev_start_status = 0;
-+	ar->max_allowed_tx_power = vdev_start_resp.max_allowed_tx_power;
-+
-+	status = vdev_start_resp.status;
-+
-+	if (WARN_ON_ONCE(status)) {
-+		ath12k_warn(ab, "vdev start resp error status %d (%s)\n",
-+			    status, ath12k_wmi_vdev_resp_print(status));
-+		ar->last_wmi_vdev_start_status = status;
-+	}
-+
-+	complete(&ar->vdev_setup_done);
-+
-+	rcu_read_unlock();
-+
-+	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev start resp for vdev id %d",
-+		   vdev_start_resp.vdev_id);
-+}
-+
-+static void ath12k_bcn_tx_status_event(struct ath12k_base *ab, struct sk_buff *skb)
-+{
-+	struct ath12k_link_vif *arvif;
-+	u32 vdev_id, tx_status;
-+
-+	if (ath12k_pull_bcn_tx_status_ev(ab, skb->data, skb->len,
-+					 &vdev_id, &tx_status) != 0) {
-+		ath12k_warn(ab, "failed to extract bcn tx status");
-+		return;
-+	}
-+
-+	rcu_read_lock();
-+	arvif = ath12k_mac_get_arvif_by_vdev_id(ab, vdev_id);
-+	if (!arvif) {
-+		ath12k_warn(ab, "invalid vdev id %d in bcn_tx_status",
-+			    vdev_id);
-+		rcu_read_unlock();
-+		return;
-+	}
-+	ath12k_mac_bcn_tx_event(arvif);
-+	rcu_read_unlock();
-+}
-+
-+static void ath12k_vdev_stopped_event(struct ath12k_base *ab, struct sk_buff *skb)
-+{
-+	struct ath12k *ar;
-+	u32 vdev_id = 0;
-+
-+	if (ath12k_pull_vdev_stopped_param_tlv(ab, skb, &vdev_id) != 0) {
-+		ath12k_warn(ab, "failed to extract vdev stopped event");
-+		return;
-+	}
-+
-+	rcu_read_lock();
-+	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_id);
-+	if (!ar) {
-+		ath12k_warn(ab, "invalid vdev id in vdev stopped ev %d",
-+			    vdev_id);
-+		rcu_read_unlock();
-+		return;
-+	}
-+
-+	complete(&ar->vdev_setup_done);
-+
-+	rcu_read_unlock();
-+
-+	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev stopped for vdev id %d", vdev_id);
-+}
-+
 +/**
 + * ath12k_mgmt_rx_reo_compare_pkt_ctrs_gte() - Compare given mgmt packet counters
 + * @ctr1: Management packet counter1
@@ -2523,9 +2338,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		 */
 +		reo_params = &first_entry->rx_params->reo_params;
 +		entry_global_ts = reo_params->global_timestamp;
- 
--		if (!(ab->num_radios > 1 && num_mac_addr >= ab->num_radios))
--			break;
++
 +		if (!ts_last_released_frame->valid ||
 +		    ath12k_mgmt_rx_reo_compare_global_timestamps_gte(
 +					entry_global_ts, ts_last_released_frame->global_ts)) {
@@ -2545,10 +2358,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			 */
 +			WARN_ON(!first_entry->is_parallel_rx);
 +		}
- 
--		for (i = 0; i < ab->num_radios; i++) {
--			pdev = &ab->pdevs[i];
--			ether_addr_copy(pdev->mac_addr, addr_list[i].addr);
++
 +		spin_unlock_bh(&reo_list->list_lock);
 +
 +		status = ath12k_mgmt_rx_reo_list_entry_send_up(reo_list,
@@ -2557,17 +2367,12 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			status = -EINVAL;
 +			kfree(first_entry);
 +			goto exit_unlock_frame_release_lock;
- 		}
--		ab->pdevs_macaddr_valid = true;
--		break;
--	default:
--		break;
++		}
 +
 +		kfree(first_entry);
 +		release_count++;
- 	}
- 
--	return 0;
++	}
++
 +	status = 0;
 +	goto exit_unlock_frame_release_lock;
 +
@@ -2577,24 +2382,17 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	spin_unlock(&reo_context->frame_release_lock);
 +
 +	return status;
- }
- 
--static int ath12k_ready_event(struct ath12k_base *ab, struct sk_buff *skb)
++}
++
 +static int
 +ath12k_wmi_mgmt_rx_reorder_process_entry(struct ath12k *ar,
 +					 struct ath12k_mgmt_rx_reo_frame_descriptor *desc,
 +			    bool *is_queued)
- {
--	struct wmi_tlv_rdy_parse rdy_parse = { };
++{
 +	struct ath12k_base *ab = ar->ab;
 +	struct ath12k_mgmt_rx_reo_context *reo_ctx;
- 	int ret;
- 
--	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
--				  ath12k_wmi_tlv_rdy_parse, &rdy_parse);
--	if (ret) {
--		ath12k_warn(ab, "failed to parse tlv %d\n", ret);
--		return ret;
++	int ret;
++
 +	if (!is_queued)
 +		return -EINVAL;
 +
@@ -2603,29 +2401,19 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (!desc || !desc->rx_params) {
 +		ath12k_err(ab, "MGMT Rx REO descriptor or rx params are null\n");
 +		return -EINVAL;
- 	}
- 
--	complete(&ab->wmi_ab.unified_ready);
--	return 0;
--}
++	}
++
 +	reo_ctx = &ab->ag->rx_reo;
 +	if (!reo_ctx) {
 +		ath12k_err(ab, "REO context is NULL\n");
 +		return -EINVAL;
 +	}
- 
--static void ath12k_peer_delete_resp_event(struct ath12k_base *ab, struct sk_buff *skb)
--{
--	struct wmi_peer_delete_resp_event peer_del_resp;
--	struct ath12k *ar;
++
 +	if (!reo_ctx->init_done || !reo_ctx->timer_init_done) {
 +		ath12k_err(ab, "MGMT Rx REO timer is not initialised\n");
 +		return -EINVAL;
 +	}
- 
--	if (ath12k_pull_peer_del_resp_ev(ab, skb, &peer_del_resp) != 0) {
--		ath12k_warn(ab, "failed to extract peer delete resp");
--		return;
++
 +	/**
 +	 * Critical Section = Host snapshot update + Calculation of wait
 +	 * counts + Update reorder list. Following section describes the
@@ -2719,27 +2507,16 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (unlikely(!desc->rx_params->reo_params.valid)) {
 +		ath12k_warn(ab, "Valid bit is not set for mgmt frame\n");
 +		goto failure;
- 	}
- 
--	rcu_read_lock();
--	ar = ath12k_mac_get_ar_by_vdev_id(ab, peer_del_resp.vdev_id);
--	if (!ar) {
--		ath12k_warn(ab, "invalid vdev id in peer delete resp ev %d",
--			    peer_del_resp.vdev_id);
--		rcu_read_unlock();
--		return;
++	}
++
 +	if ((desc->type == ATH12K_MGMT_RX_REO_FRAME_DESC_HOST_CONSUMED_FRAME ||
 +	     desc->type == ATH12K_MGMT_RX_REO_FRAME_DESC_FW_CONSUMED_FRAME) &&
 +			!desc->rx_params->reo_params.duration_us) {
 +		ath12k_warn(ab, "Rx reo duration of the frame is not valid %d\n",
 +			    desc->rx_params->reo_params.duration_us);
 +		goto failure;
- 	}
- 
--	complete(&ar->peer_delete_done);
--	rcu_read_unlock();
--	ath12k_dbg(ab, ATH12K_DBG_WMI, "peer delete resp for vdev id %d addr %pM\n",
--		   peer_del_resp.vdev_id, peer_del_resp.peer_macaddr.addr);
++	}
++
 +	/* Update the Host snapshot */
 +	ret = ath12k_wlan_mgmt_rx_reo_update_host_snapshot(ar, desc);
 +	if (ret)
@@ -2762,10 +2539,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +failure:
 +	spin_unlock_bh(&reo_ctx->rx_reorder_entry_lock);
 +	return ret;
- }
- 
--static void ath12k_vdev_delete_resp_event(struct ath12k_base *ab,
--					  struct sk_buff *skb)
++}
++
 +/**
 + * ath12k_mgmt_rx_reo_list_ageout_timer_handler() - Periodic ageout timer handler
 + * @arg: Argument to timer handler
@@ -2777,9 +2552,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +static void
 +ath12k_mgmt_rx_reo_list_ageout_timer_handler(struct timer_list *timer)
- {
--	struct ath12k *ar;
--	u32 vdev_id = 0;
++{
 +	struct mgmt_rx_reo_list *reo_list = from_timer(reo_list, timer, ageout_timer);
 +	struct ath12k_base *ab = reo_list->ab;
 +	struct mgmt_rx_reo_list_entry *cur_entry;
@@ -2792,10 +2565,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	 * list which has the largest global time stamp value.
 +	 */
 +	struct mgmt_rx_reo_list_entry *latest_aged_out_entry = NULL;
- 
--	if (ath12k_pull_vdev_del_resp_ev(ab, skb, &vdev_id) != 0) {
--		ath12k_warn(ab, "failed to extract vdev delete resp");
--		return;
++
 +	spin_lock_bh(&reo_list->list_lock);
 +
 +	cur_ts = ktime_to_us(ktime_get());
@@ -2809,28 +2579,19 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			latest_aged_out_entry = cur_entry;
 +			cur_entry->status |= ATH12K_MGMT_RX_REO_STATUS_AGED_OUT;
 +		}
- 	}
- 
--	rcu_read_lock();
--	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_id);
--	if (!ar) {
--		ath12k_warn(ab, "invalid vdev id in vdev delete resp ev %d",
--			    vdev_id);
--		rcu_read_unlock();
--		return;
++	}
++
 +	if (latest_aged_out_entry) {
 +		list_for_each_entry(cur_entry, &reo_list->list, node) {
 +			if (cur_entry == latest_aged_out_entry)
 +				break;
 +			cur_entry->status |= ATH12K_MGMT_RX_REO_STATUS_OLDER_THAN_LATEST_AGED_OUT_FRAME;
 +		}
- 	}
- 
--	complete(&ar->vdev_delete_done);
++	}
++
 +out:
 +	spin_unlock_bh(&reo_list->list_lock);
- 
--	rcu_read_unlock();
++
 +	if (latest_aged_out_entry) {
 +		status = ath12k_mgmt_rx_reo_list_release_entries(ab, reo_context);
 +		if (status) {
@@ -2839,14 +2600,11 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			return;
 +		}
 +	}
- 
--	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev delete resp for vdev id %d\n",
--		   vdev_id);
++
 +	mod_timer(&reo_list->ageout_timer, jiffies +
 +			msecs_to_jiffies(ATH12K_MGMT_RX_REO_AGEOUT_TIMER_PERIOD_MS));
- }
- 
--static const char *ath12k_wmi_vdev_resp_print(u32 vdev_resp_status)
++}
++
 +/**
 + * ath12k_mgmt_rx_reo_global_mgmt_rx_inactivity_timer_handler() - Timer handler
 + * for global management Rx inactivity timer
@@ -2859,19 +2617,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +static void
 +ath12k_mgmt_rx_reo_global_mgmt_rx_inactivity_timer_handler(struct timer_list *timer)
- {
--	switch (vdev_resp_status) {
--	case WMI_VDEV_START_RESPONSE_INVALID_VDEVID:
--		return "invalid vdev id";
--	case WMI_VDEV_START_RESPONSE_NOT_SUPPORTED:
--		return "not supported";
--	case WMI_VDEV_START_RESPONSE_DFS_VIOLATION:
--		return "dfs violation";
--	case WMI_VDEV_START_RESPONSE_INVALID_REGDOMAIN:
--		return "invalid regdomain";
--	default:
--		return "unknown";
--	}
++{
 +	struct mgmt_rx_reo_list *reo_list = from_timer(reo_list, timer, global_mgmt_rx_inactivity_timer);
 +	struct ath12k_base *ab = reo_list->ab;
 +	struct ath12k_mgmt_rx_reo_context *reo_context = &ab->ag->rx_reo;
@@ -2890,9 +2636,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +
 +	mod_timer(&reo_list->global_mgmt_rx_inactivity_timer, jiffies +
 +		 ATH12K_MGMT_RX_REO_GLOBAL_MGMT_RX_INACTIVITY_TIMEOUT);
- }
- 
--static void ath12k_vdev_start_resp_event(struct ath12k_base *ab, struct sk_buff *skb)
++}
++
 +/**
 + * mgmt_rx_reo_list_init() - Initialize the management rx-reorder list
 + * @reo_list: Pointer to reorder list
@@ -2903,20 +2648,14 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +static int
 +ath12k_mgmt_rx_reo_list_init(struct ath12k_base *ab, struct mgmt_rx_reo_list *reo_list)
- {
--	struct wmi_vdev_start_resp_event vdev_start_resp;
--	struct ath12k *ar;
--	u32 status;
++{
 +	reo_list->max_list_size = ATH12K_MGMT_RX_REO_LIST_MAX_SIZE;
 +	reo_list->list_entry_timeout_us = ATH12K_MGMT_RX_REO_LIST_TIMEOUT_US;
 +	reo_list->count = 0;
 +	reo_list->ab = ab;
 +	INIT_LIST_HEAD(&reo_list->list);
 +	spin_lock_init(&reo_list->list_lock);
- 
--	if (ath12k_pull_vdev_start_resp_tlv(ab, skb, &vdev_start_resp) != 0) {
--		ath12k_warn(ab, "failed to extract vdev start resp");
--		return;
++
 +	timer_setup(&reo_list->ageout_timer,
 +		    ath12k_mgmt_rx_reo_list_ageout_timer_handler, 0);
 +
@@ -2945,15 +2684,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (!reo_list) {
 +		ath12k_err(ab, "reorder list is null\n");
 +		return -EINVAL;
- 	}
- 
--	rcu_read_lock();
--	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_start_resp.vdev_id);
--	if (!ar) {
--		ath12k_warn(ab, "invalid vdev id in vdev start resp ev %d",
--			    vdev_start_resp.vdev_id);
--		rcu_read_unlock();
--		return;
++	}
++
 +	spin_lock_bh(&reo_list->list_lock);
 +
 +	list_for_each_entry_safe(cur_entry, temp, &reo_list->list, node) {
@@ -2961,20 +2693,13 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		dev_kfree_skb(cur_entry->nbuf);
 +		kfree(cur_entry->rx_params);
 +		kfree(cur_entry);
- 	}
- 
--	ar->last_wmi_vdev_start_status = 0;
--	ar->max_allowed_tx_power = vdev_start_resp.max_allowed_tx_power;
++	}
++
 +	spin_unlock_bh(&reo_list->list_lock);
- 
--	status = vdev_start_resp.status;
++
 +	return 0;
 +}
- 
--	if (WARN_ON_ONCE(status)) {
--		ath12k_warn(ab, "vdev start resp error status %d (%s)\n",
--			    status, ath12k_wmi_vdev_resp_print(status));
--		ar->last_wmi_vdev_start_status = status;
++
 +/**
 + * mgmt_rx_reo_list_deinit() - De initialize the management rx-reorder list
 + * @reo_list: Pointer to reorder list
@@ -2992,20 +2717,16 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (status) {
 +		ath12k_err(ab, "Failed to flush the reorder list\n");
 +		return status;
- 	}
- 
--	complete(&ar->vdev_setup_done);
++	}
++
 +	return 0;
 +}
- 
--	rcu_read_unlock();
++
 +int ath12k_mgmt_rx_reo_init_context(struct ath12k_base *ab)
 +{
 +	struct ath12k_hw_group *ag = ab->ag;
 +	struct ath12k_mgmt_rx_reo_context *reo_context = &ag->rx_reo;
- 
--	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev start resp for vdev id %d",
--		   vdev_start_resp.vdev_id);
++
 +	if (!(ag->mlo_mem.is_mlo_mem_avail && ag->mgmt_rx_reorder))
 +		return 0;
 +
@@ -3020,33 +2741,18 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	reo_context->init_done = true;
 +
 +	return 0;
- }
- 
--static void ath12k_bcn_tx_status_event(struct ath12k_base *ab, struct sk_buff *skb)
++}
++
 +int
 +ath12k_mgmt_rx_reo_deinit_context(struct ath12k_base *ab)
- {
--	struct ath12k_link_vif *arvif;
--	u32 vdev_id, tx_status;
++{
 +	int status;
 +	struct ath12k_mgmt_rx_reo_context *reo_context = &ab->ag->rx_reo;
 +	struct ath12k_hw_group *ag = ab->ag;
- 
--	if (ath12k_pull_bcn_tx_status_ev(ab, skb->data, skb->len,
--					 &vdev_id, &tx_status) != 0) {
--		ath12k_warn(ab, "failed to extract bcn tx status");
--		return;
--	}
++
 +	if (!(ag->mlo_mem.is_mlo_mem_avail && ag->mgmt_rx_reorder))
 +		return 0;
- 
--	rcu_read_lock();
--	arvif = ath12k_mac_get_arvif_by_vdev_id(ab, vdev_id);
--	if (!arvif) {
--		ath12k_warn(ab, "invalid vdev id %d in bcn_tx_status",
--			    vdev_id);
--		rcu_read_unlock();
--		return;
++
 +	if (!reo_context->init_done)
 +		return 0;
 +
@@ -3054,28 +2760,22 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (status) {
 +		ath12k_err(ab, "Failed to de-initialize mgmt Rx reo list\n");
 +		return status;
- 	}
--	ath12k_mac_bcn_tx_event(arvif);
--	rcu_read_unlock();
++	}
 +
 +	reo_context->init_done = false;
 +
 +	return status;
- }
- 
--static void ath12k_vdev_stopped_event(struct ath12k_base *ab, struct sk_buff *skb)
++}
++
 +static void ath12k_fw_consumed_mgmt_rx_event(struct ath12k_base *ab, struct sk_buff *skb)
- {
++{
 +	struct ath12k_hw_group *ag = ab->ag;
 +	struct mgmt_rx_event_params *rx_ev;
- 	struct ath12k *ar;
--	u32 vdev_id = 0;
++	struct ath12k *ar;
 +	struct ath12k_mgmt_rx_reo_frame_descriptor desc = {0};
 +	bool is_queued = false;
 +	int ret;
- 
--	if (ath12k_pull_vdev_stopped_param_tlv(ab, skb, &vdev_id) != 0) {
--		ath12k_warn(ab, "failed to extract vdev stopped event");
++
 +	if (!(ag->mlo_mem.is_mlo_mem_avail && ag->mgmt_rx_reorder))
 +		return;
 +
@@ -3088,27 +2788,20 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	if (ath12k_pull_fw_consumed_mgmt_rx_params_tlv(ab, skb, rx_ev) != 0) {
 +		ath12k_warn(ab, "failed to extract mgmt rx event");
 +		kfree(rx_ev);
- 		return;
- 	}
- 
- 	rcu_read_lock();
--	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_id);
++		return;
++	}
++
++	rcu_read_lock();
 +	ar = ath12k_mac_get_ar_by_pdev_id(ab, rx_ev->pdev_id);
 +
- 	if (!ar) {
--		ath12k_warn(ab, "invalid vdev id in vdev stopped ev %d",
--			    vdev_id);
--		rcu_read_unlock();
--		return;
++	if (!ar) {
 +		ath12k_warn(ab, "invalid pdev_id %d in mgmt_rx_event\n",
 +			    rx_ev->pdev_id);
 +		goto exit;
- 	}
- 
--	complete(&ar->vdev_setup_done);
++	}
++
 +	rx_ev->reo_params.link_id = rx_ev->pdev_id;
- 
--	rcu_read_unlock();
++
 +	/* Populate frame descriptor */
 +	desc.type = ATH12K_MGMT_RX_REO_FRAME_DESC_HOST_CONSUMED_FRAME;
 +	desc.nbuf = NULL; /* No frame buffer */
@@ -3116,8 +2809,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	desc.ingress_timestamp = ktime_to_us(ktime_get());
 +	desc.list_size_rx = -1;
 +	desc.list_insertion_pos = -1;
- 
--	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev stopped for vdev id %d", vdev_id);
++
 +	desc.frame_type = IEEE80211_FTYPE_MGMT;
 +	desc.frame_subtype = 0xFF;
 +
@@ -3141,8 +2833,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		kfree(rx_ev);
 +
 +	rcu_read_unlock();
- }
- 
++}
++
  static void ath12k_mgmt_rx_event(struct ath12k_base *ab, struct sk_buff *skb)
  {
 -	struct mgmt_rx_event_params rx_ev = {0};
@@ -3151,22 +2843,22 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	struct ath12k *ar;
  	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
  	struct ieee80211_hdr *hdr;
-@@ -8237,45 +10633,56 @@ static void ath12k_mgmt_rx_event(struct
+@@ -8256,45 +10652,56 @@ static void ath12k_mgmt_rx_event(struct
  	struct ath12k_vif *ahvif;
  	struct ath12k_mgmt_frame_stats *mgmt_stats;
  	u16 frm_type = 0;
 +	struct ath12k_mgmt_rx_reo_frame_descriptor desc = {0};
 +	bool is_queued = false;
 +	int ret;
-+
+ 
+-	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, &rx_ev) != 0) {
 +	rx_ev = kmalloc(sizeof(*rx_ev), GFP_ATOMIC);
 +	if (!rx_ev) {
 +		dev_kfree_skb(skb);
 +		ath12k_err(ab, "failed to allocate rx event\n");
 +		return;
 +	}
- 
--	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, &rx_ev) != 0) {
++
 +	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, rx_ev) != 0) {
  		ath12k_warn(ab, "failed to extract mgmt rx event");
  		dev_kfree_skb(skb);
@@ -3219,7 +2911,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		status->band = NL80211_BAND_5GHZ;
  	} else {
  		/* Shouldn't happen unless list of advertised channels to
-@@ -8286,7 +10693,7 @@ static void ath12k_mgmt_rx_event(struct
+@@ -8305,7 +10712,7 @@ static void ath12k_mgmt_rx_event(struct
  		goto exit;
  	}
  
@@ -3228,7 +2920,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	    (status->band == NL80211_BAND_5GHZ || status->band == NL80211_BAND_6GHZ))
  		ath12k_dbg(ab, ATH12K_DBG_WMI,
  			   "wmi mgmt rx 11b (CCK) on 5/6GHz, band = %d\n", status->band);
-@@ -8294,11 +10701,11 @@ static void ath12k_mgmt_rx_event(struct
+@@ -8313,11 +10720,11 @@ static void ath12k_mgmt_rx_event(struct
  	sband = &ar->mac.sbands[status->band];
  
  	if (status->band != NL80211_BAND_6GHZ)
@@ -3243,7 +2935,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	hdr = (struct ieee80211_hdr *)skb->data;
  	fc = le16_to_cpu(hdr->frame_control);
-@@ -8356,6 +10763,43 @@ skip_mgmt_stats:
+@@ -8375,6 +10782,43 @@ skip_mgmt_stats:
  	 *	ath12k_mac_handle_beacon(ar, skb);
  	 */
  
@@ -3287,7 +2979,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ath12k_dbg(ab, ATH12K_DBG_MGMT,
  		   "event mgmt rx skb %pK len %d ftype %02x stype %02x\n",
  		   skb, skb->len,
-@@ -8369,6 +10813,13 @@ skip_mgmt_stats:
+@@ -8388,6 +10832,13 @@ skip_mgmt_stats:
  	ieee80211_rx_ni(ar->ah->hw, skb);
  
  exit:
@@ -3301,7 +2993,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	rcu_read_unlock();
  }
  
-@@ -10947,6 +13398,9 @@ static void ath12k_wmi_tlv_op_rx(struct
+@@ -10973,6 +13424,9 @@ static void ath12k_wmi_tlv_op_rx(struct
  	case WMI_VDEV_ADFS_OCAC_COMPLETE_EVENTID:
  		ath12k_process_ocac_complete_event(ab, skb);
  		break;
@@ -3311,13 +3003,15 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -11573,4 +14027,3 @@ int ath12k_wmi_vdev_adfs_ocac_abort_cmd_
+@@ -11600,4 +14054,3 @@ int ath12k_wmi_vdev_adfs_ocac_abort_cmd_
  	}
  	return ret;
  }
 -
---- a/drivers/net/wireless/ath/ath12k/wmi.h
-+++ b/drivers/net/wireless/ath/ath12k/wmi.h
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/wmi.h
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -428,6 +428,9 @@ enum wmi_tlv_cmd_id {
  	WMI_BSS_COLOR_CHANGE_ENABLE_CMDID,
  	WMI_VDEV_BCN_OFFLOAD_QUIET_CONFIG_CMDID,
@@ -3348,7 +3042,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_TAG_MLO_PEER_CREATE_PARAMS = 0x3D5,
  	WMI_TAG_MLO_VDEV_START_PARAMS = 0x3D6,
  	WMI_TAG_MLO_VDEV_CREATE_PARAMS = 0x3D7,
-@@ -5442,6 +5451,676 @@ struct mlo_glb_rx_reo_per_link_snapshot_
+@@ -5448,6 +5457,676 @@ struct mlo_glb_rx_reo_per_link_snapshot_
  	struct mgmt_rx_reo_snapshot hw_forwarded;
  };
  
@@ -4025,7 +3719,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  struct mgmt_rx_event_params {
  	u32 chan_freq;
  	u32 channel;
-@@ -5455,6 +6134,61 @@ struct mgmt_rx_event_params {
+@@ -5461,6 +6140,61 @@ struct mgmt_rx_event_params {
  	int rssi;
  	u32 tsf_delta;
  	u8 pdev_id;
@@ -4087,7 +3781,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  #define ATH_MAX_ANTENNA 4
-@@ -5480,6 +6214,8 @@ struct wmi_tlv_mgmt_rx_parse {
+@@ -5486,6 +6220,8 @@ struct wmi_tlv_mgmt_rx_parse {
  	struct wmi_mgmt_rx_hdr *fixed;
  	u8 *frame_buf;
  	bool frame_buf_done;
@@ -4096,7 +3790,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  #define MAX_ANTENNA_EIGHT 8
-@@ -7475,4 +8211,10 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+@@ -7481,4 +8217,10 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  int ath12k_wmi_vdev_adfs_ch_cfg_cmd_send(struct ath12k *ar,u32 vdev_id,
                                          struct cfg80211_chan_def *chandef);
  int ath12k_wmi_vdev_adfs_ocac_abort_cmd_send(struct ath12k *ar,u32 vdev_id);
@@ -4107,9 +3801,11 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +int
 +ath12k_mgmt_rx_reo_deinit_context(struct ath12k_base *ab);
  #endif
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9072,14 +9072,52 @@ static void ath12k_mac_radio_stop(struct
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/mac.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/mac.c
+@@ -9163,14 +9163,52 @@ static void ath12k_mac_radio_stop(struct
          spin_unlock_bh(&ar->data_lock);
  }
  
@@ -4162,7 +3858,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	mutex_lock(&ah->conf_mutex);
  	ar = ah->radio;
  	ab = ar->ab;
-@@ -9119,8 +9157,11 @@ static void ath12k_mac_op_stop(struct ie
+@@ -9211,8 +9249,11 @@ static void ath12k_mac_op_stop(struct ie
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
@@ -4174,8 +3870,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	mutex_lock(&ah->conf_mutex);
  	ar = ah->radio;
  
---- a/drivers/net/wireless/ath/ath12k/qmi.c
-+++ b/drivers/net/wireless/ath/ath12k/qmi.c
+Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/qmi.c
+===================================================================
+--- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/qmi.c
++++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/qmi.c
 @@ -3927,7 +3927,7 @@ int ath12k_qmi_mlo_global_snapshot_mem_i
  	struct target_mem_chunk *mlo_chunk;
  	int ret = 0, mlo_idx = 0;
