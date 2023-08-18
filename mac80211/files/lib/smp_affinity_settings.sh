@@ -818,6 +818,30 @@ enable_affinity_mi01_6() {
 	#For monitor interrupts
         irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+		echo "Configure Affinity for PPE DS for mi01_6" > /dev/ttyMSM0
+
+		# For Miami Board (RDP 468)
+		irq_rps=`grep edma_ppeds_rxfill_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
+
+		irq_rps=`grep edma_ppeds_rxdesc_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
+
+		irq_rps=`grep edma_ppeds_txcmpl_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
+
+		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+		irq_rps=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
+
+		irq_rps=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_rps" ] && echo 4 > /proc/irq/$irq_rps/smp_affinity
+	fi
 }
 
 enable_affinity_mi01_3() {
