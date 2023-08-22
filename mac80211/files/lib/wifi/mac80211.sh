@@ -536,7 +536,12 @@ detect_mac80211() {
 	if [ $(cat /sys/bus/coresight/devices/coresight-stm/enable) -eq 0 ]
 	then
 		chipset=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
-		board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+		board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $3}')
+
+		if [ -z $board ]; then
+			board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+		fi
+
 		if [ "$chipset" == "IPQ9574" ] && [ "$board" != "AP-AL02-C4" ] && [ "$board" != "AP-AL02-C9" ] && [ "$board" != "AP-AL02-C7" ]; then
 			echo 0 > /sys/bus/coresight/devices/coresight-stm/enable
 			echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
@@ -746,7 +751,12 @@ post_mac80211() {
 	esac
 
 	chipset=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
-	board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+	board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $3}')
+
+	if [ -z $board ]; then
+		board=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}')
+	fi
+
 	if [ "$chipset" == "IPQ5018" ]; then
 		echo "q6mem" > /sys/bus/coresight/devices/coresight-tmc-etr/out_mode
 		echo 1 > /sys/bus/coresight/devices/coresight-tmc-etr/curr_sink
