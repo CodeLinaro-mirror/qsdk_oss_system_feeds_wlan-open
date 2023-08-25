@@ -75,7 +75,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +		}
 +		sawf_ctx->max_msduq_per_tid = ab->max_msduq_per_tid;
 +		sawf_ctx->default_msduq_per_tid = ab->default_msduq_per_tid;
-+		mutex_init(&sawf_ctx->sawf_svc_lock);
++		spin_lock_init(&sawf_ctx->sawf_svc_lock);
 +	} else {/* Already initialized */
 +		return;
 +	}
@@ -122,7 +122,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +		return;
 +	}
 +
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +	new_param = &sawf_ctx->svc_classes[SVC_INDEX(sawf_params->svc_id)];
 +	new_param->svc_id = sawf_params->svc_id;
 +	memcpy(new_param->app_name, sawf_params->app_name, ATH12K_MAX_APP_NAME);
@@ -136,7 +136,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	new_param->tid = sawf_params->tid;
 +	new_param->msdu_rate_loss = sawf_params->msdu_rate_loss;
 +	new_param->configured = sawf_params->configured;
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +}
 +
 +bool ath12k_validate_sawf_param(struct ath12k_sawf_svc_params *params)
@@ -225,13 +225,13 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +		return false;
 +	}
 +
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +	if (sawf_ctx->svc_classes[SVC_INDEX(svc_id)].configured) {
-+		mutex_unlock(&sawf_ctx->sawf_svc_lock);
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +		return true;
 +	}
 +
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +	return false;
 +}
 +
@@ -245,9 +245,9 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	}
 +
 +	if (ath12k_svc_id_configured(svc_id)) {
-+		mutex_lock(&sawf_ctx->sawf_svc_lock);
++		spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +		tid = sawf_ctx->svc_classes[SVC_INDEX(svc_id)].tid;
-+		mutex_unlock(&sawf_ctx->sawf_svc_lock);
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +		return tid;
 +	}
 +
@@ -277,10 +277,10 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +		return false;
 +	}
 +
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +	sawf_svc_class = &sawf_ctx->svc_classes[SVC_INDEX(svc_id)];
 +	memset(sawf_svc_class, 0, sizeof(*sawf_svc_class));
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +
 +	return true;
 +}
@@ -410,7 +410,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	struct ath12k_sawf_svc_params svc_classes[ATH12K_SAWF_SVC_CLASS_MAX];
 +	u32 max_msduq_per_tid;
 +	u32 default_msduq_per_tid;
-+	struct mutex sawf_svc_lock;
++	spinlock_t sawf_svc_lock;
 +};
 +
 +extern bool ath12k_sawf_enable;
@@ -454,7 +454,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -1305,6 +1306,8 @@ struct ath12k_base {
+@@ -1308,6 +1309,8 @@ struct ath12k_base {
  	u32 rx_hash_ix3;
  
  	struct vendor_info id;
@@ -483,7 +483,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  }
  
  
-@@ -4875,6 +4879,8 @@ ath12k_wmi_copy_resource_config(struct w
+@@ -4876,6 +4880,8 @@ ath12k_wmi_copy_resource_config(struct w
  			  WMI_RSRC_CFG_FLAGS2_INTRABSS_MEC_WDS_LEARNING_DISABLE |
  			  u32_encode_bits(tg_cfg->dp_peer_meta_data_ver,
  					  WMI_RSRC_CFG_FLAGS2_RX_PEER_METADATA_VERSION);
@@ -492,7 +492,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	wmi_cfg->host_service_flags &= ~(1 << WMI_RSRC_CFG_HOST_SVC_FLAG_REG_CC_EXT_SUPPORT_BIT);
  	wmi_cfg->host_service_flags |= 1 << WMI_RSRC_CFG_HOST_SVC_FLAG_REG_CC_EXT_SUPPORT_BIT;
  	wmi_cfg->host_service_flags |= 1 << WMI_RSRC_CFG_HOST_SVC_FLAG_REO_QREF_SUPPORT_BIT;
-@@ -5856,6 +5862,8 @@ static int ath12k_pull_svc_ready_ext2(st
+@@ -5866,6 +5872,8 @@ static int ath12k_pull_svc_ready_ext2(st
  	param->max_user_per_ppdu_ofdma = ev->max_user_per_ppdu_ofdma;
  	param->max_user_per_ppdu_mumimo = ev->max_user_per_ppdu_mumimo;
  	param->target_cap_flags = ev->target_cap_flags;
@@ -501,7 +501,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	return 0;
  }
  
-@@ -5964,6 +5972,8 @@ static int ath12k_wmi_tlv_svc_rdy_ext2_p
+@@ -5974,6 +5982,8 @@ static int ath12k_wmi_tlv_svc_rdy_ext2_p
  			ath12k_warn(ab, "unable to extract ext params\n");
  			return ret;
  		}

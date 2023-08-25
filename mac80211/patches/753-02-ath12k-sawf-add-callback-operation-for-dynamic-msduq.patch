@@ -24,8 +24,6 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  drivers/net/wireless/ath/ath12k/vendor.c |  19 +-
  4 files changed, 291 insertions(+), 26 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/peer.h b/drivers/net/wireless/ath/ath12k/peer.h
-index 0048feb..cc943c7 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.h
 +++ b/drivers/net/wireless/ath/ath12k/peer.h
 @@ -8,6 +8,7 @@
@@ -44,8 +42,6 @@ index 0048feb..cc943c7 100644
  	int vdev_id;
  	u8 addr[ETH_ALEN];
  	int peer_id;
-diff --git a/drivers/net/wireless/ath/ath12k/sawf.c b/drivers/net/wireless/ath/ath12k/sawf.c
-index 1b54c66..f1f3e0b 100644
 --- a/drivers/net/wireless/ath/ath12k/sawf.c
 +++ b/drivers/net/wireless/ath/ath12k/sawf.c
 @@ -7,7 +7,9 @@
@@ -69,7 +65,7 @@ index 1b54c66..f1f3e0b 100644
  static struct ath12k_sawf_ctx *sawf_ctx;
  
  void ath12k_sawf_init(struct ath12k_base *ab)
-@@ -38,6 +44,11 @@ void ath12k_sawf_init(struct ath12k_base *ab)
+@@ -38,6 +44,11 @@ void ath12k_sawf_init(struct ath12k_base
  		return;
  	}
  
@@ -81,7 +77,7 @@ index 1b54c66..f1f3e0b 100644
  	ath12k_info(NULL, "SAWF context initialized\n");
  }
  
-@@ -55,6 +66,9 @@ void ath12k_sawf_deinit(struct ath12k_base *ab)
+@@ -55,6 +66,9 @@ void ath12k_sawf_deinit(struct ath12k_ba
  	if (!sawf_ctx)
  		return;
  
@@ -91,61 +87,62 @@ index 1b54c66..f1f3e0b 100644
  	kfree(sawf_ctx);
  	sawf_ctx = NULL;
  	ath12k_info(NULL, "SAWF context freed\n");
-@@ -80,7 +94,6 @@ void ath12k_update_svc_class(struct ath12k_sawf_svc_params *sawf_params)
+@@ -80,7 +94,6 @@ void ath12k_update_svc_class(struct ath1
  		return;
  	}
  
--	mutex_lock(&sawf_ctx->sawf_svc_lock);
+-	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  	new_param = &sawf_ctx->svc_classes[SVC_INDEX(sawf_params->svc_id)];
  	new_param->svc_id = sawf_params->svc_id;
  	memcpy(new_param->app_name, sawf_params->app_name, ATH12K_MAX_APP_NAME);
-@@ -94,7 +107,6 @@ void ath12k_update_svc_class(struct ath12k_sawf_svc_params *sawf_params)
+@@ -94,7 +107,6 @@ void ath12k_update_svc_class(struct ath1
  	new_param->tid = sawf_params->tid;
  	new_param->msdu_rate_loss = sawf_params->msdu_rate_loss;
  	new_param->configured = sawf_params->configured;
--	mutex_unlock(&sawf_ctx->sawf_svc_lock);
+-	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  }
  
  bool ath12k_validate_sawf_param(struct ath12k_sawf_svc_params *params)
-@@ -183,13 +195,12 @@ bool ath12k_svc_id_configured(u8 svc_id)
+@@ -183,13 +195,10 @@ bool ath12k_svc_id_configured(u8 svc_id)
  		return false;
  	}
  
--	mutex_lock(&sawf_ctx->sawf_svc_lock);
+-	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
+-	if (sawf_ctx->svc_classes[SVC_INDEX(svc_id)].configured) {
+-		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +	lockdep_assert_held(&sawf_ctx->sawf_svc_lock);
- 	if (sawf_ctx->svc_classes[SVC_INDEX(svc_id)].configured) {
- 		mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	if (sawf_ctx->svc_classes[SVC_INDEX(svc_id)].configured)
  		return true;
- 	}
+-	}
  
--	mutex_unlock(&sawf_ctx->sawf_svc_lock);
+-	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  	return false;
  }
  
-@@ -202,10 +213,9 @@ int ath12k_get_tid(u8 svc_id)
+@@ -202,10 +211,9 @@ int ath12k_get_tid(u8 svc_id)
  		return -ENODATA;
  	}
  
 +	lockdep_assert_held(&sawf_ctx->sawf_svc_lock);
  	if (ath12k_svc_id_configured(svc_id)) {
--		mutex_lock(&sawf_ctx->sawf_svc_lock);
+-		spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  		tid = sawf_ctx->svc_classes[SVC_INDEX(svc_id)].tid;
--		mutex_unlock(&sawf_ctx->sawf_svc_lock);
+-		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  		return tid;
  	}
  
-@@ -235,10 +245,8 @@ bool ath12k_disable_svc_class(u8 svc_id)
+@@ -235,10 +243,8 @@ bool ath12k_disable_svc_class(u8 svc_id)
  		return false;
  	}
  
--	mutex_lock(&sawf_ctx->sawf_svc_lock);
+-	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  	sawf_svc_class = &sawf_ctx->svc_classes[SVC_INDEX(svc_id)];
  	memset(sawf_svc_class, 0, sizeof(*sawf_svc_class));
--	mutex_unlock(&sawf_ctx->sawf_svc_lock);
+-	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  
  	return true;
  }
-@@ -327,19 +335,27 @@ static u32 ath12k_sawf_tid_calc(struct ath12k_sawf_svc_params *cmd)
+@@ -333,6 +339,10 @@ static u32 ath12k_sawf_tid_calc(struct a
  int ath12k_create_send_svc_params(struct ath12k_sawf_svc_params *param)
  {
  	int ret = 0;
@@ -153,42 +150,36 @@ index 1b54c66..f1f3e0b 100644
 +		ath12k_err(NULL, "SAWF context unavailable\n");
 +		return -EINVAL;
 +	}
-+
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
  
  	if (!ath12k_svc_id_valid(param->svc_id)) {
  		ath12k_warn(NULL, "svc_id: %u is invalid, Service ID range: %d - %d\n",
- 			   param->svc_id, ATH12K_SAWF_SVC_CLASS_MIN,
- 			   ATH12K_SAWF_SVC_CLASS_MAX);
--		return -EINVAL;
-+		ret = -EINVAL;
-+		goto sawf_svc_unlock;
+@@ -341,13 +351,16 @@ int ath12k_create_send_svc_params(struct
+ 		return -EINVAL;
  	}
  
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  	if (ath12k_svc_id_configured(param->svc_id)) {
  		if (ath12k_get_tid(param->svc_id) != param->tid) {
  			ath12k_err(NULL, "Updating service class failed for TID ID:%u",
  				   param->tid);
--			return -EINVAL;
-+			ret = -EINVAL;
-+			goto sawf_svc_unlock;
++			spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
+ 			return -EINVAL;
  		}
  	}
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  
-@@ -348,40 +364,250 @@ int ath12k_create_send_svc_params(struct ath12k_sawf_svc_params *param)
- 
- 	if (!ath12k_validate_sawf_param(param)) {
- 		ath12k_err(NULL, "Service class parameters validation failed\n");
--		return -EINVAL;
-+		ret = -EINVAL;
-+		goto sawf_svc_unlock;
+ 	if (param->tid == SAWF_SVC_PARAM_DEFAULT_TID)
+ 		param->tid = ath12k_sawf_tid_calc(param);
+@@ -358,36 +371,247 @@ int ath12k_create_send_svc_params(struct
  	}
  
  	ret = ath12k_send_sawf_configs_soc(param);
 -	if (ret) {
 +	if (!ret) {
 +		param->configured = true;
++		spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +		ath12k_update_svc_class(param);
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +	} else {
  		ath12k_err(NULL, "service class configuration failed\n");
 -		return ret;
@@ -196,8 +187,6 @@ index 1b54c66..f1f3e0b 100644
  
 -	param->configured = true;
 -	ath12k_update_svc_class(param);
-+sawf_svc_unlock:
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
  	return ret;
  }
  
@@ -209,32 +198,30 @@ index 1b54c66..f1f3e0b 100644
 +		return -EINVAL;
 +	}
  
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
  	if (!ath12k_svc_id_valid(svc_id)) {
  		ath12k_err(NULL, "svc_id: %u is invalid\n", svc_id);
--		return -EINVAL;
-+		ret = -EINVAL;
-+		goto unlock;
+ 		return -EINVAL;
  	}
  
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  	if (!ath12k_svc_id_configured(svc_id)) {
  		ath12k_err(NULL, "svc_id: %u is not configured\n", svc_id);
--		return -EINVAL;
-+		ret = -EINVAL;
-+		goto unlock;
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
+ 		return -EINVAL;
  	}
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
  
  	ret = ath12k_sawf_send_disable_soc(svc_id);
  	if (ret) {
  		ath12k_err(NULL, "svc_id: %u disabling failed\n", svc_id);
 -		return ret;
-+		goto unlock;
++		return -EINVAL;
  	}
  
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
  	ath12k_disable_svc_class(svc_id);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +
-+unlock:
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
  	return ret;
  }
 +
@@ -266,7 +253,9 @@ index 1b54c66..f1f3e0b 100644
 +	if (!ahvif)
 +		return NULL;
 +
-+	mutex_lock(&ahvif->ah->conf_mutex);
++	/* ToDo: Instead of mutex_lock, rcu locking will be used
++	   to access the ahvif->link
++	*/
 +	links_map = ahvif->links_map;
 +	/* Look into all the links, find the matching peer and
 +	 * return with ab and peer_id detail */
@@ -287,7 +276,6 @@ index 1b54c66..f1f3e0b 100644
 +
 +		ab = NULL;
 +	}
-+	mutex_unlock(&ahvif->ah->conf_mutex);
 +	return ab;
 +}
 +
@@ -360,10 +348,14 @@ index 1b54c66..f1f3e0b 100644
 +	if (!sawf_ctx)
 +		return SAWF_PEER_MSDUQ_INVALID;
 +
-+	if (!ath12k_svc_id_configured(svc_id))
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
++	if (!ath12k_svc_id_configured(svc_id)) {
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +		return SAWF_PEER_MSDUQ_INVALID;
++	}
 +
 +	svc_tid = ath12k_get_tid(svc_id);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +
 +	if ((svc_tid < 0) || (svc_tid >= ATH12K_SAWF_MAX_TID_SUPPORT))
 +		return SAWF_PEER_MSDUQ_INVALID;
@@ -425,17 +417,12 @@ index 1b54c66..f1f3e0b 100644
 +	if (!ab)
 +		return SAWF_PEER_MSDUQ_INVALID;
 +
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
 +	peer_msduq = ath12k_sawf_alloc_msduq(ab, service_id, peer_id);
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
-+
 +	ath12k_dbg(ab, ATH12K_DBG_SAWF,
 +		   "SAWF get msduq:peer %pM SvcId %u:msduq id 0x%x allocated\n",
 +		   peer_mac, service_id, peer_msduq);
 +	return peer_msduq;
 +}
-diff --git a/drivers/net/wireless/ath/ath12k/sawf.h b/drivers/net/wireless/ath/ath12k/sawf.h
-index 35b7f86..11d8f21 100644
 --- a/drivers/net/wireless/ath/ath12k/sawf.h
 +++ b/drivers/net/wireless/ath/ath12k/sawf.h
 @@ -10,6 +10,7 @@
@@ -461,7 +448,7 @@ index 35b7f86..11d8f21 100644
   * Min throughput limit 0 - 10 Gb/s
   * Granularity: 1 Kb/s
 @@ -149,6 +157,29 @@ struct ath12k_sawf_ctx {
- 	struct mutex sawf_svc_lock;
+ 	spinlock_t sawf_svc_lock;
  };
  
 +/**
@@ -498,11 +485,9 @@ index 35b7f86..11d8f21 100644
 +			  u8 *peer_mac, u32 service_id,
 +			  u32 dscp, u32 rule_id);
  #endif /* ATH11K_SAWF_H */
-diff --git a/drivers/net/wireless/ath/ath12k/vendor.c b/drivers/net/wireless/ath/ath12k/vendor.c
-index 8df6c20..a84ee58 100644
 --- a/drivers/net/wireless/ath/ath12k/vendor.c
 +++ b/drivers/net/wireless/ath/ath12k/vendor.c
-@@ -144,6 +144,12 @@ static int ath12k_vendor_view_sawf_config(struct wiphy *wihpy,
+@@ -144,6 +144,12 @@ static int ath12k_vendor_view_sawf_confi
  	if (!ath12k_sawf_enable)
  		return -EOPNOTSUPP;
  
@@ -515,7 +500,7 @@ index 8df6c20..a84ee58 100644
  	ret = nla_parse(tb, QCA_WLAN_VENDOR_SAWF_ATTR_CONFIG_MAX, data, data_len,
  			ath12k_vendor_sawf_config_policy, NULL);
  
-@@ -153,12 +159,16 @@ static int ath12k_vendor_view_sawf_config(struct wiphy *wihpy,
+@@ -153,12 +159,16 @@ static int ath12k_vendor_view_sawf_confi
  	}
  
  	if (tb[QCN_WLAN_VENDOR_ATTR_SAWF_SVC_ID]) {
@@ -526,14 +511,14 @@ index 8df6c20..a84ee58 100644
  			return -EINVAL;
  		}
 -		if (!ath12k_svc_id_configured(svc_id))
-+		mutex_lock(&sawf_ctx->sawf_svc_lock);
++		spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +		isconfigured = ath12k_svc_id_configured(svc_id);
-+		mutex_unlock(&sawf_ctx->sawf_svc_lock);
++		spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +		if (!isconfigured)
  			return -EINVAL;
  	}
  
-@@ -166,13 +176,6 @@ static int ath12k_vendor_view_sawf_config(struct wiphy *wihpy,
+@@ -166,13 +176,6 @@ static int ath12k_vendor_view_sawf_confi
  	if (storage && (*storage == ATH12K_SAWF_SVC_CLASS_MAX))
  		return 0;
  
@@ -547,6 +532,3 @@ index 8df6c20..a84ee58 100644
  	sawf_svc_classes = nla_nest_start(msg,
  					  QCN_WLAN_VENDOR_ATTR_SAWF_SERVICE_CLASSES);
  
--- 
-2.17.1
-
