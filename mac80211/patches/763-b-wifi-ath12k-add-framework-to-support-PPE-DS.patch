@@ -1198,20 +1198,20 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #include <linux/dma-mapping.h>
  #include <asm/cacheflush.h>
  
-@@ -98,6 +99,76 @@ enum hal_encrypt_type ath12k_dp_tx_get_e
+@@ -98,6 +99,73 @@ enum hal_encrypt_type ath12k_dp_tx_get_e
  	}
  }
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +#define ATH12K_PPEDS_HOTLIST_LEN_MAX 1024
 +struct sk_buff *
-+ath12k_dp_ppeds_tx_release_desc(struct ath12k_dp *dp,
++ath12k_dp_ppeds_tx_release_desc_nolock(struct ath12k_dp *dp,
 +				struct ath12k_ppeds_tx_desc_info *tx_desc,
 +				u8 ring_id)
 +{
 +	struct sk_buff *skb = NULL;
 +
-+	spin_lock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
++	lockdep_assert_held(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +	if (dp->ppeds_tx_desc_reuse_list_len[ring_id] < ATH12K_PPEDS_HOTLIST_LEN_MAX &&
 +	    tx_desc->skb) {
 +		list_move_tail(&tx_desc->list, &dp->ppeds_tx_desc_reuse_list[ring_id]);
@@ -1221,17 +1221,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		tx_desc->skb = NULL;
 +		list_move_tail(&tx_desc->list, &dp->ppeds_tx_desc_free_list[ring_id]);
 +	}
-+	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +
 +	return skb;
 +}
 +
-+struct ath12k_ppeds_tx_desc_info *ath12k_dp_ppeds_tx_assign_desc(struct ath12k_dp *dp,
-+							      u8 ring_id)
++struct ath12k_ppeds_tx_desc_info *
++ath12k_dp_ppeds_tx_assign_desc_nolock(struct ath12k_dp *dp,
++				      u8 ring_id)
 +{
 +	struct ath12k_ppeds_tx_desc_info *desc, *next;
 +
-+	spin_lock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
++	lockdep_assert_held(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +	/* first try to fetch descriptor from hotlist if not use free list */
 +	desc = list_first_entry_or_null(&dp->ppeds_tx_desc_reuse_list[ring_id],
 +					struct ath12k_ppeds_tx_desc_info,
@@ -1250,7 +1250,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +							list);
 +		prefetch(next);
 +
-+		spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +		return desc;
 +	}
 +
@@ -1260,12 +1259,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +					list);
 +	if (unlikely(!desc)) {
 +		ath12k_warn(dp->ab, "failed to allocate data Tx buffer\n");
-+		spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +		return NULL;
 +	}
 +
 +	list_move_tail(&desc->list, &dp->ppeds_tx_desc_used_list[ring_id]);
-+	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ring_id]);
 +
 +	return desc;
 +}
@@ -1275,11 +1272,33 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static void ath12k_dp_tx_release_txbuf(struct ath12k_dp *dp,
  				       struct ath12k_tx_desc_info *tx_desc,
  				       u8 ring_id)
-@@ -1093,6 +1164,124 @@ static inline bool ath12k_dp_tx_completi
+@@ -1093,6 +1161,143 @@ static inline bool ath12k_dp_tx_completi
  	return true;
  }
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++static inline
++void ath12k_dp_ppeds_tx_comp_get_desc(struct ath12k_base *ab,
++				      struct hal_wbm_completion_ring_tx *tx_status,
++				      struct ath12k_ppeds_tx_desc_info **tx_desc)
++{
++        u64 desc_va = 0;
++	u32 desc_id;
++
++	if (likely(HAL_WBM_COMPL_TX_INFO0_CC_DONE & tx_status->info0)) {
++		/* HW done cookie conversion */
++		desc_va = ((u64)tx_status->buf_va_hi << 32 |
++			   tx_status->buf_va_lo);
++		*tx_desc = (struct ath12k_ppeds_tx_desc_info *)((unsigned long)desc_va);
++	} else {
++		/* SW does cookie conversion to VA */
++		desc_id = u32_get_bits(tx_status->buf_va_hi,
++				       BUFFER_ADDR_INFO1_SW_COOKIE);
++
++		*tx_desc = ath12k_dp_get_ppeds_tx_desc(ab, desc_id);
++	}
++}
++
 +int ath12k_ppeds_tx_completion_handler(struct ath12k_base *ab, int budget)
 +{
 +	struct ath12k_dp *dp = &ab->dp;
@@ -1288,23 +1307,29 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	struct hal_srng *status_ring = &ab->hal.srng_list[hal_ring_id];
 +	struct ath12k_ppeds_tx_desc_info *tx_desc = NULL;
 +	struct sk_buff *msdu;
-+	u32 *desc, desc_id;
++	u32 *desc;
 +	u8 mac_id;
-+	u64 desc_va;
 +	int valid_entries, count = 0, i = 0;
 +	struct hal_wbm_completion_ring_tx *tx_status;
 +	struct htt_tx_wbm_completion *status_desc;
 +	enum hal_wbm_rel_src_module buf_rel_source;
 +	struct sk_buff_head free_list_head;
 +	int work_done = 0, htt_status;
++	size_t stat_size;
++
++	if (likely(ab->stats_disable))
++		/* only need buf_addr_info and info0 */
++		stat_size = 3 * sizeof(u32);
++	else
++		stat_size = sizeof(struct hal_wbm_release_ring);
 +
 +	spin_lock_bh(&status_ring->lock);
 +
-+	ath12k_hal_srng_access_begin(ab, status_ring);
++	ath12k_hal_srng_access_dst_ring_begin_nolock(ab, status_ring);
 +
 +	valid_entries = ath12k_hal_srng_dst_num_free(ab, status_ring, false);
 +	if (!valid_entries) {
-+		ath12k_hal_srng_access_end(ab, status_ring);
++		ath12k_hal_srng_access_dst_ring_end_nolock(status_ring);
 +		spin_unlock_bh(&status_ring->lock);
 +		return work_done;
 +	}
@@ -1320,44 +1345,34 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		if (!desc || !ath12k_dp_tx_completion_valid(desc))
 +			continue;
 +
-+		memcpy(&tx_ring->tx_status[count],
-+		       desc, sizeof(struct hal_wbm_release_ring));
++		memcpy(&tx_ring->tx_status[count], desc, stat_size);
 +		count++;
 +
 +		if (count == valid_entries)
 +			break;
 +	}
 +
-+	ath12k_hal_srng_access_end(ab, status_ring);
++	ath12k_hal_srng_access_dst_ring_end_nolock(status_ring);
 +
 +	spin_unlock_bh(&status_ring->lock);
 +
++	spin_lock_bh(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +	while (count--) {
 +		tx_status = &tx_ring->tx_status[i++];
 +
-+		if (likely(u32_get_bits(tx_status->info0, HAL_WBM_COMPL_TX_INFO0_CC_DONE))) {
-+			/* HW done cookie conversion */
-+			desc_va = ((u64)tx_status->buf_va_hi << 32 |
-+					tx_status->buf_va_lo);
-+			tx_desc = (struct ath12k_ppeds_tx_desc_info *)((unsigned long)desc_va);
-+		} else {
-+			/* SW does cookie conversion to VA */
-+			desc_id = u32_get_bits(tx_status->buf_va_hi,
-+					       BUFFER_ADDR_INFO1_SW_COOKIE);
-+
-+			tx_desc = ath12k_dp_get_ppeds_tx_desc(ab, desc_id);
-+		}
++		ath12k_dp_ppeds_tx_comp_get_desc(ab, tx_status, &tx_desc);
 +		if (unlikely(!tx_desc)) {
 +			ath12k_warn(ab, "unable to retrieve ppe ds tx_desc!");
 +			continue;
 +		}
 +
 +		mac_id = tx_desc->mac_id;
++
 +		/* Release descriptor as soon as extracting necessary info
 +		 * to reduce contention
 +		 */
-+		msdu = ath12k_dp_ppeds_tx_release_desc(dp, tx_desc,
-+						       ATH12K_PPEDS_DEFAULT_POOL_ID);
++		msdu = ath12k_dp_ppeds_tx_release_desc_nolock(dp, tx_desc,
++							      ATH12K_PPEDS_DEFAULT_POOL_ID);
 +		buf_rel_source = FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE,
 +					   tx_status->info0);
 +		if (unlikely(buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)) {
@@ -1391,6 +1406,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +		work_done++;
 +	}
++	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +	dev_kfree_skb_list_fast(&free_list_head);
 +
 +	return work_done;
@@ -1400,17 +1416,36 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
  				    int budget)
  {
+@@ -1122,7 +1327,7 @@ int ath12k_dp_tx_completion_handler(stru
+ 
+ 	valid_entries = ath12k_hal_srng_dst_num_free(ab, status_ring, false);
+ 	if (!valid_entries) {
+-		ath12k_hal_srng_access_umac_dst_ring_end_nolock(status_ring);
++		ath12k_hal_srng_access_dst_ring_end_nolock(status_ring);
+ 		return 0;
+ 	}
+ 
+@@ -1229,7 +1434,7 @@ int ath12k_dp_tx_completion_handler(stru
+ 						   tx_ring->tcl_data_ring_id);
+ 		}
+ 	}
+-	ath12k_hal_srng_access_umac_dst_ring_end_nolock(status_ring);
++	ath12k_hal_srng_access_dst_ring_end_nolock(status_ring);
+ 	dev_kfree_skb_list_fast(&free_list_head);
+ 
+ 	return (orig_budget - budget);
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.h
-@@ -220,7 +220,11 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -220,7 +220,12 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  		 bool gsn_valid, int mcbc_gsn);
  int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
  				    int tx_comp_budget);
 -
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +int ath12k_ppeds_tx_completion_handler(struct ath12k_base *ab, int ring_id);
-+struct ath12k_ppeds_tx_desc_info *ath12k_dp_ppeds_tx_assign_desc(struct ath12k_dp *dp,
-+							   u8 ring_id);
++struct ath12k_ppeds_tx_desc_info *
++ath12k_dp_ppeds_tx_assign_desc_nolock(struct ath12k_dp *dp,
++				      u8 ring_id);
 +#endif
  int ath12k_dp_tx_htt_h2t_ppdu_stats_req(struct ath12k *ar, u32 mask);
  int
@@ -1483,45 +1518,46 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	return 0;
  }
  
-@@ -1646,6 +1657,37 @@ u32 *ath12k_hal_srng_dst_get_next_cache_
+@@ -1646,6 +1657,38 @@ u32 *ath12k_hal_srng_dst_get_next_cache_
  	return desc;
  }
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +void ath12k_hal_srng_ppeds_dst_inv_entry(struct ath12k_base *ab,
-+                                         struct hal_srng *srng, int entries)
++					 struct hal_srng *srng, int entries)
 +{
-+       u32 *desc, *last_desc;
-+       u32 tp, hp;
-+       u32 remaining_entries;
++	u32 *desc, *last_desc;
++	u32 tp, hp;
++	u32 remaining_entries;
 +
++	if (!(srng->flags & HAL_SRNG_FLAGS_CACHED) || !entries)
++		return;
 +
-+       if (!(srng->flags & HAL_SRNG_FLAGS_CACHED) || !entries)
-+               return;
++	tp = srng->u.dst_ring.tp;
++	hp = srng->u.dst_ring.cached_hp;
 +
-+       tp = srng->u.dst_ring.tp;
-+       hp = srng->u.dst_ring.cached_hp;
++	desc = srng->ring_base_vaddr + tp;
++	if (hp > tp) {
++		last_desc = ((void *)desc + entries * srng->entry_size * sizeof(u32));
++		dmac_inv_range_no_dsb((void *)desc,
++				      (void *)last_desc);
++	} else {
++		remaining_entries = srng->ring_size - tp;
++		last_desc = ((void *)desc + remaining_entries * sizeof(u32));
++		dmac_inv_range_no_dsb((void *)desc, (void *)last_desc);
 +
-+       desc = srng->ring_base_vaddr + tp;
-+       if (hp > tp) {
-+               last_desc = ((void *)desc + entries * srng->entry_size * sizeof(u32));
-+               dmac_inv_range_no_dsb((void *)desc,
-+                                     (void *)last_desc);
-+       } else {
-+               remaining_entries = srng->ring_size - tp;
-+               last_desc = ((void *)desc + remaining_entries * sizeof(u32));
-+               dmac_inv_range_no_dsb((void *)desc, (void *)last_desc);
++		last_desc = ((void *)srng->ring_base_vaddr + hp * sizeof(u32));
++		dmac_inv_range_no_dsb((void *)srng->ring_base_vaddr, (void *)last_desc);
++	}
 +
-+               last_desc = ((void *)srng->ring_base_vaddr + hp * sizeof(u32));
-+               dmac_inv_range_no_dsb((void *)srng->ring_base_vaddr, (void *)last_desc);
-+       }
++	dsb(st);
 +}
 +#endif
 +
  void ath12k_hal_srng_dst_invalidate_entry(struct ath12k_base *ab,
  					  struct hal_srng *srng, int entries)
  {
-@@ -2197,6 +2239,15 @@ void ath12k_hal_srng_shadow_config(struc
+@@ -2197,6 +2240,15 @@ void ath12k_hal_srng_shadow_config(struc
  	}
  }
  
@@ -1539,9 +1575,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  {
 --- a/drivers/net/wireless/ath/ath12k/hal.h
 +++ b/drivers/net/wireless/ath/ath12k/hal.h
-@@ -144,11 +144,6 @@ struct ath12k_base;
- 		((ab)->hw_params->regs->hal_ppe_rel_ring_base)
- #define HAL_WBM_PPE_RELEASE_RING_HP		0x00003020
+@@ -139,11 +139,6 @@ struct ath12k_base;
+ #define HAL_TCL_PPE2TCL1_RING_BASE_LSB		0x00000c48
+ #define HAL_TCL_PPE2TCL1_RING_HP		0x00002038
  
 -/* WBM PPE Release Ring address */
 -#define HAL_WBM_PPE_RELEASE_RING_BASE_LSB(ab) \
@@ -1551,7 +1587,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /* REO2SW(x) R0 ring configuration address */
  #define HAL_REO1_GEN_ENABLE			0x00000000
  #define HAL_REO1_MISC_CTRL_ADDR(ab) \
-@@ -199,6 +194,9 @@ struct ath12k_base;
+@@ -194,6 +189,9 @@ struct ath12k_base;
  #define HAL_REO1_RING_MISC_OFFSET \
  		(HAL_REO1_RING_MISC(ab) - HAL_REO1_RING_BASE_LSB(ab))
  
@@ -1561,7 +1597,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /* REO2SW(x) R2 ring pointers (head/tail) address */
  #define HAL_REO1_RING_HP			0x00003048
  #define HAL_REO1_RING_TP			0x0000304c
-@@ -245,6 +243,12 @@ struct ath12k_base;
+@@ -240,6 +238,12 @@ struct ath12k_base;
  		((ab)->hw_params->regs->hal_reo_status_ring_base)
  #define HAL_REO_STATUS_HP			0x000030a8
  
@@ -1574,7 +1610,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /* WBM Idle R0 address */
  #define HAL_WBM_IDLE_LINK_RING_BASE_LSB(ab) \
  	((ab)->hw_params->regs->hal_wbm_idle_ring_base_lsb)
-@@ -312,6 +316,7 @@ struct ath12k_base;
+@@ -307,6 +311,7 @@ struct ath12k_base;
  #define HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW2_EN		BIT(3)
  #define HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW3_EN		BIT(4)
  #define HAL_WBM_SW_COOKIE_CONV_CFG_WBM2SW4_EN		BIT(5)
@@ -1582,7 +1618,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #define HAL_WBM_SW_COOKIE_CONV_CFG_GLOBAL_EN		BIT(8)
  
  /* TCL ring feild mask and offset */
-@@ -393,6 +398,8 @@ struct ath12k_base;
+@@ -388,6 +393,8 @@ struct ath12k_base;
  #define HAL_REO_SW2REO_RING_BASE_MSB_RING_SIZE		0x0000ffff
  #define HAL_REO_CMD_RING_BASE_MSB_RING_SIZE		0x0000ffff
  #define HAL_REO_STATUS_RING_BASE_MSB_RING_SIZE		0x0000ffff
@@ -1591,7 +1627,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #define HAL_SW2TCL1_RING_BASE_MSB_RING_SIZE		0x000fffff
  #define HAL_SW2TCL1_CMD_RING_BASE_MSB_RING_SIZE		0x000fffff
  #define HAL_TCL_STATUS_RING_BASE_MSB_RING_SIZE		0x0000ffff
-@@ -404,9 +411,11 @@ struct ath12k_base;
+@@ -399,9 +406,11 @@ struct ath12k_base;
  #define HAL_WBM2SW_RELEASE_RING_BASE_MSB_RING_SIZE	0x000fffff
  #define HAL_RXDMA_RING_MAX_SIZE				0x0000ffff
  #define HAL_RXDMA_RING_MAX_SIZE_BE			0x000fffff
@@ -1604,7 +1640,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /* Add any other errors here and return them in
   * ath12k_hal_rx_desc_get_err().
   */
-@@ -565,6 +574,7 @@ enum hal_ring_type {
+@@ -560,6 +569,7 @@ enum hal_ring_type {
  	HAL_REO_REINJECT,
  	HAL_REO_CMD,
  	HAL_REO_STATUS,
@@ -1612,11 +1648,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	HAL_TCL_DATA,
  	HAL_TCL_CMD,
  	HAL_TCL_STATUS,
-@@ -796,13 +806,16 @@ struct hal_srng {
+@@ -791,13 +801,16 @@ struct hal_srng {
  };
  
  /* Interrupt mitigation - Batch threshold in terms of numer of frames */
-+#define HAL_SRNG_INT_BATCH_THRESHOLD_PPE_WBM2SW_REL 64
++#define HAL_SRNG_INT_BATCH_THRESHOLD_PPE_WBM2SW_REL 512
  #define HAL_SRNG_INT_BATCH_THRESHOLD_TX 64
  #define HAL_SRNG_INT_BATCH_THRESHOLD_RX 128
 +#define HAL_SRNG_INT_BATCH_THRESHOLD_PPE2TCL 0
@@ -1629,7 +1665,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #define HAL_SRNG_INT_TIMER_THRESHOLD_OTHER 256
  
  enum hal_srng_mac_type {
-@@ -1202,6 +1215,10 @@ void ath12k_hal_srng_shadow_update_hp_tp
+@@ -1197,6 +1210,10 @@ void ath12k_hal_srng_shadow_update_hp_tp
  					 struct hal_srng *srng);
  u32 *ath12k_hal_srng_dst_get_next_cache_entry(struct ath12k_base *ab,
  					      struct hal_srng *srng);
@@ -1640,7 +1676,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  void ath12k_hal_srng_dst_invalidate_entry(struct ath12k_base *ab,
  					  struct hal_srng *srng, int entries);
  void ath12k_hal_reo_ring_ctrl_hash_ix3_setup(struct ath12k_base *ab,
-@@ -1211,6 +1228,7 @@ void ath12k_hal_reo_ring_ctrl_hash_ix2_s
+@@ -1206,6 +1223,7 @@ void ath12k_hal_reo_ring_ctrl_hash_ix2_s
  void ath12k_hal_reo_shared_qaddr_cache_clear(struct ath12k_base *ab);
  void ath12k_hal_srng_prefetch_desc(struct ath12k_base *ab,
  				   struct hal_srng *srng);
@@ -1648,6 +1684,15 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static inline
  u32 *ath12k_hal_srng_src_get_next_entry_nolock(struct ath12k_base *ab,
+@@ -1265,7 +1283,7 @@ void ath12k_hal_srng_access_umac_src_rin
+ }
+ 
+ static inline
+-void ath12k_hal_srng_access_umac_dst_ring_end_nolock(struct hal_srng *srng)
++void ath12k_hal_srng_access_dst_ring_end_nolock(struct hal_srng *srng)
+ {
+ 	srng->u.dst_ring.last_hp = *srng->u.dst_ring.hp_addr;
+ 	writel_relaxed(srng->u.dst_ring.tp, srng->u.dst_ring.tp_addr_direct);
 --- a/drivers/net/wireless/ath/ath12k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -923,53 +923,6 @@ struct hal_reo_dest_ring {
@@ -2278,7 +2323,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #endif /* ATH12K_PCI_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,989 @@
+@@ -0,0 +1,987 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2298,7 +2343,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +#include "ppe.h"
 +
 +extern struct sk_buff *
-+ath12k_dp_ppeds_tx_release_desc(struct ath12k_dp *dp,
++ath12k_dp_ppeds_tx_release_desc_nolock(struct ath12k_dp *dp,
 +				struct ath12k_ppeds_tx_desc_info *tx_desc,
 +				u8 ring_id);
 +
@@ -2578,18 +2623,22 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	int i;
 +	int allocated = 0;
 +	struct sk_buff *skb = NULL;
-+	int flags = GFP_KERNEL;
++	int flags = GFP_ATOMIC;
 +	dma_addr_t paddr;
 +	struct ath12k_ppeds_tx_desc_info *tx_desc = NULL;
 +
++#if LINUX_VERSION_IS_GEQ(4,4,0)
++	flags = flags & ~__GFP_KSWAPD_RECLAIM;
++#endif
++
++	spin_lock_bh(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +	for (i = 0; i < num_buff_req; i++) {
-+		tx_desc = ath12k_dp_ppeds_tx_assign_desc(dp, ATH12K_PPEDS_DEFAULT_POOL_ID);
++		tx_desc = ath12k_dp_ppeds_tx_assign_desc_nolock(dp, ATH12K_PPEDS_DEFAULT_POOL_ID);
 +		if (unlikely(!tx_desc)) {
 +			ath12k_err(ab, "ran out of ppeds tx desc!\n");
 +			dsb(st);
 +			break;
 +		}
-+
 +
 +		/* allocate new skb only if one was not already found from reuse list */
 +		if (!tx_desc->skb) {
@@ -2598,16 +2647,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			 * reset can be avoided, since the DS packets were not
 +			 * processed by SW
 +			 */
-+			if (in_interrupt() || irqs_disabled() || in_atomic()) {
-+				flags = GFP_ATOMIC;
-+#if LINUX_VERSION_IS_GEQ(4,4,0)
-+				flags = flags & ~__GFP_KSWAPD_RECLAIM;
-+#endif
-+			}
-+
 +			skb = __netdev_alloc_skb_no_skb_reset(NULL, buff_size, flags);
 +			if (unlikely(!skb)) {
-+				ath12k_dp_ppeds_tx_release_desc(dp, tx_desc,
++				ath12k_dp_ppeds_tx_release_desc_nolock(dp, tx_desc,
 +								ATH12K_PPEDS_DEFAULT_POOL_ID);
 +				break;
 +			}
@@ -2630,6 +2672,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		arr[i].buff_addr = tx_desc->paddr;
 +		allocated++;
 +	}
++	spin_unlock_bh(&dp->ppeds_tx_desc_lock[ATH12K_PPEDS_DEFAULT_POOL_ID]);
 +
 +	dsb(st);
 +
