@@ -213,7 +213,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		return -ENOBUFS;
 +
 +	tailroom = skb_tailroom(msg);
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
++	spin_lock_bh(&sawf_ctx->sawf_svc_lock);
 +	for (i = (svc_id) ? (svc_id - 1) : (*storage);
 +	     i < ATH12K_SAWF_SVC_CLASS_MAX && tailroom > nested_range;
 +	     i += (svc_id) ? (ATH12K_SAWF_SVC_CLASS_MAX) : (1)) {
@@ -261,7 +261,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		tailroom -= nested_range;
 +		j++;
 +	}
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +	nla_nest_end(msg, sawf_svc_classes);
 +
 +	*storage = (svc_id) ? (ATH12K_SAWF_SVC_CLASS_MAX) : (i);
@@ -272,7 +272,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	return msg->len;
 +
 +nla_put_failure:
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
++	spin_unlock_bh(&sawf_ctx->sawf_svc_lock);
 +	return -ENOBUFS;
 +}
 +
@@ -361,7 +361,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -14987,6 +14987,8 @@ static int ath12k_mac_hw_register(struct
+@@ -15021,6 +15021,8 @@ static int ath12k_mac_hw_register(struct
  	ah->hw->wiphy->regulatory_flags = REGULATORY_WIPHY_SELF_MANAGED;
  	ah->hw->wiphy->reg_notifier = ath12k_reg_notifier;
  
@@ -372,7 +372,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		ieee80211_hw_set(hw, SW_CRYPTO_CONTROL);
 --- a/drivers/net/wireless/ath/ath12k/sawf.c
 +++ b/drivers/net/wireless/ath/ath12k/sawf.c
-@@ -242,3 +242,149 @@ bool ath12k_disable_svc_class(u8 svc_id)
+@@ -242,3 +242,145 @@ bool ath12k_disable_svc_class(u8 svc_id)
  
  	return true;
  }
@@ -383,7 +383,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +int ath12k_sawf_reconfigure_on_crash(struct ath12k_base *ab)
 +{
-+	struct ath12k_sawf_svc_params *svc_class;
++	struct ath12k_sawf_svc_params svc_class = {};
 +	struct ath12k *ar;
 +	int i;
 +
@@ -399,16 +399,12 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		return -ENODATA;
 +	}
 +
-+	mutex_lock(&sawf_ctx->sawf_svc_lock);
-+
 +	for (i = 0; i < ATH12K_SAWF_SVC_CLASS_MAX; i++) {
 +		if (!sawf_ctx->svc_classes[i].configured)
 +			continue;
-+		svc_class = &sawf_ctx->svc_classes[i];
-+		ath12k_wmi_svc_config_send(ar, svc_class);
++		svc_class = sawf_ctx->svc_classes[i];
++		ath12k_wmi_svc_config_send(ar, &svc_class);
 +	}
-+
-+	mutex_unlock(&sawf_ctx->sawf_svc_lock);
 +	return 0;
 +}
 +
