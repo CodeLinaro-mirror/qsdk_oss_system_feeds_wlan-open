@@ -209,6 +209,8 @@ update_mld_vap_details() {
 	config_load wireless
 	mld_vaps_count=0
 	radio_up_count=0
+	sta_vaps_count=0
+	sta_radio=0
 
 	mac80211_get_wifi_mlds() {
 		append _mlds $1
