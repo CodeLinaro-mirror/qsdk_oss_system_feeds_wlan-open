@@ -1211,7 +1211,6 @@ mac80211_prepare_vif() {
 			iw "$ifname" set power_save "$powersave"
 			sta_ifname=$ifname
 			STALIST="${STALIST}$ifname "
-			touch /var/run/wpa_supplicant-$device-updated-cfg
 		;;
 	esac
 
@@ -1397,7 +1396,7 @@ mac80211_setup_vif() {
 	json_select ..
 
 	json_select config
-	json_get_vars mode
+	json_get_vars mode mld
 	json_get_var vif_txpower txpower
 
 	if [ "$mode" != "ap" ] || \
@@ -1490,6 +1489,8 @@ mac80211_setup_vif() {
 			sta_started=0
 			if ([ "$is_sphy_mband" -eq 1 ] &&
 			    [ "$sta_vaps_count" -gt 1 ] && [ "$sta_radio" -gt 1 ]); then
+				#Keep count of the links to be supported before the supplicant is started
+				touch /var/run/wpa_supplicant-$device-updated-cfg
 				sta_cfg_updated=$(ls /var/run/wpa_supplicant-*-updated-cfg | wc -l)
 				if [ -n "$freq_list" ]; then
 					if [ -f  "/tmp/${mld}_freq_list" ]; then
