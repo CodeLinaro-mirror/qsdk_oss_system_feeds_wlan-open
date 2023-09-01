@@ -2259,7 +2259,7 @@ drv_mac80211_setup() {
 				if ([ $sta_vaps_count -eq 1 ] && [ $sta_radio -eq 1 ]); then
                                        ap_ifname=$(uci -q -P /var/state get wireless.$mld.ap_ifnames)
 				fi
-				. /lib/apsta_mode.sh "$sta_ifname" "$ap_ifname" "$hostapd_conf_file" "$band" "$phy"
+				. /lib/apsta_mode.sh "$sta_ifname" "$ap_ifname" "$hostapd_conf_file" "$phy"
 				echo "$!" >> /tmp/apsta_mode.pid
                        fi
 		}

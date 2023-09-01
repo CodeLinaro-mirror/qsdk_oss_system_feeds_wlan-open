@@ -18,9 +18,8 @@
 sta_intf="$1"
 ap_intfs="$2"
 hostapd_conf="$3"
-oper_band="$4"
 dfs_log=1
-phy="$5"
+phy="$4"
 ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
 
@@ -245,7 +244,7 @@ hostapd_adjust_config() {
 	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac $ml_link" > /dev/ttyMSM0
 
 	hostapd_cli -i $ap_intf $ml_link set channel $sta_channel 2> /dev/null
-	if [ $sta_channel -ge 36 ] || [ $oper_band == 3 ]; then
+	if [ "$wifi_5gband" == "true" ] || [ "$wifi_6gband" == "true" ]; then
 		hostapd_cli -i $ap_intf $ml_link set hw_mode a 2> /dev/null
 	else
 		hostapd_cli -i $ap_intf $ml_link set hw_mode g 2> /dev/null
@@ -355,6 +354,15 @@ hostapd_adjust_config() {
 hostapd_is_6ghz_band() {
 	local freq=$1
 	if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
+		echo true
+	else
+		echo false
+	fi
+}
+
+hostapd_is_5ghz_band() {
+	local freq=$1
+	if [ $freq -gt 5170 ] && [ $freq -le 5925 ]; then
 		echo true
 	else
 		echo false
