@@ -20,22 +20,23 @@ Signed-off-by: Amutha Ravikumar <quic_aravikum@quicinc.com>
  drivers/net/wireless/ath/ath12k/mac.c | 37 ++++++++++++++++++++-------
  1 file changed, 28 insertions(+), 9 deletions(-)
 
+Index: b/drivers/net/wireless/ath/ath12k/mac.c
+===================================================================
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12475,6 +12475,7 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -12906,6 +12906,7 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  	struct ath12k_link_vif *arvif;
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k_base *ab;
 +	struct ath12k_peer *peer;
  	struct ath12k *ar;
  	int ret;
- 	bool is_pending_stop = false;
-@@ -12580,17 +12581,33 @@ stop_primary:
+ 	u8 link_id = link_conf->link_id;
+@@ -12973,17 +12974,33 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  		ahvif->num_vdev_started--;
  	}
  
-+	peer = ath12k_peer_find_by_vdev_id(ab, arvif->vdev_id);
- 	if (ab->hw_params->vdev_start_delay &&
+-	if (ab->hw_params->vdev_start_delay &&
 -            ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
 -                ret = ath12k_peer_delete(ar, arvif->vdev_id, arvif->bssid);
 -                if (ret)
@@ -46,7 +47,8 @@ Signed-off-by: Amutha Ravikumar <quic_aravikum@quicinc.com>
 -                        ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
 -                                   "mac removed peer %pM  vdev %d after vdev stop\n",
 -                                   arvif->bssid, arvif->vdev_id);
-+            ahvif->vdev_type == WMI_VDEV_TYPE_STA && peer) {
++	peer = ath12k_peer_find_by_vdev_id(ab, arvif->vdev_id);
++	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA && peer) {
 +		struct ieee80211_sta *sta;
 +		unsigned int sta_link_id = 0xff;
 +
@@ -60,7 +62,8 @@ Signed-off-by: Amutha Ravikumar <quic_aravikum@quicinc.com>
 +			   vif->valid_links, arvif->vdev_id,
 +			   peer->addr, sta_link_id, sta);
 +
-+		if (!sta && !peer->sta) {
++		if ((ab->hw_params->vdev_start_delay && !sta && !peer->sta) ||
++		     !ab->hw_params->vdev_start_delay) {
 +			ret = ath12k_peer_delete(ar, arvif->vdev_id, arvif->bssid);
 +			if (ret)
 +				ath12k_warn(ar->ab,
@@ -68,12 +71,14 @@ Signed-off-by: Amutha Ravikumar <quic_aravikum@quicinc.com>
 +					    arvif->bssid, arvif->vdev_id, ret);
 +			else
 +				ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
-+					   "mac removed peer %pM  vdev %d after vdev stop\n",
++					   "mac removed peer %pM  vdev %d\n",
 +					   arvif->bssid, arvif->vdev_id);
 +		}
          }
  
  	if (ab->hw_params->vdev_start_delay &&
+Index: b/net/mac80211/sta_info.c
+===================================================================
 --- a/net/mac80211/sta_info.c
 +++ b/net/mac80211/sta_info.c
 @@ -1487,6 +1487,43 @@ struct ieee80211_sta *ieee80211_find_sta
@@ -120,9 +125,11 @@ Signed-off-by: Amutha Ravikumar <quic_aravikum@quicinc.com>
  struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
  					 const u8 *addr)
  {
+Index: b/include/net/mac80211.h
+===================================================================
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -6298,6 +6298,22 @@ struct ieee80211_sta *ieee80211_find_sta
+@@ -6347,6 +6347,22 @@ struct ieee80211_sta *ieee80211_find_sta
  					       const u8 *localaddr);
  
  /**
