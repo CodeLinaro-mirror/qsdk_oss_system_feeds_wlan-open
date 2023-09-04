@@ -604,6 +604,9 @@ config-$(CONFIG_PACKAGE_kmod-ath10k) += ATH10K_DFS_CERTIFIED ATH10K_SMART_ANT_AL
 config-$(CONFIG_PACKAGE_kmod-ath11k) += ATH11K_SPECTRAL ATH11K_CFR
 
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
+ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
+config-y += ATH12K_MEM_PROFILE_512M
+endif
 
 # kernel comparison is added since qca-nss-ecm callbacks are not supported
 # in openwrt-ginger project as of now. Once supported this kernel check
