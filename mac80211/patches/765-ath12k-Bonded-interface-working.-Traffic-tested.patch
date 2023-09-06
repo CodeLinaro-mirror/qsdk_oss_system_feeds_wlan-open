@@ -89,7 +89,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,959 @@
+@@ -0,0 +1,963 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -418,7 +418,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +static struct net_device *ath12k_mac_get_tx_link_netdev(struct ath12k_mld_dev *mldev, u8 *dst_mac_addr)
 +{
-+	struct net_device *ndev = NULL;
++	struct net_device *ndev = NULL, *dvlan_ndev = NULL;
 +	struct ieee80211_sta *sta= NULL;
 +	struct ath12k_sta *ahsta;
 +	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(mldev->vif);
@@ -444,8 +444,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		ath12k_dbg(NULL, ATH12K_DBG_DP_TX, "(%s,%d) PPE %s:%d pkt delivered to sta.deflink.link_id %d dev %s\n",
 +				current->comm, current->pid, __func__, __LINE__,
 +				ahsta->deflink.link_id, ndev->name);
-+		rcu_read_unlock();
-+		return ndev;
++		goto dvlan_check;
 +	}
 +
 +	if (sta) {
@@ -455,6 +454,11 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +				 current->comm, __func__, __LINE__,
 +				 sta, ahsta->assoc_link_id, ndev->name);
 +	}
++
++dvlan_check:
++	dvlan_ndev = ieee80211_sta_get_dvlan_iface(sta);
++	if (dvlan_ndev)
++		ndev = dvlan_ndev;
 +
 +	rcu_read_unlock();
 +
@@ -2246,6 +2250,22 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /**
   * ieee80211_report_low_ack - report non-responding station
   *
+@@ -6294,6 +6333,15 @@ struct ieee80211_sta *ieee80211_find_sta
+ 					       const u8 *localaddr);
+ 
+ /**
++ * ieee80211_sta_get_dvlan_iface - get dynamic vlan interface
++ *
++ * @pubsta: the station
++ *
++ * Return: The interface if found. %NULL otherwire.
++ */
++struct net_device *ieee80211_sta_get_dvlan_iface(struct ieee80211_sta *pubsta);
++
++/**
+  * ieee80211_sta_block_awake - block station from waking up
+  * @hw: the hardware
+  * @pubsta: the station
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
 @@ -3498,6 +3498,9 @@ enum nl80211_iftype {
@@ -3493,3 +3513,26 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /* Maximum size for the MA-UNITDATA primitive, 802.11 standard section
     6.2.1.1.2.
  
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -217,6 +217,20 @@ struct sta_info *sta_info_get(struct iee
+ 	return NULL;
+ }
+ 
++struct net_device *ieee80211_sta_get_dvlan_iface(struct ieee80211_sta *pubsta)
++{
++	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
++
++	if (!sta)
++		return NULL;
++
++	if (sta->sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
++		return  sta->sdata->dev;
++	else
++		return NULL;
++}
++EXPORT_SYMBOL(ieee80211_sta_get_dvlan_iface);
++
+ /*
+  * Get sta info either from the specified interface
+  * or from one of its vlans
