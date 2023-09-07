@@ -89,7 +89,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  CFLAGS_trace.o := -I$(src)
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -0,0 +1,956 @@
+@@ -0,0 +1,959 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -152,25 +152,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	dev_queue_xmit(skb);
 +
 +	return true;
-+}
-+
-+int ath12k_ppeds_get_core_mask(struct ath12k *ar)
-+{
-+	struct ath12k_pdev *pdev = ar->pdev;
-+	int core_mask;
-+
-+	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP)
-+		core_mask = ATH12K_PPE_DS_2G_CORE_MASK;
-+	else if (pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP &&
-+		 !ar->supports_6ghz)
-+		core_mask = ATH12K_PPE_DS_5G_CORE_MASK;
-+	else if (pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP &&
-+		 ar->supports_6ghz)
-+		core_mask = ATH12K_PPE_DS_6G_CORE_MASK;
-+	else
-+		core_mask = ATH12K_PPE_DS_DEFAULT_CORE_MASK;
-+
-+	return core_mask;
 +}
 +
 +int ath12k_bond_link_enslave(struct ath12k_link_vif *arvif, struct net_device *link_dev)
@@ -244,8 +225,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +        return true;
 +}
 +
-+void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
-+				     struct net_device *link_dev)
++void ath12k_enable_ppe_for_link_netdev(struct ath12k_link_vif *arvif,
++				       struct net_device *link_dev)
 +{
 +	struct ppe_vp_ai vpai;
 +	struct ieee80211_ppe_vp_ds_params vp_params = {0};
@@ -254,10 +235,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	int ppe_vp_num = -1;
 +
 +	arvif->ppe_vp_num = -1;
++	arvif->ppe_vp_type = -1;
 +	if (!g_bonded_interface_model)
-+		return;
-+
-+	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
 +		return;
 +
 +	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
@@ -269,14 +248,21 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	vpai.src_cb_data = NULL;
 +	vpai.stats_cb = ath12k_stats_update_ppe_vp;
 +	vpai.queue_num = 0;
-+	vpai.usr_type = PPE_VP_USER_TYPE_DS;
 +	vpai.net_dev_type = PPE_VP_NET_DEV_TYPE_WIFI;
 +	link_ndev_pvt = netdev_priv(link_dev);
 +
-+	vpai.core_mask = ath12k_ppeds_get_core_mask(arvif->ar);
++	vpai.core_mask = ATH12K_PPE_DS_DEFAULT_CORE_MASK;
 +	vp_params.dev = link_dev;
-+	ret = ath12k_mac_op_ppeds_attach_vdev(arvif, &vpai,  &ppe_vp_num, &vp_params);
-+	if (!ret) {
++
++	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags)) {
++		vpai.usr_type = PPE_VP_USER_TYPE_DS;
++
++		ret = ath12k_mac_op_ppeds_attach_vdev(arvif, &vpai,
++						      &ppe_vp_num, &vp_params);
++		if (ret) {
++			ath12k_err(NULL, "Error in enabling DS for arvif %pM\n", arvif->addr);
++			return;
++		}
 +		arvif->ppe_vp_type = PPE_VP_USER_TYPE_DS;
 +		link_ndev_pvt->ppe_vp_profile_idx = vp_params.ppe_vp_profile_idx;
 +		link_ndev_pvt->vp_num = ppe_vp_num;
@@ -285,23 +271,32 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			   "Enabling DS index %d vp %d link_id %d %pM core_mask 0x%x\n",
 +			   vp_params.ppe_vp_profile_idx, ppe_vp_num,
 +			   arvif->link_id, arvif->addr, vpai.core_mask);
-+		return;
 +	} else {
-+		ath12k_err(NULL, "Error in enabling DS for arvif %pM\n",arvif->addr);
++		vpai.usr_type = PPE_VP_USER_TYPE_ACTIVE;
++
++		ppe_vp_num = ppe_vp_alloc(vp_params.dev, &vpai);
++		if (ppe_vp_num <= 0) {
++			ath12k_err(NULL, "Error in enabling Active VP for arvif %pM\n", arvif->addr);
++			return;
++		}
++		link_ndev_pvt->vp_num = ppe_vp_num;
++		arvif->ppe_vp_num = ppe_vp_num;
++		arvif->ppe_vp_type = vpai.usr_type;
++		ath12k_dbg(ab, ATH12K_DBG_PPE,
++			   "Enabling Active VP for arvif %pM dev %s vp_num %d core_mask 0x%x\n",
++			   arvif->addr, vp_params.dev->name,
++			   arvif->ppe_vp_num, vpai.core_mask);
 +	}
 +
 +	return;
 +}
 +
-+void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev)
++void ath12k_disable_ppe_for_link_netdev(struct ath12k_link_vif *arvif, struct net_device *link_dev)
 +{
 +	struct ieee80211_ppe_vp_ds_params vp_params = {0};
 +	struct ath12k_link_vif_pvt *link_ndev_pvt = NULL;
 +
 +	if (!g_bonded_interface_model)
-+		return;
-+
-+	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &arvif->ar->ab->dev_flags))
 +		return;
 +
 +	if (!arvif->ndev_pvt || !arvif->ndev_pvt->link_ndev) {
@@ -311,15 +306,23 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +
 +	link_ndev_pvt = netdev_priv(link_dev);
 +	vp_params.ppe_vp_profile_idx = link_ndev_pvt->ppe_vp_profile_idx;
-+	if (arvif->ppe_vp_num != -1) {
++	if (arvif->ppe_vp_num == -1)
++		return;
++
++	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags)) {
 +		ath12k_mac_op_ppeds_detach_vdev (arvif, &vp_params);
 +		if (arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
 +			ppe_vp_free(arvif->ppe_vp_num);
 +
-+		ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE, "Destroyed PPE VP port no:%d for dev:%s\n",
-+			   arvif->ppe_vp_num, link_dev->name);
-+		arvif->ppe_vp_num = -1;
++	} else {
++		ppe_vp_free(arvif->ppe_vp_num);
 +	}
++
++	ath12k_dbg(arvif->ar->ab, ATH12K_DBG_PPE,
++		   "Destroyed PPE VP port type %d no:%d for dev:%s\n",
++		   arvif->ppe_vp_type, arvif->ppe_vp_num, link_dev->name);
++	arvif->ppe_vp_num = -1;
++	arvif->ppe_vp_type = -1;
 +}
 +
 +int ath12k_mac_op_change_vif_links(struct ieee80211_hw *hw,
@@ -1065,9 +1068,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +#define ATH12K_PPE_DS_6G_CORE_MASK		0x4
 +#define ATH12K_PPE_DS_DEFAULT_CORE_MASK		0x7
 +
-+void ath12k_disable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++void ath12k_disable_ppe_for_link_netdev(struct ath12k_link_vif *arvif,
 +				       struct net_device *link_dev);
-+void ath12k_enable_ds_for_link_netdev(struct ath12k_link_vif *arvif,
++void ath12k_enable_ppe_for_link_netdev(struct ath12k_link_vif *arvif,
 +				     struct net_device *link_dev);
 +int ath12k_free_bonddev_for_sfe(struct wireless_dev *wdev,
 +				struct ieee80211_vif *vif,
@@ -1127,7 +1130,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	bool mvr_processing;
  	bool pending_csa_up;
-@@ -1110,6 +1128,10 @@ struct ath12k_soc_dp_stats {
+@@ -1112,6 +1130,10 @@ struct ath12k_soc_dp_stats {
  	u32 fw_tx_status[MAX_FW_TX_STATUS];
  	u32 tx_enqueued[MAX_TCL_RING];
  	u32 tx_completed[MAX_TCL_RING];
@@ -1244,21 +1247,42 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	/* check if the msdu needs to be bridged to our connected peer */
  	f_peer = ath12k_peer_find_by_addr(ar->ab, ehdr->h_dest);
  
-@@ -2828,7 +2832,12 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2794,10 +2798,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
+ 	struct ath12k_dp_rx_tid *rx_tid;
+ 	u32 err_bitmap;
+ 	u8 tid;
+-#ifdef CPTCFG_MAC80211_PPE_SUPPORT
++#if defined(CPTCFG_MAC80211_PPE_SUPPORT) || defined(CPTCFG_ATH12K_BONDED_DS_SUPPORT)
+ 	int vp;
+ #endif
+ 	struct wireless_dev *wdev = NULL;
++#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++	struct ath12k_vif *ahvif;
++	struct ath12k_link_vif *arvif;
++#endif
+ 
+ 	tid = ath12k_dp_rx_h_tid(ab, rx_desc);
+ 	/* PN for multicast packets will be checked in mac80211 */
+@@ -2828,8 +2836,16 @@ static void ath12k_dp_rx_h_mpdu(struct a
  #endif
  				spin_unlock_bh(&ar->ab->base_lock);
  				ath12k_dp_rx_h_csum_offload(ar, msdu);
 -				msdu->dev = wdev->netdev;
+-#ifdef CPTCFG_MAC80211_PPE_SUPPORT
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
++				ahvif = ath12k_vif_to_ahvif(peer->vif)
++				arvif = ahvif->link[peer->link_id];
++				vp = arvif->ppe_vp_num;
 +				if (wdev->bond_netdev)
 +					msdu->dev = wdev->bond_netdev;
 +				else
 +#endif
 +					msdu->dev = wdev->netdev;
- #ifdef CPTCFG_MAC80211_PPE_SUPPORT
++#if defined(CPTCFG_MAC80211_PPE_SUPPORT) || defined(CPTCFG_ATH12K_BONDED_DS_SUPPORT)
  				if (vp > 0) {
  					if (likely(ppe_vp_tx_to_ppe(vp, msdu)))
-@@ -2849,6 +2858,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
+ 						return;
+@@ -2849,6 +2865,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	}
  	spin_unlock_bh(&ar->ab->base_lock);
  
@@ -1273,7 +1297,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	*fast_rx = false;
  
  	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
-@@ -3368,8 +3385,9 @@ int ath12k_dp_rx_pkt_type_filter(struct
+@@ -3368,8 +3392,9 @@ int ath12k_dp_rx_pkt_type_filter(struct
  	struct ath12k_wmi_pkt_route_param param;
  	int ret;
  
@@ -1474,7 +1498,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
 +	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK && arvif->ndev_pvt) {
 +		ath12k_bond_link_release(arvif);
-+		ath12k_disable_ds_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
++		ath12k_disable_ppe_for_link_netdev(arvif, arvif->ndev_pvt->link_ndev);
 +	}
 +#endif
  
@@ -1618,7 +1642,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +				arvif->ppe_vp_num = -1;
 +			}
 +			else if (link_ndev) {
-+				ath12k_enable_ds_for_link_netdev(arvif,
++				ath12k_enable_ppe_for_link_netdev(arvif,
 +								 arvif->ndev_pvt->link_ndev);
 +				ath12k_bond_link_enslave(arvif, arvif->ndev_pvt->link_ndev);
 +			}
@@ -1644,7 +1668,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
-@@ -10296,15 +10388,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10304,15 +10396,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1666,7 +1690,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12123,6 +12217,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12137,6 +12231,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1674,7 +1698,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14119,10 +14214,6 @@ static const struct ieee80211_ops ath12k
+@@ -14133,10 +14228,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1685,7 +1709,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -15302,6 +15393,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+@@ -15316,6 +15407,9 @@ int ath12k_mac_allocate(struct ath12k_hw
  			goto err_mac_destroy;
  		}
  
@@ -1749,7 +1773,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -13,6 +13,7 @@
+@@ -13,9 +13,13 @@
  #include <ppe_drv_sc.h>
  #include <linux/dma-mapping.h>
  #include <asm/cacheflush.h>
@@ -1757,8 +1781,18 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #include "hif.h"
  #include "ppe.h"
  
-@@ -431,12 +432,23 @@ void ath12k_dp_peer_ppeds_route_setup(st
++#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
++extern int g_bonded_interface_model;
++#endif
+ extern struct sk_buff *
+ ath12k_dp_ppeds_tx_release_desc_nolock(struct ath12k_dp *dp,
+ 				struct ath12k_ppeds_tx_desc_info *tx_desc,
+@@ -429,14 +433,49 @@ void ath12k_dp_peer_ppeds_route_setup(st
+ 				      struct ath12k_link_sta *arsta)
+ {
  	struct ath12k_base *ab = ar->ab;
++	struct ath12k_link_vif *primary_link_arvif;
++	struct ath12k_vif *ahvif = arvif->ahvif;
  	u32 service_code = PPE_DRV_SC_SPF_BYPASS;
  	int ppe_routing_enable = 1;
 -	u32 priority_valid = 0, src_info = arvif->vif->ppe_vp_num;
@@ -1766,23 +1800,47 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	struct ath12k_sta *ahsta = arsta->ahsta;
 +	struct ieee80211_sta *sta;
 +
++	if (!g_bonded_interface_model)
++		return;
++
 +	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
++
++	/* In SLO AP, DS is not supported */
++	if (hweight16(ahvif->vif->valid_links) <= 1)
++		return;
  
- 	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) ||
- 	    src_info == -1)
+-	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) ||
+-	    src_info == -1)
++	/* When SLO STA is associated to AP link vif which does not have DS rings,
++ 	 * do not enable DS.
++	 */
++	if (!sta->mlo && !test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
  		return;
  
-+	/* if primary link doesnot support DS, do not send ppe ds routing */
-+	if (sta->mlo && arvif->ahvif->link[ahsta->assoc_link_id]->ppe_vp_num == -1) {
-+		ath12k_info(ab, "Primary link %d doesnot support DS. disabling DS routing on RX\n",
-+		ahsta->assoc_link_id);
-+		return;
++	/* If STA is MLO capable but primary link does not support DS,
++	 * disable DS routing on RX.
++	 */
++	if (sta->mlo) {
++		primary_link_arvif = arvif->ahvif->link[ahsta->assoc_link_id];
++
++		if (primary_link_arvif->ppe_vp_num == -1 ||
++		    primary_link_arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS) {
++			ath12k_info(ab,
++				    "Primary link %d does not support DS "
++				    "Disabling DS routing on RX for peer %pM\n",
++				    ahsta->assoc_link_id, arsta->addr);
++			return;
++		}
++
++		if (arvif->ppe_vp_num == -1 ||
++		    arvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
++			src_info = primary_link_arvif->ppe_vp_num;
 +	}
 +
  	ath12k_wmi_config_peer_ppeds_routing(ar, arsta->addr, arvif->vdev_id,
  			service_code, priority_valid, src_info,
  			ppe_routing_enable);
-@@ -454,8 +466,6 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
+@@ -454,8 +493,6 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
  		return -ENOSR;
  	}
  
@@ -1791,7 +1849,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	for (i = 0; i < PPE_VP_ENTRIES_MAX; i++) {
  		if (!ab->dp.ppe_vp_profile[i].is_configured)
  			break;
-@@ -463,8 +473,10 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
+@@ -463,8 +500,10 @@ static int ath12k_dp_ppeds_alloc_ppe_vp_
  
  	if (i == PPE_VP_ENTRIES_MAX) {
  		WARN_ONCE(1, "All ppe vp profile entries are in use!");
@@ -1802,7 +1860,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	ab->dp.ppe_vp_profile[i].is_configured = true;
  	*vp_profile = &ab->dp.ppe_vp_profile[i];
-@@ -506,8 +518,6 @@ static int ath12k_dp_ppeds_alloc_vp_tbl_
+@@ -506,8 +545,6 @@ static int ath12k_dp_ppeds_alloc_vp_tbl_
  		return -ENOSR;
  	}
  
@@ -1811,7 +1869,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	for (i = 0; i < PPE_VP_ENTRIES_MAX; i++) {
  		if (!ab->ppe_vp_tbl_registered[i])
  			break;
-@@ -518,7 +528,8 @@ static int ath12k_dp_ppeds_alloc_vp_tbl_
+@@ -518,7 +555,8 @@ static int ath12k_dp_ppeds_alloc_vp_tbl_
  		return -ENOSR;
  	}
  
@@ -1821,7 +1879,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	mutex_unlock(&ab->ppe_vp_tbl_lock);
  
  	return i;
-@@ -543,7 +554,7 @@ static void ath12k_dp_ppeds_dealloc_vp_t
+@@ -543,7 +581,7 @@ static void ath12k_dp_ppeds_dealloc_vp_t
  		return;
  	}
  
@@ -1830,7 +1888,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ab->num_ppe_vp_entries--;
  	mutex_unlock(&ab->ppe_vp_tbl_lock);
  }
-@@ -559,7 +570,6 @@ static int ath12k_dp_ppeds_alloc_vp_sear
+@@ -559,7 +597,6 @@ static int ath12k_dp_ppeds_alloc_vp_sear
  		return -ENOSR;
  	}
  
@@ -1838,7 +1896,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	for (i = 0; i < PPE_VP_ENTRIES_MAX; i++) {
  		if (!ab->ppe_vp_search_idx_tbl_set[i])
-@@ -571,7 +581,8 @@ static int ath12k_dp_ppeds_alloc_vp_sear
+@@ -571,7 +608,8 @@ static int ath12k_dp_ppeds_alloc_vp_sear
  		return -ENOSR;
  	}
  
@@ -1848,7 +1906,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	mutex_unlock(&ab->ppe_vp_tbl_lock);
  
  	return i;
-@@ -595,7 +606,7 @@ ath12k_dp_ppeds_dealloc_vp_search_idx_tb
+@@ -595,7 +633,7 @@ ath12k_dp_ppeds_dealloc_vp_search_idx_tb
  		return;
  	}
  
@@ -1857,7 +1915,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ab->num_ppe_vp_search_idx_entries--;
  	mutex_unlock(&ab->ppe_vp_tbl_lock);
  
-@@ -638,38 +649,65 @@ static void ath12k_dp_ppeds_setup_vp_ent
+@@ -638,38 +676,65 @@ static void ath12k_dp_ppeds_setup_vp_ent
  	return;
  }
  
@@ -1934,7 +1992,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	vp_num = ppe_ds_wlan_vp_alloc(ab->ppeds_handle, vp_params->dev, vp_arg);
  	if (vp_num < 0) {
  		ath12k_err(ab," vp alloc failed\n");
-@@ -684,14 +722,14 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -684,14 +749,14 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  		goto vp_free;
  	}
  
@@ -1952,7 +2010,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		ppe_vp_search_tbl_idx = ath12k_dp_ppeds_alloc_vp_search_idx_tbl_entry(ab);
  		if (ppe_vp_search_tbl_idx < 0) {
  			ath12k_err(ab,
-@@ -703,19 +741,23 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
+@@ -703,19 +768,23 @@ int ath12k_mac_op_ppeds_attach_vdev(stru
  	}
  
  	vp_profile->vp_num = vp_num;
@@ -1980,7 +2038,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	return 0;
  
-@@ -729,22 +771,17 @@ vp_free:
+@@ -729,22 +798,17 @@ vp_free:
  	return ret;
  }
  
@@ -2005,7 +2063,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ppe_vp_profile_idx = vp_params->ppe_vp_profile_idx;
  
  	vp_profile = &ab->dp.ppe_vp_profile[ppe_vp_profile_idx];
-@@ -758,7 +795,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
+@@ -758,7 +822,7 @@ void ath12k_mac_op_ppeds_detach_vdev(str
  	ath12k_dbg(ab, ATH12K_DBG_PPE, "ppe_ds_wlan_vp_free\n");
  
  	/* For STA mode ast index table reg also needs to be cleaned */
@@ -2502,7 +2560,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  				   "Failed to add default virtual iface\n");
 --- a/net/mac80211/mlme.c
 +++ b/net/mac80211/mlme.c
-@@ -2353,7 +2353,7 @@ void ieee80211_dfs_cac_timer_work(struct
+@@ -2354,7 +2354,7 @@ void ieee80211_dfs_cac_timer_work(struct
  			     dfs_cac_timer_work);
  	struct cfg80211_chan_def chandef = link->conf->chandef;
  	struct ieee80211_sub_if_data *sdata = link->sdata;
@@ -2511,7 +2569,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	mutex_lock(&sdata->local->mtx);
  
  	if (sdata->wdev.links[link->link_id].cac_started) {
-@@ -2364,6 +2364,7 @@ void ieee80211_dfs_cac_timer_work(struct
+@@ -2365,6 +2365,7 @@ void ieee80211_dfs_cac_timer_work(struct
  	}
  
  	mutex_unlock(&sdata->local->mtx);
@@ -2645,9 +2703,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		return 0;
 +#endif
  	case NL80211_IFTYPE_STATION:
- 		changed |= BSS_CHANGED_ASSOC |
- 			   BSS_CHANGED_ARP_FILTER |
-@@ -4404,9 +4408,11 @@ ieee80211_dfs_radar_detected_processing(
+ 		changed |= BSS_CHANGED_PS;
+ 		changed &= ~BSS_CHANGED_IDLE;
+@@ -4408,9 +4412,11 @@ ieee80211_dfs_radar_detected_processing(
  	}
  	mutex_unlock(&local->chanctx_mtx);
  
@@ -3196,7 +3254,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	int len = 0, i, retval;
  	const int size = 4096;
  	static const char *rxdma_err[HAL_REO_ENTR_RING_RXDMA_ECODE_MAX] = {
-@@ -1719,6 +1721,17 @@ static ssize_t ath12k_debugfs_dump_soc_d
+@@ -1723,6 +1725,17 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			soc_stats->tx_completed[2],
  			soc_stats->tx_completed[3]);
  
