@@ -127,7 +127,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  
  	lockdep_assert_held(&ar->conf_mutex);
  
-@@ -2010,16 +2032,732 @@ void ath12k_core_halt(struct ath12k *ar)
+@@ -2010,16 +2032,725 @@ void ath12k_core_halt(struct ath12k *ar)
  	cancel_work_sync(&ar->regd_update_work);
  	rcu_assign_pointer(ab->pdevs_active[ar->pdev_idx], NULL);
  	synchronize_rcu();
@@ -334,7 +334,9 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +			params.aifs = p->aifs;
 +			params.txop = p->txop;
 +
++			mutex_lock(&ar->conf_mutex);
 +			ath12k_mac_conf_tx(ar, arvif, i, &params);
++			mutex_unlock(&ar->conf_mutex);
 +		}
 +		break;
 +	}
@@ -384,12 +386,16 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +			return 0;
 +		}
 +
-+
++		mutex_lock(&ar->conf_mutex);
 +		ath12k_mac_bss_info_changed(ar, arvif, link_conf, changed);
++		mutex_unlock(&ar->conf_mutex);
 +		break;
 +	case NL80211_IFTYPE_OCB:
 +		changed |= BSS_CHANGED_OCB;
++
++		mutex_lock(&ar->conf_mutex);
 +		ath12k_mac_bss_info_changed(ar, arvif, link_conf, changed);
++		mutex_unlock(&ar->conf_mutex);
 +		break;
 +	case NL80211_IFTYPE_ADHOC:
 +		changed |= BSS_CHANGED_IBSS;
@@ -409,8 +415,10 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +			changed |= BSS_CHANGED_BEACON |
 +				   BSS_CHANGED_BEACON_ENABLED;
 +
++			mutex_lock(&ar->conf_mutex);
 +			ath12k_mac_bss_info_changed(ar, arvif, link_conf,
 +					changed &~ BSS_CHANGED_IDLE);
++			mutex_unlock(&ar->conf_mutex);
 +
 +		}
 +		break;
@@ -430,6 +438,8 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +	}
 +
 +	mutex_unlock(&ah->conf_mutex);
++	ath12k_dbg(ar->ab, ATH12K_DBG_MODE1_RECOVERY, "Reconfig link vif done:type:%d\n", vif->type);
++
 +	return 0;
 +}
 +
@@ -447,11 +457,9 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +	int ret = -1;
 +	u8 link_id = link_conf->link_id;
 +
-+	lockdep_assert_held(&ar->conf_mutex);
-+
 +	ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
-+		"Recovering: link_id:%d [vif->link_id:%d]\n",
-+		link_id, arvif->link_id);
++		"Recovering: link_id:%d [vif->link_id:%d] type:%d\n",
++		link_id, arvif->link_id, vif->type);
 +
 +	mutex_lock(&ah->conf_mutex);
 +
@@ -468,6 +476,8 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +				TARGET_NUM_VDEVS);
 +		goto exit;
 +	}
++
++	mutex_lock(&ar->conf_mutex);
 +
 +	ret = ath12k_mac_vdev_create(ar, arvif);
 +	if (!ret)
@@ -553,21 +563,22 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +		   ahvif->links_map,
 +		   arvif->is_created);
 +
++	mutex_unlock(&ar->conf_mutex);
 +	mutex_unlock(&ah->conf_mutex);
 +
 +	return ret;
 +}
 +
 +/* Wrapper function for recovery after crash */
-+int ath12k_mode1_recovery_reconfig(struct ath12k_base *partner_ab, const char *fun)
++int ath12k_mode1_recovery_reconfig(struct ath12k_base *ab, const char *fun)
 +{
 +	struct ath12k *ar = NULL;
 +	struct ath12k_pdev *pdev;
 +	struct ath12k_link_vif *arvif, *tmp;
 +	struct ath12k_vif *ahvif ;
 +	struct ieee80211_bss_conf *link;
-+	struct ath12k_hw_group *ag = partner_ab->ag;
-+	struct ath12k_base *ab;
++	struct ath12k_hw_group *ag = ab->ag;
++	struct ath12k_base *partner_ab;
 +	struct ath12k_hw *ah;
 +	struct ieee80211_key_conf *key;
 +	int i, j, key_idx;
@@ -575,257 +586,239 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +	int ret = -EINVAL;
 +	bool started = false;
 +
-+	//TODO: Remove one loop
-+	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
++	for (j = 0; j < ab->num_radios; j++) {
++		pdev = &ab->pdevs[j];
++		ar = pdev->ar;
 +
-+		if (!ab->recovery_start)
++		if (WARN_ON(!ar))
 +			continue;
 +
-+		for (j = 0; j < ab->num_radios; j++) {
-+			pdev = &ab->pdevs[j];
-+			ar = pdev->ar;
++		if (!ath12k_ftm_mode) {
++			if (ath12k_mac_radio_start(ar)) {
++				ath12k_err(ab, "mac radio start failed\n");
++				return ret;
++			}
++			ar->ah->in_recovery = true;
++			started = true;
++		}
 +
-+			if (WARN_ON(!ar))
++		if (list_empty(&ar->arvifs))
++			continue;
++
++		/* Decrement number of vdev created for all the arvif
++		 * under a ar
++		 */
++		list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
++			arvif->ahvif->num_vdev_created--;
++		}
++	}
++
++	/* add chanctx/hw_config/filter part */
++	for (j = 0; j < ab->num_radios; j++) {
++		pdev = &ab->pdevs[j];
++		ar = pdev->ar;
++
++		if (!ar)
++			continue;
++
++		mutex_lock(&ar->conf_mutex);
++
++		list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
++			ahvif = arvif->ahvif;
++
++			if (!ahvif)
 +				continue;
 +
-+			if (!ath12k_ftm_mode) {
-+				if (ath12k_mac_radio_start(ar)) {
-+					ath12k_err(ab, "mac radio start failed\n");
-+					return ret;
++			arvif->is_started = false;
++			arvif->is_created = false;
++
++			rcu_read_lock();
++			link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
++
++			/* Not expected */
++			if (WARN_ON(!link)) {
++				rcu_read_unlock();
++				continue;
++			}
++			rcu_read_unlock();
++			spin_lock_bh(&ar->data_lock);
++
++			ar->rx_channel = link->chandef.chan;
++			spin_unlock_bh(&ar->data_lock);
++
++			/* hw_config */
++			changed &= ~(IEEE80211_CONF_CHANGE_CHANNEL |
++				IEEE80211_CONF_CHANGE_POWER |
++				IEEE80211_CONF_CHANGE_SMPS);
++
++			if (ar->ah->hw->conf.flags & IEEE80211_CONF_MONITOR) {
++				set_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags);
++
++				if (test_bit(MONITOR_VDEV_CREATED,
++				    &ar->monitor_flags)) {
++					ret = ath12k_mac_monitor_vdev_create(ar);
++					if (!ret && ath12k_mac_monitor_start(ar)) {
++						ath12k_err(ab, "unable to start monitor vdev\n");
++						ath12k_mac_monitor_vdev_delete(ar);
++					} else {
++						ath12k_err(ab, "unable to create monitor vdev\n");
++					}
 +				}
-+				ar->ah->in_recovery = true;
-+				started = true;
++			} else {
++				clear_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags);
++				if (test_bit(MONITOR_VDEV_CREATED,
++					      &ar->monitor_flags)) {
++					ret = ath12k_mac_monitor_stop(ar);
++					if (!ret && ath12k_mac_monitor_vdev_delete(ar))
++						ath12k_err(ab, "monitor vdev delete failed\n");
++					else
++						ath12k_err(ab, "failed to stop monitor stop\n");
++				}
 +			}
 +
-+			if (list_empty(&ar->arvifs))
++			/* configure filter - we can use the same flag*/
++		}
++		mutex_unlock(&ar->conf_mutex);
++	}
++
++	/* assign chanctx part */
++	for (j = 0; j < ab->num_radios; j++) {
++		pdev = &ab->pdevs[j];
++		ar = pdev->ar;
++
++		if (!ar)
++			continue;
++
++		mutex_lock(&ar->conf_mutex);
++
++		list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
++			ahvif = arvif->ahvif;
++
++			if (!ahvif)
 +				continue;
 +
-+			/* Decrement number of vdev created for all the arvif
-+			 * under a ar
-+			 * TODO: To find a optimized way
++			rcu_read_lock();
++			link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
++
++			/* Not expected */
++			if (WARN_ON(!link)) {
++				rcu_read_unlock();
++				continue;
++			}
++			rcu_read_unlock();
++
++			/* unlock ar mutex here since we will take ah mutex in
++			 * the reconfig link API thus maintaining same order
++			 * as we use in other places.
 +			 */
-+			list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
-+				arvif->ahvif->num_vdev_created--;
++			mutex_unlock(&ar->conf_mutex);
++			ret = ath12k_mlo_core_recovery_reconfig_link_bss(ar, link, ahvif, arvif);
++			if (ret) {
++				ath12k_err(ab, "ERROR in reconfig link:%d\n",
++						ret);
++				return ret;
 +			}
++			mutex_lock(&ar->conf_mutex);
++			ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
++					"vdev_created getting incremented:%d\n",
++					ahvif->num_vdev_created);
 +		}
++		mutex_unlock(&ar->conf_mutex);
 +	}
 +
-+	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
++	/* reconfig_link_bss */
++	for (j = 0; j < ab->num_radios; j++) {
++		pdev = &ab->pdevs[j];
++		ar = pdev->ar;
 +
-+		if (!ab->recovery_start)
++		if (!ar)
 +			continue;
-+		/* add chanctx/hw_config/filter part */
-+		for (j = 0; j < ab->num_radios; j++) {
-+			pdev = &ab->pdevs[j];
-+			ar = pdev->ar;
 +
-+			if (!ar)
++		mutex_lock(&ar->conf_mutex);
++
++		list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
++			ahvif = arvif->ahvif;
++
++			if (!ahvif)
 +				continue;
 +
-+			mutex_lock(&ar->conf_mutex);
++			rcu_read_lock();
++			link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
 +
-+			list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
-+				ahvif = arvif->ahvif;
-+
-+				if (!ahvif)
-+					continue;
-+
-+				arvif->is_started = false;
-+				arvif->is_created = false;
-+
-+				rcu_read_lock();
-+				link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
-+
-+				/* Not expected */
-+				if (WARN_ON(!link)) {
-+					rcu_read_unlock();
-+					continue;
-+				}
++			/* Not expected */
++			if (WARN_ON(!link)) {
 +				rcu_read_unlock();
-+				spin_lock_bh(&ar->data_lock);
-+
-+				ar->rx_channel = link->chandef.chan;
-+				spin_unlock_bh(&ar->data_lock);
-+
-+				/* hw_config */
-+				changed &= ~(IEEE80211_CONF_CHANGE_CHANNEL |
-+					IEEE80211_CONF_CHANGE_POWER |
-+					IEEE80211_CONF_CHANGE_SMPS);
-+
-+				if (ar->ah->hw->conf.flags & IEEE80211_CONF_MONITOR) {
-+					set_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags);
-+
-+					if (test_bit(MONITOR_VDEV_CREATED,
-+					    &ar->monitor_flags)) {
-+						ret = ath12k_mac_monitor_vdev_create(ar);
-+						if (!ret && ath12k_mac_monitor_start(ar)) {
-+							ath12k_err(ab, "unable to start monitor vdev\n");
-+							ath12k_mac_monitor_vdev_delete(ar);
-+						} else {
-+							ath12k_err(ab, "unable to create monitor vdev\n");
-+						}
-+					}
-+				} else {
-+					clear_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags);
-+					if (test_bit(MONITOR_VDEV_CREATED,
-+						      &ar->monitor_flags)) {
-+						ret = ath12k_mac_monitor_stop(ar);
-+						if (!ret && ath12k_mac_monitor_vdev_delete(ar))
-+							ath12k_err(ab, "monitor vdev delete failed\n");
-+						else
-+							ath12k_err(ab, "failed to stop monitor stop\n");
-+					}
-+				}
-+
-+				/* configure filter - we can use the same flag*/
-+			}
-+			mutex_unlock(&ar->conf_mutex);
-+		}
-+	}
-+
-+	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
-+
-+		if (!ab->recovery_start)
-+			continue;
-+		/* assign chanctx part */
-+		for (j = 0; j < ab->num_radios; j++) {
-+			pdev = &ab->pdevs[j];
-+			ar = pdev->ar;
-+
-+			if (!ar)
 +				continue;
-+
-+			mutex_lock(&ar->conf_mutex);
-+
-+			list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
-+				ahvif = arvif->ahvif;
-+
-+				if (!ahvif)
-+					continue;
-+
-+				rcu_read_lock();
-+				link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
-+
-+				/* Not expected */
-+				if (WARN_ON(!link)) {
-+					rcu_read_unlock();
-+					continue;
-+				}
-+				rcu_read_unlock();
-+
-+				ret = ath12k_mlo_core_recovery_reconfig_link_bss(ar, link, ahvif, arvif);
-+				if (ret) {
-+					ath12k_err(ab, "ERROR in reconfig link:%d\n",
-+							ret);
-+					mutex_unlock(&ar->conf_mutex);
-+					return ret;
-+				}
-+				ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
-+						"vdev_created getting incremented:%d\n",
-+						ahvif->num_vdev_created);
 +			}
++			rcu_read_unlock();
++
++			/* unlock ar mutex here since we will take ah mutex in
++			 * the reconfig link API thus maintaining same order
++			 * as we use in other places.
++			 */
 +			mutex_unlock(&ar->conf_mutex);
++			ret = ath12k_mlo_recovery_link_vif_reconfig(ar, ahvif,
++				       arvif,
++				       arvif->ahvif->vif,
++				       link);
++			if (ret) {
++				ath12k_err(ab, "Failed to update reconfig_bss\n");
++				return ret;
++			}
++			mutex_lock(&ar->conf_mutex);
 +		}
++		mutex_unlock(&ar->conf_mutex);
 +	}
 +
 +	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
-+
-+		if (!ab->recovery_start)
-+			continue;
-+		/* reconfig_link_bss */
-+		for (j = 0; j < ab->num_radios; j++) {
-+			pdev = &ab->pdevs[j];
-+			ar = pdev->ar;
-+
-+			if (!ar)
-+				continue;
-+
-+			mutex_lock(&ar->conf_mutex);
-+
-+			list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
-+				ahvif = arvif->ahvif;
-+
-+				if (!ahvif)
-+					continue;
-+
-+				rcu_read_lock();
-+				link = rcu_dereference(ahvif->vif->link_conf[arvif->link_id]);
-+
-+				/* Not expected */
-+				if (WARN_ON(!link)) {
-+					rcu_read_unlock();
-+					continue;
-+				}
-+				rcu_read_unlock();
-+
-+				ret = ath12k_mlo_recovery_link_vif_reconfig(ar, ahvif,
-+					       arvif,
-+					       arvif->ahvif->vif,
-+					       link);
-+				if (ret) {
-+					ath12k_err(ab, "Failed to update reconfig_bss\n");
-+					mutex_unlock(&ar->conf_mutex);
-+					return ret;
-+				}
-+			}
-+			mutex_unlock(&ar->conf_mutex);
-+		}
-+	}
-+
-+	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
++		partner_ab = ag->ab[i];
 +		if (ab == partner_ab)
 +			continue;
 +
-+		clear_bit(ATH12K_FLAG_UMAC_RECOVERY_START, &ab->dev_flags);
++		clear_bit(ATH12K_FLAG_UMAC_RECOVERY_START, &partner_ab->dev_flags);
 +	}
 +
-+	for (i = 0; i < ag->num_chip; i++) {
-+		ab = ag->ab[i];
++	/* sta state part */
++	for (j = 0; j < ab->num_radios; j++) {
++		pdev = &ab->pdevs[j];
++		ar = pdev->ar;
 +
-+		/* sta state part */
-+		for (j = 0; j < ab->num_radios; j++) {
-+			pdev = &ab->pdevs[j];
-+			ar = pdev->ar;
++		if (!ar)
++			continue;
 +
-+			if (!ar)
++		mutex_lock(&ar->conf_mutex);
++
++		if (list_empty(&ar->arvifs)) {
++			mutex_unlock(&ar->conf_mutex);
++			continue;
++		}
++
++		list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
++			ahvif = arvif->ahvif;
++
++			if (!ahvif)
 +				continue;
 +
++			/* unlock ar mutex here as the iterator will be called
++			 * within rcu lock.
++			 */
++			mutex_unlock(&ar->conf_mutex);
++			ieee80211_iterate_stations_atomic(ar->ah->hw,
++							  ath12k_core_mode1_recovery_sta_list,
++							  arvif);
 +			mutex_lock(&ar->conf_mutex);
-+
-+			if (list_empty(&ar->arvifs)) {
-+				mutex_unlock(&ar->conf_mutex);
-+				continue;
-+			}
-+
-+			list_for_each_entry_safe_reverse(arvif, tmp, &ar->arvifs, list) {
-+				ahvif = arvif->ahvif;
-+
-+				if (!ahvif)
-+					continue;
-+
-+				mutex_unlock(&ar->conf_mutex);
-+				ieee80211_iterate_stations_atomic(ar->ah->hw,
-+								  ath12k_core_mode1_recovery_sta_list,
-+								  arvif);
-+				mutex_lock(&ar->conf_mutex);
-+				for (key_idx = 0; key_idx < WMI_MAX_KEY_INDEX; key_idx++) {
-+					key = arvif->keys[key_idx];
-+					if (key) {
-+						ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
-+							"key:%p cipher:%d idx:%d flags:%d\n",
-+							key, key->cipher, key->keyidx, key->flags);
-+						ret = ath12k_mac_set_key(arvif->ar, SET_KEY, arvif, NULL, key);
-+					}
++			for (key_idx = 0; key_idx < WMI_MAX_KEY_INDEX; key_idx++) {
++				key = arvif->keys[key_idx];
++				if (key) {
++					ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
++						"key:%p cipher:%d idx:%d flags:%d\n",
++						key, key->cipher, key->keyidx, key->flags);
++					ret = ath12k_mac_set_key(arvif->ar, SET_KEY, arvif, NULL, key);
 +				}
 +			}
-+			mutex_unlock(&ar->conf_mutex);
-+			ar->ah->in_recovery = false;
 +		}
++		mutex_unlock(&ar->conf_mutex);
++		ar->ah->in_recovery = false;
 +	}
 +
 +	for (i = 0; i < ag->num_hw; i++) {
@@ -833,8 +826,8 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +		if (!ah)
 +			continue;
 +
-+		for (j = 0; j < partner_ab->num_radios; j++) {
-+			pdev = &partner_ab->pdevs[j];
++		for (j = 0; j < ab->num_radios; j++) {
++			pdev = &ab->pdevs[j];
 +			ar = pdev->ar;
 +
 +			if (!ar)
@@ -846,7 +839,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +		}
 +	}
 +
-+	partner_ab->recovery_start = false;
++	ab->recovery_start = false;
 +	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
 +	return ret;
 +}
@@ -861,7 +854,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	int i;
  
  	if (!ab->is_reset)
-@@ -2032,16 +2770,20 @@ static void ath12k_core_restart(struct w
+@@ -2032,16 +2763,20 @@ static void ath12k_core_restart(struct w
  		 * If for any reason, reconfiguration fails, issue bug on for
  		 * Mode 0
  		 */
@@ -884,7 +877,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  		for (i = 0; i < ag->num_hw; i++) {
  			ah = ag->ah[i];
  			if (!ah)
-@@ -2056,6 +2798,19 @@ static void ath12k_core_restart(struct w
+@@ -2056,6 +2791,19 @@ static void ath12k_core_restart(struct w
  	if (ath12k_sawf_reconfigure_on_crash(ab))
  		ath12k_warn(ab, "SAWF SLA reconfiguring failed\n");
  #endif /* CPTCFG_ATH12K_SAWF */
@@ -904,7 +897,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  }
  
  static void ath12k_rproc_recovery_do_coredump(struct rproc *rproc)
-@@ -2159,11 +2914,12 @@ static int ath12k_rproc_recovery_power_u
+@@ -2159,26 +2907,26 @@ static int ath12k_rproc_recovery_power_u
   * is identified by waiting for MLO Teardown complete for all
   * chipsets
   */
@@ -913,12 +906,18 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  {
  	struct ath12k_hw_group *ag = ab->ag;
  	long time_left;
- 	unsigned long timeout;
+-	unsigned long timeout;
 +	int ret = 0;
  
  	reinit_completion(&ag->umac_reset_complete);
  
-@@ -2176,9 +2932,11 @@ int ath12k_core_trigger_umac_reset(struc
+ 	ath12k_mac_mlo_teardown_with_umac_reset(ab);
+ 
+-	timeout = jiffies + msecs_to_jiffies(ATH12K_UMAC_RESET_TIMEOUT_IN_MS);
+-
+ 	time_left = wait_for_completion_timeout(&ag->umac_reset_complete,
+-						timeout);
++						msecs_to_jiffies(ATH12K_UMAC_RESET_TIMEOUT_IN_MS));
  
  	if (!time_left) {
  		ath12k_warn(ab, "UMAC reset didn't get completed within 200 ms\n");
@@ -932,7 +931,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  }
  
  #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-@@ -2226,9 +2984,11 @@ static void ath12k_core_reset(struct wor
+@@ -2226,9 +2974,11 @@ static void ath12k_core_reset(struct wor
  {
  	struct ath12k_base *ab = container_of(work, struct ath12k_base, reset_work);
  	struct ath12k_hw_group *ag = ab->ag;
@@ -944,7 +943,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  
  #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
  	if (!ab->is_reset) {
-@@ -2239,9 +2999,20 @@ static void ath12k_core_reset(struct wor
+@@ -2239,9 +2989,20 @@ static void ath12k_core_reset(struct wor
  	}
  #endif
  
@@ -967,7 +966,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	}
  
  	/* Sometimes the recovery will fail and then the next all recovery fail,
-@@ -2273,7 +3044,7 @@ static void ath12k_core_reset(struct wor
+@@ -2273,7 +3034,7 @@ static void ath12k_core_reset(struct wor
  		 */
  		ath12k_warn(ab, "already resetting count %d\n", reset_count);
  
@@ -976,7 +975,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  			BUG_ON(1);
  
  		reinit_completion(&ab->reset_complete);
-@@ -2301,6 +3072,71 @@ static void ath12k_core_reset(struct wor
+@@ -2301,6 +3062,71 @@ static void ath12k_core_reset(struct wor
  	ab->is_reset = true;
  	atomic_set(&ab->recovery_count, 0);
  
@@ -1048,7 +1047,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	for (i = 0; i < ag->num_chip; i++) {
  		partner_ab = ag->ab[i];
  		if (ab == partner_ab)
-@@ -2310,16 +3146,17 @@ static void ath12k_core_reset(struct wor
+@@ -2310,16 +3136,17 @@ static void ath12k_core_reset(struct wor
  		 * method to ensure recovery of all partner chips in MODE0 instead of
  		 * relying on firmware to crash partner chips
  		 */
@@ -1071,7 +1070,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	ath12k_core_pre_reconfigure_recovery(ab);
  
  	ath12k_core_post_reconfigure_recovery(ab);
-@@ -2338,10 +3175,6 @@ static void ath12k_core_reset(struct wor
+@@ -2338,10 +3165,6 @@ static void ath12k_core_reset(struct wor
  	if (ab->is_qdss_tracing)
  		ab->is_qdss_tracing = false;
  
@@ -1082,7 +1081,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	if (ab->fw_recovery_support) {
  		if (ab->hif.bus == ATH12K_BUS_PCI) {
  			ath12k_hif_power_down(ab);
-@@ -2354,6 +3187,12 @@ static void ath12k_core_reset(struct wor
+@@ -2354,6 +3177,12 @@ static void ath12k_core_reset(struct wor
  		}
  		ath12k_dbg(ab, ATH12K_DBG_BOOT, "reset started\n");
  	}
@@ -1095,7 +1094,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	mutex_unlock(&ag->mutex_lock);
  }
  
-@@ -2670,6 +3509,7 @@ struct ath12k_base *ath12k_core_alloc(st
+@@ -2670,6 +3499,7 @@ struct ath12k_base *ath12k_core_alloc(st
  	init_waitqueue_head(&ab->ssr_dump_wq);
  	INIT_WORK(&ab->restart_work, ath12k_core_restart);
  	INIT_WORK(&ab->reset_work, ath12k_core_reset);
