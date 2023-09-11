@@ -20,6 +20,10 @@ could be more than that a radio supports.
 Modify the ath12k_mac_op_switch_vif_chanctx() mac ops to get all the consecutive
 contexts belonging to the same radio and further process it in a single shot.
 
+While at it, if channel is moved from one underlying radio to another, which is
+currently not supported, handle it accordingly and return operation not supported
+to upper layer.
+
 Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/mac.c | 92 +++++++++++++++++++++++----
@@ -27,7 +31,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12343,6 +12343,10 @@ ath12k_mac_process_update_vif_chan(struc
+@@ -12365,6 +12365,10 @@ ath12k_mac_process_update_vif_chan(struc
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -38,22 +42,25 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (ath12k_wmi_is_mvr_supported(ab))
  		ath12k_mac_update_vif_chan_mvr(ar, vifs, n_vifs);
  	else
-@@ -13407,7 +13411,12 @@ ath12k_mac_op_switch_vif_chanctx(struct
+@@ -13332,36 +13336,82 @@ ath12k_mac_op_switch_vif_chanctx(struct
  				 int n_vifs,
  				 enum ieee80211_chanctx_switch_mode mode)
  {
+-	struct ath12k *ar;
 +	struct ath12k_hw *ah = hw->priv;
- 	struct ath12k *ar;
++	struct ath12k *curr_ar, *new_ar, *ar;
 +	struct ieee80211_chanctx_conf *prev_ctx, *curr_ctx;
 +	int i, ret = 0, idx;
-+
-+	mutex_lock(&ah->conf_mutex);
  
- 	/* TODO Swiching a vif between two radios require deleting of vdev
+-	/* TODO Swiching a vif between two radios require deleting of vdev
++	mutex_lock(&ah->conf_mutex);
++
++	/* TODO Switching a vif between two radios require deleting of vdev
  	 * in its current ar and creating a vdev and applying its cached params
-@@ -13415,28 +13424,57 @@ ath12k_mac_op_switch_vif_chanctx(struct
- 	 * Currently only switching within same band allowed, also if ar's
- 	 * which are in same band (5G LB/HB needs to be handled)
+-	 * to the new vdev in ar.
+-	 * Currently only switching within same band allowed, also if ar's
+-	 * which are in same band (5G LB/HB needs to be handled)
++	 * to the new vdev in ar. So instead of returning error, handle it?
  	 */
 -	if (vifs->old_ctx->def.chan->band != vifs->new_ctx->def.chan->band) {
 -		WARN_ON(1);
@@ -66,12 +73,26 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +			break;
 +		}
 +
-+		ar = ath12k_get_ar_by_ctx(hw, vifs[i].old_ctx);
-+		if (!ar) {
++		curr_ar = ath12k_get_ar_by_ctx(hw, vifs[i].old_ctx);
++		new_ar = ath12k_get_ar_by_ctx(hw, vifs[i].new_ctx);
++		if (!curr_ar || !new_ar) {
 +			ath12k_err(NULL,
-+				   "unable to determine device for the passed channel ctx with freq %d MHz\n",
-+				   vifs[i].old_ctx->def.chan->center_freq);
++				   "unable to determine device for the passed channel ctx");
++			ath12k_err(NULL,
++				   "Old freq %d MHz (device %s) to new freq %d MHz (device %s)\n",
++				   vifs[i].old_ctx->def.chan->center_freq,
++				   curr_ar ? "valid" : "invalid",
++				   vifs[i].new_ctx->def.chan->center_freq,
++				   new_ar ? "valid" : "invalid");
 +			ret = -EINVAL;
++			break;
++		}
++
++		/* Switching a vif between two radios is not allowed */
++		if (curr_ar != new_ar) {
++			ath12k_dbg(curr_ar->ab, ATH12K_DBG_MAC,
++				   "mac chanctx switch to another radio not supported.");
++			ret = -EOPNOTSUPP;
 +			break;
 +		}
  	}
