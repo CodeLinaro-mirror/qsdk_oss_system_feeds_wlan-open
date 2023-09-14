@@ -27,7 +27,7 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  
  unsigned int ath12k_debug_mask;
  module_param_named(debug_mask, ath12k_debug_mask, uint, 0644);
-@@ -2359,6 +2360,21 @@ int ath12k_sawf_send_disable_soc(u8 svc_
+@@ -2378,6 +2379,21 @@ int ath12k_sawf_send_disable_soc(u8 svc_
  	return ret;
  }
  
@@ -51,7 +51,7 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  	int ret;
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1480,6 +1480,7 @@ void ath12k_fw_stats_reset(struct ath12k
+@@ -1484,6 +1484,7 @@ void ath12k_fw_stats_reset(struct ath12k
  void ath12k_fw_stats_free(struct ath12k_fw_stats *stats);
  int ath12k_send_sawf_configs_soc(struct ath12k_sawf_svc_params *new_param);
  int ath12k_sawf_send_disable_soc(u8 svc_id);
@@ -69,7 +69,17 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  };
  
  static struct ath12k_sawf_ctx *sawf_ctx;
-@@ -50,6 +51,12 @@ void ath12k_sawf_init(struct ath12k_base
+@@ -41,6 +42,9 @@ void ath12k_sawf_init(struct ath12k_base
+ 		sawf_ctx->max_msduq_per_tid = ab->max_msduq_per_tid;
+ 		sawf_ctx->default_msduq_per_tid = ab->default_msduq_per_tid;
+ 		spin_lock_init(&sawf_ctx->sawf_svc_lock);
++		sawf_ctx->workqueue = create_singlethread_workqueue("sawf_wq");
++		INIT_WORK(&sawf_ctx->ul_configure, ath12k_send_ul_configs);
++		INIT_LIST_HEAD(&sawf_ctx->list);
+ 	} else {/* Already initialized */
+ 		return;
+ 	}
+@@ -50,6 +54,12 @@ void ath12k_sawf_init(struct ath12k_base
  	else
  		ath12k_dbg(ab, ATH12K_DBG_SAWF, "ECM msduq callback register success\n");
  
@@ -82,17 +92,37 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  	ath12k_info(NULL, "SAWF context initialized\n");
  }
  
-@@ -70,6 +77,9 @@ void ath12k_sawf_deinit(struct ath12k_ba
+@@ -58,18 +68,25 @@ void ath12k_sawf_deinit(struct ath12k_ba
+ 	if (!ath12k_sawf_enable)
+ 		return;
+ 
++	if (!sawf_ctx)
++                return;
++
+ 	/* During firmware crash recovery scenario, the SAWF context
+ 	 * will be retained.
+ 	 */
+-	if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags))
+-		return;
+-
+-	if (!sawf_ctx)
++	if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags)) {
++		cancel_work_sync(&sawf_ctx->ul_configure);
+ 		return;
++	}
+ 
  	ecm_classifier_emesh_sawf_msduq_callback_unregister();
  	ath12k_dbg(ab, ATH12K_DBG_SAWF, "ECM msduq callback unregister success\n");
  
 +	ecm_classifier_emesh_sawf_conn_sync_callback_unregister();
 +	ath12k_dbg(ab, ATH12K_DBG_SAWF, "ECM uplink cfg callback unregister success\n");
 +
++	cancel_work_sync(&sawf_ctx->ul_configure);
++	destroy_workqueue(sawf_ctx->workqueue);
  	kfree(sawf_ctx);
  	sawf_ctx = NULL;
  	ath12k_info(NULL, "SAWF context freed\n");
-@@ -880,3 +890,195 @@ unlock_ab_base:
+@@ -881,3 +898,247 @@ unlock_ab_base:
  	spin_unlock_bh(&ab->base_lock);
  	rcu_read_unlock();
  }
@@ -105,17 +135,23 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +	int ret;
 +
 +	sawf = ath12k_get_sawf_context();
-+	if (!sawf ||
-+	    !mac_addr ||
-+	    !ath12k_svc_id_valid(svc_id) ||
-+	    !ath12k_svc_id_configured(svc_id))
-+		return ;
++	if (!sawf || !mac_addr)
++		return;
++
++	spin_lock_bh(&sawf->sawf_svc_lock);
++	if (!ath12k_svc_id_valid(svc_id) ||
++	    !ath12k_svc_id_configured(svc_id)) {
++		spin_unlock_bh(&sawf->sawf_svc_lock);
++		return;
++	}
 +
 +	svc_param = &sawf->svc_classes[SVC_INDEX(svc_id)];
 +
 +	if (!svc_param->ul_service_interval ||
-+	    !svc_param->ul_burst_size)
++	    !svc_param->ul_burst_size) {
++		spin_unlock_bh(&sawf->sawf_svc_lock);
 +		return;
++	}
 +
 +	latency_info.svc_id = svc_id;
 +	latency_info.ul_enable = 1;
@@ -130,7 +166,8 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +	latency_info.ofdma_disable = svc_param->ul_ofdma_disable ? 1 : 0;
 +	latency_info.mu_mimo_disable = svc_param->ul_mu_mimo_disable ? 1 : 0;
 +
-+        ether_addr_copy(latency_info.peer_mac, mac_addr);
++	spin_unlock_bh(&sawf->sawf_svc_lock);
++	ether_addr_copy(latency_info.peer_mac, mac_addr);
 +
 +	ret = ath12k_core_sawf_ul_config(dev, &latency_info);
 +	if (ret)
@@ -139,11 +176,10 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +			   mac_addr, ret);
 +}
 +
-+void ath12k_sawf_config_ul(struct net_device *dest_dev, u8 *dst_mac, struct net_device *src_dev, u8 *src_mac,
-+			   u8 fw_service_id, u8 rv_service_id,
-+			   u8 add_or_sub)
++void ath12k_send_ul_configs(struct work_struct *work)
 +{
 +	struct ath12k_sawf_ctx *sawf;
++	struct ath_ul_params *ul_params, *tmp;
 +
 +	sawf = ath12k_get_sawf_context();
 +	if (!sawf) {
@@ -151,10 +187,55 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +		return;
 +	}
 +
-+	mutex_lock(&sawf->sawf_svc_lock);
-+	ath12k_sawf_core_send_ul_config(src_dev, fw_service_id, src_mac, add_or_sub);
-+	ath12k_sawf_core_send_ul_config(dest_dev, rv_service_id, dst_mac, add_or_sub);
-+	mutex_unlock(&sawf->sawf_svc_lock);
++	spin_lock_bh(&sawf->sawf_svc_lock);
++	list_for_each_entry_safe(ul_params, tmp, &sawf->list, list) {
++		list_del(&ul_params->list);
++		spin_unlock_bh(&sawf->sawf_svc_lock);
++
++		ath12k_sawf_core_send_ul_config(ul_params->src_dev,
++						ul_params->fw_service_id,
++						ul_params->src_mac,
++						ul_params->add_or_sub);
++		ath12k_sawf_core_send_ul_config(ul_params->dest_dev,
++						ul_params->rv_service_id,
++						ul_params->dst_mac,
++						ul_params->add_or_sub);
++		kfree(ul_params);
++		spin_lock_bh(&sawf->sawf_svc_lock);
++	}
++	spin_unlock_bh(&sawf->sawf_svc_lock);
++}
++
++void ath12k_sawf_config_ul(struct net_device *dest_dev, u8 *dst_mac, struct net_device *src_dev, u8 *src_mac,
++			   u8 fw_service_id, u8 rv_service_id,
++			   u8 add_or_sub)
++{
++	struct ath12k_sawf_ctx *sawf;
++	struct ath_ul_params *ul_params;
++
++	sawf = ath12k_get_sawf_context();
++	if (!sawf) {
++		ath12k_err(NULL, "SAWF ctx is invalid\n");
++		return;
++	}
++
++	ul_params = kzalloc(sizeof(*ul_params), GFP_NOWAIT);
++	if (!ul_params) {
++		ath12k_err(NULL,"Failed to allocate memory during SAWF UL configuration\n");
++		return;
++	}
++	ul_params->dest_dev = dest_dev;
++	ul_params->src_dev = src_dev;
++	ether_addr_copy(ul_params->dst_mac, dst_mac);
++	ether_addr_copy(ul_params->src_mac, src_mac);
++	ul_params->fw_service_id = fw_service_id;
++	ul_params->rv_service_id = rv_service_id;
++	ul_params->add_or_sub = add_or_sub;
++	spin_lock_bh(&sawf->sawf_svc_lock);
++	list_add_tail(&ul_params->list, &sawf->list);
++	spin_unlock_bh(&sawf->sawf_svc_lock);
++
++	queue_work(sawf->workqueue, &sawf->ul_configure);
 +}
 +
 +int ath12k_sawf_wmi_config_peer_latency(struct ath12k *ar,
@@ -249,7 +330,6 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +	peer = ath12k_peer_find_by_addr(ab, latency_info->peer_mac);
 +	if (!peer)
 +		goto unlock_base_lock;
-+
 +	ath12k_dbg(ab, ATH12K_DBG_SAWF,
 +		   "SAWF:Peer Found:config uplink:MAC %pM:svc_id %u\n",
 +		   latency_info->peer_mac,
@@ -277,20 +357,50 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +		   latency_info->mu_mimo_disable);
 +
 +	ar = ab->pdevs[peer->pdev_idx].ar;
-+	if (ar)
++	if (ar) {
++		spin_unlock_bh(&ab->base_lock);
 +		ret = ath12k_sawf_wmi_config_peer_latency(ar, latency_info);
-+	else
++		return ret;
++	} else {
 +		ath12k_err(ab,"SAWF UL Cfg fail, pdev_idx %d ar NULL \n",
 +			   peer->pdev_idx);
++	}
 +
 +unlock_base_lock:
 +	spin_unlock_bh(&ab->base_lock);
-+
 +	return ret;
 +}
 --- a/drivers/net/wireless/ath/ath12k/sawf.h
 +++ b/drivers/net/wireless/ath/ath12k/sawf.h
-@@ -317,6 +317,150 @@ struct ath12k_htt_t2h_sawf_q_map_report
+@@ -167,6 +167,17 @@ struct ath12k_sawf_svc_params {
+ 	bool configured;
+ };
+ 
++struct ath_ul_params {
++	struct list_head list;
++	struct net_device *dest_dev;
++	struct net_device *src_dev;
++	u8 dst_mac[ETH_ALEN];
++	u8 src_mac[ETH_ALEN];
++	u8 fw_service_id;
++	u8 rv_service_id;
++	u8 add_or_sub;
++};
++
+ /**
+  * struct ath12k_sawf_ctx- SAWF context
+  * @svc_classes: List of all service classes
+@@ -176,6 +187,9 @@ struct ath12k_sawf_ctx {
+ 	u32 max_msduq_per_tid;
+ 	u32 default_msduq_per_tid;
+ 	spinlock_t sawf_svc_lock;
++	struct workqueue_struct *workqueue;
++	struct work_struct ul_configure;
++	struct list_head list;
+ };
+ 
+ /**
+@@ -317,6 +331,150 @@ struct ath12k_htt_t2h_sawf_q_map_report
  	u32 tid_report[ATH12K_SAWF_MAX_TID_SUPPORT]; //MAX_TIDT
  } __packed;
  
@@ -441,7 +551,11 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  extern bool ath12k_sawf_enable;
  struct ath12k_sawf_ctx *ath12k_get_sawf_context(void);
  void ath12k_sawf_init(struct ath12k_base *ab);
-@@ -333,6 +477,11 @@ int ath12k_sawf_disable_config(u8 svc_id
+@@ -330,9 +488,15 @@ int ath12k_get_tid(u8 svc_id);
+ int ath12k_sawf_reconfigure_on_crash(struct ath12k_base *ab);
+ int ath12k_create_send_svc_params(struct ath12k_sawf_svc_params *param);
+ int ath12k_sawf_disable_config(u8 svc_id);
++void ath12k_send_ul_configs(struct work_struct *work);
  u16 ath12k_sawf_get_msduq(struct net_device *netdev,
  			  u8 *peer_mac, u32 service_id,
  			  u32 dscp, u32 rule_id);
