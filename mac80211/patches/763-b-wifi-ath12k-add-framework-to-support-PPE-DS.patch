@@ -172,6 +172,16 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = ath12k_dp_alloc(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to init DP: %d\n", ret);
+@@ -2301,6 +2339,9 @@ struct ath12k_base *ath12k_core_alloc(st
+ 	ab->hif.bus = bus;
+ 	ab->qmi.num_radios = ATH12K_QMI_INVALID_RADIO;
+ 
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	ab->ppeds_node_idx = -1;
++#endif
+ 	return ab;
+ 
+ err_free_wq:
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -28,6 +28,10 @@
@@ -193,7 +203,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  enum ath12k_monitor_flags {
-@@ -1113,6 +1118,30 @@ struct ath12k_soc_dp_stats {
+@@ -1115,6 +1120,30 @@ struct ath12k_soc_dp_stats {
  	struct ath12k_dp_ring_bp_stats bp_stats;
  };
  
@@ -224,7 +234,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  struct ath12k_reg_freq {
           u32 start_freq;
           u32 end_freq;
-@@ -1232,7 +1261,7 @@ struct ath12k_base {
+@@ -1234,7 +1263,7 @@ struct ath12k_base {
  	bool wmi_ready;
  	u32 wlan_init_status;
  	int irq_num[ATH12K_IRQ_NUM_MAX];
@@ -233,12 +243,14 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	struct napi_struct *napi;
  	struct ath12k_targ_cap target_caps;
  	u32 ext_service_bitmap[WMI_SERVICE_EXT_BM_SIZE];
-@@ -1319,6 +1348,20 @@ struct ath12k_base {
+@@ -1321,6 +1350,22 @@ struct ath12k_base {
  	u32 max_msduq_per_tid;
  	u32 default_msduq_per_tid;
  
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	ppe_ds_wlan_handle_t *ppeds_handle;
++	/* used for per node enumeration*/
++	int ppeds_node_idx;
 +	int ppe_vp_tbl_registered[PPE_VP_ENTRIES_MAX];
 +	int ppe_vp_search_idx_tbl_set[PPE_VP_ENTRIES_MAX];
 +	struct ath12k_ppeds_napi ppeds_napi_ctxt;
@@ -270,7 +282,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2065,6 +2065,94 @@ static const struct file_operations fops
+@@ -2069,6 +2069,94 @@ static const struct file_operations fops
  	.write = ath12k_write_rx_hash_ix3,
  };
  
@@ -365,7 +377,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  int ath12k_debugfs_pdev_create(struct ath12k_base *ab)
  {
  	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
-@@ -2097,6 +2185,11 @@ int ath12k_debugfs_pdev_create(struct at
+@@ -2101,6 +2189,11 @@ int ath12k_debugfs_pdev_create(struct at
  	debugfs_create_file("fw_reset_stats", 0400, ab->debugfs_soc, ab,
  			    &fops_fw_reset_stats);
  
@@ -2147,7 +2159,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
  
  	/* TODO: Do we need to enable ANI? */
-@@ -14108,6 +14119,10 @@ static const struct ieee80211_ops ath12k
+@@ -14122,6 +14133,10 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -2198,7 +2210,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		    ab->hw_params->ring_mask->rx_mon_dest[i]) {
  			num_irq = 1;
  		}
-@@ -590,6 +596,82 @@ static int ath12k_pci_ext_irq_config(str
+@@ -590,6 +596,88 @@ static int ath12k_pci_ext_irq_config(str
  	return 0;
  }
  
@@ -2216,12 +2228,18 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	    ring_num == HAL_WBM2SW_PPEDS_TX_CMPLN_RING_NUM)) {
 +		return 0;
 +	}
++
++	if (ab->ppeds_node_idx == -1) {
++		ath12k_err(ab, "invalid ppeds_node_idx in ppeds_register_interrupts\n");
++		return -EINVAL;
++	}
++
 +	irq = ath12k_pci_get_msi_irq(ab->dev, vector);
 +
 +	irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
 +	if (type == HAL_PPE2TCL) {
 +		snprintf(&ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE2TCL], sizeof(ab->dp.ppeds_irq_name),
-+			 "pci%d_ppe2tcl", bus_id);
++			 "pci%d_ppe2tcl_%d", bus_id, ab->ppeds_node_idx);
 +		ret = request_irq(irq,  ath12k_ds_ppe2tcl_irq_handler,
 +				  IRQF_SHARED,
 +			    ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE2TCL], (void *)ath12k_dp_get_ppe_ds_ctxt(ab));
@@ -2230,7 +2248,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		ab->dp.ppeds_irq[PPEDS_IRQ_PPE2TCL] = irq;
 +	} else if (type == HAL_REO2PPE) {
 +		snprintf(&ab->dp.ppeds_irq_name[PPEDS_IRQ_REO2PPE], sizeof(ab->dp.ppeds_irq_name),
-+			 "pci%d_reo2ppe", bus_id);
++			 "pci%d_reo2ppe_%d", bus_id, ab->ppeds_node_idx);
 +		ret = request_irq(irq,  ath12k_ds_reo2ppe_irq_handler,
 +				  IRQF_SHARED,
 +				  ab->dp.ppeds_irq_name[PPEDS_IRQ_REO2PPE], (void *)ath12k_dp_get_ppe_ds_ctxt(ab));
@@ -2239,7 +2257,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		ab->dp.ppeds_irq[PPEDS_IRQ_REO2PPE] = irq;
 +	} else if (type == HAL_WBM2SW_RELEASE && ring_num == HAL_WBM2SW_PPEDS_TX_CMPLN_RING_NUM) {
 +		snprintf(&ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL], sizeof(ab->dp.ppeds_irq_name),
-+			 "pci%d_ppe_wbm_rel", bus_id);
++			 "pci%d_ppe_wbm_rel_%d", bus_id, ab->ppeds_node_idx);
 +		ret = request_irq(irq,  ath12k_dp_ppeds_handle_tx_comp,
 +				  IRQF_SHARED,
 +				  ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL],(void *)ab);
@@ -2281,7 +2299,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static int ath12k_pci_config_irq(struct ath12k_base *ab)
  {
  	struct ath12k_ce_pipe *ce_pipe;
-@@ -1266,6 +1348,12 @@ static const struct ath12k_hif_ops ath12
+@@ -1266,6 +1354,12 @@ static const struct ath12k_hif_ops ath12
  	.ce_irq_enable = ath12k_pci_hif_ce_irq_enable,
  	.ce_irq_disable = ath12k_pci_hif_ce_irq_disable,
  	.get_ce_msi_idx = ath12k_pci_get_ce_msi_idx,
@@ -2323,7 +2341,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #endif /* ATH12K_PCI_H */
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,987 @@
+@@ -0,0 +1,997 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -2342,6 +2360,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +#include "hif.h"
 +#include "ppe.h"
 +
++static atomic_t num_ppeds_nodes;
 +extern struct sk_buff *
 +ath12k_dp_ppeds_tx_release_desc_nolock(struct ath12k_dp *dp,
 +				struct ath12k_ppeds_tx_desc_info *tx_desc,
@@ -3121,7 +3140,14 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		ath12k_ppeds_detach(ab);
 +		return -1;
 +	}
-+	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS attach ab %px ppeds_handle %px\n", ab, ab->ppeds_handle);
++
++	WARN_ON(ab->ppeds_node_idx != -1);
++	/* dec ppeds_node_idx to start from 0 */
++	ab->ppeds_node_idx = atomic_inc_return(&num_ppeds_nodes) - 1;
++
++	ath12k_dbg(ab, ATH12K_DBG_PPE,
++		   "PPEDS attach ab %px ppeds_handle %px ppeds_node_idx %d num_ppeds_nodes %d\n",
++		   ab, ab->ppeds_handle, ab->ppeds_node_idx, atomic_read(&num_ppeds_nodes));
 +
 +	ret = ath12k_dp_ppeds_add_napi_ctxt(ab);
 +	if (ret)
@@ -3151,6 +3177,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	ath12k_hif_ppeds_free_interrupts(ab);
 +	ppe_ds_wlan_inst_free(ab->ppeds_handle);
 +	ab->ppeds_handle = NULL;
++	ab->ppeds_node_idx = -1;
++	atomic_dec(&num_ppeds_nodes);
 +
 +	for (i = 0; i < PPE_VP_ENTRIES_MAX; i++) {
 +		ab->ppe_vp_tbl_registered[i] = 0;
