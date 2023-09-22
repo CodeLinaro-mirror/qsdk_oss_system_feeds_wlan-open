@@ -241,7 +241,7 @@ hostapd_adjust_config() {
 		ieee80211ac=0
 	fi
 
-	#echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, ieee80211ac $ieee80211ac $ml_link" > /dev/ttyMSM0
+	echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, AP $ap_intf link $ml_link" > /dev/ttyMSM0
 
 	hostapd_cli -i $ap_intf $ml_link set channel $sta_channel 2> /dev/null
 	if [ "$wifi_5gband" == "true" ] || [ "$wifi_6gband" == "true" ]; then
@@ -417,7 +417,6 @@ hostapd_get_ap_status() {
 		if [ -n "$ap_link" ]; then
 			ap_status=$(hostapd_cli -i $ap_intf -l $ap_link status 2> /dev/null | grep state | cut -d'=' -f 2)
 		else
-			echo hostapd control interfaces not available > /dev/console
 			echo "FAIL"
 			return
 		fi
@@ -463,11 +462,10 @@ do
 		#currently, hostapd_cli disable would disable all MLO vaps
 		ap_status=$(hostapd_get_ap_status $ap_intf)
 		if [ "$ap_status" == "FAIL" ]; then
-			echo "hostapd control interface not found" > /dev/console
 			exit
 		fi
 
-		if [ "$ap_status" != "DISABLED" ]; then
+		if [ "$ap_status" = "ENABLED" ]; then
 			echo "wpa_s state: $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2), stopping AP" > /dev/ttyMSM0
 
 			ap_link=$(iw dev $ap_intf info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
@@ -544,8 +542,10 @@ do
                         fi
 
 		ap_status=$(hostapd_get_ap_status $ap_intf)
-		if [ "$ap_status" = "DISABLED" ]; then
-			echo "REPEATER AP failed bring-up, exiting" > /dev/ttyMSM0
+		if [ "$ap_status" = "DISABLED" -o "$ap_status" = "FAIL" ]; then
+			echo "REPEATER AP $ap_intf failed bring-up, exiting" > /dev/ttyMSM0
+			logread > /tmp/logread_AP_failure.log
+			echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
 			echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 			date >> /tmp/apsta_debug.log
 			hostapd_cli -i $ap_intf $ml_link status>> /tmp/apsta_debug.log
@@ -555,7 +555,7 @@ do
 			wpa_cli -i $sta_intf list_n >> /tmp/apsta_debug.log
 			wpa_cli -i $sta_intf all_bss >> /tmp/apsta_debug.log
 			date >> /tmp/apsta_debug.log
-			#wifi down
+			wifi down
 			exit
 		fi
 	fi
