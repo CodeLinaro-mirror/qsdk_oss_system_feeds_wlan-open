@@ -99,6 +99,7 @@ hostapd_vht_he_eht_oper_centr_freq_seg0_idx() {
 	local sta_channel="$2"
 	# Frequency is needed for specially handling 6 GHz channels
 	local freq="$3"
+	local intf="$4"
 
 	case $ap_vht_he_eht_oper_chwidth in
 		# 20/40 MHz chan width
@@ -165,14 +166,8 @@ hostapd_vht_he_eht_oper_centr_freq_seg0_idx() {
 		;;
                 "9" )
 			if [ $freq -ge 5955 ] && [ $freq -le 7115 ]; then
-				case "$sta_channel" in
-					1|5|9|13|17|21|25|29|33|37|41|45) ap_vht_he_eht_oper_centr_freq_seg0_idx=31;;
-					49|53|57|61|65|69|73|77) ap_vht_he_eht_oper_centr_freq_seg0_idx=63;;
-					81|85|89|93|97|101|105|109) ap_vht_he_eht_oper_centr_freq_seg0_idx=95;;
-					113|117|121|125|129|133|137|141) ap_vht_he_eht_oper_centr_freq_seg0_idx=127;;
-					145|149|153|157|161|165|169|173) ap_vht_he_eht_oper_centr_freq_seg0_idx=159;;
-					177|181|185|189|193|197|201|205|209|213|217|221) ap_vht_he_eht_oper_centr_freq_seg0_idx=191;;
-				esac
+				eht_oper_centr_freq_val=$(iw dev $intf info | grep $freq | awk '{print $9}')
+				ap_vht_he_eht_oper_centr_freq_seg0_idx=$((($eht_oper_centr_freq_val - 5950) / 5))
 			elif [ $freq -ge 5500 ] && [ $freq -le 5730 ]; then
 				ap_vht_he_eht_oper_centr_freq_seg0_idx=130
 			fi
@@ -276,16 +271,16 @@ hostapd_adjust_config() {
                 local ap_vht_he_eht_oper_centr_freq_seg0_idx
 
                 hostapd_vht_he_eht_oper_chwidth "$sta_width"
-                hostapd_vht_he_eht_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel" "$sta_freq"
+                hostapd_vht_he_eht_oper_centr_freq_seg0_idx "$sta_width" "$sta_channel" "$sta_freq" "$sta_intf"
 
-				if [ $wifi_gen == 7 ]; then
-					hostapd_cli -i $ap_intf $ml_link set ieee80211be 1 2> /dev/null
-					hostapd_cli -i $ap_intf $ml_link set eht_oper_chwidth $ap_vht_he_eht_oper_chwidth
-					hostapd_cli -i $ap_intf $ml_link set eht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
-				fi
-				hostapd_cli -i $ap_intf $ml_link set ieee80211ax 1 2> /dev/null
-				hostapd_cli -i $ap_intf $ml_link set he_oper_chwidth $ap_vht_he_eht_oper_chwidth
-				hostapd_cli -i $ap_intf $ml_link set he_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
+		if [ $wifi_gen == 7 ]; then
+			hostapd_cli -i $ap_intf $ml_link set ieee80211be 1 2> /dev/null
+			hostapd_cli -i $ap_intf $ml_link set eht_oper_chwidth $ap_vht_he_eht_oper_chwidth
+			hostapd_cli -i $ap_intf $ml_link set eht_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
+		fi
+		hostapd_cli -i $ap_intf $ml_link set ieee80211ax 1 2> /dev/null
+		hostapd_cli -i $ap_intf $ml_link set he_oper_chwidth $ap_vht_he_eht_oper_chwidth
+		hostapd_cli -i $ap_intf $ml_link set he_oper_centr_freq_seg0_idx $ap_vht_he_eht_oper_centr_freq_seg0_idx
 
 		# VHT Operations is not applicable for 6GHz interface
 		if [ $wifi_6gband == false ]; then
