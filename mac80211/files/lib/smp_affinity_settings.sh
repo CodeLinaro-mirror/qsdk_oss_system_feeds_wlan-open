@@ -1002,6 +1002,7 @@ enable_smp_affinity_wifi() {
 					#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 					enable_affinity_al02_c4
 					;;
+			ap-al06 | \
 			ap-al02-c6)
 					#case for rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 					enable_affinity_al02_c6

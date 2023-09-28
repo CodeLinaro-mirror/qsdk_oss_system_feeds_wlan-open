@@ -252,6 +252,7 @@ boost_performance() {
 				#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 
 				;;
+			ap-al06 | \
 			ap-al02-c6)
 				#rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 
