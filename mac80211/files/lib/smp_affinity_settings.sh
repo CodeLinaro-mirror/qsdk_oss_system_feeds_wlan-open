@@ -1,6 +1,7 @@
 #!/bin/sh
 #
 # Copyright (c) 2019, The Linux Foundation. All rights reserved.
+# Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -457,6 +458,31 @@ enable_affinity_al02_c4() {
 		irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 	fi
+
+	if [ -d "/sys/kernel/debug/ath12k" ]; then
+		# logic to identify QCN9274 V1.0 / V2.0
+		soc=`ls  /sys/kernel/debug/ath12k/ | head -1 |awk '{print substr($0,0,13)}' | awk '{print $2}'`
+		case $soc in
+			"hw1.0")
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+			"hw2.0")
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix3
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+		esac
+	fi
 }
 
 enable_affinity_al02_c6() {
@@ -539,6 +565,28 @@ enable_affinity_al02_c6() {
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'pci4_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	if [ -d "/sys/kernel/debug/ath12k" ]; then
+		# logic to identify QCN9274 V1.0 / V2.0
+		soc=`ls  /sys/kernel/debug/ath12k/ | head -1 |awk '{print substr($0,0,13)}' | awk '{print $2}'`
+		case $soc in
+			"hw1.0")
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+			"hw2.0")
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+		esac
+	fi
+
 }
 
 enable_affinity_al02_c9() {
@@ -644,6 +692,28 @@ enable_affinity_al02_c9() {
 		irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 	fi
+
+	if [ -d "/sys/kernel/debug/ath12k" ]; then
+		# logic to identify QCN9274 V1.0 / V2.0
+		soc=`ls  /sys/kernel/debug/ath12k/ | head -1 |awk '{print substr($0,0,13)}' | awk '{print $2}'`
+		case $soc in
+			"hw1.0")
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+			"hw2.0")
+				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001\:01\:00.0/rx_hash_ix3
+				echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix2
+				echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix3
+
+			;;
+		esac
+	fi
+
 }
 
 enable_affinity_mi01_2() {
@@ -783,6 +853,19 @@ enable_affinity_mi01_2() {
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 	fi
+
+	#5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
 }
 
 enable_affinity_mi01_6() {
@@ -871,6 +954,14 @@ enable_affinity_mi01_6() {
 		irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 	fi
+
+	#For 5G/6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 }
 
 enable_affinity_mi01_3() {
