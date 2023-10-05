@@ -67,16 +67,26 @@ if [ -e /sys/devices/platform/soc/soc:wifi2@c000000/devcoredump/data ] && [ "$AC
 	DUMPPATH="/sys/devices/platform/soc/soc:wifi2@c000000/devcoredump/data"
 fi
 
+if [ -e /sys/devices/platform/soc@0/cd00000.remoteproc/remoteproc/remoteproc0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="IPQ9574-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/devices/platform/soc@0/cd00000.remoteproc/remoteproc/remoteproc0/devcoredump/data"
+fi
+
+if [ -e /sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="IPQ5332-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/devcoredump/data"
+fi
+
 if [ -n "$FILENAME" ]; then
 	printf "%s\n" "Collecting dump_data in $SERVER" > /dev/console
 	cd /tmp
 	cp $DUMPPATH $FILENAME
 	$(tftp -l $FILENAME -p $SERVER 2>&1)
 	if [ $? -eq 0 ]; then
-		printf "%s\n" "dump_data collected in $SERVER" \
+		printf "%s\n" "$FILENAME collected in $SERVER" \
 								> /dev/console
 	else
-		printf "%s\n" "dump_data collection failed in $SERVER" \
+		printf "%s\n" "$FILENAME collection failed in $SERVER" \
 								> /dev/console
 	fi
 	echo 1 > $DUMPPATH
