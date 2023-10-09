@@ -296,31 +296,7 @@ update_mld_vap_details() {
 }
 
 pre_wifi_updown() {
-	has_updated_cfg=$(ls /var/run/hostapd-*-updated-cfg 2>/dev/null | wc -l)
-	if [ "$has_updated_cfg" -gt 1 ]; then
-		rm -rf /var/run/hostapd-*updated-cfg
-	fi
-	rm -rf /var/run/wpa_supplicant-*-updated-cfg  2>/dev/null
-	if [ -f "$MLD_VAP_DETAILS" ]; then
-		rm -rf $MLD_VAP_DETAILS
-	fi
-
-	get_device_config()  {
-		if [ ${#1} -eq 12 ]; then
-			dev=$1
-			drv_mlo_capable=$(cat /sys/module/ath12k/parameters/mlo_capable)
-		fi
-        }
-	config_foreach get_device_config wifi-device
-
-	if ([ -n "$drv_mlo_capable" ] && [ $drv_mlo_capable -eq 0 ]); then
-		echo Wireless driver is not in single wiphy architecture. Kindly set mlo_capable module param.
-		exit
-	fi
-
-
-	update_mld_vap_details
-	rm -rf /tmp/*_freq_list
+	:
 }
 
 post_wifi_updown() {
@@ -792,6 +768,31 @@ pre_mac80211() {
 
 	case "${action}" in
 		disable)
+			has_updated_cfg=$(ls /var/run/hostapd-*-updated-cfg 2>/dev/null | wc -l)
+			if [ "$has_updated_cfg" -gt 1 ]; then
+				rm -rf /var/run/hostapd-*updated-cfg
+			fi
+		        rm -rf /var/run/wpa_supplicant-*-updated-cfg  2>/dev/null
+		        if [ -f "$MLD_VAP_DETAILS" ]; then
+		                rm -rf $MLD_VAP_DETAILS
+		        fi
+
+		        get_device_config()  {
+	                if [ ${#1} -eq 12 ]; then
+				dev=$1
+				drv_mlo_capable=$(cat /sys/module/ath12k/parameters/mlo_capable)
+	                fi
+			}
+		        config_foreach get_device_config wifi-device
+
+		        if ([ -n "$drv_mlo_capable" ] && [ $drv_mlo_capable -eq 0 ]); then
+				echo Wireless driver is not in single wiphy architecture. Kindly set mlo_capable module param.
+				exit
+		        fi
+
+		        update_mld_vap_details
+		        rm -rf /tmp/*_freq_list
+
 			[ -f "/usr/sbin/fst.sh" ] && {
 				/usr/sbin/fst.sh set_mac_addr
 				/usr/sbin/fst.sh stop
