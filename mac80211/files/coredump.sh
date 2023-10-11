@@ -32,6 +32,12 @@ if [ -e /sys/devices/platform/soc/c000000.wifi1/devcoredump/data ] && [ "$ACTION
 	FILENAME="IPQ8074-m3dump-$TIMESTAMP.bin"
 	DUMPPATH="/sys/devices/platform/soc/c000000.wifi1/devcoredump/data"
 fi
+
+if [ -e /sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/devcoredump/data ] && [ "$ACTION" = add ]; then
+        FILENAME="IPQ5322-ahb-q6dump-$TIMESTAMP.bin"
+        DUMPPATH="/sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/devcoredump/data"
+fi
+
 if [ -e /sys/devices/platform/soc/c000000.wifi/devcoredump/data ] && [ "$ACTION" = add ]; then
 	FILENAME="IPQ6018-m3dump-$TIMESTAMP.bin"
 	DUMPPATH="/sys/devices/platform/soc/c000000.wifi/devcoredump/data"
