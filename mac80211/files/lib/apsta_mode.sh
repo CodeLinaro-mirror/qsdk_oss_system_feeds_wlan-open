@@ -346,6 +346,29 @@ hostapd_adjust_config() {
 	fi
 }
 
+get_link_id() {
+	ifname=$1
+	link=$(iw dev $ifname info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+
+	if [ -n "$link" ]; then
+		echo "$link"
+		return
+	else
+		#when interface is in disable state, we might not find link from iw, hence, use control
+		#interface file names to find the link id
+
+		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
+		if [ -n "$ctrl_iface" ]; then
+			link=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}' | head -n 1 )
+			if [ -n "$link" ]; then
+				echo "$link"
+				return
+			fi
+		fi
+	fi
+	echo ""
+}
+
 hostapd_is_6ghz_band() {
 	local freq=$1
 	if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
@@ -381,13 +404,21 @@ get_link_info() {
 	ifname=$1
 	freq=$2
 	ap_freq=
-	num_links=$(hostapd_cli -i $ifname status | grep num_links | cut -d'=' -f 2)
+	ml_link=""
+	link_id=$(get_link_id $ifname)
+
+	if [ -z "$link_id" ]; then
+		echo ""
+		return
+	fi
+
+	num_links=$(hostapd_cli -i $ifname -l $link_id status | grep num_links | cut -d'=' -f 2)
 	if [ $num_links -eq 0 ]; then
 		echo ""
 		return
 	fi
 
-	links=$(hostapd_cli -i $ifname status | grep link_id | cut -d'=' -f 2)
+	links=$(hostapd_cli -i $ifname -l $link_id status | grep link_id | cut -d'=' -f 2)
 	for i in $links
 	do
 		ap_freq=$(hostapd_cli -i $ifname -l $i status | grep -w freq | cut -d'=' -f 2)
@@ -408,9 +439,10 @@ hostapd_get_ap_status() {
 
 	if [ -z "$res" ]; then
 		#This could occur when the control socket is not in link0
-		ap_link=$(iw dev $ap_intf info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
-		if [ -n "$ap_link" ]; then
-			ap_status=$(hostapd_cli -i $ap_intf -l $ap_link status 2> /dev/null | grep state | cut -d'=' -f 2)
+		link_id=$(get_link_id $ap_intf)
+		if [ -n "$link_id" ]; then
+			ap_status=$(hostapd_cli -i $ap_intf -l $link_id status 2> /dev/null | grep state | cut -d'=' -f 2)
+
 		else
 			echo "FAIL"
 			return
@@ -490,7 +522,9 @@ do
 				do
 					ml_link=$(get_link_info $ap_intf $freq)
 					#echo link config command is $ml_link $freq $ap_intf  > /dev/console
-					hostapd_adjust_config $freq $ap_intf
+					if [ -n "$ml_link" ]; then
+						hostapd_adjust_config $freq $ap_intf
+					fi
 				done
 			done
 		else
