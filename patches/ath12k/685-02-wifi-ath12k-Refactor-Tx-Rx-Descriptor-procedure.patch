@@ -30,45 +30,28 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -1336,7 +1336,7 @@ static u32 ath12k_dp_cc_cookie_gen(u16 p
- 	return (u32)ppt_idx << ATH12K_CC_PPT_SHIFT | spt_idx;
- }
- 
--static u8 *ath12k_dp_cc_find_desc(struct ath12k_base *ab, u32 cookie)
-+static u8 *ath12k_dp_cc_find_desc(struct ath12k_base *ab, u32 cookie, bool is_rx)
+@@ -1388,6 +1388,7 @@ static inline void *ath12k_dp_cc_get_des
+ struct ath12k_rx_desc_info *ath12k_dp_get_rx_desc(struct ath12k_base *ab,
+ 						  u32 cookie)
  {
- 	struct ath12k_dp *dp = &ab->dp;
- 	u16 spt_page_id, spt_idx;
-@@ -1345,6 +1345,13 @@ static u8 *ath12k_dp_cc_find_desc(struct
- 	spt_idx = u32_get_bits(cookie, ATH12k_DP_CC_COOKIE_SPT);
- 	spt_page_id = u32_get_bits(cookie, ATH12K_DP_CC_COOKIE_PPT);
++	struct ath12k_dp *dp = &ab->dp;
+ 	struct ath12k_rx_desc_info **desc_addr_ptr;
+ 	u16 ppt_idx, spt_idx;
  
-+	if (is_rx) {
-+		if (WARN_ON(spt_page_id < dp->rx_spt_base))
-+			return NULL;
+@@ -1398,6 +1399,11 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
+ 	    spt_idx > ATH12K_MAX_SPT_ENTRIES)
+ 		return NULL;
+ 
++	if (WARN_ON(spt_idx < dp->rx_spt_base))
++		return NULL;
 +
-+		spt_page_id = spt_page_id - dp->rx_spt_base;
-+	}
++	spt_idx = spt_idx - dp->rx_spt_base;
 +
- 	spt_va = (u8 *)dp->spt_info[spt_page_id].vaddr;
+ 	desc_addr_ptr = ath12k_dp_cc_get_desc_addr_ptr(ab, ppt_idx, spt_idx);
  
- 	return (spt_va + spt_idx * sizeof(u64));
-@@ -1355,7 +1362,7 @@ struct ath12k_rx_desc_info *ath12k_dp_ge
- {
- 	u8 *desc_addr_ptr;
- 
--	desc_addr_ptr = ath12k_dp_cc_find_desc(ab, cookie);
-+	desc_addr_ptr = ath12k_dp_cc_find_desc(ab, cookie, true);
- 	return *(struct ath12k_rx_desc_info **)desc_addr_ptr;
- }
- 
-@@ -1364,10 +1371,40 @@ struct ath12k_tx_desc_info *ath12k_dp_ge
- {
- 	u8 *desc_addr_ptr;
- 
--	desc_addr_ptr = ath12k_dp_cc_find_desc(ab, desc_id);
-+	desc_addr_ptr = ath12k_dp_cc_find_desc(ab, desc_id, false);
- 	return *(struct ath12k_tx_desc_info **)desc_addr_ptr;
+ 	return *desc_addr_ptr;
+@@ -1422,6 +1428,36 @@ struct ath12k_tx_desc_info *ath12k_dp_ge
+ 	return *desc_addr_ptr;
  }
  
 +static void ath12k_dp_tx_cmem_init(struct ath12k_base *ab, struct ath12k_dp *dp)
@@ -104,18 +87,15 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static int ath12k_dp_cc_desc_init(struct ath12k_base *ab)
  {
  	struct ath12k_dp *dp = &ab->dp;
-@@ -1427,9 +1464,9 @@ static int ath12k_dp_cc_desc_init(struct
+@@ -1443,6 +1479,7 @@ static int ath12k_dp_cc_desc_init(struct
  		}
  
  		dp->spt_info->rxbaddr[i] = &rx_descs[0];
 +		ppt_idx = dp->rx_spt_base + ATH12K_RX_SPT_PAGE_OFFSET + i;
  
  		for (j = 0; j < ATH12K_MAX_SPT_ENTRIES; j++) {
--			ppt_idx = ATH12K_RX_SPT_PAGE_OFFSET + i;
- 			rx_descs[j].cookie = ath12k_dp_cc_cookie_gen(ppt_idx, j);
- 			rx_descs[j].magic = ATH12K_DP_RX_DESC_MAGIC;
- 			list_add_tail(&rx_descs[j].list, &dp->rx_desc_free_list);
-@@ -1473,6 +1510,7 @@ static int ath12k_dp_cc_init(struct ath1
+ 			rx_descs[j].cookie = ath12k_dp_cc_cookie_gen(i, j);
+@@ -1518,6 +1555,7 @@ static int ath12k_dp_cc_init(struct ath1
  		return -ENOMEM;
  	}
  
@@ -123,7 +103,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	cmem_base = ab->qmi.dev_mem[ATH12K_QMI_DEVMEM_CMEM_INDEX].start;
  
  	for (i = 0; i < dp->num_spt_pages; i++) {
-@@ -1491,12 +1529,12 @@ static int ath12k_dp_cc_init(struct ath1
+@@ -1536,12 +1574,12 @@ static int ath12k_dp_cc_init(struct ath1
  			ret = -EINVAL;
  			goto free;
  		}
@@ -142,7 +122,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		ath12k_warn(ab, "HW CC desc init failed %d", ret);
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
-@@ -343,6 +343,7 @@ struct ath12k_dp {
+@@ -344,6 +344,7 @@ struct ath12k_dp {
  	struct ath12k_hp_update_timer tx_ring_timer[DP_TCL_NUM_RING_MAX];
  	struct ath12k_spt_info *spt_info;
  	u32 num_spt_pages;
@@ -152,48 +132,41 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	/* protects the free and used desc list */
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -3102,8 +3102,13 @@ try_again:
- 		desc_info = (struct ath12k_rx_desc_info *)((unsigned long)desc_va);
- 
- 		/* retry manual desc retrieval */
--		if (!desc_info)
-+		if (!desc_info) {
+@@ -3196,7 +3196,7 @@ try_again:
+ 		if (!desc_info) {
  			desc_info = ath12k_dp_get_rx_desc(ab, cookie);
-+			if (!desc_info) {
-+				ath12k_warn(ab, "Rx with invalid buf cookie 0x%x\n", cookie);
-+				continue;
-+			}
-+		}
- 
- 		if (desc_info->magic != ATH12K_DP_RX_DESC_MAGIC)
- 			ath12k_warn(ab, "Check HW CC implementation");
-@@ -3803,8 +3808,13 @@ ath12k_dp_process_rx_err_buf(struct ath1
- 	desc_info = (struct ath12k_rx_desc_info *)((unsigned long)desc_va);
- 
- 	/* retry manual desc retrieval */
--	if (!desc_info)
-+	if (!desc_info) {
+ 			if (!desc_info) {
+-				ath12k_warn(ab, "Invalid cookie in manual desc retrieval");
++				ath12k_warn(ab, "Invalid cookie in manual desc retrieval cookie 0x%x", cookie);
+ 				continue;
+ 			}
+ 		}
+@@ -3914,7 +3914,7 @@ ath12k_dp_process_rx_err_buf(struct ath1
+ 	if (!desc_info) {
  		desc_info = ath12k_dp_get_rx_desc(ab, cookie);
-+		if (!desc_info) {
-+			ath12k_warn(ab, "RX Exception, invalid buf cookie 0x%x\n", cookie);
-+			return -EINVAL;
-+		}
-+	}
- 
- 	if (desc_info->magic != ATH12K_DP_RX_DESC_MAGIC)
- 		ath12k_warn(ab, " RX Exception, Check HW CC implementation");
-@@ -4298,8 +4308,13 @@ int ath12k_dp_rx_process_wbm_err(struct
- 		desc_info = (struct ath12k_rx_desc_info *)err_info.rx_desc;
- 
- 		/* retry manual desc retrieval if hw cc is not done */
--		if (!desc_info)
-+		if (!desc_info) {
+ 		if (!desc_info) {
+-			ath12k_warn(ab, "Invalid cookie in manual desc retrieval");
++			ath12k_warn(ab, "Invalid cookie in manual desc retrieval cookie 0x%x", cookie);
+ 			return -EINVAL;
+ 		}
+ 	}
+@@ -4430,7 +4430,7 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 		if (!desc_info) {
  			desc_info = ath12k_dp_get_rx_desc(ab, err_info.cookie);
-+			if (!desc_info) {
-+				ath12k_warn(ab, "WBM RX err, invalid buf cookie 0x%x\n", err_info.cookie);
-+				continue;
-+			}
-+		}
+ 			if (!desc_info) {
+-				ath12k_warn(ab, "Invalid cookie in manual desc retrieval");
++				ath12k_warn(ab, "Invalid cookie in manual desc retrieval cookie 0x%x", err_info.cookie);
+ 				continue;
+ 			}
+ 		}
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -4623,7 +4623,7 @@ int ath12k_wmi_pdev_dma_ring_cfg(struct
+ 	cmd->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_DMA_RING_CFG_REQ,
+ 						 sizeof(*cmd));
  
- 		/* FIXME Extract mac id correctly. Since descs are not tied
- 		 * to mac, we can extract from vdev id in ring desc.
+-	cmd->pdev_id = cpu_to_le32(DP_SW2HW_MACID(arg->pdev_id));
++	cmd->pdev_id = cpu_to_le32(arg->pdev_id);
+ 	cmd->module_id = cpu_to_le32(arg->module_id);
+ 	cmd->base_paddr_lo = cpu_to_le32(arg->base_paddr_lo);
+ 	cmd->base_paddr_hi = cpu_to_le32(arg->base_paddr_hi);

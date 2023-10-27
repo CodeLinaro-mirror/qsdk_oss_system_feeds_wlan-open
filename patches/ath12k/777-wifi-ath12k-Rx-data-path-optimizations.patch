@@ -88,20 +88,21 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  static u8 ath12k_dp_rx_h_tid(struct ath12k_base *ab,
  			     struct hal_rx_desc *desc)
  {
-@@ -206,12 +158,6 @@ static void ath12k_dp_rxdesc_set_msdu_le
+@@ -206,13 +158,6 @@ static void ath12k_dp_rxdesc_set_msdu_le
  	ab->hw_params->hal_ops->rx_desc_set_msdu_len(desc, len);
  }
  
--static bool ath12k_dp_rx_h_is_mcbc(struct ath12k_base *ab,
--				   struct hal_rx_desc *desc)
+-static bool ath12k_dp_rx_h_is_da_mcbc(struct ath12k_base *ab,
+-				      struct hal_rx_desc *desc)
 -{
 -	return (ath12k_dp_rx_h_first_msdu(ab, desc) &&
--	        ab->hw_params->hal_ops->rx_desc_is_mcbc(desc));
+-		ab->hw_params->hal_ops->rx_desc_is_da_mcbc(desc));
 -}
- 
+-
  static bool ath12k_dp_rxdesc_mac_addr2_valid(struct ath12k_base *ab,
  					     struct hal_rx_desc *desc)
-@@ -2246,7 +2192,8 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
+ {
+@@ -2251,7 +2196,8 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
  static int ath12k_dp_rx_msdu_coalesce(struct ath12k *ar,
  				      struct sk_buff_head *msdu_list,
  				      struct sk_buff *first, struct sk_buff *last,
@@ -111,7 +112,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  {
  	struct ath12k_base *ab = ar->ab;
  	struct sk_buff *skb;
-@@ -2270,8 +2217,9 @@ static int ath12k_dp_rx_msdu_coalesce(st
+@@ -2275,8 +2221,9 @@ static int ath12k_dp_rx_msdu_coalesce(st
  	}
  
  	ldesc = (struct hal_rx_desc *)last->data;
@@ -123,7 +124,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	/* MSDU spans over multiple buffers because the length of the MSDU
  	 * exceeds DP_RX_BUFFER_SIZE - HAL_RX_DESC_SIZE. So assume the data
-@@ -2323,6 +2271,13 @@ static int ath12k_dp_rx_msdu_coalesce(st
+@@ -2328,6 +2275,13 @@ static int ath12k_dp_rx_msdu_coalesce(st
  		rem_len -= buf_len;
  		if (!rxcb->is_continuation)
  			break;
@@ -137,7 +138,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  	}
  
  	return 0;
-@@ -2346,14 +2301,13 @@ static struct sk_buff *ath12k_dp_rx_get_
+@@ -2351,14 +2305,13 @@ static struct sk_buff *ath12k_dp_rx_get_
  	return NULL;
  }
  
@@ -156,7 +157,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	msdu->ip_summed = (ip_csum_fail || l4_csum_fail) ?
  			  CHECKSUM_NONE : CHECKSUM_UNNECESSARY;
-@@ -2733,31 +2687,35 @@ ath12k_dp_rx_h_find_peer(struct ath12k_b
+@@ -2737,31 +2690,35 @@ ath12k_dp_rx_h_find_peer(struct ath12k_b
  static bool ath12k_dp_rx_check_fast_rx(struct ath12k *ar,
                                         struct sk_buff *msdu,
                                         struct hal_rx_desc *rx_desc,
@@ -199,7 +200,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  		return false;
  
  	/* fast rx is supported only on ethernet decap, so
-@@ -2797,8 +2755,8 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2801,8 +2758,8 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	struct ieee80211_hdr *hdr;
  	struct ath12k_peer *peer;
  	struct ieee80211_rx_status *rx_status = rx_info->rx_status;
@@ -209,14 +210,14 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  	u8 tid;
  #if defined(CPTCFG_MAC80211_PPE_SUPPORT) || defined(CPTCFG_ATH12K_BONDED_DS_SUPPORT)
  	int vp;
-@@ -2809,14 +2767,13 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2813,14 +2770,13 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	struct ath12k_link_vif *arvif;
  #endif
  
 -	tid = ath12k_dp_rx_h_tid(ab, rx_desc);
  	/* PN for multicast packets will be checked in mac80211 */
  	rxcb = ATH12K_SKB_RXCB(msdu);
--	fill_crypto_hdr = ath12k_dp_rx_h_is_mcbc(ar->ab, rx_desc);
+-	fill_crypto_hdr = ath12k_dp_rx_h_is_da_mcbc(ar->ab, rx_desc);
 +	fill_crypto_hdr = rx_info->is_mcbc;
  	rxcb->is_mcbc = fill_crypto_hdr;
  
@@ -226,7 +227,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath12k_dp_rx_h_find_peer(ar->ab, msdu, rx_info);
-@@ -2826,20 +2783,16 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2830,18 +2786,14 @@ static void ath12k_dp_rx_h_mpdu(struct a
  		 * pkts with crypto error are not expected to arrive in this
  		 * path, so its safe to skip checking errors here */
  		if (*fast_rx &&
@@ -245,12 +246,9 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
 -				ath12k_dp_rx_h_csum_offload(ar, msdu);
 +				ath12k_dp_rx_h_csum_offload(ar, msdu, rx_info);
  #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
--				ahvif = ath12k_vif_to_ahvif(peer->vif)
-+				ahvif = ath12k_vif_to_ahvif(peer->vif);
+ 				ahvif = ath12k_vif_to_ahvif(peer->vif)
  				arvif = ahvif->link[peer->link_id];
- 				vp = arvif->ppe_vp_num;
- 				if (wdev->bond_netdev)
-@@ -2858,6 +2811,13 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2862,6 +2814,13 @@ static void ath12k_dp_rx_h_mpdu(struct a
  				return;
  		        }
  		}
@@ -264,7 +262,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  		if (rxcb->is_mcbc)
  			enctype = peer->sec_type_grp;
  		else
-@@ -2904,7 +2864,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2908,7 +2867,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  					   RX_FLAG_PN_VALIDATED;
  	}
  
@@ -273,7 +271,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  	ath12k_dp_rx_h_undecap(ar, msdu, rx_desc,
  			       enctype, rx_status, is_decrypted);
  
-@@ -3012,26 +2972,17 @@ static void ath12k_dp_rx_h_fetch_info(st
+@@ -3016,26 +2975,17 @@ static void ath12k_dp_rx_h_fetch_info(st
  				      struct hal_rx_desc *rx_desc,
  				      struct ath12k_dp_rx_info *rx_info)
  {
@@ -310,7 +308,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	if (ath12k_dp_rxdesc_mac_addr2_valid(ab, rx_desc)) {
  		ether_addr_copy(rx_info->addr2,
-@@ -3254,7 +3205,8 @@ static int ath12k_dp_rx_process_msdu(str
+@@ -3261,7 +3211,8 @@ static int ath12k_dp_rx_process_msdu(str
  
  	rx_desc = (struct hal_rx_desc *)msdu->data;
  	lrx_desc = (struct hal_rx_desc *)last_buf->data;
@@ -320,7 +318,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  		ath12k_warn(ab, "msdu_done bit in msdu_end is not set\n");
  		ret = -EIO;
  		goto free_out;
-@@ -3262,8 +3214,8 @@ static int ath12k_dp_rx_process_msdu(str
+@@ -3269,8 +3220,8 @@ static int ath12k_dp_rx_process_msdu(str
  
  	rxcb = ATH12K_SKB_RXCB(msdu);
  	rxcb->rx_desc = rx_desc;
@@ -331,7 +329,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	if (rxcb->is_frag) {
  		skb_pull(msdu, hal_rx_desc_sz);
-@@ -3280,7 +3232,8 @@ static int ath12k_dp_rx_process_msdu(str
+@@ -3287,7 +3238,8 @@ static int ath12k_dp_rx_process_msdu(str
  	} else {
  		ret = ath12k_dp_rx_msdu_coalesce(ar, msdu_list,
  						 msdu, last_buf,
@@ -341,7 +339,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  		if (ret) {
  			ath12k_warn(ab,
  				    "failed to coalesce msdu rx buffer%d\n", ret);
-@@ -3323,6 +3276,7 @@ static void ath12k_dp_rx_process_receive
+@@ -3330,6 +3282,7 @@ static void ath12k_dp_rx_process_receive
  	u8 mac_id, hw_link_id;
  	int ret;
  	bool fast_rx;
@@ -349,7 +347,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  	if (skb_queue_empty(msdu_list))
  		return;
-@@ -3333,6 +3287,12 @@ static void ath12k_dp_rx_process_receive
+@@ -3340,6 +3293,12 @@ static void ath12k_dp_rx_process_receive
  	rcu_read_lock();
  
  	while ((msdu = __skb_dequeue(msdu_list))) {
@@ -362,7 +360,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  		rxcb = ATH12K_SKB_RXCB(msdu);
  		/* Enable fast rx by default, the value will cahnge based on peer cap
                  * and packet type */
-@@ -3359,7 +3319,7 @@ static void ath12k_dp_rx_process_receive
+@@ -3366,7 +3325,7 @@ static void ath12k_dp_rx_process_receive
  			continue;
  		}
  
@@ -402,7 +400,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  
  static const struct hal_srng_config hw_srng_config_template[] = {
  	/* TODO: max_rings can populated by querying HW capabilities */
-@@ -677,6 +678,59 @@ static u32 ath12k_hw_qcn9274_dp_rx_h_mpd
+@@ -721,6 +722,59 @@ static u32 ath12k_hw_qcn9274_dp_rx_h_mpd
  	return errmap;
  }
  
@@ -462,7 +460,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  const struct hal_ops hal_qcn9274_ops = {
  	.rx_desc_get_first_msdu = ath12k_hw_qcn9274_rx_desc_get_first_msdu,
  	.rx_desc_get_last_msdu = ath12k_hw_qcn9274_rx_desc_get_last_msdu,
-@@ -720,6 +774,9 @@ const struct hal_ops hal_qcn9274_ops = {
+@@ -764,6 +818,9 @@ const struct hal_ops hal_qcn9274_ops = {
  	.rxdma_ring_wmask_rx_mpdu_start = ath12k_hal_rx_mpdu_start_wmask_get,
  	.rxdma_ring_wmask_rx_msdu_end = ath12k_hal_rx_msdu_end_wmask_get,
  	.rx_desc_get_msdu_src_link_id = ath12k_hw_qcn9274_rx_desc_get_msdu_src_link,
@@ -482,7 +480,7 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  #define HAL_CE_REMAP_REG_BASE	(ab->ce_remap_base_addr)
  
  #define HAL_LINK_DESC_SIZE			(32 << 2)
-@@ -1147,6 +1148,12 @@ struct hal_ops {
+@@ -1130,6 +1131,12 @@ struct hal_ops {
  	u16 (*rxdma_ring_wmask_rx_mpdu_start)(void);
  	u32 (*rxdma_ring_wmask_rx_msdu_end)(void);
  	u8 (*rx_desc_get_msdu_src_link_id)(struct hal_rx_desc *desc);

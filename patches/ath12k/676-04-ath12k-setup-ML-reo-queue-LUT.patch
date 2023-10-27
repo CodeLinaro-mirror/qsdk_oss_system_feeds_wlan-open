@@ -1,4 +1,4 @@
-From 34cc01f22ff045e55499263f7e36b2c3330d6228 Mon Sep 17 00:00:00 2001
+From be76a82c9100cd5f2624aec2dd54891da27ec01d Mon Sep 17 00:00:00 2001
 From: Sriram R <quic_srirrama@quicinc.com>
 Date: Sat, 12 Nov 2022 18:14:16 +0530
 Subject: [PATCH] ath12k: setup ML reo queue LUT
@@ -11,16 +11,18 @@ non ML LUT for the link peers is not required.
 
 Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/dp.c    | 31 ++++++++++++++---
+ drivers/net/wireless/ath/ath12k/dp.c    | 35 ++++++++++++++++---
  drivers/net/wireless/ath/ath12k/dp.h    |  1 +
- drivers/net/wireless/ath/ath12k/dp_rx.c | 44 ++++++++++++++++---------
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 46 ++++++++++++++++++-------
  drivers/net/wireless/ath/ath12k/peer.c  |  2 ++
  drivers/net/wireless/ath/ath12k/peer.h  |  1 +
- 5 files changed, 59 insertions(+), 20 deletions(-)
+ 5 files changed, 67 insertions(+), 18 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index 71e716b..fedc029 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -1257,12 +1257,19 @@ static void ath12k_dp_reoq_lut_cleanup(s
+@@ -1281,12 +1281,19 @@ static void ath12k_dp_reoq_lut_cleanup(struct ath12k_base *ab)
  	if (!dp->reoq_lut.vaddr)
  		return;
  
@@ -45,10 +47,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  void ath12k_dp_free(struct ath12k_base *ab)
-@@ -1526,11 +1533,30 @@ static int ath12k_dp_reoq_lut_setup(stru
- 		return -ENOMEM;
- 	}
- 
+@@ -1562,9 +1569,27 @@ static int ath12k_dp_reoq_lut_setup(struct ath12k_base *ab)
+		return -ENOMEM;
+	}
+
 +	dp->ml_reoq_lut.vaddr = dma_alloc_coherent(ab->dev,
 +						   DP_REOQ_LUT_SIZE,
 +						   &dp->ml_reoq_lut.paddr,
@@ -64,21 +66,20 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		return -ENOMEM;
 +	}
 +
- 	memset(dp->reoq_lut.vaddr, 0, DP_REOQ_LUT_SIZE);
-+	memset(dp->ml_reoq_lut.vaddr, 0, DP_REOQ_LUT_SIZE);
- 
- 	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0(ab),
- 			   dp->reoq_lut.paddr >> 8);
- 
+	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE0(ab),
+			    dp->reoq_lut.paddr >> 8);
+
 +	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_LUT_BASE1(ab),
 +			   dp->ml_reoq_lut.paddr >> 8);
 +
- 	val = ath12k_hif_read32(ab,
- 				HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_ADDR_READ(ab));
- 
+	val = ath12k_hif_read32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_ADDR_READ(ab));
+
+	ath12k_hif_write32(ab, HAL_SEQ_WCSS_UMAC_REO_REG + HAL_REO1_QDESC_ADDR_READ(ab),
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index 2db50da..28c7b2c 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
-@@ -359,6 +359,7 @@ struct ath12k_dp {
+@@ -357,6 +357,7 @@ struct ath12k_dp {
  	struct dp_rxdma_ring rxdma_mon_buf_ring;
  	struct dp_rxdma_ring tx_mon_buf_ring;
  	struct ath12k_reo_q_addr_lut reoq_lut;
@@ -86,9 +87,11 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  };
  
  /* HTT definitions */
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 32950ad..8d4b5dd 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -807,15 +807,22 @@ static void ath12k_peer_rx_tid_qref_setu
+@@ -795,15 +795,22 @@ static void ath12k_peer_rx_tid_qref_setup(struct ath12k_base *ab, u16 peer_id, u
  {
  	struct ath12k_reo_queue_ref *qref;
  	struct ath12k_dp *dp = &ab->dp;
@@ -116,7 +119,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	qref->info0 = u32_encode_bits(lower_32_bits(paddr),
  				      BUFFER_ADDR_INFO0_ADDR);
-@@ -828,15 +835,22 @@ static void ath12k_peer_rx_tid_qref_rese
+@@ -816,15 +823,22 @@ static void ath12k_peer_rx_tid_qref_reset(struct ath12k_base *ab, u16 peer_id, u
  {
  	struct ath12k_reo_queue_ref *qref;
  	struct ath12k_dp *dp = &ab->dp;
@@ -144,8 +147,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	qref->info0 = u32_encode_bits(0, BUFFER_ADDR_INFO0_ADDR);
  	qref->info1 = u32_encode_bits(0, BUFFER_ADDR_INFO1_ADDR) |
-@@ -869,7 +883,11 @@ void ath12k_dp_rx_peer_tid_delete(struct
- 		kfree(rx_tid->vaddr);
+@@ -858,7 +872,10 @@ void ath12k_dp_rx_peer_tid_delete(struct ath12k *ar,
+ 		rx_tid->vaddr = NULL;
  	}
  
 -	ath12k_peer_rx_tid_qref_reset(ar->ab, peer->peer_id, tid);
@@ -153,11 +156,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		ath12k_peer_rx_tid_qref_reset(ar->ab, peer->ml_peer_id, tid);
 +	else
 +		ath12k_peer_rx_tid_qref_reset(ar->ab, peer->peer_id, tid);
-+
+ 
  	rx_tid->vaddr = NULL;
  	rx_tid->paddr = 0;
- 	rx_tid->size = 0;
-@@ -1008,7 +1026,7 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1002,7 +1019,7 @@ int ath12k_dp_rx_peer_tid_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_
  		return 0;
  	}
  
@@ -166,7 +168,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		spin_unlock_bh(&ab->base_lock);
  		ath12k_warn(ab, "reo qref table is not setup\n");
  		return -EINVAL;
-@@ -1080,7 +1098,10 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1086,7 +1103,10 @@ int ath12k_dp_rx_peer_tid_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_
  		/* Update the REO queue LUT at the corresponding peer id
  		 * and tid with qaddr.
  		 */
@@ -178,9 +180,11 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		spin_unlock_bh(&ab->base_lock);
  	} else {
  		spin_unlock_bh(&ab->base_lock);
+diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
+index f3ec74c..59e20a5 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -505,9 +505,11 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -514,9 +514,11 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_link_vif *arvif,
  			/* the assoc link is considered primary for now */
  			peer->primary_link = arsta->is_assoc_link;
  			ether_addr_copy(peer->ml_addr, sta->addr);
@@ -192,9 +196,11 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		}
  
  	}
+diff --git a/drivers/net/wireless/ath/ath12k/peer.h b/drivers/net/wireless/ath/ath12k/peer.h
+index 0fd6dcb..d611bda 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.h
 +++ b/drivers/net/wireless/ath/ath12k/peer.h
-@@ -64,6 +64,7 @@ struct ath12k_peer {
+@@ -63,6 +63,7 @@ struct ath12k_peer {
  	 */
  	bool dp_setup_done;
  
@@ -202,3 +208,6 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	u16 ml_peer_id;
  	/* TODO remove or fill below these info if required/not required during dp change */
  	/* for reference to ath12k_link_sta */
+-- 
+2.17.1
+

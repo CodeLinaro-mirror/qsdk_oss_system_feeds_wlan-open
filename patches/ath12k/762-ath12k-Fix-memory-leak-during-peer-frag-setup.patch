@@ -98,7 +98,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	return ret;
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1075,13 +1075,11 @@ static int ath12k_peer_rx_tid_reo_update
+@@ -1067,36 +1067,19 @@ static int ath12k_peer_rx_tid_reo_update
  	return 0;
  }
  
@@ -110,11 +110,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  {
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_dp *dp = &ab->dp;
+ 	struct hal_rx_reo_queue *addr_aligned;
 -	struct ath12k_peer *peer;
  	struct ath12k_dp_rx_tid *rx_tid;
  	u32 hw_desc_sz;
- 	u32 *addr_aligned;
-@@ -1089,22 +1087,7 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+ 	void *vaddr;
  	dma_addr_t paddr;
  	int ret;
  
@@ -137,7 +137,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_warn(ab, "reo qref table is not setup\n");
  		return -EINVAL;
  	}
-@@ -1112,7 +1095,6 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1104,7 +1087,6 @@ int ath12k_dp_rx_peer_tid_setup(struct a
  	if (peer->peer_id > DP_MAX_PEER_ID || tid > IEEE80211_NUM_TIDS) {
  		ath12k_warn(ab, "peer id of peer %d or tid %d doesn't allow reoq setup\n",
  			    peer->peer_id, tid);
@@ -145,7 +145,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		return -EINVAL;
  	}
  
-@@ -1122,10 +1104,9 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1114,16 +1096,15 @@ int ath12k_dp_rx_peer_tid_setup(struct a
  		paddr = rx_tid->paddr;
  		ret = ath12k_peer_rx_tid_reo_update(ar, peer, rx_tid,
  						    ba_win_sz, ssn, true);
@@ -157,7 +157,15 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  			return ret;
  		}
  
-@@ -1146,7 +1127,6 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+ 		if (!ab->hw_params->reoq_lut_support) {
+-			ret = ath12k_wmi_peer_rx_reorder_queue_setup(ar, vdev_id,
+-								     peer_mac,
++			ret = ath12k_wmi_peer_rx_reorder_queue_setup(ar, peer->vdev_id,
++								     peer->addr,
+ 								     paddr, tid, 1,
+ 								     ba_win_sz);
+ 			if (ret) {
+@@ -1150,7 +1131,6 @@ int ath12k_dp_rx_peer_tid_setup(struct a
  
  	vaddr = kzalloc(hw_desc_sz + HAL_LINK_DESC_ALIGN - 1, GFP_ATOMIC);
  	if (!vaddr) {
@@ -165,7 +173,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -1160,9 +1140,8 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1164,9 +1144,8 @@ int ath12k_dp_rx_peer_tid_setup(struct a
  
  	ret = dma_mapping_error(ab->dev, paddr);
  	if (ret) {
@@ -176,7 +184,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		goto err_mem_free;
  	}
  
-@@ -1179,11 +1158,11 @@ int ath12k_dp_rx_peer_tid_setup(struct a
+@@ -1183,11 +1162,11 @@ int ath12k_dp_rx_peer_tid_setup(struct a
  			ath12k_peer_rx_tid_qref_setup(ab, peer->ml_peer_id, tid, paddr);
  		else
  			ath12k_peer_rx_tid_qref_setup(ab, peer->peer_id, tid, paddr);
@@ -190,7 +198,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
  	return ret;
-@@ -1201,6 +1180,7 @@ int ath12k_dp_rx_ampdu_start(struct ath1
+@@ -1205,6 +1184,7 @@ int ath12k_dp_rx_ampdu_start(struct ath1
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_sta *ahsta = (void *)params->sta->drv_priv;
  	struct ath12k_link_sta *arsta;
@@ -198,7 +206,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	int vdev_id;
  	int ret;
  
-@@ -1211,12 +1191,26 @@ int ath12k_dp_rx_ampdu_start(struct ath1
+@@ -1215,12 +1195,26 @@ int ath12k_dp_rx_ampdu_start(struct ath1
  
  	vdev_id = arsta->arvif->vdev_id;
  
@@ -228,7 +236,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	return ret;
  }
  
-@@ -3519,32 +3513,13 @@ static void ath12k_dp_rx_frag_timer(stru
+@@ -3529,32 +3523,13 @@ static void ath12k_dp_rx_frag_timer(stru
  	spin_unlock_bh(&rx_tid->ab->base_lock);
  }
  
@@ -250,8 +258,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -
 -	peer = ath12k_peer_find(ab, vdev_id, peer_mac);
 -	if (!peer) {
--		ath12k_warn(ab, "failed to find the peer to set up fragment info\n");
 -		spin_unlock_bh(&ab->base_lock);
+-		ath12k_warn(ab, "failed to find the peer to set up fragment info\n");
 -		return -ENOENT;
 -	}
 -
@@ -263,7 +271,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	for (i = 0; i <= IEEE80211_NUM_TIDS; i++) {
  		rx_tid = &peer->rx_tid[i];
  		rx_tid->ab = ab;
-@@ -3554,7 +3529,6 @@ int ath12k_dp_rx_peer_frag_setup(struct
+@@ -3564,7 +3539,6 @@ int ath12k_dp_rx_peer_frag_setup(struct
  
  	peer->tfm_mmic = tfm;
  	peer->dp_setup_done = true;
@@ -285,8 +293,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  void ath12k_dp_htt_htc_t2h_msg_handler(struct ath12k_base *ab,
  				       struct sk_buff *skb);
  int ath12k_dp_rx_pdev_reo_setup(struct ath12k_base *ab);
-@@ -167,8 +166,8 @@ int ath12k_dp_htt_tlv_iter(struct ath12k
- 			   void *data);
+@@ -163,8 +162,8 @@ int ath12k_dp_rx_bufs_replenish(struct a
+ 				bool hw_cc);
  int ath12k_dp_rx_pdev_mon_attach(struct ath12k *ar);
  void ath12k_dp_rx_pdev_mon_detach(struct ath12k_base *ab, const int pdev_idx);
 -int ath12k_dp_rx_peer_frag_setup(struct ath12k *ar, const u8 *peer_mac, int vdev_id);

@@ -1,4 +1,4 @@
-From ab9b5478345921fad607f8b9ec2f607a8026e371 Mon Sep 17 00:00:00 2001
+From 7b41ffc9c71445819fa7ae1bc4eaf658d47159df Mon Sep 17 00:00:00 2001
 From: Aishwarya R <quic_aisr@quicinc.com>
 Date: Mon, 11 Apr 2022 11:22:11 +0530
 Subject: [PATCH] ath12k: add support to select 6 GHZ Regulatory type
@@ -9,14 +9,14 @@ to select the exact reg rules.
 
 Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/reg.c |  61 +++++++--
- drivers/net/wireless/ath/ath12k/reg.h |   6 +-
- drivers/net/wireless/ath/ath12k/wmi.c | 187 +++++++++++++++++++++++++-
- drivers/net/wireless/ath/ath12k/wmi.h |  29 +++-
- 4 files changed, 262 insertions(+), 21 deletions(-)
+ drivers/net/wireless/ath/ath12k/reg.c |  60 +++++++--
+ drivers/net/wireless/ath/ath12k/reg.h |   9 +-
+ drivers/net/wireless/ath/ath12k/wmi.c | 186 +++++++++++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/wmi.h |  27 +++-
+ 4 files changed, 260 insertions(+), 22 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
-index ff2b517..0a9ddf2 100644
+index 262ba8e..b97ce0e 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
 @@ -28,6 +28,21 @@ static const struct ieee80211_regdomain ath12k_world_regd = {
@@ -41,27 +41,27 @@ index ff2b517..0a9ddf2 100644
  static bool ath12k_regdom_changes(struct ath12k *ar, char *alpha2)
  {
  	const struct ieee80211_regdomain *regd;
-@@ -565,14 +580,16 @@ ath12k_reg_update_weather_radar_band(struct ath12k_base *ab,
+@@ -562,14 +577,17 @@ ath12k_reg_update_weather_radar_band(struct ath12k_base *ab,
  
  struct ieee80211_regdomain *
  ath12k_reg_build_regd(struct ath12k_base *ab,
--		      struct cur_regulatory_info *reg_info, bool intersect)
-+		      struct cur_regulatory_info *reg_info, bool intersect,
+-		      struct ath12k_reg_info *reg_info, bool intersect)
++		      struct ath12k_reg_info *reg_info, bool intersect,
 +		      enum wmi_vdev_type vdev_type,
 +		      enum ieee80211_ap_reg_power power_type)
  {
  	struct ieee80211_regdomain *tmp_regd, *default_regd, *new_regd = NULL;
--	struct cur_reg_rule *reg_rule;
-+	struct cur_reg_rule *reg_rule, *reg_rule_6g;
+-	struct ath12k_reg_rule *reg_rule;
++	struct ath12k_reg_rule *reg_rule, *reg_rule_6g;
  	u8 i = 0, j = 0, k = 0;
  	u8 num_rules;
  	u16 max_bw;
--	u32 flags;
+ 	u32 flags;
 +	u32 flags, reg_6g_number, max_bw_6g;
  	char alpha2[3];
  
  	num_rules = reg_info->num_5g_reg_rules + reg_info->num_2g_reg_rules;
-@@ -581,8 +598,32 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+@@ -578,8 +596,32 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  	 * This can be updated to choose the combination dynamically based on AP
  	 * type and client type, after complete 6G regulatory support is added.
  	 */
@@ -96,7 +96,7 @@ index ff2b517..0a9ddf2 100644
  
  	if (!num_rules)
  		goto ret;
-@@ -639,12 +680,10 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+@@ -636,12 +678,10 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  			 * per other BW rule flags we pass from here
  			 */
  			flags = NL80211_RRF_AUTO_BW | NL80211_RRF_NO_320MHZ;
@@ -114,27 +114,37 @@ index ff2b517..0a9ddf2 100644
  			if ((reg_rule->start_freq == 6425) && (reg_rule->end_freq == 6525))
  				max_bw = 80;
 diff --git a/drivers/net/wireless/ath/ath12k/reg.h b/drivers/net/wireless/ath/ath12k/reg.h
-index 74a27c4..bae7af8 100644
+index 56d009a..9e820bd 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
-@@ -31,7 +31,11 @@ void ath12k_reg_free(struct ath12k_base *ab);
+@@ -42,7 +42,7 @@ struct ath12k_reg_rule {
+ 	u8 ant_gain;
+ 	u16 flags;
+ 	bool psd_flag;
+-	u16 psd_eirp;
++	s8 psd_eirp;
+ };
+ 
+ struct ath12k_reg_info {
+@@ -87,8 +87,11 @@ void ath12k_reg_init(struct ath12k *ar);
+ void ath12k_reg_free(struct ath12k_base *ab);
  void ath12k_regd_update_work(struct work_struct *work);
- struct ieee80211_regdomain *
- ath12k_reg_build_regd(struct ath12k_base *ab,
--		      struct cur_regulatory_info *reg_info, bool intersect);
-+		      struct cur_regulatory_info *reg_info, bool intersect,
-+		      enum wmi_vdev_type vdev_type,
+ struct ieee80211_regdomain *ath12k_reg_build_regd(struct ath12k_base *ab,
+-						  struct ath12k_reg_info *reg_info,
+-						  bool intersect);
++						  struct ath12k_reg_info *reg_info, bool intersect,
++						  enum wmi_vdev_type vdev_type,
 +                      enum ieee80211_ap_reg_power power_type);
 +enum wmi_reg_6g_ap_type
 +ath12k_ieee80211_ap_pwr_type_convert(enum ieee80211_ap_reg_power power_type);
  int ath12k_regd_update(struct ath12k *ar, bool init);
  int ath12k_reg_update_chan_list(struct ath12k *ar);
- #endif
+ 
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 7d3d92d..87e0fb8 100644
+index 484a93d..6b379c0 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -4777,6 +4777,119 @@ static struct cur_reg_rule
+@@ -4781,6 +4781,119 @@ static struct ath12k_reg_rule
  	return reg_rule_ptr;
  }
  
@@ -253,17 +263,56 @@ index 7d3d92d..87e0fb8 100644
 +
  static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  						   struct sk_buff *skb,
- 						   struct cur_regulatory_info *reg_info)
-@@ -4788,7 +4901,7 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+ 						   struct ath12k_reg_info *reg_info)
+@@ -4792,9 +4905,11 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  	u32 num_6g_reg_rules_ap[WMI_REG_CURRENT_MAX_AP_TYPE];
  	u32 num_6g_reg_rules_cl[WMI_REG_CURRENT_MAX_AP_TYPE][WMI_REG_MAX_CLIENT_TYPE];
  	u32 total_reg_rules = 0;
 -	int ret, i, j;
 +	int ret, i, j, skip_6g_rules_in_5g_rules = 0;
  
- 	ath12k_dbg(ab, ATH12K_DBG_WMI, "processing regulatory ext channel list\n");
+-	ath12k_dbg(ab, ATH12K_DBG_WMI, "processing regulatory ext channel list\n");
++	ath12k_dbg(ab, ATH12K_DBG_WMI,
++                   "%s: status_code %s", __func__,
++                   ath12k_cc_status_to_str(reg_info->status_code));
  
-@@ -4891,6 +5004,14 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+ 	tb = ath12k_wmi_tlv_parse_alloc(ab, skb->data, skb->len, GFP_ATOMIC);
+ 	if (IS_ERR(tb)) {
+@@ -4818,6 +4933,18 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+ 		le32_to_cpu(ev->num_6g_reg_rules_ap_sp);
+ 	reg_info->num_6g_reg_rules_ap[WMI_REG_VLP_AP] =
+ 		le32_to_cpu(ev->num_6g_reg_rules_ap_vlp);
++	
++	ath12k_dbg(ab, ATH12K_DBG_WMI,
++                  "6g reg info client type %s rnr_tpe_usable %d unspecified_ap_usable %d AP sub domain: lpi %s , sp %s , vlp %s\n",
++                  ath12k_6g_client_type_to_str(reg_info->client_type),
++                  reg_info->rnr_tpe_usable,
++                  reg_info->unspecified_ap_usable,
++                  ath12k_sub_reg_6g_to_str
++                  (ev->domain_code_6g_ap_lpi),
++                  ath12k_sub_reg_6g_to_str
++                  (ev->domain_code_6g_ap_sp),
++                  ath12k_sub_reg_6g_to_str
++                  (ev->domain_code_6g_ap_vlp));
+ 
+ 	for (i = 0; i < WMI_REG_MAX_CLIENT_TYPE; i++) {
+ 		reg_info->num_6g_reg_rules_cl[WMI_REG_INDOOR_AP][i] =
+@@ -4826,6 +4953,14 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+ 			le32_to_cpu(ev->num_6g_reg_rules_cl_sp[i]);
+ 		reg_info->num_6g_reg_rules_cl[WMI_REG_VLP_AP][i] =
+ 			le32_to_cpu(ev->num_6g_reg_rules_cl_vlp[i]);
++		ath12k_dbg(ab, ATH12K_DBG_WMI,
++                  "6g AP BW: lpi %d - %d sp %d - %d vlp %d - %d\n",
++                  ev->min_bw_6g_ap_lpi,
++                  ev->max_bw_6g_ap_lpi,
++                  ev->min_bw_6g_ap_sp,
++                  ev->max_bw_6g_ap_sp,
++                  ev->min_bw_6g_ap_vlp,
++                  ev->max_bw_6g_ap_vlp);
+ 	}
+ 
+ 	num_2g_reg_rules = reg_info->num_2g_reg_rules;
+@@ -4894,6 +5029,14 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  	 * from 5G rules list.
  	 */
  	if (memcmp(reg_info->alpha2, "US", 2) == 0) {
@@ -278,18 +327,7 @@ index 7d3d92d..87e0fb8 100644
  		reg_info->num_5g_reg_rules = REG_US_5G_NUM_REG_RULES;
  		num_5g_reg_rules = reg_info->num_5g_reg_rules;
  	}
-@@ -4923,6 +5044,10 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
- 		break;
- 	}
- 
-+	ath12k_dbg(ab, ATH12K_DBG_WMI,
-+                   "%s: status_code %s", __func__,
-+                   ath12k_cc_status_to_str(reg_info->status_code));
-+
- 	reg_info->is_ext_reg_event = true;
- 
- 	reg_info->min_bw_2g = ext_chan_list_event_hdr->min_bw_2g;
-@@ -4958,6 +5083,10 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+@@ -4955,6 +5098,10 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  	}
  
  	ath12k_dbg(ab, ATH12K_DBG_WMI,
@@ -300,7 +338,7 @@ index 7d3d92d..87e0fb8 100644
  		   "%s:cc_ext %s dsf %d BW: min_2g %d max_2g %d min_5g %d max_5g %d",
  		   __func__, reg_info->alpha2, reg_info->dfs_region,
  		   reg_info->min_bw_2g, reg_info->max_bw_2g,
-@@ -5000,10 +5129,13 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+@@ -4997,10 +5144,13 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  			ath12k_warn(ab, "Unable to Allocate memory for 2g rules\n");
  			return -ENOMEM;
  		}
@@ -315,7 +353,7 @@ index 7d3d92d..87e0fb8 100644
  		reg_info->reg_rules_5g_ptr =
  			create_ext_reg_rules_from_wmi(num_5g_reg_rules,
  						      ext_wmi_reg_rule);
-@@ -5013,9 +5145,18 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+@@ -5010,9 +5160,18 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  			ath12k_warn(ab, "Unable to Allocate memory for 5g rules\n");
  			return -ENOMEM;
  		}
@@ -335,7 +373,7 @@ index 7d3d92d..87e0fb8 100644
  
  	for (i = 0; i < WMI_REG_CURRENT_MAX_AP_TYPE; i++) {
  		reg_info->reg_rules_6g_ap_ptr[i] =
-@@ -5028,10 +5169,17 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+@@ -5025,10 +5184,17 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  			return -ENOMEM;
  		}
  
@@ -353,7 +391,7 @@ index 7d3d92d..87e0fb8 100644
  		for (i = 0; i < WMI_REG_MAX_CLIENT_TYPE; i++) {
  			reg_info->reg_rules_6g_client_ptr[j][i] =
  				create_ext_reg_rules_from_wmi(num_6g_reg_rules_cl[j][i],
-@@ -5043,6 +5191,10 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+@@ -5040,6 +5206,10 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  				return -ENOMEM;
  			}
  
@@ -364,42 +402,9 @@ index 7d3d92d..87e0fb8 100644
  			ext_wmi_reg_rule += num_6g_reg_rules_cl[j][i];
  		}
  	}
-@@ -5058,6 +5210,19 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
- 	reg_info->domain_code_6g_ap[WMI_REG_VLP_AP] =
- 			ext_chan_list_event_hdr->domain_code_6g_ap_vlp;
+@@ -5065,8 +5235,9 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  
-+	ath12k_dbg(ab, ATH12K_DBG_WMI,
-+                  "6g reg info client type %s rnr_tpe_usable %d unspecified_ap_usable %d AP sub domain: lpi %s , sp %s , vlp %s\n",
-+                  ath12k_6g_client_type_to_str(reg_info->client_type),
-+                  reg_info->rnr_tpe_usable,
-+                  reg_info->unspecified_ap_usable,
-+                  ath12k_sub_reg_6g_to_str
-+                  (ext_chan_list_event_hdr->domain_code_6g_ap_lpi),
-+                  ath12k_sub_reg_6g_to_str
-+                  (ext_chan_list_event_hdr->domain_code_6g_ap_sp),
-+                  ath12k_sub_reg_6g_to_str
-+                  (ext_chan_list_event_hdr->domain_code_6g_ap_vlp));
-+
-+
- 	for (i = 0; i < WMI_REG_MAX_CLIENT_TYPE; i++) {
- 		reg_info->domain_code_6g_client[WMI_REG_INDOOR_AP][i] =
- 				ext_chan_list_event_hdr->domain_code_6g_client_lpi[i];
-@@ -5065,13 +5230,22 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
- 				ext_chan_list_event_hdr->domain_code_6g_client_sp[i];
- 		reg_info->domain_code_6g_client[WMI_REG_VLP_AP][i] =
- 				ext_chan_list_event_hdr->domain_code_6g_client_vlp[i];
-+		ath12k_dbg(ab, ATH12K_DBG_WMI,
-+                  "6g AP BW: lpi %d - %d sp %d - %d vlp %d - %d\n",
-+                  ext_chan_list_event_hdr->min_bw_6g_ap_lpi,
-+                  ext_chan_list_event_hdr->max_bw_6g_ap_lpi,
-+                  ext_chan_list_event_hdr->min_bw_6g_ap_sp,
-+                  ext_chan_list_event_hdr->max_bw_6g_ap_sp,
-+                  ext_chan_list_event_hdr->min_bw_6g_ap_vlp,
-+                  ext_chan_list_event_hdr->max_bw_6g_ap_vlp);
- 	}
- 
- 	reg_info->domain_code_6g_super_id =
- 			ext_chan_list_event_hdr->domain_code_6g_super_id;
+ 	reg_info->domain_code_6g_super_id = le32_to_cpu(ev->domain_code_6g_super_id);
  
 -	ath12k_dbg(ab, ATH12K_DBG_WMI, "6g client_type: %d domain_code_6g_super_id: %d",
 -		   reg_info->client_type, reg_info->domain_code_6g_super_id);
@@ -409,7 +414,7 @@ index 7d3d92d..87e0fb8 100644
  
  	ath12k_dbg(ab, ATH12K_DBG_WMI, "processed regulatory ext channel list\n");
  
-@@ -6344,7 +6518,8 @@ static int ath12k_reg_chan_list_event(struct ath12k_base *ab, struct sk_buff *sk
+@@ -5805,7 +5976,8 @@ static int ath12k_reg_chan_list_event(struct ath12k_base *ab, struct sk_buff *sk
  	    !ath12k_reg_is_world_alpha((char *)reg_info->alpha2))
  		intersect = true;
  
@@ -420,10 +425,10 @@ index 7d3d92d..87e0fb8 100644
  		ath12k_warn(ab, "failed to build regd from reg_info\n");
  		goto fallback;
 diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
-index 03251df..84b0069 100644
+index e8ed624..6e7111c 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -3028,8 +3028,8 @@ struct rx_reorder_queue_remove_params {
+@@ -3089,8 +3089,8 @@ struct ath12k_wmi_rx_reorder_queue_remove_arg {
  #define REG_RULE_MAX_BW				0x0000ffff
  #define REG_RULE_REG_PWR			0x00ff0000
  #define REG_RULE_ANT_GAIN			0xff000000
@@ -434,14 +439,10 @@ index 03251df..84b0069 100644
  
  #define WMI_VDEV_PARAM_TXBF_SU_TX_BFEE BIT(0)
  #define WMI_VDEV_PARAM_TXBF_MU_TX_BFEE BIT(1)
-@@ -4335,7 +4335,30 @@ struct cur_reg_rule {
- 	u8 ant_gain;
- 	u16 flags;
- 	bool psd_flag;
--	u16 psd_eirp;
-+	s8 psd_eirp;
-+};
-+
+@@ -3629,6 +3629,29 @@ struct wmi_bcn_send_from_host_cmd {
+ #define WMI_CHAN_REG_INFO2_ANT_MAX	GENMASK(7, 0)
+ #define WMI_CHAN_REG_INFO2_MAX_TX_PWR	GENMASK(15, 8)
+ 
 +enum reg_subdomains_6g {
 +       EMPTY_6G = 0x0,
 +       FCC1_CLIENT_LPI_REGULAR_6G = 0x01,
@@ -463,9 +464,11 @@ index 03251df..84b0069 100644
 +       ETSI2_6G = 0x03,
 +       APL1_6G = 0x04,
 +       FCC1_6G_CL = 0x05,
- };
- 
- struct cur_regulatory_info {
++ };
++
+ struct ath12k_wmi_channel_params {
+ 	__le32 tlv_header;
+ 	__le32 mhz;
 -- 
 2.17.1
 

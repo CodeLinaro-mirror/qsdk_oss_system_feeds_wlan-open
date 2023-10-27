@@ -36,7 +36,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -47,6 +47,10 @@
+@@ -46,6 +46,10 @@ MODULE_PARM_DESC(en_fwlog, "fwlog: 0-dis
  
  static unsigned int ath12k_recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
  
@@ -47,7 +47,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  static DEFINE_MUTEX(ath12k_hw_lock);
  static struct list_head ath12k_hw_groups = LIST_HEAD_INIT(ath12k_hw_groups);
  
-@@ -765,6 +769,7 @@
+@@ -752,6 +756,7 @@ static void ath12k_core_stop(struct ath1
  	if (!test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags))
  		ath12k_qmi_firmware_stop(ab);
  
@@ -55,7 +55,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ath12k_hif_stop(ab);
  	ath12k_wmi_detach(ab);
  	ath12k_dp_rx_pdev_reo_cleanup(ab);
-@@ -807,6 +812,248 @@
+@@ -794,6 +799,248 @@ static void ath12k_core_soc_destroy(stru
  	ath12k_qmi_deinit_service(ab);
  }
  
@@ -304,7 +304,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  static int ath12k_core_pdev_init(struct ath12k_base *ab)
  {
  	int ret;
-@@ -824,8 +1071,16 @@
+@@ -811,8 +1058,16 @@ static int ath12k_core_pdev_init(struct
  		goto err_thermal_unregister;
  	}
  
@@ -321,28 +321,18 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  err_thermal_unregister:
  	ath12k_thermal_unregister(ab);
  	return ret;
-@@ -1264,6 +1519,11 @@
- 	mutex_unlock(&ab->core_lock);
+@@ -1249,6 +1504,10 @@ int ath12k_core_qmi_firmware_ready(struc
  
  	if (ath12k_core_hw_group_start_ready(ag)) {
+ 
 +		/* initialize the mgmt rx re-order after
 +		 * mlo mem is available
 +		 */
 +		ath12k_mgmt_rx_reo_init_context(ab);
-+		ath12k_qmi_mlo_global_snapshot_mem_init(ab);
+ 		ath12k_qmi_mlo_global_snapshot_mem_init(ab);
+ 
  		ret = ath12k_core_hw_group_start(ag);
- 		if (ret) {
- 			ath12k_warn(ab, "unable to start hw group\n");
-@@ -1277,8 +1537,6 @@
- 
- 	mutex_unlock(&ag->mutex_lock);
- 
--	ath12k_qmi_mlo_global_snapshot_mem_init(ab);
--
- 	/* Add code here carefully */
- 	return 0;
- 
-@@ -1842,6 +2100,8 @@
+@@ -1827,6 +2086,8 @@ int ath12k_core_init(struct ath12k_base
  		}
  	}
  
@@ -353,15 +343,15 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  err_hw_group:
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -964,6 +964,7 @@
+@@ -917,6 +917,7 @@ struct ath12k {
  
  	struct completion mvr_complete;
  	struct cfg80211_chan_def agile_chandef;
 +	struct ath12k_mgmt_rx_reo_pdev_info rx_reo_pdev_ctx;
  };
  
- struct ath12k_band_cap {
-@@ -1146,12 +1147,14 @@
+ struct ath12k_hw {
+@@ -1100,12 +1101,14 @@ struct ath12k_hw_group {
  	u8 num_hw;
  	bool mlo_capable;
  	bool hw_queues_stopped;
@@ -376,7 +366,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	struct ath12k_host_mlo_mem_arena mlomem_arena;
  };
  
-@@ -1270,7 +1273,6 @@
+@@ -1220,7 +1223,6 @@ struct ath12k_base {
  		u32 fw_crash_counter;
  		u32 last_recovery_time;
  	} stats;
@@ -386,7 +376,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	u32 pktlog_defs_checksum;
 --- a/drivers/net/wireless/ath/ath12k/debug.h
 +++ b/drivers/net/wireless/ath/ath12k/debug.h
-@@ -27,6 +27,7 @@
+@@ -27,6 +27,7 @@ enum ath12k_debug_mask {
  	ATH12K_DBG_DP_TX	= 0x00002000,
  	ATH12K_DBG_DP_RX	= 0x00004000,
  	ATH12K_DBG_OFFSET	= 0x00008000,
@@ -396,7 +386,16 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6741,10 +6741,60 @@
+@@ -116,6 +116,8 @@ struct wmi_tlv_mgmt_rx_parse {
+ 	const struct ath12k_wmi_mgmt_rx_params *fixed;
+ 	const u8 *frame_buf;
+ 	bool frame_buf_done;
++	struct ath12k_wmi_mgmt_rx_reo_params *reo_params;
++	struct ath12k_wmi_mgmt_rx_fw_consumed_hdr *fw_consumed_reo_params;
+ };
+ 
+ static const struct ath12k_wmi_tlv_policy ath12k_wmi_tlv_policies[] = {
+@@ -6958,10 +6960,60 @@ static int ath12k_wmi_tlv_mgmt_rx_parse(
  			parse->frame_buf_done = true;
  		}
  		break;
@@ -412,7 +411,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 +static int ath12k_pull_fw_consumed_mgmt_rx_params_tlv(struct ath12k_base *ab,
 +					  struct sk_buff *skb,
-+					  struct mgmt_rx_event_params *hdr)
++					  struct ath12k_wmi_mgmt_rx_arg *hdr)
 +{
 +	struct wmi_tlv_mgmt_rx_parse parse = { };
 +	int ret;
@@ -456,16 +455,16 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +
  static int ath12k_pull_mgmt_rx_params_tlv(struct ath12k_base *ab,
  					  struct sk_buff *skb,
- 					  struct mgmt_rx_event_params *hdr)
-@@ -6753,6 +6803,7 @@
- 	const struct wmi_mgmt_rx_hdr *ev;
+ 					  struct ath12k_wmi_mgmt_rx_arg *hdr)
+@@ -6970,6 +7022,7 @@ static int ath12k_pull_mgmt_rx_params_tl
+ 	const struct ath12k_wmi_mgmt_rx_params *ev;
  	const u8 *frame;
- 	int ret;
+ 	int i, ret;
 +	struct ath12k_wmi_mgmt_rx_reo_params *reo_params_tlv = NULL;
  
  	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
  				  ath12k_wmi_tlv_mgmt_rx_parse,
-@@ -6765,6 +6816,13 @@
+@@ -6982,6 +7035,13 @@ static int ath12k_pull_mgmt_rx_params_tl
  	ev = parse.fixed;
  	frame = parse.frame_buf;
  
@@ -479,9 +478,9 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	if (!ev || !frame) {
  		ath12k_warn(ab, "failed to fetch mgmt rx hdr");
  		return -EPROTO;
-@@ -6783,6 +6841,24 @@
- 	hdr->tsf_delta =  ev->tsf_delta;
- 	memcpy(hdr->rssi_ctl, ev->rssi_ctl, sizeof(hdr->rssi_ctl));
+@@ -7002,6 +7062,24 @@ static int ath12k_pull_mgmt_rx_params_tl
+ 	for (i = 0; i < ATH_MAX_ANTENNA; i++)
+ 		hdr->rssi_ctl[i] = le32_to_cpu(ev->rssi_ctl[i]);
  
 +	hdr->reo_params.pdev_id = ev->pdev_id;
 +
@@ -504,7 +503,43 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	if (skb->len < (frame - skb->data) + hdr->buf_len) {
  		ath12k_warn(ab, "invalid length in mgmt rx hdr ev");
  		return -EPROTO;
-@@ -8243,9 +8319,2329 @@
+@@ -8262,7 +8340,7 @@ static int ath12k_wmi_rdy_parse(struct a
+ 
+ 		ether_addr_copy(ab->mac_addr,
+ 				fixed_param.ready_event_min.mac_addr.addr);
+-		ab->pktlog_defs_checksum = le32_to_cpu(fixed_param.pktlog_defs_checksum);
++		ab->pktlog_defs_checksum = fixed_param.pktlog_defs_checksum;
+ 		ab->wmi_ready = true;
+ 		break;
+ 	case WMI_TAG_ARRAY_FIXED_STRUCT:
+@@ -8312,7 +8390,7 @@ static void ath12k_peer_delete_resp_even
+ 	}
+ 
+ 	rcu_read_lock();
+-	ar = ath12k_mac_get_ar_by_vdev_id(ab, le32_to_cpu(peer_del_resp.vdev_id));
++	ar = ath12k_mac_get_ar_by_vdev_id(ab, peer_del_resp.vdev_id);
+ 	if (!ar) {
+ 		ath12k_warn(ab, "invalid vdev id in peer delete resp ev %d",
+ 			    peer_del_resp.vdev_id);
+@@ -8382,7 +8460,7 @@ static void ath12k_vdev_start_resp_event
+ 	}
+ 
+ 	rcu_read_lock();
+-	ar = ath12k_mac_get_ar_by_vdev_id(ab, le32_to_cpu(vdev_start_resp.vdev_id));
++	ar = ath12k_mac_get_ar_by_vdev_id(ab, vdev_start_resp.vdev_id);
+ 	if (!ar) {
+ 		ath12k_warn(ab, "invalid vdev id in vdev start resp ev %d",
+ 			    vdev_start_resp.vdev_id);
+@@ -8393,7 +8471,7 @@ static void ath12k_vdev_start_resp_event
+ 	ar->last_wmi_vdev_start_status = 0;
+ 	ar->max_allowed_tx_power = vdev_start_resp.max_allowed_tx_power;
+ 
+-	status = le32_to_cpu(vdev_start_resp.status);
++	status = vdev_start_resp.status;
+ 
+ 	if (WARN_ON_ONCE(status)) {
+ 		ath12k_warn(ab, "vdev start resp error status %d (%s)\n",
+@@ -8458,9 +8536,2332 @@ static void ath12k_vdev_stopped_event(st
  	ath12k_dbg(ab, ATH12K_DBG_WMI, "vdev stopped for vdev id %d", vdev_id);
  }
  
@@ -2405,7 +2440,6 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		ath12k_err(ab, "MGMT Rx REO timer is not initialised\n");
 +		return -EINVAL;
 +	}
-+
 +	/**
 +	 * Critical Section = Host snapshot update + Calculation of wait
 +	 * counts + Update reorder list. Following section describes the
@@ -2544,6 +2578,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +static void
 +ath12k_mgmt_rx_reo_list_ageout_timer_handler(struct timer_list *timer)
++
 +{
 +	struct mgmt_rx_reo_list *reo_list = from_timer(reo_list, timer, ageout_timer);
 +	struct ath12k_base *ab = reo_list->ab;
@@ -2581,6 +2616,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		}
 +	}
 +
++
 +out:
 +	spin_unlock_bh(&reo_list->list_lock);
 +
@@ -2609,6 +2645,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 + */
 +static void
 +ath12k_mgmt_rx_reo_global_mgmt_rx_inactivity_timer_handler(struct timer_list *timer)
++
 +{
 +	struct mgmt_rx_reo_list *reo_list = from_timer(reo_list, timer, global_mgmt_rx_inactivity_timer);
 +	struct ath12k_base *ab = reo_list->ab;
@@ -2714,6 +2751,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	return 0;
 +}
 +
++
 +int ath12k_mgmt_rx_reo_init_context(struct ath12k_base *ab)
 +{
 +	struct ath12k_hw_group *ag = ab->ag;
@@ -2762,7 +2800,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +static void ath12k_fw_consumed_mgmt_rx_event(struct ath12k_base *ab, struct sk_buff *skb)
 +{
 +	struct ath12k_hw_group *ag = ab->ag;
-+	struct mgmt_rx_event_params *rx_ev;
++	struct ath12k_wmi_mgmt_rx_arg *rx_ev;
 +	struct ath12k *ar;
 +	struct ath12k_mgmt_rx_reo_frame_descriptor desc = {0};
 +	bool is_queued = false;
@@ -2829,27 +2867,28 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +
  static void ath12k_mgmt_rx_event(struct ath12k_base *ab, struct sk_buff *skb)
  {
--	struct mgmt_rx_event_params rx_ev = {0};
+-	struct ath12k_wmi_mgmt_rx_arg rx_ev = {0};
 +	struct ath12k_hw_group *ag = ab->ag;
-+	struct mgmt_rx_event_params *rx_ev;
++	struct ath12k_wmi_mgmt_rx_arg *rx_ev;
  	struct ath12k *ar;
  	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
  	struct ieee80211_hdr *hdr;
-@@ -8256,45 +10652,56 @@
+@@ -8471,46 +10872,58 @@ static void ath12k_mgmt_rx_event(struct
  	struct ath12k_vif *ahvif;
  	struct ath12k_mgmt_frame_stats *mgmt_stats;
  	u16 frm_type = 0;
 +	struct ath12k_mgmt_rx_reo_frame_descriptor desc = {0};
 +	bool is_queued = false;
 +	int ret;
- 
--	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, &rx_ev) != 0) {
++
 +	rx_ev = kmalloc(sizeof(*rx_ev), GFP_ATOMIC);
 +	if (!rx_ev) {
 +		dev_kfree_skb(skb);
 +		ath12k_err(ab, "failed to allocate rx event\n");
 +		return;
 +	}
+ 
+-	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, &rx_ev) != 0) {
 +
 +	if (ath12k_pull_mgmt_rx_params_tlv(ab, skb, rx_ev) != 0) {
  		ath12k_warn(ab, "failed to extract mgmt rx event");
@@ -2879,7 +2918,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	if ((test_bit(ATH12K_CAC_RUNNING, &ar->dev_flags)) ||
 -	    (rx_ev.status & (WMI_RX_STATUS_ERR_DECRYPT |
 +	    (rx_ev->status & (WMI_RX_STATUS_ERR_DECRYPT |
- 	    WMI_RX_STATUS_ERR_KEY_CACHE_MISS | WMI_RX_STATUS_ERR_CRC))) {
+ 			     WMI_RX_STATUS_ERR_KEY_CACHE_MISS |
+ 			     WMI_RX_STATUS_ERR_CRC))) {
  		dev_kfree_skb(skb);
  		goto exit;
  	}
@@ -2903,7 +2943,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		status->band = NL80211_BAND_5GHZ;
  	} else {
  		/* Shouldn't happen unless list of advertised channels to
-@@ -8305,7 +10712,7 @@
+@@ -8521,7 +10934,7 @@ static void ath12k_mgmt_rx_event(struct
  		goto exit;
  	}
  
@@ -2912,7 +2952,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	    (status->band == NL80211_BAND_5GHZ || status->band == NL80211_BAND_6GHZ))
  		ath12k_dbg(ab, ATH12K_DBG_WMI,
  			   "wmi mgmt rx 11b (CCK) on 5/6GHz, band = %d\n", status->band);
-@@ -8313,11 +10720,11 @@
+@@ -8529,11 +10942,11 @@ static void ath12k_mgmt_rx_event(struct
  	sband = &ar->mac.sbands[status->band];
  
  	if (status->band != NL80211_BAND_6GHZ)
@@ -2927,7 +2967,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	hdr = (struct ieee80211_hdr *)skb->data;
  	fc = le16_to_cpu(hdr->frame_control);
-@@ -8375,6 +10782,43 @@
+@@ -8591,6 +11004,43 @@ skip_mgmt_stats:
  	 *	ath12k_mac_handle_beacon(ar, skb);
  	 */
  
@@ -2971,7 +3011,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ath12k_dbg(ab, ATH12K_DBG_MGMT,
  		   "event mgmt rx skb %pK len %d ftype %02x stype %02x\n",
  		   skb, skb->len,
-@@ -8388,6 +10832,13 @@
+@@ -8604,6 +11054,13 @@ skip_mgmt_stats:
  	ieee80211_rx_ni(ar->ah->hw, skb);
  
  exit:
@@ -2985,7 +3025,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	rcu_read_unlock();
  }
  
-@@ -10973,6 +13424,9 @@
+@@ -10965,6 +13422,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_VDEV_ADFS_OCAC_COMPLETE_EVENTID:
  		ath12k_process_ocac_complete_event(ab, skb);
  		break;
@@ -2995,14 +3035,14 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -11600,4 +14054,3 @@
+@@ -11546,4 +14006,3 @@ int ath12k_wmi_vdev_adfs_ocac_abort_cmd_
  	}
  	return ret;
  }
 -
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -428,6 +428,9 @@
+@@ -563,6 +563,9 @@ enum wmi_tlv_cmd_id {
  	WMI_BSS_COLOR_CHANGE_ENABLE_CMDID,
  	WMI_VDEV_BCN_OFFLOAD_QUIET_CONFIG_CMDID,
  	WMI_FILS_DISCOVERY_TMPL_CMDID,
@@ -3012,7 +3052,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_ADDBA_CLEAR_RESP_CMDID = WMI_TLV_CMD(WMI_GRP_BA_NEG),
  	WMI_ADDBA_SEND_CMDID,
  	WMI_ADDBA_STATUS_CMDID,
-@@ -776,6 +779,9 @@
+@@ -911,6 +914,9 @@ enum wmi_tlv_event_id {
  	WMI_TBTTOFFSET_EXT_UPDATE_EVENTID,
  	WMI_OFFCHAN_DATA_TX_COMPLETION_EVENTID,
  	WMI_HOST_FILS_DISCOVERY_EVENTID,
@@ -3022,7 +3062,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_TX_DELBA_COMPLETE_EVENTID = WMI_TLV_CMD(WMI_GRP_BA_NEG),
  	WMI_TX_ADDBA_COMPLETE_EVENTID,
  	WMI_BA_RSP_SSN_EVENTID,
-@@ -2006,6 +2012,9 @@
+@@ -2148,6 +2154,9 @@ enum wmi_tlv_tag {
  	WMI_TAG_MLO_TEARDOWN_CMD,
  	WMI_TAG_MLO_TEARDOWN_COMPLETE,
  	WMI_TAG_MLO_PEER_ASSOC_PARAMS = 0x3D0,
@@ -3032,7 +3072,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_TAG_MLO_PEER_CREATE_PARAMS = 0x3D5,
  	WMI_TAG_MLO_VDEV_START_PARAMS = 0x3D6,
  	WMI_TAG_MLO_VDEV_CREATE_PARAMS = 0x3D7,
-@@ -5448,6 +5457,676 @@
+@@ -5385,6 +5394,676 @@ struct mlo_glb_rx_reo_per_link_snapshot_
  	struct mgmt_rx_reo_snapshot hw_forwarded;
  };
  
@@ -3666,7 +3706,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +struct mgmt_rx_reo_list_entry {
 +	struct list_head node;
 +	struct sk_buff *nbuf;
-+	struct mgmt_rx_event_params *rx_params;
++	struct ath12k_wmi_mgmt_rx_arg *rx_params;
 +	struct ath12k_mgmt_rx_reo_wait_count wait_count;
 +	struct ath12k_mgmt_rx_reo_wait_count initial_wait_count;
 +	u64 insertion_ts;
@@ -3706,10 +3746,10 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +#define ATH12K_MGMT_RX_REO_PKT_CTR_HALF_RANGE	(0x8000)
 +#define ATH12K_MGMT_RX_REO_PKT_CTR_FULL_RANGE	(ATH12K_MGMT_RX_REO_PKT_CTR_HALF_RANGE << 1)
 +
- struct mgmt_rx_event_params {
+ struct ath12k_wmi_mgmt_rx_arg {
  	u32 chan_freq;
  	u32 channel;
-@@ -5461,6 +6140,61 @@
+@@ -5398,6 +6077,61 @@ struct ath12k_wmi_mgmt_rx_arg {
  	int rssi;
  	u32 tsf_delta;
  	u8 pdev_id;
@@ -3754,7 +3794,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	u8 frame_type;
 +	u8 frame_subtype;
 +	struct sk_buff *nbuf;
-+	struct mgmt_rx_event_params *rx_params;
++	struct ath12k_wmi_mgmt_rx_arg *rx_params;
 +	struct ath12k_mgmt_rx_reo_wait_count wait_count;
 +	u64 ingress_timestamp;
 +	bool is_stale;
@@ -3771,16 +3811,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  #define ATH_MAX_ANTENNA 4
-@@ -5486,6 +6220,8 @@
- 	struct wmi_mgmt_rx_hdr *fixed;
- 	u8 *frame_buf;
- 	bool frame_buf_done;
-+	struct ath12k_wmi_mgmt_rx_reo_params *reo_params;
-+	struct ath12k_wmi_mgmt_rx_fw_consumed_hdr *fw_consumed_reo_params;
- };
- 
- #define MAX_ANTENNA_EIGHT 8
-@@ -7481,4 +8217,10 @@
+@@ -7203,4 +7937,10 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  int ath12k_wmi_vdev_adfs_ch_cfg_cmd_send(struct ath12k *ar,u32 vdev_id,
                                          struct cfg80211_chan_def *chandef);
  int ath12k_wmi_vdev_adfs_ocac_abort_cmd_send(struct ath12k *ar,u32 vdev_id);
@@ -3793,7 +3824,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9167,14 +9167,52 @@
+@@ -9221,14 +9221,52 @@ static void ath12k_mac_radio_stop(struct
          spin_unlock_bh(&ar->data_lock);
  }
  
@@ -3846,7 +3877,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	mutex_lock(&ah->conf_mutex);
  	ar = ah->radio;
  	ab = ar->ab;
-@@ -9215,8 +9253,11 @@
+@@ -9269,8 +9307,11 @@ static void ath12k_mac_op_stop(struct ie
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k *ar;
@@ -3860,7 +3891,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -3927,7 +3927,7 @@
+@@ -3895,7 +3895,7 @@ int ath12k_qmi_mlo_global_snapshot_mem_i
  	struct target_mem_chunk *mlo_chunk;
  	int ret = 0, mlo_idx = 0;
  

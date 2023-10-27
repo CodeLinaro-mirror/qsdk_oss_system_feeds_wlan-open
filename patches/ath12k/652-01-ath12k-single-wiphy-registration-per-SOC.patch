@@ -1,7 +1,7 @@
-From 3e5bc1991519d88ae2f87767680d962954f48c83 Mon Sep 17 00:00:00 2001
+From 533ac73db50768caa49f4a016991986002cd4cd7 Mon Sep 17 00:00:00 2001
 From: Sriram R <quic_srirrama@quicinc.com>
 Date: Tue, 21 Dec 2021 13:44:27 +0530
-Subject: [PATCH 01/10] ath12k: single wiphy registration per SOC
+Subject: [PATCH] ath12k: single wiphy registration per SOC
 
 Group all the hardware within the SOC as a single wiphy. For MLO,
 we have to move away from multi-wiphy model to support MLO accross
@@ -12,17 +12,17 @@ Also made the change in mac80211 registration and mac80211 callback.
 Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c |  49 ++---
+ drivers/net/wireless/ath/ath12k/core.c |  49 +--
  drivers/net/wireless/ath/ath12k/core.h |  17 +-
- drivers/net/wireless/ath/ath12k/mac.c  | 384 ++++++++++++++++++---------------
+ drivers/net/wireless/ath/ath12k/mac.c  | 404 +++++++++++++------------
  drivers/net/wireless/ath/ath12k/reg.c  |   6 +-
  drivers/net/wireless/ath/ath12k/reg.h  |   2 +-
  drivers/net/wireless/ath/ath12k/wmi.c  |  12 +-
- 6 files changed, 257 insertions(+), 213 deletions(-)
+ 6 files changed, 268 insertions(+), 222 deletions(-)
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -473,23 +473,23 @@ static int ath12k_core_pdev_create(struc
+@@ -460,23 +460,23 @@ static int ath12k_core_pdev_create(struc
  		return ret;
  	}
  
@@ -52,12 +52,14 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	ret = ath12k_spectral_init(ab);
-@@ -502,10 +502,10 @@ static int ath12k_core_pdev_create(struc
+@@ -487,12 +487,12 @@ static int ath12k_core_pdev_create(struc
  
- err_thermal_unregister:
- 	ath12k_thermal_unregister(ab);
+ 	return 0;
+ 
 -err_dp_pdev_free:
 -	ath12k_dp_pdev_free(ab);
+ err_thermal_unregister:
+ 	ath12k_thermal_unregister(ab);
  err_mac_unregister:
  	ath12k_mac_unregister(ab);
 +err_dp_pdev_free:
@@ -65,7 +67,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_pdev_debug:
  	ath12k_debugfs_pdev_destroy(ab);
  
-@@ -576,13 +576,6 @@ static int ath12k_core_start(struct ath1
+@@ -563,13 +563,6 @@ static int ath12k_core_start(struct ath1
  		goto err_hif_stop;
  	}
  
@@ -79,7 +81,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_dp_cc_config(ab);
  
  	ath12k_dp_pdev_pre_alloc(ab);
-@@ -590,20 +583,27 @@ static int ath12k_core_start(struct ath1
+@@ -577,20 +570,27 @@ static int ath12k_core_start(struct ath1
  	ret = ath12k_dp_rx_pdev_reo_setup(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to initialize reo destination rings: %d\n", ret);
@@ -110,16 +112,16 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	/* put hardware to DBS mode */
-@@ -611,7 +611,7 @@ static int ath12k_core_start(struct ath1
+@@ -598,7 +598,7 @@ static int ath12k_core_start(struct ath1
  		ret = ath12k_wmi_set_hw_mode(ab, WMI_HOST_HW_MODE_DBS);
  		if (ret) {
  			ath12k_err(ab, "failed to send dbs mode: %d\n", ret);
--			goto err_hif_stop;
+-			goto err_reo_cleanup;
 +			goto err_mac_destroy;
  		}
  	}
  
-@@ -619,15 +619,15 @@ static int ath12k_core_start(struct ath1
+@@ -606,15 +606,15 @@ static int ath12k_core_start(struct ath1
  	if (ret) {
  		ath12k_err(ab, "failed to send htt version request message: %d\n",
  			   ret);
@@ -138,7 +140,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_hif_stop:
  	ath12k_hif_stop(ab);
  err_wmi_detach:
-@@ -798,6 +798,8 @@ static void ath12k_core_restart(struct w
+@@ -785,6 +785,8 @@ static void ath12k_core_restart(struct w
  	ab->stats.fw_crash_counter++;
  	spin_unlock_bh(&ab->base_lock);
  
@@ -147,7 +149,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	for (i = 0; i < ab->num_radios; i++) {
  		pdev = &ab->pdevs[i];
  		ar = pdev->ar;
-@@ -810,7 +812,6 @@ static void ath12k_core_restart(struct w
+@@ -797,7 +799,6 @@ static void ath12k_core_restart(struct w
  			}
  		}
  
@@ -155,7 +157,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ath12k_mac_drain_tx(ar);
  		complete(&ar->scan.started);
  		complete(&ar->scan.completed);
-@@ -855,7 +856,7 @@ static void ath12k_core_restart(struct w
+@@ -842,7 +843,7 @@ static void ath12k_core_restart(struct w
  		case ATH12K_STATE_ON:
  			ar->state = ATH12K_STATE_RESTARTING;
  			ath12k_core_halt(ar);
@@ -166,7 +168,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			ath12k_warn(ab,
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -598,9 +598,8 @@ enum ath12k_fw_recovery_option {
+@@ -556,9 +556,8 @@ enum ath12k_fw_recovery_option {
  
  struct ath12k {
  	struct ath12k_base *ab;
@@ -174,12 +176,12 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ieee80211_hw *hw;
 -	struct ieee80211_ops *ops;
 +	struct ath12k_pdev *pdev;
- 	struct ath12k_pdev_wmi *wmi;
+ 	struct ath12k_wmi_pdev *wmi;
  	struct ath12k_pdev_dp dp;
  	u8 mac_addr[ETH_ALEN];
-@@ -843,11 +842,24 @@ struct ath12k_reg_freq {
+@@ -693,6 +692,18 @@ struct ath12k {
+ 	bool awgn_intf_handling_in_prog;
  };
- 
  
 +struct ath12k_hw {
 +	struct ieee80211_hw *hw;
@@ -193,8 +195,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	struct ath12k radio[0] __aligned(sizeof(void *));
 +};
 +
- /* Master structure to hold the hw data which may be used in core module */
- struct ath12k_base {
+ struct ath12k_band_cap {
+ 	u32 phy_id;
+ 	u32 max_bw_supported;
+@@ -787,6 +798,7 @@ struct ath12k_base {
  	enum ath12k_hw_rev hw_rev;
  	struct platform_device *pdev;
  	struct device *dev;
@@ -202,7 +206,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ath12k_qmi qmi;
  	struct ath12k_wmi_base wmi_ab;
  	struct completion fw_ready;
-@@ -1165,5 +1177,4 @@ static inline const char *ath12k_bus_str
+@@ -1102,5 +1114,4 @@ static inline const char *ath12k_bus_str
  
  	return "unknown";
  }
@@ -210,7 +214,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  #endif /* _CORE_H_ */
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9680,9 +9680,9 @@ static int ath12k_mac_setup_channels_rat
+@@ -9744,9 +9744,9 @@ static int ath12k_mac_setup_channels_rat
  	return 0;
  }
  
@@ -222,7 +226,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ieee80211_iface_combination *combinations;
  	struct ieee80211_iface_limit *limits;
  	int n_limits, max_interfaces;
-@@ -9736,8 +9736,8 @@ static int ath12k_mac_setup_iface_combin
+@@ -9800,8 +9800,8 @@ static int ath12k_mac_setup_iface_combin
  						BIT(NL80211_CHAN_WIDTH_160) |
  						BIT(NL80211_CHAN_WIDTH_320);
  
@@ -233,7 +237,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	return 0;
  }
-@@ -9787,19 +9787,12 @@ static void __ath12k_mac_unregister(stru
+@@ -9851,19 +9851,12 @@ static void __ath12k_mac_unregister(stru
  {
  	cancel_work_sync(&ar->regd_update_work);
  
@@ -253,11 +257,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  void ath12k_mac_unregister(struct ath12k_base *ab)
-@@ -9816,211 +9809,96 @@ void ath12k_mac_unregister(struct ath12k
+@@ -9880,216 +9873,97 @@ void ath12k_mac_unregister(struct ath12k
  
  		__ath12k_mac_unregister(ar);
  	}
-+
 +	kfree(ab->ah->hw->wiphy->iface_combinations[0].limits);
 +	kfree(ab->ah->hw->wiphy->iface_combinations);
 +
@@ -288,14 +291,14 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -	ath12k_pdev_caps_update(ar);
 -
 -	SET_IEEE80211_PERM_ADDR(ar->hw, ar->mac_addr);
--
--	SET_IEEE80211_DEV(ar->hw, ab->dev);
 +	hw = ar->hw;
 +	init_waitqueue_head(&ar->txmgmt_empty_waitq);
 +	idr_init(&ar->txmgmt_idr);
 +	spin_lock_init(&ar->txmgmt_idr_lock);
  
+-	SET_IEEE80211_DEV(ar->hw, ab->dev);
 +	cap = &ar->pdev->cap;
+ 
  	ret = ath12k_mac_setup_channels_rates(ar,
  					      cap->supported_bands);
  	if (ret)
@@ -313,9 +316,11 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -
 -	ar->hw->wiphy->available_antennas_rx = cap->rx_chain_mask;
 -	ar->hw->wiphy->available_antennas_tx = cap->tx_chain_mask;
--
--	ar->hw->wiphy->interface_modes = ab->hw_params->interface_modes;
 +	ath12k_pdev_caps_update(ar);
+ 
+-	ar->hw->wiphy->interface_modes = ab->hw_params->interface_modes;
++	ar->max_num_stations = TARGET_NUM_STATIONS;
++	ar->max_num_peers = TARGET_NUM_PEERS_PDEV;
  
 -	ar->hw->wiphy->ru_punct_supp_bw = NL80211_RU_PUNCT_SUPP_BW_80;
 -
@@ -338,13 +343,9 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -		ieee80211_hw_set(ar->hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 -		ieee80211_hw_set(ar->hw, SUPPORTS_RX_DECAP_OFFLOAD);
 -	}
-+	ar->max_num_stations = TARGET_NUM_STATIONS;
-+	ar->max_num_peers = TARGET_NUM_PEERS_PDEV;
- 
  	if (cap->nss_ratio_enabled)
 -		ieee80211_hw_set(ar->hw, SUPPORTS_VHT_EXT_NSS_BW);
-+		ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);
- 
+-
 -	if ((ht_cap & WMI_HT_CAP_ENABLED) || ar->supports_6ghz) {
 -		ieee80211_hw_set(ar->hw, AMPDU_AGGREGATION);
 -		ieee80211_hw_set(ar->hw, TX_AMPDU_SETUP_IN_HW);
@@ -352,7 +353,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -		ieee80211_hw_set(ar->hw, SUPPORTS_AMSDU_IN_AMPDU);
 -		ieee80211_hw_set(ar->hw, USES_RSS);
 -	}
--
++		ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);
+ 
 -	if (ar->ab->hw_params->supports_ap_ps)
 -		ieee80211_hw_set(ar->hw, SUPPORTS_AP_PS);
 -
@@ -459,6 +461,12 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -		goto err_unregister_hw;
 -	}
 -
+-	ret = ath12k_debugfs_register(ar);
+-	if (ret) {
+-		ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
+-		goto err_unregister_hw;
+-	}
+-
  	return 0;
 -
 -err_unregister_hw:
@@ -499,6 +507,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		WLAN_CIPHER_SUITE_GCMP_256,
 +		WLAN_CIPHER_SUITE_CCMP_256,
 +	};
++
  
  	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
  		return 0;
@@ -511,7 +520,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	for (i = 0; i < ab->num_radios; i++) {
  		pdev = &ab->pdevs[i];
  		ar = pdev->ar;
-@@ -10035,17 +9913,146 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10104,17 +9978,146 @@ int ath12k_mac_register(struct ath12k_ba
  		if (ret)
  			goto err_cleanup;
  
@@ -661,7 +670,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_cleanup:
  	for (i = i - 1; i >= 0; i--) {
  		pdev = &ab->pdevs[i];
-@@ -10053,32 +10060,56 @@ err_cleanup:
+@@ -10122,32 +10125,56 @@ err_cleanup:
  		__ath12k_mac_unregister(ar);
  	}
  
@@ -727,7 +736,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ar->pdev = pdev;
  		ar->pdev_idx = i;
  		ar->lmac_id = ath12k_hw_get_mac_from_pdev_id(ab->hw_params, i);
-@@ -10120,11 +10151,6 @@ int ath12k_mac_allocate(struct ath12k_ba
+@@ -10189,11 +10216,6 @@ int ath12k_mac_allocate(struct ath12k_ba
  	}
  
  	return 0;
@@ -739,7 +748,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  void ath12k_mac_destroy(struct ath12k_base *ab)
-@@ -10139,7 +10165,9 @@ void ath12k_mac_destroy(struct ath12k_ba
+@@ -10208,7 +10230,9 @@ void ath12k_mac_destroy(struct ath12k_ba
  		if (!ar)
  			continue;
  
@@ -752,7 +761,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
-@@ -701,10 +701,10 @@ void ath12k_regd_update_work(struct work
+@@ -700,10 +700,10 @@ void ath12k_regd_update_work(struct work
  	}
  }
  
@@ -768,18 +777,18 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  void ath12k_reg_free(struct ath12k_base *ab)
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
-@@ -26,7 +26,7 @@ enum ath12k_dfs_region {
+@@ -83,7 +83,7 @@ struct ath12k_reg_info {
+ 		[WMI_REG_CURRENT_MAX_AP_TYPE][WMI_REG_MAX_CLIENT_TYPE];
  };
  
- /* ATH12K Regulatory API's */
 -void ath12k_reg_init(struct ath12k *ar);
 +void ath12k_reg_init(struct ath12k_base *ab);
  void ath12k_reg_free(struct ath12k_base *ab);
  void ath12k_regd_update_work(struct work_struct *work);
- struct ieee80211_regdomain *
+ struct ieee80211_regdomain *ath12k_reg_build_regd(struct ath12k_base *ab,
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -5881,7 +5881,8 @@ static void ath12k_wmi_event_scan_foreig
+@@ -5844,7 +5844,8 @@ static void ath12k_wmi_event_scan_foreig
  		break;
  	case ATH12K_SCAN_RUNNING:
  	case ATH12K_SCAN_ABORTING:
@@ -789,7 +798,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		break;
  	}
  }
-@@ -6830,7 +6831,8 @@ static int ath12k_reg_handle_chan_list(s
+@@ -6796,7 +6797,8 @@ static int ath12k_reg_handle_chan_list(s
  		ar = ab->pdevs[pdev_idx].ar;
  		kfree(ab->new_regd[pdev_idx]);
  		ab->new_regd[pdev_idx] = regd;
@@ -799,7 +808,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	} else {
  		/* Multiple events for the same *ar is not expected. But we
  		 * can still clear any previously stored default_regd if we
-@@ -7224,7 +7226,7 @@ static void ath12k_mgmt_rx_event(struct
+@@ -7191,7 +7193,7 @@ static void ath12k_mgmt_rx_event(struct
  		   status->freq, status->band, status->signal,
  		   status->rate_idx);
  
@@ -808,7 +817,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  exit:
  	rcu_read_unlock();
-@@ -7384,7 +7386,7 @@ static void ath12k_peer_sta_kickout_even
+@@ -7356,7 +7358,7 @@ static void ath12k_peer_sta_kickout_even
  		goto exit;
  	}
  
@@ -817,7 +826,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  					   arg.mac_addr, NULL);
  	if (!sta) {
  		ath12k_warn(ab, "Spurious quick kickout for STA %pM\n",
-@@ -7864,7 +7866,7 @@ ath12k_wmi_pdev_dfs_radar_detected_event
+@@ -7849,7 +7851,7 @@ ath12k_wmi_pdev_dfs_radar_detected_event
  	if (ar->dfs_block_radar_events)
  		ath12k_info(ab, "DFS Radar detected, but ignored as requested\n");
  	else

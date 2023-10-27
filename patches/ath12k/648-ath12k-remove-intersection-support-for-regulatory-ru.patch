@@ -1,4 +1,4 @@
-From f06e76fbb20be6e5be4fdbf2455a6ab1b916f2d1 Mon Sep 17 00:00:00 2001
+From a019120fae509f2d60eac071b5177ba6a536ea20 Mon Sep 17 00:00:00 2001
 From: Aishwarya R <quic_aisr@quicinc.com>
 Date: Mon, 23 May 2022 16:35:11 +0530
 Subject: [PATCH] ath12k: remove intersection support for regulatory rules
@@ -16,14 +16,16 @@ Remove regulatory rules intersection logic support.
 
 Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/reg.c | 191 +++-----------------------
+ drivers/net/wireless/ath/ath12k/reg.c | 211 +++-----------------------
  drivers/net/wireless/ath/ath12k/reg.h |   2 +-
- drivers/net/wireless/ath/ath12k/wmi.c |  22 +--
- 3 files changed, 22 insertions(+), 193 deletions(-)
+ drivers/net/wireless/ath/ath12k/wmi.c |  21 +--
+ 3 files changed, 22 insertions(+), 212 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
+index d11fb3e..1841fa0 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
-@@ -380,147 +380,9 @@ static u32 ath12k_map_fw_reg_flags(u16 r
+@@ -377,147 +377,9 @@ static u32 ath12k_map_fw_reg_flags(u16 reg_flags)
  	return flags;
  }
  
@@ -174,20 +176,20 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  
  static const char *
  ath12k_reg_get_regdom_str(enum nl80211_dfs_regions dfs_region)
-@@ -650,10 +512,10 @@ ath12k_reg_update_weather_radar_band(str
+@@ -647,10 +509,10 @@ ath12k_reg_update_weather_radar_band(struct ath12k_base *ab,
  
  struct ieee80211_regdomain *
  ath12k_reg_build_regd(struct ath12k_base *ab,
--		      struct cur_regulatory_info *reg_info, bool intersect,
-+		      struct cur_regulatory_info *reg_info,
+-		      struct ath12k_reg_info *reg_info, bool intersect,
++		      struct ath12k_reg_info *reg_info,
  		      enum ieee80211_ap_reg_power power_type)
  {
 -	struct ieee80211_regdomain *tmp_regd, *default_regd, *new_regd = NULL;
 +	struct ieee80211_regdomain *new_regd = NULL;
- 	struct cur_reg_rule *reg_rule, *reg_rule_6g;
- 	u8 i = 0, j = 0, k = 0, max_elements = 0;
+ 	struct ath12k_reg_rule *reg_rule, *reg_rule_6g;
+ 	u8 i = 0, j = 0, k = 0;
  	u8 num_rules;
-@@ -683,26 +545,26 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -682,26 +544,26 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  	num_rules += reg_6g_number;
  
  	if (!num_rules)
@@ -198,10 +200,10 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  	if (reg_info->dfs_region == ATH12K_DFS_REG_ETSI)
  		num_rules += 2;
  
--	tmp_regd =  kzalloc(sizeof(*tmp_regd) +
+-	tmp_regd = kzalloc(sizeof(*tmp_regd) +
 +	new_regd =  kzalloc(sizeof(*new_regd) +
- 			(num_rules * sizeof(struct ieee80211_reg_rule)),
- 			GFP_ATOMIC);
+ 			   (num_rules * sizeof(struct ieee80211_reg_rule)),
+ 			   GFP_ATOMIC);
 -	if (!tmp_regd)
 -		goto ret;
 +	if (!new_regd)
@@ -221,7 +223,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  		   reg_info->dfs_region, num_rules);
  	/* Update reg_rules[] below. Firmware is expected to
  	 * send these rules in order(2G rules first and then 5G)
-@@ -721,19 +583,7 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -720,19 +582,7 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  			reg_rule = reg_info->reg_rules_5g_ptr + j++;
  			max_bw = min_t(u16, reg_rule->max_bw,
  				       reg_info->max_bw_5g);
@@ -242,7 +244,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  			/* FW doesn't pass NL80211_RRF_AUTO_BW flag for
  			 * BW Auto correction, we can enable this by default
  			 * for all 5G rules here. The regulatory core performs
-@@ -785,12 +635,6 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -784,12 +634,6 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
                                   k = 0;
                           }
                           reg_6g_number--;
@@ -255,7 +257,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  			flags = NL80211_RRF_AUTO_BW;
  		} else {
  			break;
-@@ -798,7 +642,7 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -797,7 +641,7 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  
  		flags |= ath12k_map_fw_reg_flags(reg_rule->flags);
  
@@ -264,7 +266,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  				       reg_rule->start_freq,
  				       reg_rule->end_freq, max_bw,
  				       reg_rule->ant_gain, reg_rule->reg_power,
-@@ -813,7 +657,7 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -812,7 +656,7 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  		    reg_info->dfs_region == ATH12K_DFS_REG_ETSI &&
  		    (reg_rule->end_freq > ETSI_WEATHER_RADAR_BAND_LOW &&
  		    reg_rule->start_freq < ETSI_WEATHER_RADAR_BAND_HIGH)){
@@ -273,7 +275,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  							     reg_rule, &i,
  							     flags, max_bw);
  			continue;
-@@ -823,37 +667,20 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -822,37 +666,20 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  			ath12k_dbg(ab, ATH12K_DBG_REG, "\t%d. (%d - %d @ %d) (%d, %d) (%d ms) (FLAGS %d) (%d, %d) (6G_POWER_MODE: %d)\n",
  				   i + 1, reg_rule->start_freq, reg_rule->end_freq,
  				   max_bw, reg_rule->ant_gain, reg_rule->reg_power,
@@ -315,20 +317,24 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  	return new_regd;
  }
  
+diff --git a/drivers/net/wireless/ath/ath12k/reg.h b/drivers/net/wireless/ath/ath12k/reg.h
+index 1049d48..b39e3a9 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
-@@ -31,7 +31,7 @@ void ath12k_reg_free(struct ath12k_base
+@@ -87,7 +87,7 @@ void ath12k_reg_init(struct ath12k *ar);
+ void ath12k_reg_free(struct ath12k_base *ab);
  void ath12k_regd_update_work(struct work_struct *work);
- struct ieee80211_regdomain *
- ath12k_reg_build_regd(struct ath12k_base *ab,
--		      struct cur_regulatory_info *reg_info, bool intersect,
-+		      struct cur_regulatory_info *reg_info,
+ struct ieee80211_regdomain *ath12k_reg_build_regd(struct ath12k_base *ab,
+-						  struct ath12k_reg_info *reg_info, bool intersect,
++						  struct ath12k_reg_info *reg_info,
                        enum ieee80211_ap_reg_power power_type);
  enum wmi_reg_6g_ap_type
  ath12k_ieee80211_ap_pwr_type_convert(enum ieee80211_ap_reg_power power_type);
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 84aad9a..b422783 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6735,17 +6735,11 @@ static void ath12k_wmi_htc_tx_complete(s
+@@ -6034,17 +6034,11 @@ static void ath12k_wmi_htc_tx_complete(struct ath12k_base *ab,
  		wake_up(&wmi->tx_ce_desc_wq);
  }
  
@@ -346,8 +352,8 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  	int pdev_idx;
  	struct ath12k *ar;
  
-@@ -6780,21 +6774,10 @@ static int ath12k_reg_handle_chan_list(s
- 		    (char *)reg_info->alpha2, 2))
+@@ -6079,21 +6073,10 @@ static int ath12k_reg_handle_chan_list(struct ath12k_base *ab,
+ 		    reg_info->alpha2, 2))
  		goto retfail;
  
 -	/* Intersect new rules with default regd if a new country setting was
@@ -360,13 +366,16 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 -	    !ath12k_reg_is_world_alpha((char *)reg_info->alpha2))
 -		intersect = true;
 -
-         ath12k_dbg(ab, ATH12K_DBG_WMI,
+     ath12k_dbg(ab, ATH12K_DBG_WMI,
 -                   "wmi handle chan list power type %d intersect %d\n",
 -                   power_type, intersect);
 +                   "wmi handle chan list power type %d\n", power_type);
  
--        regd = ath12k_reg_build_regd(ab, reg_info, intersect, power_type);
-+        regd = ath12k_reg_build_regd(ab, reg_info, power_type);
+-    regd = ath12k_reg_build_regd(ab, reg_info, intersect, power_type);
++    regd = ath12k_reg_build_regd(ab, reg_info, power_type);
  	if (!regd) {
  		ath12k_warn(ab, "failed to build regd from reg_info\n");
  		goto fallback;
+-- 
+2.17.1
+

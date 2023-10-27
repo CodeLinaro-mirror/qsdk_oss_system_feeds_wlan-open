@@ -22,7 +22,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -318,7 +318,16 @@ struct ath12k_vif_cache {
+@@ -254,7 +254,16 @@ struct ath12k_vif_cache {
  	u64 bss_conf_changed;
  };
  
@@ -41,7 +41,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	u32 dtim_period;
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -459,6 +459,8 @@ void ath12k_dp_tx_update_bank_profile(st
+@@ -464,6 +464,8 @@ void ath12k_dp_tx_update_bank_profile(st
  
  	ath12k_dp_tx_put_bank_profile(dp, arvif->bank_id);
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, dp);
@@ -50,7 +50,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  }
  
  static void ath12k_dp_deinit_bank_profiles(struct ath12k_base *ab)
-@@ -1173,6 +1175,19 @@ void ath12k_dp_vdev_tx_attach(struct ath
+@@ -1196,6 +1198,19 @@ void ath12k_dp_vdev_tx_attach(struct ath
  	arvif->vdev_id_check_en = true;
  	arvif->bank_id = ath12k_dp_tx_get_bank_profile(ab, arvif, &ab->dp);
  
@@ -72,7 +72,35 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  		ath12k_err(ar->ab, "Failed to initialize DP TX Banks");
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -254,19 +254,15 @@ int ath12k_dp_tx_direct(struct ath12k_li
+@@ -94,27 +94,6 @@ struct ath12k_tx_desc_info *ath12k_dp_tx
+ 	return desc;
+ }
+ 
+-static struct ath12k_tx_desc_info *ath12k_dp_tx_assign_buffer(struct ath12k_dp *dp,
+-							      u8 ring_id)
+-{
+-	struct ath12k_tx_desc_info *desc;
+-
+-	spin_lock_bh(&dp->tx_desc_lock[ring_id]);
+-	desc = list_first_entry_or_null(&dp->tx_desc_free_list[ring_id],
+-					struct ath12k_tx_desc_info,
+-					list);
+-	if (unlikely(!desc)) {
+-		spin_unlock_bh(&dp->tx_desc_lock[ring_id]);
+-		ath12k_warn(dp->ab, "failed to allocate data Tx buffer\n");
+-		return NULL;
+-	}
+-
+-	list_move_tail(&desc->list, &dp->tx_desc_used_list[ring_id]);
+-	spin_unlock_bh(&dp->tx_desc_lock[ring_id]);
+-
+-	return desc;
+-}
+-
+ static void ath12k_hal_tx_cmd_ext_desc_setup(struct ath12k_base *ab, void *cmd,
+ 					     struct hal_tx_info *ti)
+ {
+@@ -254,19 +233,15 @@ int ath12k_dp_tx_direct(struct ath12k_li
  	tcl_desc.buf_addr_info.info1 |=
  		FIELD_PREP(BUFFER_ADDR_INFO1_RET_BUF_MGR, rbm_id) |
  		FIELD_PREP(BUFFER_ADDR_INFO1_SW_COOKIE, tx_desc->desc_id);
@@ -98,15 +126,15 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	memcpy(hal_tcl_desc, &tcl_desc, sizeof(tcl_desc));
  	dsb(st);
  	ath12k_hal_srng_access_umac_src_ring_end_nolock(ab->mem, tcl_ring);
-@@ -304,6 +300,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -304,6 +279,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+ 	struct hal_srng *tcl_ring;
  	struct ieee80211_hdr *hdr = (void *)skb->data;
  	struct dp_tx_ring *tx_ring;
- 	void *hal_tcl_desc;
 +	struct hal_tcl_data_cmd *tcl_cmd;
  	u8 hal_ring_id;
  	int ret;
  	u16 peer_id;
-@@ -361,30 +358,20 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -361,30 +337,20 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  		ti.meta_data_flags = u32_encode_bits(HTT_TCL_META_DATA_TYPE_GLOBAL_SEQ_NUM,
  						     HTT_TCL_META_DATA_TYPE_MISSION) |
  				     u32_encode_bits(mcbc_gsn, HTT_TCL_META_DATA_GLOBAL_SEQ_NUM);
@@ -142,18 +170,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	}
  
  	switch (ti.encap_type) {
-@@ -457,7 +444,9 @@ int ath12k_dp_tx(struct ath12k *ar, stru
- 
- 		ti.pkt_offset += htt_meta_size;
- 		ti.meta_data_flags |= HTT_TCL_META_DATA_VALID_HTT;
--		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO2_TO_FW, 1);
-+		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO2_TO_FW, 1) |
-+			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO2_PKT_OFFSET,
-+					ti.pkt_offset);
- 		ti.encap_type = HAL_TCL_ENCAP_TYPE_RAW;
- 		ti.encrypt_type = HAL_ENCRYPT_TYPE_OPEN;
- 	}
-@@ -532,7 +521,31 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -532,7 +498,31 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  	arvif->link_stats.tx_encap_type[ti.encap_type]++;
  	arvif->link_stats.tx_encrypt_type[ti.encrypt_type]++;
  	arvif->link_stats.tx_desc_type[ti.type]++;
@@ -186,66 +203,21 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  
  	ath12k_hal_srng_access_end(ab, tcl_ring);
  
---- a/drivers/net/wireless/ath/ath12k/hal_tx.c
-+++ b/drivers/net/wireless/ath/ath12k/hal_tx.c
-@@ -34,43 +34,6 @@ static const u8 dscp_tid_map[DSCP_TID_MA
- 	7, 7, 7, 7, 7, 7, 7, 7,
- };
- 
--void ath12k_hal_tx_cmd_desc_setup(struct ath12k_base *ab, void *cmd,
--				  struct hal_tx_info *ti)
--{
--	struct hal_tcl_data_cmd *tcl_cmd = (struct hal_tcl_data_cmd *)cmd;
--
--	tcl_cmd->buf_addr_info.info0 =
--		u32_encode_bits(ti->paddr, BUFFER_ADDR_INFO0_ADDR);
--	tcl_cmd->buf_addr_info.info1 =
--		u32_encode_bits(((uint64_t)ti->paddr >> HAL_ADDR_MSB_REG_SHIFT),
--				BUFFER_ADDR_INFO1_ADDR);
--	tcl_cmd->buf_addr_info.info1 |=
--		u32_encode_bits((ti->rbm_id), BUFFER_ADDR_INFO1_RET_BUF_MGR) |
--		u32_encode_bits(ti->desc_id, BUFFER_ADDR_INFO1_SW_COOKIE);
--
--	tcl_cmd->info0 =
--		u32_encode_bits(ti->type, HAL_TCL_DATA_CMD_INFO0_DESC_TYPE) |
--		u32_encode_bits(ti->bank_id, HAL_TCL_DATA_CMD_INFO0_BANK_ID);
--
--	tcl_cmd->info1 =
--		u32_encode_bits(ti->meta_data_flags,
--				HAL_TCL_DATA_CMD_INFO1_CMD_NUM);
--
--	tcl_cmd->info2 = ti->flags0 |
--		u32_encode_bits(ti->data_len, HAL_TCL_DATA_CMD_INFO2_DATA_LEN) |
--		u32_encode_bits(ti->pkt_offset, HAL_TCL_DATA_CMD_INFO2_PKT_OFFSET);
--
--	tcl_cmd->info3 = ti->flags1 |
--		u32_encode_bits(ti->lmac_id, HAL_TCL_DATA_CMD_INFO3_PMAC_ID) |
--		u32_encode_bits(ti->vdev_id, HAL_TCL_DATA_CMD_INFO3_VDEV_ID);
--
--	tcl_cmd->info4 = u32_encode_bits(ti->bss_ast_idx,
--					 HAL_TCL_DATA_CMD_INFO4_SEARCH_INDEX) |
--			 u32_encode_bits(ti->bss_ast_hash,
--					 HAL_TCL_DATA_CMD_INFO4_CACHE_SET_NUM);
--	tcl_cmd->info5 = 0;
--}
--
- void ath12k_hal_tx_set_dscp_tid_map(struct ath12k_base *ab, int id)
- {
- 	u32 ctrl_reg_val;
 --- a/drivers/net/wireless/ath/ath12k/hal_tx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_tx.h
-@@ -182,8 +182,6 @@ struct hal_tx_fes_status_end {
+@@ -182,9 +182,6 @@ struct hal_tx_fes_status_end {
  /* STA mode will have MCAST_PKT_CTRL instead of DSCP_TID_MAP bitfield */
  #define HAL_TX_BANK_CONFIG_DSCP_TIP_MAP_ID	GENMASK(22, 17)
  
--void ath12k_hal_tx_cmd_desc_setup(struct ath12k_base *ab, void *cmd,
+-void ath12k_hal_tx_cmd_desc_setup(struct ath12k_base *ab,
+-				  struct hal_tcl_data_cmd *tcl_cmd,
 -				  struct hal_tx_info *ti);
  void ath12k_hal_tx_set_dscp_tid_map(struct ath12k_base *ab, int id);
  int ath12k_hal_reo_cmd_send(struct ath12k_base *ab, struct hal_srng *srng,
  			    enum hal_reo_cmd_type type,
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -493,6 +493,8 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -492,6 +492,8 @@ int ath12k_peer_create(struct ath12k *ar
  	if (vif->type == NL80211_IFTYPE_STATION) {
  		arvif->ast_hash = peer->ast_hash;
  		arvif->ast_idx = peer->hw_peer_id;

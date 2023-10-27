@@ -1,9 +1,9 @@
-From 99d27eb5bee5cd3049bea1f03f541a22114fdd22 Mon Sep 17 00:00:00 2001
+From c6a4dcc13c6ac67017402a77246668c9b6fb121a Mon Sep 17 00:00:00 2001
 From: Sowmiya Sree Elavalagan <ssreeela@codeaurora.org>
 Date: Sat, 20 Aug 2022 20:33:58 +0530
 Subject: [PATCH] ath12k: Add TPC stats support
 
-TPC stats displays the per chain transmit power for a particular rate 
+TPC stats displays the per chain transmit power for a particular rate
 index and chain mask configuration. Transmit power is minimum of
 regulatory power, ctl power and rates defined for a particular rate idx.
 
@@ -58,13 +58,13 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  drivers/net/wireless/ath/ath12k/core.h    |   9 +-
  drivers/net/wireless/ath/ath12k/debugfs.c | 746 ++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/debugfs.h |  61 ++
- drivers/net/wireless/ath/ath12k/wmi.c     | 462 ++++++++++++++
- drivers/net/wireless/ath/ath12k/wmi.h     | 249 +++++++-
- 5 files changed, 1525 insertions(+), 2 deletions(-)
+ drivers/net/wireless/ath/ath12k/wmi.c     | 460 +++++++++++++
+ drivers/net/wireless/ath/ath12k/wmi.h     | 246 +++++++
+ 5 files changed, 1521 insertions(+), 1 deletion(-)
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -68,8 +68,9 @@ enum wme_ac {
+@@ -62,8 +62,9 @@ enum wme_ac {
  };
  
  #define ATH12K_HT_MCS_MAX	7
@@ -75,7 +75,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  #define ATH12K_EHT_MCS_MAX	15
  
  enum ath12k_crypt_mode {
-@@ -784,6 +785,12 @@ struct ath12k {
+@@ -741,6 +742,12 @@ struct ath12k {
  	struct cfg80211_chan_def awgn_chandef;
  	u32 chan_bw_interference_bitmap;
  	bool awgn_intf_handling_in_prog;
@@ -87,10 +87,10 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
 +	bool tpc_request;
  };
  
- struct ath12k_band_cap {
+ struct ath12k_hw {
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1327,6 +1327,741 @@ static const struct file_operations fops
+@@ -1559,6 +1559,741 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -832,7 +832,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  static ssize_t ath12k_write_simulate_awgn(struct file *file,
                                            const char __user *user_buf,
                                            size_t count, loff_t *ppos)
-@@ -1384,6 +2119,8 @@ int ath12k_debugfs_register(struct ath12
+@@ -1616,6 +2351,8 @@ int ath12k_debugfs_register(struct ath12
  	ath12k_debugfs_fw_stats_init(ar);
  	ath12k_init_pktlog(ar);
  
@@ -841,7 +841,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	debugfs_create_file("ext_tx_stats", 0644,
  			    ar->debug.debugfs_pdev, ar,
  			    &fops_extd_tx_stats);
-@@ -1409,6 +2146,15 @@ int ath12k_debugfs_register(struct ath12
+@@ -1641,6 +2378,15 @@ int ath12k_debugfs_register(struct ath12
                                      &fops_simulate_awgn);
          }
  
@@ -929,16 +929,16 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	bool override_cfg_param;
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -81,6 +81,8 @@ struct wmi_tlv_dma_buf_release_parse {
- static const struct wmi_tlv_policy wmi_tlv_policies[] = {
+@@ -98,6 +98,8 @@ struct wmi_tlv_mgmt_rx_parse {
+ static const struct ath12k_wmi_tlv_policy ath12k_wmi_tlv_policies[] = {
  	[WMI_TAG_ARRAY_BYTE] = { .min_len = 0 },
  	[WMI_TAG_ARRAY_UINT32] = { .min_len = 0 },
 +	[WMI_TAG_ARRAY_STRUCT] = { .min_len = 0 },
-+	[WMI_TAG_ARRAY_INT16] = { .min_len = 0 },
++	[WMI_TAG_ARRAY_INT16] = { .min_len = 0 },	
  	[WMI_TAG_SERVICE_READY_EVENT] = {
  		.min_len = sizeof(struct wmi_service_ready_event) },
  	[WMI_TAG_SERVICE_READY_EXT_EVENT] = {
-@@ -137,6 +139,8 @@ static const struct wmi_tlv_policy wmi_t
+@@ -154,6 +156,8 @@ static const struct ath12k_wmi_tlv_polic
  		.min_len = sizeof(struct wmi_twt_add_dialog_event) },
  	[WMI_TAG_OBSS_COLOR_COLLISION_EVT]
  		= { .min_len = sizeof(struct wmi_obss_color_collision_event) },
@@ -947,8 +947,8 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  };
  
  static __le32 ath12k_wmi_tlv_hdr(u32 cmd, u32 len)
-@@ -8305,6 +8309,459 @@ static void ath12k_wmi_event_wow_wakeup_
- 	complete(&ab->wow.wakeup_completed);
+@@ -8236,6 +8240,459 @@ static void ath12k_probe_resp_tx_status_
+ 	kfree(tb);
  }
  
 +static int ath12k_tpc_get_reg_pwr(struct ath12k_base *ab,
@@ -1407,7 +1407,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  static void ath12k_wmi_diag_event(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	const struct wmi_tlv *tlv;
-@@ -8691,6 +9148,9 @@ static void ath12k_wmi_tlv_op_rx(struct
+@@ -8621,6 +9078,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_OBSS_COLOR_COLLISION_DETECTION_EVENTID:
  		ath12k_wmi_obss_color_collision_event(ab, skb);
  		break;
@@ -1419,7 +1419,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -282,6 +282,7 @@ enum wmi_tlv_cmd_id {
+@@ -417,6 +417,7 @@ enum wmi_tlv_cmd_id {
  	WMI_PDEV_SET_SRG_OBSS_BSSID_ENABLE_BITMAP_CMDID,
  	WMI_PDEV_SET_NON_SRG_OBSS_COLOR_ENABLE_BITMAP_CMDID,
  	WMI_PDEV_SET_NON_SRG_OBSS_BSSID_ENABLE_BITMAP_CMDID,
@@ -1427,7 +1427,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	WMI_VDEV_CREATE_CMDID = WMI_TLV_CMD(WMI_GRP_VDEV),
  	WMI_VDEV_DELETE_CMDID,
  	WMI_VDEV_START_REQUEST_CMDID,
-@@ -470,6 +471,11 @@ enum wmi_tlv_cmd_id {
+@@ -605,6 +606,11 @@ enum wmi_tlv_cmd_id {
  	WMI_REQUEST_RCPI_CMDID,
  	WMI_REQUEST_PEER_STATS_INFO_CMDID,
  	WMI_REQUEST_RADIO_CHAN_STATS_CMDID,
@@ -1439,7 +1439,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	WMI_SET_ARP_NS_OFFLOAD_CMDID = WMI_TLV_CMD(WMI_GRP_ARP_NS_OFL),
  	WMI_ADD_PROACTIVE_ARP_RSP_PATTERN_CMDID,
  	WMI_DEL_PROACTIVE_ARP_RSP_PATTERN_CMDID,
-@@ -740,6 +746,9 @@ enum wmi_tlv_event_id {
+@@ -875,6 +881,9 @@ enum wmi_tlv_event_id {
  	WMI_UPDATE_RCPI_EVENTID,
  	WMI_PEER_STATS_INFO_EVENTID,
  	WMI_RADIO_CHAN_STATS_EVENTID,
@@ -1449,7 +1449,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	WMI_NLO_MATCH_EVENTID = WMI_TLV_CMD(WMI_GRP_NLO_OFL),
  	WMI_NLO_SCAN_COMPLETE_EVENTID,
  	WMI_APFIND_EVENTID,
-@@ -1151,6 +1160,7 @@ enum wmi_tlv_tag {
+@@ -1287,6 +1296,7 @@ enum wmi_tlv_tag {
  	WMI_TAG_ARRAY_BYTE,
  	WMI_TAG_ARRAY_STRUCT,
  	WMI_TAG_ARRAY_FIXED_STRUCT,
@@ -1457,7 +1457,7 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	WMI_TAG_LAST_ARRAY_ENUM = 31,
  	WMI_TAG_SERVICE_READY_EVENT,
  	WMI_TAG_HAL_REG_CAPABILITIES,
-@@ -1913,6 +1923,14 @@ enum wmi_tlv_tag {
+@@ -2049,6 +2059,14 @@ enum wmi_tlv_tag {
  	WMI_TAG_EHT_RATE_SET = 0x3C4,
  	WMI_TAG_DCS_AWGN_INT_TYPE = 0x3C5,
  	WMI_TAG_PDEV_PKTLOG_DECODE_INFO = 0x414,
@@ -1472,9 +1472,9 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  	WMI_TAG_MAX
  };
  
-@@ -5679,6 +5697,234 @@ struct target_resource_config {
- 	u32 ema_max_profile_period;
- };
+@@ -5512,6 +5530,234 @@ struct wmi_probe_tmpl_cmd {
+ 	__le32 buf_len;
+ } __packed;
  
 +enum wmi_tpc_pream_bw {
 +	WMI_TPC_PREAM_CCK,
@@ -1707,11 +1707,10 @@ Signed-off-by: Sivashankari Madhavan <quic_sivamadh@quicinc.com>
  enum wmi_dblog_param {
  	WMI_DEBUG_LOG_PARAM_LOG_LEVEL = 0x1,
  	WMI_DEBUG_LOG_PARAM_VDEV_ENABLE,
-@@ -6047,5 +6293,6 @@ int ath12k_wmi_send_vdev_set_tpc_power(s
-                                         u32 vdev_id,
-                                         struct ath12k_reg_tpc_power_info *param);
+@@ -5720,4 +5966,6 @@ int ath12k_wmi_send_vdev_set_tpc_power(s
+ int ath12k_wmi_dbglog_cfg(struct ath12k *ar, u32 param, u64 value);
+ int ath12k_wmi_pdev_ap_ps_cmd_send(struct ath12k *ar, u8 pdev_id, u32 value);
  int ath12k_wmi_pdev_m3_dump_enable(struct ath12k *ar, u32 enable);
--
 +int ath12k_wmi_pdev_get_tpc_table_cmdid(struct ath12k *ar);
 +void ath12k_wmi_free_tpc_stats_mem(struct ath12k *ar);
  #endif

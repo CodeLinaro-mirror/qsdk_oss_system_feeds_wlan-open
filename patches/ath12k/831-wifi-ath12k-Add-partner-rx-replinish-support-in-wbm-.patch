@@ -11,7 +11,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -4811,27 +4811,27 @@ int ath12k_dp_rx_process_wbm_err(struct
+@@ -4856,26 +4856,27 @@ int ath12k_dp_rx_process_wbm_err(struct
  				 struct napi_struct *napi, int budget)
  {
  	struct ath12k *ar;
@@ -24,13 +24,13 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 -	struct sk_buff_head msdu_list;
 +	struct sk_buff_head msdu_list, scatter_msdu_list;
  	struct ath12k_skb_rxcb *rxcb;
- 	u32 *rx_desc;
+ 	void *rx_desc;
 -	int mac_id;
 -	int num_buffs_reaped = 0;
 +	int i, num_buffs_reaped[ATH12K_MAX_SOCS] = { 0 };
- 	int total_num_buffs_reaped = 0;
  	struct ath12k_rx_desc_info *desc_info;
  	struct ath12k_soc_dp_stats *soc_stats = &ab->soc_stats;
++	int total_num_buffs_reaped = 0;
  	int ret;
 -	u8 src_link_id;
 +	u8 hw_link_id;
@@ -44,7 +44,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  	spin_lock_bh(&srng->lock);
  
-@@ -4866,17 +4866,19 @@ int ath12k_dp_rx_process_wbm_err(struct
+@@ -4910,17 +4911,20 @@ int ath12k_dp_rx_process_wbm_err(struct
  
  		msdu = desc_info->skb;
  		desc_info->skb = NULL;
@@ -63,10 +63,11 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
 -		num_buffs_reaped++;
 +		num_buffs_reaped[src_ab->chip_id]++;
- 		total_num_buffs_reaped++;
++		total_num_buffs_reaped++;
  
  		if (!err_info.continuation)
-@@ -4890,13 +4892,45 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 			budget--;
+@@ -4933,36 +4937,83 @@ int ath12k_dp_rx_process_wbm_err(struct
  
  		rxcb->err_rel_src = err_info.err_rel_src;
  		rxcb->err_code = err_info.err_code;
@@ -105,7 +106,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +					rxcb->hw_link_id = hw_link_id;
 +				}
 +
-+				skb_queue_splice_tail_init(&scatter_msdu_list, &msdu_list);
++				skb_queue_splice_init(&scatter_msdu_list, &msdu_list);
 +			} else {
 +				rxcb->hw_link_id = hw_link_id;
 +				__skb_queue_tail(&msdu_list, msdu);
@@ -116,8 +117,11 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	}
  
  	ath12k_hal_srng_access_end(ab, srng);
-@@ -4906,20 +4940,35 @@ int ath12k_dp_rx_process_wbm_err(struct
- 	if (!total_num_buffs_reaped)
+ 
+ 	spin_unlock_bh(&srng->lock);
+ 
+-	if (!num_buffs_reaped)
++	if (!total_num_buffs_reaped)
  		goto done;
  
 -	ath12k_dp_rx_bufs_replenish(ab, rx_ring, num_buffs_reaped,
@@ -161,7 +165,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  			dev_kfree_skb_any(msdu);
  			continue;
  		}
-@@ -4929,8 +4978,6 @@ int ath12k_dp_rx_process_wbm_err(struct
+@@ -4972,8 +5023,6 @@ int ath12k_dp_rx_process_wbm_err(struct
  			continue;
  		}
  
@@ -170,3 +174,12 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		if (rxcb->err_rel_src < HAL_WBM_REL_SRC_MODULE_MAX)
  			soc_stats->rx_wbm_rel_source[rxcb->err_rel_src][ar->ab->chip_id]++;
  
+@@ -4981,7 +5030,7 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 	}
+ 	rcu_read_unlock();
+ done:
+-	return num_buffs_reaped;
++	return total_num_buffs_reaped;
+ }
+ 
+ void ath12k_dp_rx_process_reo_status(struct ath12k_base *ab)

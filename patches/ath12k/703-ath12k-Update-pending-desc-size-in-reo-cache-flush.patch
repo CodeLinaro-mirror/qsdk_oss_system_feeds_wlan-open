@@ -29,24 +29,20 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp_rx.h   |  1 +
  4 files changed, 20 insertions(+), 10 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 6d12cc5..4a9702f 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -981,6 +981,8 @@ struct ath12k_soc_dp_stats {
+@@ -915,6 +915,8 @@ struct ath12k_soc_dp_stats {
  	u32 reo_error_drop[HAL_REO_DEST_RING_ERROR_CODE_MAX];
  	u32 hal_reo_error[DP_REO_DST_RING_MAX];
  	u32 mon_drop_desc;
 +	u32 hal_reo_cmd_drain;
 +	u32 reo_cmd_cache_error;
  	struct ath12k_soc_dp_tx_err_stats tx_err;
- 	struct ath12k_dp_ring_bp_stats bp_stats;
  };
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index 55924ec..f121252 100644
+ 
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -810,6 +810,14 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -810,6 +810,14 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			 "\nMon drop descriptor: %u\n",
  			 soc_stats->mon_drop_desc);
  
@@ -61,11 +57,9 @@ index 55924ec..f121252 100644
  	len += ath12k_debugfs_dump_soc_ring_bp_stats(ab, buf + len, size - len);
  
  	if (len > size)
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index 31462e7..0a816ff 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -699,7 +699,10 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
+@@ -682,7 +682,10 @@ static int ath12k_dp_reo_cache_flush(str
  	unsigned long tot_desc_sz, desc_sz;
  	int ret;
  
@@ -77,7 +71,7 @@ index 31462e7..0a816ff 100644
  	desc_sz = ath12k_hal_reo_qdesc_size(0, HAL_DESC_REO_NON_QOS_TID);
  
  	while (tot_desc_sz > desc_sz) {
-@@ -711,9 +714,7 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
+@@ -694,9 +697,7 @@ static int ath12k_dp_reo_cache_flush(str
  					     NULL);
  		if (ret)
  		{
@@ -88,7 +82,7 @@ index 31462e7..0a816ff 100644
  			/* If this fails with ring full condition, then
  			 * no need to retry below as it is expected to
  			 * fail within short time */
-@@ -722,6 +723,7 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
+@@ -705,6 +706,7 @@ static int ath12k_dp_reo_cache_flush(str
  		}
  	}
  
@@ -96,7 +90,7 @@ index 31462e7..0a816ff 100644
  	memset(&cmd, 0, sizeof(cmd));
  	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
  	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
-@@ -729,9 +731,6 @@ static int ath12k_dp_reo_cache_flush(struct ath12k_base *ab,
+@@ -712,9 +714,6 @@ static int ath12k_dp_reo_cache_flush(str
  	ret = ath12k_dp_reo_cmd_send(ab, rx_tid,
  				     HAL_REO_CMD_FLUSH_CACHE,
  				     &cmd, ath12k_dp_reo_cmd_free);
@@ -106,7 +100,7 @@ index 31462e7..0a816ff 100644
  
  exit:
  	return ret;
-@@ -745,6 +744,7 @@ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
+@@ -728,6 +727,7 @@ static void ath12k_dp_rx_tid_del_func(st
  	struct ath12k_dp_rx_reo_cache_flush_elem *elem, *tmp;
  
  	if (status == HAL_REO_CMD_DRAIN) {
@@ -114,7 +108,7 @@ index 31462e7..0a816ff 100644
  		goto free_desc;
  	} else if (status != HAL_REO_CMD_SUCCESS) {
  		/* Shouldn't happen! Cleanup in case of other failure? */
-@@ -777,12 +777,11 @@ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
+@@ -767,12 +767,11 @@ static void ath12k_dp_rx_tid_del_func(st
  			if (ath12k_dp_reo_cache_flush(ab, &elem->data)) {
  				/* In failure case, just update the timestamp
  				 * for flush cache elem and continue */
@@ -124,13 +118,11 @@ index 31462e7..0a816ff 100644
  					msecs_to_jiffies(ATH12K_DP_RX_REO_DESC_FREE_TIMEOUT_MS);
 -				ath12k_warn(ab, "Failed to send HAL_REO_CMD_FLUSH_CACHE cmd"
 -						"Updating timestamp (%ld) in the list\n", elem->ts);
--				continue;
+-				continue;			
 +				break;
  			}
  			spin_lock_bh(&dp->reo_cmd_lock);
  			list_del(&elem->list);
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.h b/drivers/net/wireless/ath/ath12k/dp_rx.h
-index e6095b8..9cecfff 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -17,6 +17,7 @@ struct ath12k_dp_rx_tid {
@@ -141,6 +133,3 @@ index e6095b8..9cecfff 100644
  	u32 ba_win_sz;
  	bool active;
  
--- 
-2.17.1
-

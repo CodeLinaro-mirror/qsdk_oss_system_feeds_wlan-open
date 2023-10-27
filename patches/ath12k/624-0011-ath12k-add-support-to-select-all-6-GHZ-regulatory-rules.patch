@@ -1,4 +1,4 @@
-From e10cecf8cd3637074ab292b36f5c1c855398fe95 Mon Sep 17 00:00:00 2001
+From 9db1d8f0718f9033a236b97d3d33f581bea0ea16 Mon Sep 17 00:00:00 2001
 From: Aishwarya R <quic_aisr@quicinc.com>
 Date: Mon, 11 Apr 2022 12:41:55 +0530
 Subject: [PATCH] ath12k: add support to select all 6 GHZ regulatory rules
@@ -16,15 +16,53 @@ Even during concurrency, two rules can be fetched and updated.
 
 Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/reg.c | 121 ++++++++++++++++++--------
+ drivers/net/wireless/ath/ath12k/mac.c |  11 ---
+ drivers/net/wireless/ath/ath12k/mac.h |   1 -
+ drivers/net/wireless/ath/ath12k/reg.c | 112 ++++++++++++++++++--------
  drivers/net/wireless/ath/ath12k/reg.h |   1 -
- drivers/net/wireless/ath/ath12k/wmi.c |  67 +++++++++-----
+ drivers/net/wireless/ath/ath12k/wmi.c |  75 ++++++++++-------
  drivers/net/wireless/ath/ath12k/wmi.h |   1 -
- 4 files changed, 128 insertions(+), 62 deletions(-)
+ 6 files changed, 126 insertions(+), 75 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index dd5f169..58a820a 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -770,17 +770,6 @@ struct ath12k *ath12k_mac_get_ar_by_vdev_id(struct ath12k_base *ab, u32 vdev_id)
+ 	return NULL;
+ }
+ 
+-enum wmi_vdev_type ath12k_mac_get_ar_vdev_type(struct ath12k *ar)
+-{
+-       struct ath12k_vif *arvif;
+-
+-       list_for_each_entry(arvif, &ar->arvifs, list) {
+-               return arvif->vdev_type;
+-       }
+-
+-       return WMI_VDEV_TYPE_UNSPEC;
+-}
+-
+ struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id)
+ {
+ 	int i;
+diff --git a/drivers/net/wireless/ath/ath12k/mac.h b/drivers/net/wireless/ath/ath12k/mac.h
+index bef349c..5158c87 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.h
++++ b/drivers/net/wireless/ath/ath12k/mac.h
+@@ -76,7 +76,6 @@ struct ath12k_vif *ath12k_mac_get_arvif_by_vdev_id(struct ath12k_base *ab,
+ 						   u32 vdev_id);
+ struct ath12k *ath12k_mac_get_ar_by_vdev_id(struct ath12k_base *ab, u32 vdev_id);
+ struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id);
+-enum wmi_vdev_type ath12k_mac_get_ar_vdev_type(struct ath12k *ar);
+ 
+ void ath12k_mac_fill_reg_tpc_info(struct ath12k *ar,
+                                   struct ieee80211_vif *vif,
+diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
+index 52fa8aa..dab0c9c 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
-@@ -43,6 +43,40 @@ ath12k_ieee80211_ap_pwr_type_convert(enu
+@@ -43,6 +43,40 @@ ath12k_ieee80211_ap_pwr_type_convert(enum ieee80211_ap_reg_power power_type)
         }
  }
  
@@ -65,32 +103,27 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  static bool ath12k_regdom_changes(struct ath12k *ar, char *alpha2)
  {
  	const struct ieee80211_regdomain *regd;
-@@ -586,49 +620,35 @@ ath12k_reg_update_weather_radar_band(str
+@@ -583,7 +617,6 @@ ath12k_reg_update_weather_radar_band(struct ath12k_base *ab,
  struct ieee80211_regdomain *
  ath12k_reg_build_regd(struct ath12k_base *ab,
- 		      struct cur_regulatory_info *reg_info, bool intersect,
+ 		      struct ath12k_reg_info *reg_info, bool intersect,
 -		      enum wmi_vdev_type vdev_type,
  		      enum ieee80211_ap_reg_power power_type)
  {
  	struct ieee80211_regdomain *tmp_regd, *default_regd, *new_regd = NULL;
- 	struct cur_reg_rule *reg_rule, *reg_rule_6g;
--	u8 i = 0, j = 0, k = 0;
-+	u8 i = 0, j = 0, k = 0, max_elements = 0;
+@@ -592,8 +625,9 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  	u8 num_rules;
  	u16 max_bw;
+ 	u32 flags;
 -	u32 flags, reg_6g_number, max_bw_6g;
 +	u32 flags, reg_6g_number = 0, max_bw_6g = 0;
  	char alpha2[3];
-+	bool reg_6g_itr_set = false;
++	int max_elements = 0;
  
  	num_rules = reg_info->num_5g_reg_rules + reg_info->num_2g_reg_rules;
  
--	/* FIXME: Currently taking reg rules for 6G only from Indoor AP mode list.
--	 * This can be updated to choose the combination dynamically based on AP
--	 * type and client type, after complete 6G regulatory support is added.
-+	/* FIXME: Currently updating all 9 possible regulatory rules for 6G.
-+         * For space optimization, logic can be enhanced to store reg rules
-+         * dynamically from power, AP and STA mode combination.
+@@ -602,31 +636,18 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+ 	 * type and client type, after complete 6G regulatory support is added.
  	 */
  	if (reg_info->is_ext_reg_event) {
 -               if (vdev_type == WMI_VDEV_TYPE_STA) {
@@ -123,15 +156,15 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 +                        for (j = 0; j < WMI_REG_CURRENT_MAX_AP_TYPE; j++)
 +                                reg_6g_number += reg_info->num_6g_reg_rules_cl
 +                                                                        [j][i];
++
                 }
 -               num_rules += reg_6g_number;
--       }
-+	}
+        }
 +	num_rules += reg_6g_number;
  
  	if (!num_rules)
  		goto ret;
-@@ -655,7 +675,7 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -653,7 +674,7 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  	/* Update reg_rules[] below. Firmware is expected to
  	 * send these rules in order(2G rules first and then 5G)
  	 */
@@ -140,7 +173,7 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  		if (reg_info->num_2g_reg_rules &&
  		    (i < reg_info->num_2g_reg_rules)) {
  			reg_rule = reg_info->reg_rules_2g_ptr + i;
-@@ -685,12 +705,39 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -683,12 +704,39 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
  			 * per other BW rule flags we pass from here
  			 */
  			flags = NL80211_RRF_AUTO_BW | NL80211_RRF_NO_320MHZ;
@@ -186,19 +219,23 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  #if 1 /*WAR*/
  			if ((reg_rule->start_freq == 6425) && (reg_rule->end_freq == 6525))
  				max_bw = 80;
+diff --git a/drivers/net/wireless/ath/ath12k/reg.h b/drivers/net/wireless/ath/ath12k/reg.h
+index 9e820bd..1049d48 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
-@@ -32,7 +32,6 @@ void ath12k_regd_update_work(struct work
- struct ieee80211_regdomain *
- ath12k_reg_build_regd(struct ath12k_base *ab,
- 		      struct cur_regulatory_info *reg_info, bool intersect,
--		      enum wmi_vdev_type vdev_type,
+@@ -88,7 +88,6 @@ void ath12k_reg_free(struct ath12k_base *ab);
+ void ath12k_regd_update_work(struct work_struct *work);
+ struct ieee80211_regdomain *ath12k_reg_build_regd(struct ath12k_base *ab,
+ 						  struct ath12k_reg_info *reg_info, bool intersect,
+-						  enum wmi_vdev_type vdev_type,
                        enum ieee80211_ap_reg_power power_type);
  enum wmi_reg_6g_ap_type
  ath12k_ieee80211_ap_pwr_type_convert(enum ieee80211_ap_reg_power power_type);
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 9dab32c..39d67e0 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -5084,6 +5084,27 @@ static void ath12k_print_reg_rule(struct
+@@ -4957,6 +4957,27 @@ static void ath12k_print_reg_rule(struct ath12k_base *ab, char *prev,
         }
  }
  
@@ -225,10 +262,10 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 +
  static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  						   struct sk_buff *skb,
- 						   struct cur_regulatory_info *reg_info)
-@@ -5188,28 +5209,6 @@ static int ath12k_pull_reg_chan_list_ext
- 	memcpy(reg_info->alpha2, &ext_chan_list_event_hdr->alpha2,
- 	       REG_ALPHA2_LEN);
+ 						   struct ath12k_reg_info *reg_info)
+@@ -5082,28 +5103,6 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
+ 
+ 	memcpy(reg_info->alpha2, &ev->alpha2, REG_ALPHA2_LEN);
  
 -	/* FIXME: Currently FW includes 6G reg rule also in 5G rule
 -	 * list for country US.
@@ -252,10 +289,10 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 -		num_5g_reg_rules = reg_info->num_5g_reg_rules;
 -	}
 -
- 	reg_info->dfs_region = ext_chan_list_event_hdr->dfs_region;
- 	reg_info->phybitmap = ext_chan_list_event_hdr->phybitmap;
- 	reg_info->num_phy = ext_chan_list_event_hdr->num_phy;
-@@ -5329,6 +5328,28 @@ static int ath12k_pull_reg_chan_list_ext
+ 	reg_info->dfs_region = le32_to_cpu(ev->dfs_region);
+ 	reg_info->phybitmap = le32_to_cpu(ev->phybitmap);
+ 	reg_info->num_phy = le32_to_cpu(ev->num_phy);
+@@ -5213,6 +5212,28 @@ static int ath12k_pull_reg_chan_list_ext_update_ev(struct ath12k_base *ab,
  	}
  	ext_wmi_reg_rule += num_2g_reg_rules;
  
@@ -284,36 +321,37 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  	if (num_5g_reg_rules) {
  		reg_info->reg_rules_5g_ptr =
  			create_ext_reg_rules_from_wmi(num_5g_reg_rules,
-@@ -6659,8 +6680,6 @@ static int ath12k_reg_handle_chan_list(s
- 	int pdev_idx;
+@@ -5985,7 +6006,6 @@ static int ath12k_reg_handle_chan_list(struct ath12k_base *ab,
+ 	bool intersect = false;
+ 	int ret = 0, pdev_idx, i, j;
  	struct ath12k *ar;
- 
 -	enum wmi_vdev_type vdev_type;
--
+ 
  	if (reg_info->status_code != REG_SET_CC_STATUS_PASS) {
  		/* In case of failure to set the requested ctry,
- 		 * fw retains the current regd. We print a failure info
-@@ -6702,14 +6721,11 @@ static int ath12k_reg_handle_chan_list(s
+@@ -6028,14 +6048,11 @@ static int ath12k_reg_handle_chan_list(struct ath12k_base *ab,
  	    !ath12k_reg_is_world_alpha((char *)reg_info->alpha2))
  		intersect = true;
  
 -	ar = ab->pdevs[pdev_idx].ar;
--        vdev_type = ath12k_mac_get_ar_vdev_type(ar);
+-    vdev_type = ath12k_mac_get_ar_vdev_type(ar);
 -
-         ath12k_dbg(ab, ATH12K_DBG_WMI,
+     ath12k_dbg(ab, ATH12K_DBG_WMI,
 -                   "wmi handle chan list power type %d vdev type %d intersect %d\n",
 -                   power_type, vdev_type, intersect);
 +                   "wmi handle chan list power type %d intersect %d\n",
 +                   power_type, intersect);
  
--        regd = ath12k_reg_build_regd(ab, reg_info, intersect, vdev_type, power_type);
-+        regd = ath12k_reg_build_regd(ab, reg_info, intersect, power_type);
+-    regd = ath12k_reg_build_regd(ab, reg_info, intersect, vdev_type, power_type);
++    regd = ath12k_reg_build_regd(ab, reg_info, intersect, power_type);
  	if (!regd) {
  		ath12k_warn(ab, "failed to build regd from reg_info\n");
  		goto fallback;
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index 4d738ea..3a4a859 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -4310,7 +4310,6 @@ struct wmi_eht_rate_set {
+@@ -4179,7 +4179,6 @@ struct wmi_eht_rate_set {
  #define MAX_REG_RULES 10
  #define REG_ALPHA2_LEN 2
  #define MAX_6G_REG_RULES 5
@@ -321,33 +359,6 @@ Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
  
  enum wmi_start_event_param {
  	WMI_VDEV_START_RESP_EVENT = 0,
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -636,17 +636,6 @@ struct ath12k *ath12k_mac_get_ar_by_vdev
- 	return NULL;
- }
- 
--enum wmi_vdev_type ath12k_mac_get_ar_vdev_type(struct ath12k *ar)
--{
--       struct ath12k_vif *arvif;
--
--       list_for_each_entry(arvif, &ar->arvifs, list) {
--               return arvif->vdev_type;
--       }
--
--       return WMI_VDEV_TYPE_UNSPEC;
--}
--
- struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id)
- {
- 	int i;
---- a/drivers/net/wireless/ath/ath12k/mac.h
-+++ b/drivers/net/wireless/ath/ath12k/mac.h
-@@ -147,7 +147,6 @@ struct ath12k_vif *ath12k_mac_get_arvif_
- 						   u32 vdev_id);
- struct ath12k *ath12k_mac_get_ar_by_vdev_id(struct ath12k_base *ab, u32 vdev_id);
- struct ath12k *ath12k_mac_get_ar_by_pdev_id(struct ath12k_base *ab, u32 pdev_id);
--enum wmi_vdev_type ath12k_mac_get_ar_vdev_type(struct ath12k *ar);
- 
- void ath12k_mac_fill_reg_tpc_info(struct ath12k *ar,
-                                   struct ieee80211_vif *vif,
+-- 
+2.17.1
+

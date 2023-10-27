@@ -23,7 +23,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/ce.c
 +++ b/drivers/net/wireless/ath/ath12k/ce.c
-@@ -753,6 +753,29 @@ void ath12k_ce_poll_send_completed(struc
+@@ -752,6 +752,29 @@ void ath12k_ce_poll_send_completed(struc
  		ath12k_ce_tx_process_cb(pipe);
  }
  
@@ -53,7 +53,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  int ath12k_ce_send(struct ath12k_base *ab, struct sk_buff *skb, u8 pipe_id,
  		   u16 transfer_id)
  {
-@@ -763,7 +786,7 @@ int ath12k_ce_send(struct ath12k_base *a
+@@ -762,7 +785,7 @@ int ath12k_ce_send(struct ath12k_base *a
  	unsigned int nentries_mask;
  	int ret = 0;
  	u8 byte_swap_data = 0;
@@ -62,7 +62,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	/* Check if some entries could be regained by handling tx completion if
  	 * the CE has interrupts disabled and the used entries is more than the
-@@ -789,7 +812,7 @@ int ath12k_ce_send(struct ath12k_base *a
+@@ -788,7 +811,7 @@ int ath12k_ce_send(struct ath12k_base *a
  
  	if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags))
  		return -ESHUTDOWN;
@@ -71,12 +71,12 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	spin_lock_bh(&ab->ce.ce_lock);
  
  	write_index = pipe->src_ring->write_index;
-@@ -810,8 +833,17 @@ int ath12k_ce_send(struct ath12k_base *a
+@@ -809,8 +832,17 @@ int ath12k_ce_send(struct ath12k_base *a
  	desc = ath12k_hal_srng_src_get_next_reaped(ab, srng);
  	if (!desc) {
  		ath12k_hal_srng_access_end(ab, srng);
 -		ret = -ENOBUFS;
--		goto err_unlock;
+-		goto unlock;
 +		if (retry++ < ATH12K_MAX_CE_MANUAL_RETRY &&
 +		    ath12k_is_manual_ce_poll_needed(ab, pipe, srng)) {
 +			spin_unlock_bh(&srng->lock);
@@ -86,14 +86,14 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +			goto retry;
 +		} else {
 +			ret = -ENOBUFS;
-+			goto err_unlock;
++			goto unlock;
 +		}
  	}
  
  	if (pipe->attr_flags & CE_ATTR_BYTE_SWAP_DATA)
 --- a/drivers/net/wireless/ath/ath12k/ce.h
 +++ b/drivers/net/wireless/ath/ath12k/ce.h
-@@ -171,7 +171,9 @@ struct ath12k_ce_pipe {
+@@ -165,7 +165,9 @@ struct ath12k_ce_pipe {
  	struct ath12k_ce_ring *src_ring;
  	struct ath12k_ce_ring *dest_ring;
  	struct ath12k_ce_ring *status_ring;
@@ -106,7 +106,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  struct ath12k_ce {
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
-@@ -2567,9 +2567,12 @@ void ath12k_hal_dump_srng_stats(struct a
+@@ -2584,9 +2584,12 @@ void ath12k_hal_dump_srng_stats(struct a
  		if (ath12k_ce_get_attr_flags(ab, i) & CE_ATTR_DIS_INTR)
  			continue;
  
@@ -123,15 +123,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	ath12k_err(ab, "\nLast interrupt received for each group:\n");
 --- a/drivers/net/wireless/ath/ath12k/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/hw.c
-@@ -1654,6 +1654,7 @@ static struct ath12k_hw_params ath12k_hw
- 		.send_platform_model = false,
- 		.en_fwlog = true,
- 		.support_umac_reset = true,
-+		.support_ce_manual_poll = true,
- 	},
- 	{
- 		.name = "ipq5332 hw1.0",
-@@ -1735,6 +1736,7 @@ static struct ath12k_hw_params ath12k_hw
+@@ -1636,6 +1636,7 @@ static struct ath12k_hw_params ath12k_hw
  		.send_platform_model = true,
  		.en_fwlog = true,
  		.support_umac_reset = false,
@@ -141,7 +133,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/hw.h
 +++ b/drivers/net/wireless/ath/ath12k/hw.h
-@@ -231,6 +231,7 @@ struct ath12k_hw_params {
+@@ -230,6 +230,7 @@ struct ath12k_hw_params {
  	const struct ce_remap *ce_remap;
  	const struct cmem_remap *cmem_remap;
  	bool compact_rx_tlv;

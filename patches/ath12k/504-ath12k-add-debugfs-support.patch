@@ -1,13 +1,13 @@
-From 29a8697dd79305fe297c2c1b8dd28fd08f8b7dea Mon Sep 17 00:00:00 2001
+From e2d7076052fca4cbc38bc5cae44a5fa639acbe1d Mon Sep 17 00:00:00 2001
 From: Aditya Kumar Singh <quic_adisi@quicinc.com>
 Date: Thu, 1 Sep 2022 15:51:39 +0530
-Subject: [PATCH 3/5] Revert "ath12k: remove debugfs support"
+Subject: [PATCH] Revert "ath12k: remove debugfs support"
 
 This reverts commit caa2f39cd59ba34be73e788ca2f6d8ed45de980f.
 
 Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/Kconfig       |    8 +
+ drivers/net/wireless/ath/ath12k/Kconfig       |   16 +
  drivers/net/wireless/ath/ath12k/Makefile      |    1 +
  drivers/net/wireless/ath/ath12k/core.c        |   22 +-
  drivers/net/wireless/ath/ath12k/core.h        |   36 +
@@ -18,13 +18,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  drivers/net/wireless/ath/ath12k/debugfs_sta.c | 1081 ++++
  drivers/net/wireless/ath/ath12k/debugfs_sta.h |   46 +
  drivers/net/wireless/ath/ath12k/dp.c          |    6 +-
- drivers/net/wireless/ath/ath12k/dp_mon.c      |   18 +
+ drivers/net/wireless/ath/ath12k/dp.h          |   95 +
+ drivers/net/wireless/ath/ath12k/dp_mon.c      |   20 +
  drivers/net/wireless/ath/ath12k/dp_rx.c       |    9 +
  drivers/net/wireless/ath/ath12k/dp_tx.c       |   41 +
- drivers/net/wireless/ath/ath12k/mac.c         |   36 +-
+ drivers/net/wireless/ath/ath12k/mac.c         |   42 +-
  drivers/net/wireless/ath/ath12k/pci.c         |   12 +-
  drivers/net/wireless/ath/ath12k/wmi.c         |    1 +
- 17 files changed, 9043 insertions(+), 8 deletions(-)
+ 18 files changed, 9154 insertions(+), 8 deletions(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/debugfs.c
  create mode 100644 drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
  create mode 100644 drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
@@ -33,9 +34,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/Kconfig
 +++ b/drivers/net/wireless/ath/ath12k/Kconfig
-@@ -23,6 +23,14 @@ config ATH12K_DEBUG
- 
- 	  If unsure, say Y to make it easier to debug problems.
+@@ -25,6 +25,14 @@ config ATH12K_DEBUG
+ 	  If unsure, say Y to make it easier to debug problems. But if
+ 	  you want optimal performance choose N.
  
 +config ATH12K_DEBUGFS
 +	bool "QTI ath12k debugfs support"
@@ -50,7 +51,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	depends on ATH12K && EVENT_TRACING
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -22,6 +22,7 @@ ath12k-y += core.o \
+@@ -21,6 +21,7 @@ ath12k-y += core.o \
  	    pci.o \
  	    dp_mon.o
  
@@ -60,7 +61,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -433,14 +433,22 @@ static int ath12k_core_soc_create(struct
+@@ -420,14 +420,22 @@ static int ath12k_core_soc_create(struct
  		return ret;
  	}
  
@@ -84,7 +85,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  err_qmi_deinit:
  	ath12k_qmi_deinit_service(ab);
  	return ret;
-@@ -448,6 +456,7 @@ err_qmi_deinit:
+@@ -435,6 +443,7 @@ err_qmi_deinit:
  
  static void ath12k_core_soc_destroy(struct ath12k_base *ab)
  {
@@ -92,7 +93,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	ath12k_dp_free(ab);
  	ath12k_reg_free(ab);
  	ath12k_qmi_deinit_service(ab);
-@@ -457,10 +466,16 @@ static int ath12k_core_pdev_create(struc
+@@ -444,10 +453,16 @@ static int ath12k_core_pdev_create(struc
  {
  	int ret;
  
@@ -110,7 +111,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	ret = ath12k_dp_pdev_alloc(ab);
-@@ -482,6 +497,8 @@ err_dp_pdev_free:
+@@ -469,6 +484,8 @@ err_dp_pdev_free:
  	ath12k_dp_pdev_free(ab);
  err_mac_unregister:
  	ath12k_mac_unregister(ab);
@@ -119,7 +120,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	return ret;
  }
-@@ -492,6 +509,7 @@ static void ath12k_core_pdev_destroy(str
+@@ -479,6 +496,7 @@ static void ath12k_core_pdev_destroy(str
  	ath12k_mac_unregister(ab);
  	ath12k_hif_irq_disable(ab);
  	ath12k_dp_pdev_free(ab);
@@ -129,13 +130,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static int ath12k_core_start(struct ath12k_base *ab,
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -424,8 +424,14 @@ struct ath12k_sta {
+@@ -417,9 +417,15 @@ struct ath12k_sta {
  	u64 rx_duration;
  	u64 tx_duration;
  	u8 rssi_comb;
 +	struct ath12k_htt_tx_stats *tx_stats;
  	struct ath12k_rx_peer_stats *rx_stats;
  	struct ath12k_wbm_tx_stats *wbm_tx_stats;
+ 	u32 bw_prev;
 +
 +#ifdef CPTCFG_MAC80211_DEBUGFS
 +	/* protected by conf_mutex */
@@ -144,7 +146,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  };
  
  #define ATH12K_MIN_5G_FREQ 4150
-@@ -447,6 +453,7 @@ enum ath12k_state {
+@@ -441,6 +447,7 @@ enum ath12k_state {
  #define ATH12K_DEFAULT_NOISE_FLOOR -95
  
  struct ath12k_fw_stats {
@@ -152,7 +154,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	u32 pdev_id;
  	u32 stats_id;
  	struct list_head pdevs;
-@@ -454,6 +461,29 @@ struct ath12k_fw_stats {
+@@ -448,6 +455,29 @@ struct ath12k_fw_stats {
  	struct list_head bcn;
  };
  
@@ -182,7 +184,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  struct ath12k_per_peer_tx_stats {
  	u32 succ_bytes;
  	u32 retry_bytes;
-@@ -592,6 +622,9 @@ struct ath12k {
+@@ -587,6 +617,9 @@ struct ath12k {
  	struct ath12k_per_peer_tx_stats cached_stats;
  	u32 last_ppdu_id;
  	u32 cached_ppdu_id;
@@ -192,7 +194,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	bool dfs_block_radar_events;
  	struct ath12k_thermal thermal;
-@@ -763,6 +796,9 @@ struct ath12k_base {
+@@ -754,6 +787,9 @@ struct ath12k_base {
  
  	/* Current DFS Regulatory */
  	enum ath12k_dfs_region dfs_region;
@@ -204,7 +206,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	unsigned long dev_flags;
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -0,0 +1,1216 @@
+@@ -0,0 +1,1217 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -411,7 +413,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
 +	reinit_completion(&ar->debug.fw_stats_complete);
 +
-+	ret = ath12k_wmi_send_stats_request_cmd(ar, req_param);
++	ret = ath12k_wmi_send_stats_request_cmd(ar, req_param->stats_id,
++						req_param->vdev_id, req_param->pdev_id);
 +
 +	if (ret) {
 +		ath12k_warn(ab, "could not request fw stats (%d)\n",
@@ -9099,7 +9102,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +#endif /* _ATH12K_DEBUGFS_STA_H_ */
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -972,12 +972,16 @@ done:
+@@ -973,12 +973,16 @@ done:
  
  void ath12k_dp_pdev_free(struct ath12k_base *ab)
  {
@@ -9117,9 +9120,122 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
  
  void ath12k_dp_pdev_pre_alloc(struct ath12k_base *ab)
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -1825,6 +1825,101 @@ enum vdev_stats_offload_timer_duration {
+ 	ATH12K_STATS_TIMER_DUR_1SEC = 2,
+ 	ATH12K_STATS_TIMER_DUR_2SEC = 3,
+ };
++/* @brief target -> host extended statistics upload
++ *
++ * @details
++ * The following field definitions describe the format of the HTT target
++ * to host stats upload confirmation message.
++ * The message contains a cookie echoed from the HTT host->target stats
++ * upload request, which identifies which request the confirmation is
++ * for, and a single stats can span over multiple HTT stats indication
++ * due to the HTT message size limitation so every HTT ext stats indication
++ * will have tag-length-value stats information elements.
++ * The tag-length header for each HTT stats IND message also includes a
++ * status field, to indicate whether the request for the stat type in
++ * question was fully met, partially met, unable to be met, or invalid
++ * (if the stat type in question is disabled in the target).
++ * A Done bit 1's indicate the end of the of stats info elements.
++ *
++ *
++ * |31                         16|15    12|11|10 8|7   5|4       0|
++ * |--------------------------------------------------------------|
++ * |                   reserved                   |    msg type   |
++ * |--------------------------------------------------------------|
++ * |                         cookie LSBs                          |
++ * |--------------------------------------------------------------|
++ * |                         cookie MSBs                          |
++ * |--------------------------------------------------------------|
++ * |      stats entry length     | rsvd   | D|  S |   stat type   |
++ * |--------------------------------------------------------------|
++ * |                   type-specific stats info                   |
++ * |                      (see htt_stats.h)                       |
++ * |--------------------------------------------------------------|
++ * Header fields:
++ *  - MSG_TYPE
++ *    Bits 7:0
++ *    Purpose: Identifies this is a extended statistics upload confirmation
++ *             message.
++ *    Value: 0x1c
++ *  - COOKIE_LSBS
++ *    Bits 31:0
++ *    Purpose: Provide a mechanism to match a target->host stats confirmation
++ *        message with its preceding host->target stats request message.
++ *    Value: LSBs of the opaque cookie specified by the host-side requestor
++ *  - COOKIE_MSBS
++ *    Bits 31:0
++ *    Purpose: Provide a mechanism to match a target->host stats confirmation
++ *        message with its preceding host->target stats request message.
++ *    Value: MSBs of the opaque cookie specified by the host-side requestor
++ *
++ * Stats Information Element tag-length header fields:
++ *  - STAT_TYPE
++ *    Bits 7:0
++ *    Purpose: identifies the type of statistics info held in the
++ *        following information element
++ *    Value: htt_dbg_ext_stats_type
++ *  - STATUS
++ *    Bits 10:8
++ *    Purpose: indicate whether the requested stats are present
++ *    Value: htt_dbg_ext_stats_status
++ *  - DONE
++ *    Bits 11
++ *    Purpose:
++ *        Indicates the completion of the stats entry, this will be the last
++ *        stats conf HTT segment for the requested stats type.
++ *    Value:
++ *        0 -> the stats retrieval is ongoing
++ *        1 -> the stats retrieval is complete
++ *  - LENGTH
++ *    Bits 31:16
++ *    Purpose: indicate the stats information size
++ *    Value: This field specifies the number of bytes of stats information
++ *       that follows the element tag-length header.
++ *       It is expected but not required that this length is a multiple of
++ *       4 bytes.
++ */
++
++#define HTT_T2H_EXT_STATS_INFO1_DONE	BIT(11)
++#define HTT_T2H_EXT_STATS_INFO1_LENGTH   GENMASK(31, 16)
++
++struct ath12k_htt_extd_stats_msg {
++	u32 info0;
++	u64 cookie;
++	u32 info1;
++	u8 data[0];
++} __packed;
++
++#define	HTT_MAC_ADDR_L32_0	GENMASK(7, 0)
++#define	HTT_MAC_ADDR_L32_1	GENMASK(15, 8)
++#define	HTT_MAC_ADDR_L32_2	GENMASK(23, 16)
++#define	HTT_MAC_ADDR_L32_3	GENMASK(31, 24)
++#define	HTT_MAC_ADDR_H16_0	GENMASK(7, 0)
++#define	HTT_MAC_ADDR_H16_1	GENMASK(15, 8)
++
++struct htt_mac_addr {
++	u32 mac_addr_l32;
++	u32 mac_addr_h16;
++};
+ 
+ static inline void ath12k_dp_get_mac_addr(u32 addr_l32, u16 addr_h16, u8 *addr)
+ {
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -2093,6 +2093,14 @@ int ath12k_dp_mon_srng_process(struct at
+@@ -2077,6 +2077,8 @@ int ath12k_dp_mon_srng_process(struct at
+ 	bool end_of_ppdu;
+ 	struct hal_rx_mon_ppdu_info *ppdu_info;
+ 	struct ath12k_peer *peer = NULL;
++	u16 log_type = 0;
++	u32 rx_buf_sz;
+ 
+ 	ppdu_info = &pmon->mon_ppdu_info;
+ 	memset(ppdu_info, 0, sizeof(*ppdu_info));
+@@ -2092,6 +2094,14 @@ int ath12k_dp_mon_srng_process(struct at
  		buf_ring = &dp->tx_mon_buf_ring;
  	}
  
@@ -9134,7 +9250,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	srng = &ab->hal.srng_list[mon_dst_ring->ring_id];
  
  	spin_lock_bh(&srng->lock);
-@@ -2155,6 +2163,10 @@ int ath12k_dp_mon_srng_process(struct at
+@@ -2149,6 +2159,10 @@ int ath12k_dp_mon_srng_process(struct at
  				continue;
  			}
  
@@ -9145,7 +9261,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			dev_kfree_skb_any(skb);
  			pmon->dest_skb_q[i] = NULL;
  		}
-@@ -2220,6 +2232,9 @@ static void ath12k_dp_mon_rx_update_peer
+@@ -2214,6 +2228,9 @@ static void ath12k_dp_mon_rx_update_peer
  
  	arsta->rssi_comb = ppdu_info->rssi_comb;
  
@@ -9155,7 +9271,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	num_msdu = ppdu_info->tcp_msdu_count + ppdu_info->tcp_ack_msdu_count +
  		   ppdu_info->udp_msdu_count + ppdu_info->other_msdu_count;
  
-@@ -2467,6 +2482,9 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
+@@ -2461,6 +2478,9 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
  {
  	u32 num_users, i;
  
@@ -9176,7 +9292,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  #include "hal_desc.h"
  #include "hw.h"
  #include "dp_rx.h"
-@@ -1451,6 +1453,9 @@ ath12k_update_per_peer_tx_stats(struct a
+@@ -1282,7 +1284,7 @@ static int ath12k_htt_tlv_ppdu_stats_par
+ 	return 0;
+ }
+ 
+-static int ath12k_dp_htt_tlv_iter(struct ath12k_base *ab, const void *ptr, size_t len,
++int ath12k_dp_htt_tlv_iter(struct ath12k_base *ab, const void *ptr, size_t len,
+ 				  int (*iter)(struct ath12k_base *ar, u16 tag, u16 len,
+ 					      const void *ptr, void *data),
+ 				  void *data)
+@@ -1462,6 +1464,9 @@ ath12k_update_per_peer_tx_stats(struct a
  		peer_stats->ba_fails =
  			HTT_USR_CMPLTN_LONG_RETRY(usr_stats->cmpltn_cmn.flags) +
  			HTT_USR_CMPLTN_SHORT_RETRY(usr_stats->cmpltn_cmn.flags);
@@ -9186,7 +9311,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	spin_unlock_bh(&ab->base_lock);
-@@ -1552,6 +1557,9 @@ static int ath12k_htt_pull_ppdu_stats(st
+@@ -1565,6 +1570,9 @@ static int ath12k_htt_pull_ppdu_stats(st
  		goto exit;
  	}
  
@@ -9196,14 +9321,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	spin_lock_bh(&ar->data_lock);
  	ppdu_info = ath12k_dp_htt_get_ppdu_desc(ar, ppdu_id);
  	if (!ppdu_info) {
-@@ -1860,6 +1868,7 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
+@@ -1853,6 +1861,7 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
  		ath12k_htt_pull_ppdu_stats(ab, skb);
  		break;
  	case HTT_T2H_MSG_TYPE_EXT_STATS_CONF:
 +		ath12k_debugfs_htt_ext_stats_handler(ab, skb);
  		break;
- 	case HTT_T2H_MSG_TYPE_PKTLOG:
- 		ath12k_htt_pktlog(ab, skb);
+ 	case HTT_T2H_MSG_TYPE_BKPRESSURE_EVENT_IND:
+ 		ath12k_htt_backpressure_event_handler(ab, skb);
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -7,6 +7,7 @@
@@ -9214,7 +9339,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  #include "hw.h"
  
  static enum hal_tcl_encap_type
-@@ -436,6 +437,23 @@ ath12k_dp_tx_process_htt_tx_complete(str
+@@ -440,6 +441,23 @@ ath12k_dp_tx_process_htt_tx_complete(str
  	}
  }
  
@@ -9238,7 +9363,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static void ath12k_dp_tx_complete_msdu(struct ath12k *ar,
  				       struct sk_buff *msdu,
  				       struct hal_tx_status *ts)
-@@ -486,6 +504,29 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -490,6 +508,29 @@ static void ath12k_dp_tx_complete_msdu(s
  	    (info->flags & IEEE80211_TX_CTL_NO_ACK))
  		info->flags |= IEEE80211_TX_STAT_NOACK_TRANSMITTED;
  
@@ -9278,7 +9403,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  #define CHAN2G(_channel, _freq, _flags) { \
  	.band                   = NL80211_BAND_2GHZ, \
-@@ -3347,12 +3348,20 @@ static int ath12k_mac_station_add(struct
+@@ -3441,12 +3442,20 @@ static int ath12k_mac_station_add(struct
  	if (ret) {
  		ath12k_warn(ab, "Failed to add peer: %pM for VDEV: %d\n",
  			    sta->addr, arvif->vdev_id);
@@ -9300,7 +9425,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (ieee80211_vif_is_mesh(vif)) {
  		ret = ath12k_wmi_set_peer_param(ar, sta->addr,
  						arvif->vdev_id,
-@@ -3360,7 +3369,7 @@ static int ath12k_mac_station_add(struct
+@@ -3454,7 +3463,7 @@ static int ath12k_mac_station_add(struct
  		if (ret) {
  			ath12k_warn(ab, "failed to STA %pM 4addr capability: %d\n",
  				    sta->addr, ret);
@@ -9309,7 +9434,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		}
  	}
  
-@@ -3368,7 +3377,7 @@ static int ath12k_mac_station_add(struct
+@@ -3462,7 +3471,7 @@ static int ath12k_mac_station_add(struct
  	if (ret) {
  		ath12k_warn(ab, "failed to setup dp for peer %pM on vdev %i (%d)\n",
  			    sta->addr, arvif->vdev_id, ret);
@@ -9318,7 +9443,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	if (ab->hw_params->vdev_start_delay &&
-@@ -3377,14 +3386,20 @@ static int ath12k_mac_station_add(struct
+@@ -3471,14 +3480,20 @@ static int ath12k_mac_station_add(struct
  		ret = ath12k_start_vdev_delay(ar->hw, vif);
  		if (ret) {
  			ath12k_warn(ab, "failed to delay vdev start: %d\n", ret);
@@ -9340,7 +9465,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  dec_num_station:
  	ath12k_mac_dec_num_stations(arvif, sta);
  exit:
-@@ -3445,6 +3460,9 @@ static int ath12k_mac_op_sta_state(struc
+@@ -3567,6 +3582,9 @@ static int ath12k_mac_op_sta_state(struc
  		}
  		spin_unlock_bh(&ar->ab->base_lock);
  
@@ -9350,7 +9475,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		kfree(arsta->rx_stats);
  		arsta->rx_stats = NULL;
  	} else if (old_state == IEEE80211_STA_AUTH &&
-@@ -6448,6 +6466,10 @@ static const struct ieee80211_ops ath12k
+@@ -6574,6 +6592,10 @@ static const struct ieee80211_ops ath12k
  	.get_survey			= ath12k_mac_op_get_survey,
  	.flush				= ath12k_mac_op_flush,
  	.sta_statistics			= ath12k_mac_op_sta_statistics,
@@ -9361,10 +9486,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -6857,6 +6879,12 @@ static int __ath12k_mac_register(struct
+@@ -6983,6 +7005,18 @@ static int __ath12k_mac_register(struct
  		goto err_unregister_hw;
  	}
  
++	ret = ath12k_debugfs_register(ar);
++	if (ret) {
++		ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
++		goto err_unregister_hw;
++	}
++
 +	ret = ath12k_debugfs_register(ar);
 +	if (ret) {
 +		ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
@@ -9376,7 +9507,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  err_unregister_hw:
 --- a/drivers/net/wireless/ath/ath12k/pci.c
 +++ b/drivers/net/wireless/ath/ath12k/pci.c
-@@ -1271,6 +1271,7 @@ static void ath12k_pci_remove(struct pci
+@@ -1339,6 +1339,7 @@ static void ath12k_pci_remove(struct pci
  
  	if (test_bit(ATH12K_FLAG_QMI_FAIL, &ab->dev_flags)) {
  		ath12k_pci_power_down(ab);
@@ -9384,7 +9515,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		ath12k_qmi_deinit_service(ab);
  		goto qmi_fail;
  	}
-@@ -1343,20 +1344,29 @@ static int ath12k_pci_init(void)
+@@ -1408,20 +1409,29 @@ static int ath12k_pci_init(void)
  {
  	int ret;
  
@@ -9417,7 +9548,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  module_exit(ath12k_pci_exit);
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6751,6 +6751,7 @@ static void ath12k_peer_assoc_conf_event
+@@ -6787,6 +6787,7 @@ static void ath12k_peer_assoc_conf_event
  
  static void ath12k_update_stats_event(struct ath12k_base *ab, struct sk_buff *skb)
  {
@@ -9425,3 +9556,15 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
  
  /* PDEV_CTL_FAILSAFE_CHECK_EVENT is received from FW when the frequency scanned
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.h
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
+@@ -141,5 +141,8 @@ ath12k_dp_rx_h_find_peer(struct ath12k_b
+ 
+ int ath12k_dp_rxdma_ring_sel_config_qcn9274(struct ath12k_base *ab);
+ int ath12k_dp_rxdma_ring_sel_config_wcn7850(struct ath12k_base *ab);
+-
++int ath12k_dp_htt_tlv_iter(struct ath12k_base *ab, const void *ptr, size_t len,
++				  int (*iter)(struct ath12k_base *ar, u16 tag, u16 len,
++					      const void *ptr, void *data),
++				  void *data);
+ #endif /* ATH12K_DP_RX_H */

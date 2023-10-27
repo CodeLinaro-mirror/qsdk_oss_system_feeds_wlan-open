@@ -1,4 +1,4 @@
-From 260227e439754b4b5790a0a23819e265c1700faa Mon Sep 17 00:00:00 2001
+From 11e6079e082f4e8031ede3e71c93a3d77079fee0 Mon Sep 17 00:00:00 2001
 From: P Praneesh <quic_ppranees@quicinc.com>
 Date: Thu, 23 Jun 2022 10:47:16 +0530
 Subject: [PATCH] ath12k: add EHT tlv parsing for monitor mode
@@ -10,14 +10,43 @@ to the ppdu_info structure which is further used to build radiotap header.
 
 Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/dp_mon.c   | 907 ++++++++++++++++++++++++++++-
- drivers/net/wireless/ath/ath12k/hal_desc.h |   9 +-
- drivers/net/wireless/ath/ath12k/hal_rx.h   | 534 +++++++++++++++++
- 3 files changed, 1447 insertions(+), 3 deletions(-)
+ .../wireless/ath/ath12k/debugfs_htt_stats.c   |   1 -
+ .../wireless/ath/ath12k/debugfs_htt_stats.h   |   1 +
+ drivers/net/wireless/ath/ath12k/dp_mon.c      | 947 +++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/dp_mon.h      |   1 +
+ drivers/net/wireless/ath/ath12k/hal_desc.h    |   9 +-
+ drivers/net/wireless/ath/ath12k/hal_rx.h      | 534 ++++++++++
+ 6 files changed, 1489 insertions(+), 4 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
+index 04f682b..8899111 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
+@@ -14,7 +14,6 @@
+ #define HTT_MAX_STRING_LEN 256
+ #define HTT_MAX_PRINT_CHAR_PER_ELEM 15
+ 
+-#define HTT_TLV_HDR_LEN 4
+ 
+ #define PRINT_ARRAY_TO_BUF(out, buflen, arr, str, len, newline)				\
+ 	do {										\
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+index 13f45f1..a7722b9 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
++++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+@@ -10,6 +10,7 @@
+ #define HTT_STATS_COOKIE_LSB    GENMASK_ULL(31, 0)
+ #define HTT_STATS_COOKIE_MSB    GENMASK_ULL(63, 32)
+ #define HTT_STATS_MAGIC_VALUE   0xF0F0F0F0
++#define HTT_TLV_HDR_LEN                4
+ 
+ enum htt_tlv_tag_t {
+ 	HTT_STATS_TX_PDEV_CMN_TAG                           = 0,
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
+index 293f0b2..526f043 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -580,12 +580,880 @@ static void ath12k_dp_mon_parse_he_sig_s
+@@ -582,12 +582,880 @@ static void ath12k_dp_mon_parse_he_sig_su(u8 *tlv_data,
  	ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
  }
  
@@ -882,7 +911,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -				  u32 tlv_tag, u8 *tlv_data, u32 userid)
 +				  struct hal_tlv_parsed_hdr *tlv_parsed_hdr)
  {
- 	u32 info[6];
+ 	u32 info[7];
 +	u16 tlv_tag = tlv_parsed_hdr->tlv_tag;
 +	u16 tlv_len = tlv_parsed_hdr->tlv_len;
 +	u16 userid = tlv_parsed_hdr->tlv_userid;
@@ -899,7 +928,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	switch (tlv_tag) {
  	case HAL_RX_PPDU_START: {
-@@ -664,6 +1532,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -666,6 +1534,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		case HAL_RX_PREAMBLE_11AX:
  			ppdu_info->he_flags = 1;
  			break;
@@ -909,7 +938,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		default:
  			break;
  		}
-@@ -796,6 +1667,10 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -798,6 +1669,10 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  
  		break;
  	}
@@ -920,10 +949,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	case HAL_PHYRX_OTHER_RECEIVE_INFO: {
  		struct phyrx_common_user_info *cmn_usr_info =
  			(struct phyrx_common_user_info *)tlv_data;
-@@ -803,6 +1678,24 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
- 					     HAL_RX_PHY_CMN_USER_INFO0_GI);
- 		break;
- 	}
+@@ -809,6 +1684,24 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
+ 		return HAL_RX_MON_STATUS_BUF_ADDR;
+ 	case HAL_RX_MPDU_END:
+ 		return HAL_RX_MON_STATUS_MPDU_END;
 +	case HAL_PHYRX_GENERIC_U_SIG:
 +		ath12k_dp_mon_hal_rx_parse_u_sig_hdr(tlv_data, ppdu_info);
 +		break;
@@ -942,10 +971,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +
 +		break;
 +	}
- 	case HAL_MON_BUF_ADDR:
- 		return HAL_RX_MON_STATUS_BUF_ADDR;
- 	case HAL_RX_MPDU_END:
-@@ -1098,6 +1991,47 @@ ath12k_dp_mon_rx_update_radiotap_he_mu(s
+ 	case HAL_DUMMY:
+ 		return HAL_RX_MON_STATUS_BUF_DONE;
+ 	case HAL_RX_PPDU_END_STATUS_DONE:
+@@ -1099,6 +1992,47 @@ ath12k_dp_mon_rx_update_radiotap_he_mu(struct hal_rx_mon_ppdu_info *rx_status,
  	rtap_buf[rtap_len] = rx_status->he_RU[3];
  }
  
@@ -993,7 +1022,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  static void ath12k_dp_mon_update_radiotap(struct ath12k *ar,
  					  struct hal_rx_mon_ppdu_info *ppduinfo,
  					  struct sk_buff *mon_skb,
-@@ -1106,6 +2040,7 @@ static void ath12k_dp_mon_update_radiota
+@@ -1107,6 +2041,7 @@ static void ath12k_dp_mon_update_radiotap(struct ath12k *ar,
  	struct ieee80211_supported_band *sband;
  	u8 *ptr = NULL;
  	u16 ampdu_id = ppduinfo->ampdu_id[ppduinfo->userid];
@@ -1001,16 +1030,16 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	rxs->flag |= RX_FLAG_MACTIME_START;
  	rxs->signal = ppduinfo->rssi_comb + ATH12K_DEFAULT_NOISE_FLOOR;
-@@ -1124,6 +2059,8 @@ static void ath12k_dp_mon_update_radiota
+@@ -1125,6 +2060,8 @@ static void ath12k_dp_mon_update_radiotap(struct ath12k *ar,
  	} else if (ppduinfo->he_flags) {
  		rxs->flag |= RX_FLAG_RADIOTAP_HE;
  		rxs->encoding = RX_ENC_HE;
 +		ru_size = ppduinfo->userstats[ppduinfo->userid].ul_ofdma_ru_size;
-+		rxs->eht_ru = ath12k_dp_mon_rx_mon_ru_size_to_nl_ru_size(ru_size);
++		rxs->eht.ru = ath12k_dp_mon_rx_mon_ru_size_to_nl_ru_size(ru_size);
  		ptr = skb_push(mon_skb, sizeof(struct ieee80211_radiotap_he));
  		ath12k_dp_mon_rx_update_radiotap_he(ppduinfo, ptr);
  		rxs->rate_idx = ppduinfo->rate;
-@@ -1409,6 +2346,7 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+@@ -1410,6 +2347,7 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k *ar, struct hal_rx_mon_ppdu_info *ppdu
  			    struct sk_buff *skb)
  {
  	struct hal_tlv_64_hdr *tlv;
@@ -1018,7 +1047,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	enum hal_rx_mon_status hal_status = HAL_RX_MON_STATUS_BUF_DONE;
  	u32 tlv_userid = 0;
  	u16 tlv_tag, tlv_len;
-@@ -1431,8 +2369,13 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+@@ -1433,8 +2371,13 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k *ar, struct hal_rx_mon_ppdu_info *ppdu
  		if (tlv_tag == HAL_RX_PPDU_END)
  			tlv_len = sizeof(struct hal_rx_rxpcu_classification_overview);
  
@@ -1033,6 +1062,20 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		if (montior_started)
  			ath12k_dp_mon_parse_rx_dest_tlv(ar, ppdu_info,
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.h b/drivers/net/wireless/ath/ath12k/dp_mon.h
+index 04098e2..a252c5e 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_mon.h
++++ b/drivers/net/wireless/ath/ath12k/dp_mon.h
+@@ -8,6 +8,7 @@
+ #define ATH12K_DP_MON_H
+ 
+ #include "core.h"
++#include "debugfs_htt_stats.h"
+ 
+ enum dp_monitor_mode {
+ 	ATH12K_DP_TX_MONITOR_MODE,
+diff --git a/drivers/net/wireless/ath/ath12k/hal_desc.h b/drivers/net/wireless/ath/ath12k/hal_desc.h
+index b58f51c..d7de934 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -522,7 +522,7 @@ enum hal_tlv_tag {
@@ -1058,6 +1101,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #define RX_MPDU_DESC_INFO0_MSDU_COUNT		GENMASK(7, 0)
  #define RX_MPDU_DESC_INFO0_FRAG_FLAG		BIT(8)
  #define RX_MPDU_DESC_INFO0_MPDU_RETRY		BIT(9)
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.h b/drivers/net/wireless/ath/ath12k/hal_rx.h
+index de9c1a2..391b94b 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -163,6 +163,23 @@ struct mon_mpdu_data {
@@ -1103,7 +1148,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
-@@ -552,6 +581,373 @@ struct phyrx_common_user_info {
+@@ -666,6 +695,511 @@ struct phyrx_common_user_info {
  	__le32 rsvd1;
  };
  
@@ -1474,14 +1519,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +	ATH12K_EHT_RU_INVALID,
 +};
 +
- void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab, u32 *reo_desc,
- 				       struct hal_reo_status *status);
- void ath12k_hal_reo_flush_queue_status(struct ath12k_base *ab, u32 *reo_desc,
-@@ -702,4 +1098,142 @@ void ath12k_hal_rx_reo_ent_buf_paddr_get
- #define HAL_RX_MPDU_ERR_MSDU_LEN		BIT(5)
- #define HAL_RX_MPDU_ERR_MPDU_LEN		BIT(6)
- #define HAL_RX_MPDU_ERR_UNENCRYPTED_FRAME	BIT(7)
-+
 +/* U-SIG Common Mask */
 +#define USIG_PHY_VERSION_KNOWN	0x00000001
 +#define USIG_BW_KNOWN		0x00000002
@@ -1619,34 +1656,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +#define EHT_USER_RESERVED_SHIFT			28
 +#define EHT_USER_BEAMFORMING_SHIFT		29
 +#define EHT_USER_SPATIAL_CONFIG_SHIFT		24
- #endif
---- a/drivers/net/wireless/ath/ath12k/dp_mon.h
-+++ b/drivers/net/wireless/ath/ath12k/dp_mon.h
-@@ -8,6 +8,7 @@
- #define ATH12K_DP_MON_H
- 
- #include "core.h"
-+#include "debugfs_htt_stats.h"
- 
- #define ATH12K_DP_TX_MONITOR_MODE 0
- #define ATH12K_DP_RX_MONITOR_MODE 1
---- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
-+++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
-@@ -14,7 +14,6 @@
- #define HTT_MAX_STRING_LEN 256
- #define HTT_MAX_PRINT_CHAR_PER_ELEM 15
- 
--#define HTT_TLV_HDR_LEN 4
- 
- #define PRINT_ARRAY_TO_BUF(out, buflen, arr, str, len, newline)				\
- 	do {										\
---- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
-+++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
-@@ -10,6 +10,7 @@
- #define HTT_STATS_COOKIE_LSB    GENMASK_ULL(31, 0)
- #define HTT_STATS_COOKIE_MSB    GENMASK_ULL(63, 32)
- #define HTT_STATS_MAGIC_VALUE   0xF0F0F0F0
-+#define HTT_TLV_HDR_LEN                4
- 
- enum htt_tlv_tag_t {
- 	HTT_STATS_TX_PDEV_CMN_TAG                           = 0,
++
+ void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab,
+ 				       struct hal_tlv_64_hdr *tlv,
+ 				       struct hal_reo_status *status);
+-- 
+2.17.1
+

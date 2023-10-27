@@ -1,4 +1,4 @@
-From 404940a75602c687eb2d67c34cc1bf187700fa27 Mon Sep 17 00:00:00 2001
+From c7ff64f92ebf74b842facc9d9c17171abac05b6c Mon Sep 17 00:00:00 2001
 From: P Praneesh <quic_ppranees@quicinc.com>
 Date: Wed, 23 Mar 2022 14:16:45 +0530
 Subject: [PATCH] ath12k: Fix rx stats support by enabling monitor ring
@@ -12,21 +12,44 @@ Subject: [PATCH] ath12k: Fix rx stats support by enabling monitor ring
 
 Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/debugfs.c  |  1 +
- drivers/net/wireless/ath/ath12k/dp.h       |  8 +++
- drivers/net/wireless/ath/ath12k/dp_mon.c   | 84 +++++++++++++++++-------------
- drivers/net/wireless/ath/ath12k/dp_rx.c    |  4 --
- drivers/net/wireless/ath/ath12k/dp_tx.c    |  8 +--
- drivers/net/wireless/ath/ath12k/hal.c      |  4 +-
- drivers/net/wireless/ath/ath12k/hal.h      |  2 +-
- drivers/net/wireless/ath/ath12k/hal_desc.h |  7 +--
- drivers/net/wireless/ath/ath12k/hal_rx.h   | 45 ++++++++++------
- drivers/net/wireless/ath/ath12k/mac.c      |  5 +-
- 10 files changed, 101 insertions(+), 67 deletions(-)
+ drivers/net/wireless/ath/ath12k/debugfs.c  |   3 +-
+ drivers/net/wireless/ath/ath12k/dp.h       |   8 +
+ drivers/net/wireless/ath/ath12k/dp_mon.c   | 165 +++++++++++----------
+ drivers/net/wireless/ath/ath12k/dp_rx.c    |   2 -
+ drivers/net/wireless/ath/ath12k/dp_tx.c    |   8 +-
+ drivers/net/wireless/ath/ath12k/hal.c      |   4 +-
+ drivers/net/wireless/ath/ath12k/hal.h      |   2 +-
+ drivers/net/wireless/ath/ath12k/hal_desc.h |   7 +-
+ drivers/net/wireless/ath/ath12k/hal_rx.h   |  37 +++--
+ drivers/net/wireless/ath/ath12k/mac.c      |  48 +++---
+ 10 files changed, 151 insertions(+), 133 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
+index cd97cee..a6adfb0 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -641,6 +641,7 @@ static ssize_t ath12k_write_extd_rx_stats(struct file *file,
+ 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS;
+ 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS_EXT;
+ 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_STATUS_DONE;
++		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_ENABLE_FP;
+ 
+ 		tlv_filter.rx_filter = rx_filter;
+ 		tlv_filter.pkt_filter_flags0 = HTT_RX_FP_MGMT_FILTER_FLAGS0;
+@@ -657,7 +658,7 @@ static ssize_t ath12k_write_extd_rx_stats(struct file *file,
+ 
+ 	for (i = 0; i < ar->ab->hw_params->num_rxmda_per_pdev; i++) {
+ 		ring_id = ar->dp.rxdma_mon_dst_ring[i].ring_id;
+-		ret = ath12k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, ar->dp.mac_id,
++		ret = ath12k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, ar->dp.mac_id + i,
+ 						       HAL_RXDMA_MONITOR_DST,
+ 						       DP_RXDMA_REFILL_RING_SIZE,
+ 						       &tlv_filter);
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index ba55e0e..492fbdb 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
-@@ -419,11 +419,14 @@ enum htt_srng_ring_id {
+@@ -417,11 +417,14 @@ enum htt_srng_ring_id {
  	HTT_RXDMA_MONITOR_BUF_RING,
  	HTT_RXDMA_MONITOR_DESC_RING,
  	HTT_RXDMA_MONITOR_DEST_RING,
@@ -41,7 +64,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  /* host -> target  HTT_SRING_SETUP message
-@@ -751,6 +754,8 @@ enum htt_stats_internal_ppdu_frametype {
+@@ -749,6 +752,8 @@ enum htt_stats_internal_ppdu_frametype {
  #define HTT_RX_RING_SELECTION_CFG_CMD_INFO0_PS		BIT(25)
  #define HTT_RX_RING_SELECTION_CFG_CMD_INFO1_BUF_SIZE	GENMASK(15, 0)
  #define HTT_RX_RING_SELECTION_CFG_CMD_OFFSET_VALID      BIT(26)
@@ -50,7 +73,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  #define HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET      GENMASK(15, 0)
  #define HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET      GENMASK(31, 16)
-@@ -774,6 +779,7 @@ enum htt_rx_filter_tlv_flags {
+@@ -772,6 +777,7 @@ enum htt_rx_filter_tlv_flags {
  	HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS	= BIT(10),
  	HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS_EXT	= BIT(11),
  	HTT_RX_FILTER_TLV_FLAGS_PPDU_END_STATUS_DONE	= BIT(12),
@@ -58,47 +81,33 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  enum htt_rx_mgmt_pkt_filter_tlv_flags0 {
-@@ -1083,6 +1089,8 @@ struct htt_rx_ring_selection_cfg_cmd {
- 	u32 rx_mpdu_offset;
- 	u32 rx_msdu_offset;
- 	u32 rx_attn_offset;
-+	u32 rx_drop_threshold;
-+	u32 reserved[5];
+@@ -1081,6 +1087,8 @@ struct htt_rx_ring_selection_cfg_cmd {
+ 	__le32 rx_mpdu_offset;
+ 	__le32 rx_msdu_offset;
+ 	__le32 rx_attn_offset;
++	__le32 rx_drop_threshold;
++	__le32 reserved[5];
  } __packed;
  
  struct htt_rx_ring_tlv_filter {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
+index b38be58..e8ce322 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -17,7 +17,7 @@ static void ath12k_dp_mon_rx_handle_ofdm
- 				(struct hal_rx_ppdu_end_user_stats *)rx_tlv;
- 
- 	rx_user_status->ul_ofdma_user_v0_word0 = __le32_to_cpu(ppdu_end_user->info6);
--	rx_user_status->ul_ofdma_user_v0_word1 = __le32_to_cpu(ppdu_end_user->rsvd2[10]);
-+	rx_user_status->ul_ofdma_user_v0_word1 = __le32_to_cpu(ppdu_end_user->rsvd5[3]);
- }
- 
- static void
-@@ -26,15 +26,15 @@ ath12k_dp_mon_rx_populate_byte_count(voi
- {
- 	struct hal_rx_ppdu_end_user_stats *ppdu_end_user =
- 		(struct hal_rx_ppdu_end_user_stats *)rx_tlv;
--	u32 mpdu_ok_byte_count = __le32_to_cpu(ppdu_end_user->rsvd2[6]);
--	u32 mpdu_err_byte_count = __le32_to_cpu(ppdu_end_user->rsvd2[8]);
-+	u32 mpdu_ok_byte_count = __le32_to_cpu(ppdu_end_user->info7);
-+	u32 mpdu_err_byte_count = __le32_to_cpu(ppdu_end_user->info8);
+@@ -33,10 +33,10 @@ ath12k_dp_mon_rx_populate_byte_count(void *rx_tlv, void *ppduinfo,
  
  	rx_user_status->mpdu_ok_byte_count =
  		u32_get_bits(mpdu_ok_byte_count,
--			     HAL_RX_PPDU_END_USER_STATS_RSVD2_6_MPDU_OK_BYTE_COUNT);
+-			     HAL_RX_PPDU_END_USER_STATS_MPDU_DELIM_OK_BYTE_COUNT);
 +			     HAL_RX_PPDU_END_USER_STATS_INFO7_MPDU_OK_BYTE_COUNT);
  	rx_user_status->mpdu_err_byte_count =
  		u32_get_bits(mpdu_err_byte_count,
--			     HAL_RX_PPDU_END_USER_STATS_RSVD2_8_MPDU_ERR_BYTE_COUNT);
+-			     HAL_RX_PPDU_END_USER_STATS_MPDU_DELIM_ERR_BYTE_COUNT);
 +			     HAL_RX_PPDU_END_USER_STATS_INFO8_MPDU_ERR_BYTE_COUNT);
  }
  
  static void
-@@ -594,11 +594,16 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -596,11 +596,16 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  			(struct hal_rx_ppdu_start *)tlv_data;
  
  		info[0] = __le32_to_cpu(ppdu_start->info0);
@@ -118,16 +127,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		if (ppdu_info->ppdu_id != ppdu_info->last_ppdu_id) {
  			ppdu_info->last_ppdu_id = ppdu_info->ppdu_id;
-@@ -612,7 +617,7 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
- 	case HAL_RX_PPDU_END_USER_STATS: {
- 		struct hal_rx_ppdu_end_user_stats *eu_stats =
- 			(struct hal_rx_ppdu_end_user_stats *)tlv_data;
--		u32 tid = __le32_to_cpu(eu_stats->rsvd2[0]);
-+		u32 tid = __le32_to_cpu(eu_stats->info6);
- 
- 		info[0] = __le32_to_cpu(eu_stats->info0);
- 		info[1] = __le32_to_cpu(eu_stats->info1);
-@@ -649,6 +654,7 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -651,6 +656,7 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		ppdu_info->num_mpdu_fcs_err =
  			u32_get_bits(info[0],
  				     HAL_RX_PPDU_END_USER_STATS_INFO0_MPDU_CNT_FCS_ERR);
@@ -135,7 +135,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		switch (ppdu_info->preamble_type) {
  		case HAL_RX_PREAMBLE_11N:
  			ppdu_info->ht_flags = 1;
-@@ -727,9 +733,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -729,9 +735,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		struct hal_rx_phyrx_rssi_legacy_info *rssi =
  			(struct hal_rx_phyrx_rssi_legacy_info *)tlv_data;
  		u32 reception_type = 0;
@@ -147,7 +147,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		/* TODO: Please note that the combined rssi will not be accurate
  		 * in MU case. Rssi in MU needs to be retrieved from
-@@ -737,10 +743,10 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -739,10 +745,10 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		 */
  		ppdu_info->rssi_comb =
  			u32_get_bits(info[0],
@@ -160,7 +160,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		switch (reception_type) {
  		case HAL_RECEPTION_TYPE_ULOFMDA:
-@@ -770,7 +776,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -772,7 +778,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  	case HAL_RX_MPDU_START: {
  		struct hal_rx_mpdu_start *mpdu_start =
  			(struct hal_rx_mpdu_start *)tlv_data;
@@ -168,7 +168,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		u16 peer_id;
  
  		info[1] = __le32_to_cpu(mpdu_start->info1);
-@@ -787,10 +792,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -789,10 +794,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  				u32_get_bits(info[0], HAL_RX_MPDU_START_INFO1_PEERID);
  		}
  
@@ -179,7 +179,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	}
  	case HAL_RX_MSDU_START:
-@@ -803,7 +804,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -805,7 +806,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		int buf_id = u32_get_bits(packet_info->cookie,
  					  DP_RXDMA_BUF_COOKIE_BUF_ID);
  		struct sk_buff *msdu;
@@ -187,7 +187,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		struct ath12k_skb_rxcb *rxcb;
  
  		spin_lock_bh(&buf_ring->idr_lock);
-@@ -821,11 +821,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -823,11 +823,6 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  				 msdu->len + skb_tailroom(msdu),
  				 DMA_FROM_DEVICE);
  
@@ -199,7 +199,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_dp_mon_buf_replenish(ab, buf_ring, 1);
  
  		break;
-@@ -1193,8 +1188,8 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+@@ -1192,8 +1187,8 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k_base *ab, struct ath12k_mon_data *pmon
  			    struct sk_buff *skb)
  {
  	struct hal_rx_mon_ppdu_info *ppdu_info = &pmon->mon_ppdu_info;
@@ -210,22 +210,22 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	u32 tlv_userid = 0;
  	u16 tlv_tag, tlv_len;
  	u8 *ptr = skb->data;
-@@ -1202,10 +1197,10 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+@@ -1201,10 +1196,10 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k_base *ab, struct ath12k_mon_data *pmon
  	memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
  
  	do {
 -		tlv = (struct hal_tlv_hdr *)ptr;
--		tlv_tag = u32_get_bits(tlv->tl, HAL_TLV_HDR_TAG);
--		tlv_len = u32_get_bits(tlv->tl, HAL_TLV_HDR_LEN);
--		tlv_userid = u32_get_bits(tlv->tl, HAL_TLV_USR_ID);
-+		tlv = (struct hal_tlv_64_hdr *)ptr;
-+		tlv_tag = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_TAG);
-+		tlv_len = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_LEN);
-+		tlv_userid = u64_get_bits(tlv->tl, HAL_TLV_USR_ID);
+-		tlv_tag = le32_get_bits(tlv->tl, HAL_TLV_HDR_TAG);
+-		tlv_len = le32_get_bits(tlv->tl, HAL_TLV_HDR_LEN);
+-		tlv_userid = le32_get_bits(tlv->tl, HAL_TLV_USR_ID);
+++		tlv = (struct hal_tlv_64_hdr *)ptr;
+++		tlv_tag = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_TAG);
+++		tlv_len = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_LEN);
+++		tlv_userid = u64_get_bits(tlv->tl, HAL_TLV_USR_ID);
  		ptr += sizeof(*tlv);
  
  		/* The actual length of PPDU_END is the combined length of many PHY
-@@ -1220,7 +1215,7 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+@@ -1219,7 +1214,7 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k_base *ab, struct ath12k_mon_data *pmon
  		hal_status = ath12k_dp_mon_rx_parse_status_tlv(ab, pmon,
  							       tlv_tag, ptr, tlv_userid);
  		ptr += tlv_len;
@@ -234,7 +234,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		if ((ptr - skb->data) >= DP_RX_BUFFER_SIZE)
  			break;
-@@ -2070,10 +2065,9 @@ int ath12k_dp_mon_srng_process(struct at
+@@ -2071,10 +2066,9 @@ int ath12k_dp_mon_srng_process(struct ath12k *ar, int mac_id, int *budget,
  	struct hal_srng *srng;
  	struct dp_rxdma_ring *buf_ring;
  	u64 cookie;
@@ -245,24 +245,22 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -	bool end_of_ppdu;
  	struct hal_rx_mon_ppdu_info *ppdu_info;
  	struct ath12k_peer *peer = NULL;
- 	u32 rx_buf_sz;
-@@ -2134,10 +2128,12 @@ int ath12k_dp_mon_srng_process(struct at
+ 	u16 log_type = 0;
+@@ -2134,9 +2128,10 @@ int ath12k_dp_mon_srng_process(struct ath12k *ar, int mac_id, int *budget,
  		pmon->dest_skb_q[dest_idx] = skb;
  		dest_idx++;
- 		ppdu_id = mon_dst_desc->ppdu_id;
--		end_of_ppdu = u32_get_bits(mon_dst_desc->info0,
--					   HAL_MON_DEST_INFO0_END_OF_PPDU);
+ 		ppdu_id = le32_to_cpu(mon_dst_desc->ppdu_id);
+-		end_of_ppdu = le32_get_bits(mon_dst_desc->info0,
+-					    HAL_MON_DEST_INFO0_END_OF_PPDU);
 -		if (!end_of_ppdu)
 +		end_reason = u32_get_bits(mon_dst_desc->info0,
 +					   HAL_MON_DEST_INFO0_END_REASON);
 +		if (end_reason != HAL_MON_END_OF_PPDU) {
 +			ath12k_warn(ab, "Monitor dest descriptor end reason %d", end_reason);
  			continue;
-+		}
  
  		for (i = 0; i < dest_idx; i++) {
- 			skb = pmon->dest_skb_q[i];
-@@ -2509,11 +2505,12 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2505,11 +2500,12 @@ int ath12k_dp_mon_rx_process_stats(struct ath12k *ar, int mac_id,
  	struct dp_rxdma_ring *buf_ring;
  	struct ath12k_sta *arsta = NULL;
  	struct ath12k_peer *peer;
@@ -278,22 +276,14 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	srng_id = ath12k_hw_mac_id_to_srng_id(ab->hw_params, mac_id);
  	mon_dst_ring = &pdev_dp->rxdma_mon_dst_ring[srng_id];
-@@ -2529,6 +2526,7 @@ int ath12k_dp_mon_rx_process_stats(struc
- 				ath12k_hal_srng_dst_peek(ab, srng);
- 		if (unlikely(!mon_dst_desc))
- 			break;
-+
- 		cookie = mon_dst_desc->cookie;
- 		buf_id = u32_get_bits(cookie, DP_RXDMA_BUF_COOKIE_BUF_ID);
- 
-@@ -2546,62 +2544,68 @@ int ath12k_dp_mon_rx_process_stats(struc
+@@ -2541,62 +2537,66 @@ int ath12k_dp_mon_rx_process_stats(struct ath12k *ar, int mac_id,
  		dma_unmap_single(ab->dev, rxcb->paddr,
  				 skb->len + skb_tailroom(skb),
  				 DMA_FROM_DEVICE);
 -		pmon->dest_skb_q[dest_idx] = skb;
 -		dest_idx++;
--		end_of_ppdu = u32_get_bits(mon_dst_desc->info0,
--					   HAL_MON_DEST_INFO0_END_OF_PPDU);
+-		end_of_ppdu = le32_get_bits(mon_dst_desc->info0,
+-					    HAL_MON_DEST_INFO0_END_OF_PPDU);
 -		if (!end_of_ppdu)
 -			continue;
 -
@@ -306,7 +296,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -				dev_kfree_skb_any(skb);
 -				continue;
 -			}
- 
+-
 -			rcu_read_lock();
 -			spin_lock_bh(&ab->base_lock);
 -			peer = ath12k_peer_find_by_id(ab, ppdu_info->peer_id);
@@ -354,7 +344,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	ath12k_hal_srng_access_end(ab, srng);
  	spin_unlock_bh(&srng->lock);
-+
 +	if (!num_buffs_reaped)
 +		return 0;
 +
@@ -400,7 +389,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	return num_buffs_reaped;
  }
  
-@@ -2612,7 +2616,8 @@ int ath12k_dp_mon_process_ring(struct at
+@@ -2608,7 +2608,8 @@ int ath12k_dp_mon_process_ring(struct ath12k_base *ab, int mac_id,
  	int num_buffs_reaped = 0;
  
  	if (!ar->monitor_started)
@@ -409,10 +398,12 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +								  napi, &budget);
  	else
  		num_buffs_reaped = ath12k_dp_mon_srng_process(ar, mac_id, &budget,
- 							      flag, napi);
+ 							      monitor_mode, napi);
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index cd74d22..22e0c3f 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -4148,7 +4148,6 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7
+@@ -4041,7 +4041,6 @@ int ath12k_dp_rxdma_ring_sel_config_wcn7850(struct ath12k_base *ab)
  						       DP_RXDMA_REFILL_RING_SIZE,
  						       &tlv_filter);
  	}
@@ -420,7 +411,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	return ret;
  }
-@@ -4167,7 +4166,6 @@ int ath12k_dp_rx_htt_setup(struct ath12k
+@@ -4060,7 +4059,6 @@ int ath12k_dp_rx_htt_setup(struct ath12k_base *ab)
  			    ret);
  		return ret;
  	}
@@ -428,9 +419,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	if (ab->hw_params->rx_mac_buf_ring) {
  		for (i = 0; i < ab->hw_params->num_rxmda_per_pdev; i++) {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
+index 4be8a9b..39f7e1c 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -812,7 +812,7 @@ ath12k_dp_tx_get_ring_id_type(struct ath
+@@ -818,7 +818,7 @@ ath12k_dp_tx_get_ring_id_type(struct ath12k_base *ab,
  		*htt_ring_type = HTT_HW_TO_SW_RING;
  		break;
  	case HAL_RXDMA_MONITOR_BUF:
@@ -439,7 +432,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		*htt_ring_type = HTT_SW_TO_HW_RING;
  		break;
  	case HAL_RXDMA_MONITOR_STATUS:
-@@ -820,7 +820,7 @@ ath12k_dp_tx_get_ring_id_type(struct ath
+@@ -826,7 +826,7 @@ ath12k_dp_tx_get_ring_id_type(struct ath12k_base *ab,
  		*htt_ring_type = HTT_SW_TO_HW_RING;
  		break;
  	case HAL_RXDMA_MONITOR_DST:
@@ -448,16 +441,16 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		*htt_ring_type = HTT_HW_TO_SW_RING;
  		break;
  	case HAL_TX_MONITOR_BUF:
-@@ -1080,6 +1080,8 @@ int ath12k_dp_tx_htt_rx_filter_setup(str
- 				      HTT_RX_RING_SELECTION_CFG_CMD_INFO0_PS);
- 	cmd->info0 |= u32_encode_bits(tlv_filter->offset_valid,
- 				      HTT_RX_RING_SELECTION_CFG_CMD_OFFSET_VALID);
+@@ -1086,6 +1086,8 @@ int ath12k_dp_tx_htt_rx_filter_setup(struct ath12k_base *ab, u32 ring_id,
+ 				       HTT_RX_RING_SELECTION_CFG_CMD_INFO0_PS);
+ 	cmd->info0 |= le32_encode_bits(tlv_filter->offset_valid,
+ 				       HTT_RX_RING_SELECTION_CFG_CMD_OFFSET_VALID);
 +	cmd->info0 |= u32_encode_bits(true,
 +				      HTT_RX_RING_SELECTION_CFG_CMD_RXMON_GCONF_EN);
- 	cmd->info1 = u32_encode_bits(rx_buf_size,
- 				     HTT_RX_RING_SELECTION_CFG_CMD_INFO1_BUF_SIZE);
- 	cmd->pkt_type_en_flags0 = tlv_filter->pkt_filter_flags0;
-@@ -1221,7 +1223,7 @@ int ath12k_dp_tx_htt_monitor_mode_ring_c
+ 	cmd->info1 = le32_encode_bits(rx_buf_size,
+ 				      HTT_RX_RING_SELECTION_CFG_CMD_INFO1_BUF_SIZE);
+ 	cmd->pkt_type_en_flags0 = cpu_to_le32(tlv_filter->pkt_filter_flags0);
+@@ -1227,7 +1229,7 @@ int ath12k_dp_tx_htt_monitor_mode_ring_config(struct ath12k *ar, bool reset)
  		return ret;
  	}
  
@@ -466,9 +459,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	if (ret) {
  		ath12k_err(ab, "failed to setup rx monitor filter %d\n", ret);
  		return ret;
+diff --git a/drivers/net/wireless/ath/ath12k/hal.c b/drivers/net/wireless/ath/ath12k/hal.c
+index e7a150e..e9ac54e 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
-@@ -147,7 +147,7 @@ static const struct hal_srng_config hw_s
+@@ -147,7 +147,7 @@ static const struct hal_srng_config hw_srng_config_template[] = {
  		.max_size = HAL_RXDMA_RING_MAX_SIZE_BE,
  	},
  	[HAL_RXDMA_MONITOR_BUF] = {
@@ -477,7 +472,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		.max_rings = 1,
  		.entry_size = sizeof(struct hal_mon_buf_ring) >> 2,
  		.mac_type = ATH12K_HAL_SRNG_PMAC,
-@@ -181,7 +181,7 @@ static const struct hal_srng_config hw_s
+@@ -181,7 +181,7 @@ static const struct hal_srng_config hw_srng_config_template[] = {
  		.max_size = HAL_WBM2PPE_RELEASE_RING_BASE_MSB_RING_SIZE,
  	},
  	[HAL_TX_MONITOR_BUF] = {
@@ -486,9 +481,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		.max_rings = 1,
  		.entry_size = sizeof(struct hal_mon_buf_ring) >> 2,
  		.mac_type = ATH12K_HAL_SRNG_PMAC,
+diff --git a/drivers/net/wireless/ath/ath12k/hal.h b/drivers/net/wireless/ath/ath12k/hal.h
+index 5a20df8..556f589 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.h
 +++ b/drivers/net/wireless/ath/ath12k/hal.h
-@@ -493,8 +493,8 @@ enum hal_srng_ring_id {
+@@ -485,8 +485,8 @@ enum hal_srng_ring_id {
  	HAL_SRNG_RING_ID_WMAC1_RXMON2SW0 = HAL_SRNG_RING_ID_WMAC1_RXDMA2SW1,
  	HAL_SRNG_RING_ID_WMAC1_SW2RXDMA1_DESC,
  	HAL_SRNG_RING_ID_RXDMA_DIR_BUF,
@@ -498,6 +495,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	HAL_SRNG_RING_ID_PMAC1_ID_END,
  };
+diff --git a/drivers/net/wireless/ath/ath12k/hal_desc.h b/drivers/net/wireless/ath/ath12k/hal_desc.h
+index 6c17adc..86661ad 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -580,6 +580,8 @@ struct hal_tlv_hdr {
@@ -521,6 +520,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #define HAL_MON_DEST_INFO0_INITIATOR		BIT(18)
  #define HAL_MON_DEST_INFO0_EMPTY_DESC		BIT(19)
  #define HAL_MON_DEST_INFO0_RING_ID		GENMASK(27, 20)
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.h b/drivers/net/wireless/ath/ath12k/hal_rx.h
+index 32fae7a..3ec4d76 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -156,6 +156,7 @@ struct hal_rx_mon_ppdu_info {
@@ -558,34 +559,18 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  #define HAL_RX_PPDU_END_USER_STATS_INFO2_AST_INDEX		GENMASK(15, 0)
  #define HAL_RX_PPDU_END_USER_STATS_INFO2_FRAME_CTRL		GENMASK(31, 16)
-@@ -262,8 +267,9 @@ struct hal_rx_ppdu_start {
+@@ -262,8 +267,8 @@ struct hal_rx_ppdu_start {
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_BITMAP		GENMASK(15, 0)
  #define HAL_RX_PPDU_END_USER_STATS_INFO6_TID_EOSP_BITMAP	GENMASK(31, 16)
  
--#define HAL_RX_PPDU_END_USER_STATS_RSVD2_6_MPDU_OK_BYTE_COUNT	GENMASK(24, 0)
--#define HAL_RX_PPDU_END_USER_STATS_RSVD2_8_MPDU_ERR_BYTE_COUNT	GENMASK(24, 0)
+-#define HAL_RX_PPDU_END_USER_STATS_MPDU_DELIM_OK_BYTE_COUNT	GENMASK(24, 0)
+-#define HAL_RX_PPDU_END_USER_STATS_MPDU_DELIM_ERR_BYTE_COUNT	GENMASK(24, 0)
 +#define HAL_RX_PPDU_END_USER_STATS_INFO7_MPDU_OK_BYTE_COUNT	GENMASK(24, 0)
-+
 +#define HAL_RX_PPDU_END_USER_STATS_INFO8_MPDU_ERR_BYTE_COUNT	GENMASK(24, 0)
  
  struct hal_rx_ppdu_end_user_stats {
  	__le32 rsvd0[2];
-@@ -275,8 +281,13 @@ struct hal_rx_ppdu_end_user_stats {
- 	__le32 rsvd1[2];
- 	__le32 info4;
- 	__le32 info5;
-+	__le32 rsvd2;
- 	__le32 info6;
--	__le32 rsvd2[11];
-+	__le32 rsvd3[4];
-+	__le32 info7;
-+	__le32 rsvd4;
-+	__le32 info8;
-+	__le32 rsvd5[4];
- } __packed;
- 
- struct hal_rx_ppdu_end_user_stats_ext {
-@@ -287,6 +298,7 @@ struct hal_rx_ppdu_end_user_stats_ext {
+@@ -294,6 +299,7 @@ struct hal_rx_ppdu_end_user_stats_ext {
  	__le32 info4;
  	__le32 info5;
  	__le32 info6;
@@ -593,7 +578,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  } __packed;
  
  #define HAL_RX_HT_SIG_INFO_INFO0_MCS		GENMASK(6, 0)
-@@ -429,30 +441,33 @@ enum hal_rx_ul_reception_type {
+@@ -436,30 +442,33 @@ enum hal_rx_ul_reception_type {
  	HAL_RECEPTION_TYPE_FRAMELESS
  };
  
@@ -636,9 +621,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  } __packed;
  
  struct hal_rx_rxpcu_classification_overview {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index f44b514..d59ef07 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -5969,8 +5969,29 @@ void ath12k_mac_drain_tx(struct ath12k *
+@@ -6096,8 +6096,29 @@ void ath12k_mac_drain_tx(struct ath12k *ar)
  
  static int ath12k_mac_config_mon_status_default(struct ath12k *ar, bool enable)
  {
@@ -670,16 +657,16 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  }
  
  static int ath12k_mac_op_start(struct ieee80211_hw *hw)
-@@ -6586,8 +6607,6 @@ static void ath12k_mac_op_configure_filt
+@@ -6711,8 +6732,6 @@ static void ath12k_mac_op_configure_filter(struct ieee80211_hw *hw,
  					   u64 multicast)
  {
  	struct ath12k *ar = hw->priv;
--	bool reset_flag = false;
--	int ret = 0;
+-	bool reset_flag;
+-	int ret;
  
  	mutex_lock(&ar->conf_mutex);
  
-@@ -6595,27 +6614,6 @@ static void ath12k_mac_op_configure_filt
+@@ -6720,27 +6739,6 @@ static void ath12k_mac_op_configure_filter(struct ieee80211_hw *hw,
  	*total_flags &= SUPPORTED_FILTERS;
  	ar->filter_flags = *total_flags;
  
@@ -707,22 +694,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	mutex_unlock(&ar->conf_mutex);
  }
  
---- a/drivers/net/wireless/ath/ath12k/debugfs.c
-+++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -641,6 +641,7 @@ static ssize_t ath12k_write_extd_rx_stat
- 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS;
- 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_USER_STATS_EXT;
- 		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_PPDU_END_STATUS_DONE;
-+		rx_filter |= HTT_RX_FILTER_TLV_FLAGS_ENABLE_FP;
- 
- 		tlv_filter.rx_filter = rx_filter;
- 		tlv_filter.pkt_filter_flags0 = HTT_RX_FP_MGMT_FILTER_FLAGS0;
-@@ -657,7 +658,7 @@ static ssize_t ath12k_write_extd_rx_stat
- 
- 	for (i = 0; i < ar->ab->hw_params->num_rxmda_per_pdev; i++) {
- 		ring_id = ar->dp.rxdma_mon_dst_ring[i].ring_id;
--		ret = ath12k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, ar->dp.mac_id,
-+		ret = ath12k_dp_tx_htt_rx_filter_setup(ar->ab, ring_id, ar->dp.mac_id + i,
- 						       HAL_RXDMA_MONITOR_DST,
- 						       DP_RXDMA_REFILL_RING_SIZE,
- 						       &tlv_filter);
+-- 
+2.17.1
+

@@ -17,48 +17,9 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  drivers/net/wireless/ath/ath12k/mac.c      |   2 +-
  6 files changed, 285 insertions(+), 20 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 1d3a4f0..e21d360 100644
---- a/drivers/net/wireless/ath/ath12k/core.h
-+++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -351,6 +351,7 @@ struct ath12k_link_vif {
- 	struct ath12k_reg_tpc_power_info reg_tpc_info;
- 	u8 vdev_stats_id;
- 	struct ath12k_fw_vdev_ol_stats vdev_stats;
-+	struct host_link_stats link_stats;
- 	u8 nontransmitting_vif_count;
- 	bool bcca_zero_sent;
- 	bool do_not_send_tmpl;
-@@ -405,6 +406,9 @@ struct ath12k_vif {
- 	u8 num_vdev_started;
- 	struct ath12k_vif_cache cache[IEEE80211_MLD_MAX_NUM_LINKS];
- 	u8 last_scan_link;
-+#ifdef CPTCFG_ATH12K_DEBUGFS
-+	struct dentry *debugfs_linkstats;
-+#endif /* CPTCFG_ATH12K_DEBUGFS */
- };
- 
- struct ath12k_vif_iter {
-@@ -1046,6 +1050,14 @@ struct ath12k_soc_dp_stats {
- 	u32 mon_drop_desc;
- 	u32 hal_reo_cmd_drain;
- 	u32 reo_cmd_cache_error;
-+	u32 mcast_enqueued;
-+	u32 ucast_enqueued;
-+	u32 mcast_reinject;
-+	u32 wbm_rel_source[HAL_WBM_REL_SRC_MODULE_MAX];
-+	u32 tqm_rel_reason[MAX_TQM_RELEASE_REASON];
-+	u32 fw_tx_status[MAX_FW_TX_STATUS];
-+	u32 tx_enqueued[MAX_TCL_RING];
-+	u32 tx_completed[MAX_TCL_RING];
- 	struct ath12k_soc_dp_tx_err_stats tx_err;
- 	struct ath12k_dp_ring_bp_stats bp_stats;
- };
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index cabb64d..a7b2e8c 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1489,6 +1489,59 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -1490,6 +1490,59 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			"\nREO_CMD_CACHE_FLUSH Failure: %u\n",
  			soc_stats->reo_cmd_cache_error);
  
@@ -118,7 +79,7 @@ index cabb64d..a7b2e8c 100644
  	len += ath12k_debugfs_dump_soc_ring_bp_stats(ab, buf + len, size - len);
  
  	if (len > size)
-@@ -1499,8 +1552,32 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -1500,8 +1553,32 @@ static ssize_t ath12k_debugfs_dump_soc_d
  	return retval;
  }
  
@@ -151,7 +112,7 @@ index cabb64d..a7b2e8c 100644
  	.open = simple_open,
  	.owner = THIS_MODULE,
  	.llseek = default_llseek,
-@@ -4058,6 +4135,105 @@ static const struct file_operations ath12k_fops_twt_resume_dialog = {
+@@ -4057,6 +4134,105 @@ static const struct file_operations ath1
  	.open = simple_open
  };
  
@@ -257,7 +218,7 @@ index cabb64d..a7b2e8c 100644
  int ath12k_debugfs_add_interface(struct ath12k_link_vif *arvif)
  {
  	struct ath12k_vif *ahvif = arvif->ahvif;
-@@ -4122,6 +4298,29 @@ int ath12k_debugfs_add_interface(struct ath12k_link_vif *arvif)
+@@ -4121,6 +4297,29 @@ int ath12k_debugfs_add_interface(struct
  		}
  	}
  
@@ -287,7 +248,7 @@ index cabb64d..a7b2e8c 100644
  exit:
  	return ret;
  }
-@@ -4132,21 +4331,27 @@ void ath12k_debugfs_remove_interface(struct ath12k_link_vif *arvif)
+@@ -4131,21 +4330,27 @@ void ath12k_debugfs_remove_interface(str
  	struct ieee80211_vif *vif = ahvif->vif;
  	u8 link_id = arvif->link_id;
  
@@ -321,8 +282,6 @@ index cabb64d..a7b2e8c 100644
  	debugfs_remove(arvif->debugfs_rtsthreshold);
  	arvif->debugfs_rtsthreshold = NULL;
  }
-diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
-index 3409c35..2c23c1f 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
 @@ -6,7 +6,7 @@
@@ -362,11 +321,9 @@ index 3409c35..2c23c1f 100644
  struct ath12k_dp {
  	struct ath12k_base *ab;
  	u8 num_bank_profiles;
-diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
-index e150831..6628e5e 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -412,6 +412,10 @@ tcl_ring_sel:
+@@ -413,6 +413,10 @@ tcl_ring_sel:
  		goto fail_unmap_dma_ext_desc;
  	}
  
@@ -377,7 +334,7 @@ index e150831..6628e5e 100644
  	ath12k_hal_tx_cmd_desc_setup(ab, hal_tcl_desc, &ti);
  
  	ath12k_hal_srng_access_end(ab, tcl_ring);
-@@ -420,7 +424,7 @@ tcl_ring_sel:
+@@ -421,7 +425,7 @@ tcl_ring_sel:
  
  	ath12k_dbg_dump(ab, ATH12K_DBG_DP_TX, NULL, "dp tx msdu: ",
  			skb->data, skb->len);
@@ -386,7 +343,7 @@ index e150831..6628e5e 100644
  	atomic_inc(&ar->dp.num_tx_pending);
  
  	return 0;
-@@ -440,6 +444,7 @@ fail_remove_tx_buf:
+@@ -441,6 +445,7 @@ fail_remove_tx_buf:
  	if (ti.pkt_offset)
  		skb_pull(skb, ti.pkt_offset);
  
@@ -394,7 +351,7 @@ index e150831..6628e5e 100644
  	if (tcl_ring_retry)
  		goto tcl_ring_sel;
  
-@@ -483,12 +488,14 @@ ath12k_dp_tx_htt_tx_complete_buf(struct ath12k_base *ab,
+@@ -484,12 +489,14 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  	struct ath12k_skb_cb *skb_cb;
  	struct ath12k *ar;
  	struct ieee80211_vif *vif;
@@ -409,7 +366,7 @@ index e150831..6628e5e 100644
  
  	if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  		wake_up(&ar->dp.tx_empty_waitq);
-@@ -522,6 +529,14 @@ ath12k_dp_tx_htt_tx_complete_buf(struct ath12k_base *ab,
+@@ -523,6 +530,14 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  	}
  
  	vif = skb_cb->vif;
@@ -424,7 +381,7 @@ index e150831..6628e5e 100644
  
  	memset(&info->status, 0, sizeof(info->status));
  
-@@ -551,18 +566,20 @@ ath12k_dp_tx_process_htt_tx_complete(struct ath12k_base *ab,
+@@ -552,18 +567,20 @@ ath12k_dp_tx_process_htt_tx_complete(str
  {
  	struct htt_tx_wbm_completion *status_desc;
  	struct ath12k_dp_htt_wbm_tx_status ts = {0};
@@ -433,9 +390,9 @@ index e150831..6628e5e 100644
  
  	status_desc = desc + HTT_TX_WBM_COMP_STATUS_OFFSET;
  
--	wbm_status = u32_get_bits(status_desc->info0,
-+	htt_status = u32_get_bits(status_desc->info0,
- 				  HTT_TX_WBM_COMP_INFO0_STATUS);
+-	wbm_status = le32_get_bits(status_desc->info0,
++	htt_status = le32_get_bits(status_desc->info0,
+ 				   HTT_TX_WBM_COMP_INFO0_STATUS);
  
 -	switch (wbm_status) {
 -	case HAL_WBM_REL_HTT_TX_COMP_STATUS_OK:
@@ -447,10 +404,10 @@ index e150831..6628e5e 100644
 -		ts.acked = (wbm_status == HAL_WBM_REL_HTT_TX_COMP_STATUS_OK);
 +	case HAL_WBM_REL_HTT_TX_COMP_STATUS_OK:
 +		ts.acked = (htt_status == HAL_WBM_REL_HTT_TX_COMP_STATUS_OK);
- 		ts.ack_rssi = u32_get_bits(status_desc->info2,
- 					   HTT_TX_WBM_COMP_INFO2_ACK_RSSI);
+ 		ts.ack_rssi = le32_get_bits(status_desc->info2,
+ 					    HTT_TX_WBM_COMP_INFO2_ACK_RSSI);
  		ath12k_dp_tx_htt_tx_complete_buf(ab, msdu, tx_ring, &ts, skb_ext_desc);
-@@ -577,7 +594,7 @@ ath12k_dp_tx_process_htt_tx_complete(struct ath12k_base *ab,
+@@ -578,7 +595,7 @@ ath12k_dp_tx_process_htt_tx_complete(str
  		 */
  		break;
  	default:
@@ -459,7 +416,7 @@ index e150831..6628e5e 100644
  		break;
  	}
  }
-@@ -743,10 +760,9 @@ static void ath12k_dp_tx_complete_msdu(struct ath12k *ar,
+@@ -744,10 +761,9 @@ static void ath12k_dp_tx_complete_msdu(s
  				       struct sk_buff *msdu,
  				       struct hal_wbm_release_ring *tx_status,
  				       enum hal_wbm_rel_src_module buf_rel_source,
@@ -471,7 +428,7 @@ index e150831..6628e5e 100644
  	struct ath12k_base *ab = ar->ab;
  	struct ieee80211_tx_info *info;
  	struct ath12k_skb_cb *skb_cb;
-@@ -757,6 +773,7 @@ static void ath12k_dp_tx_complete_msdu(struct ath12k *ar,
+@@ -758,6 +774,7 @@ static void ath12k_dp_tx_complete_msdu(s
  	enum hal_wbm_tqm_rel_reason rel_status;
  	enum hal_wbm_htt_tx_comp_status wbm_status;
  	struct ieee80211_vif *vif;
@@ -479,7 +436,7 @@ index e150831..6628e5e 100644
  	u8 flags = 0;
  
  
-@@ -766,7 +783,7 @@ static void ath12k_dp_tx_complete_msdu(struct ath12k *ar,
+@@ -767,7 +784,7 @@ static void ath12k_dp_tx_complete_msdu(s
  	}
  
  	skb_cb = ATH12K_SKB_CB(msdu);
@@ -488,7 +445,7 @@ index e150831..6628e5e 100644
  	dma_unmap_single_attrs(ab->dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE,
  			     DMA_ATTR_SKIP_CPU_SYNC);
  	if (unlikely(skb_cb->paddr_ext_desc)) {
-@@ -812,6 +829,14 @@ static void ath12k_dp_tx_complete_msdu(struct ath12k *ar,
+@@ -813,6 +830,14 @@ static void ath12k_dp_tx_complete_msdu(s
  			       tx_status->info0);
  
  	vif = skb_cb->vif;
@@ -503,7 +460,7 @@ index e150831..6628e5e 100644
  
  	info = IEEE80211_SKB_CB(msdu);
  	memset(&info->status, 0, sizeof(info->status));
-@@ -985,11 +1010,13 @@ void ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id)
+@@ -987,11 +1012,13 @@ void ath12k_dp_tx_completion_handler(str
  		ath12k_dp_tx_release_txbuf(dp, tx_desc, tx_desc->pool_id);
  		buf_rel_source = FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE,
  					   tx_status->info0);
@@ -518,7 +475,7 @@ index e150831..6628e5e 100644
  			continue;
  		}
  
-@@ -998,7 +1025,9 @@ void ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id)
+@@ -1000,7 +1027,9 @@ void ath12k_dp_tx_completion_handler(str
  		if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  			wake_up(&ar->dp.tx_empty_waitq);
  
@@ -529,8 +486,6 @@ index e150831..6628e5e 100644
  	}
  }
  
-diff --git a/drivers/net/wireless/ath/ath12k/hal_desc.h b/drivers/net/wireless/ath/ath12k/hal_desc.h
-index fc02e06..21ea8fc 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_desc.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_desc.h
 @@ -1251,6 +1251,7 @@ struct hal_reo_flush_cache {
@@ -571,11 +526,9 @@ index fc02e06..21ea8fc 100644
  };
  
  enum hal_wbm_rel_desc_type {
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index ed5c470..f8652df 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8498,6 +8498,7 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -8565,6 +8565,7 @@ static void ath12k_mac_op_tx(struct ieee
  	}
  
  	arvif = ahvif->link[link];
@@ -583,7 +536,7 @@ index ed5c470..f8652df 100644
  
  	if (!arvif || !arvif->ar) {
  		ieee80211_free_txskb(hw, skb);
-@@ -8522,7 +8523,6 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -8584,7 +8585,6 @@ static void ath12k_mac_op_tx(struct ieee
  	} else if (ieee80211_is_mgmt(hdr->frame_control)) {
  		frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
@@ -591,6 +544,39 @@ index ed5c470..f8652df 100644
  		ret = ath12k_mac_mgmt_tx(ar, skb, is_prb_rsp);
  		if (ret) {
  			if (ret != -EBUSY)
--- 
-2.17.1
-
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -310,6 +310,7 @@ struct ath12k_link_vif {
+ 	struct ath12k_reg_tpc_power_info reg_tpc_info;
+ 	u8 vdev_stats_id;
+ 	struct ath12k_fw_vdev_ol_stats vdev_stats;
++	struct host_link_stats link_stats;
+ 	u8 nontransmitting_vif_count;
+ 	bool bcca_zero_sent;
+ 	bool do_not_send_tmpl;
+@@ -363,6 +364,9 @@ struct ath12k_vif {
+ 	u8 num_vdev_started;
+ 	struct ath12k_vif_cache cache[IEEE80211_MLD_MAX_NUM_LINKS];
+ 	u8 last_scan_link;
++#ifdef CPTCFG_ATH12K_DEBUGFS
++	struct dentry *debugfs_linkstats;
++#endif /* CPTCFG_ATH12K_DEBUGFS */
+  };
+ 
+ struct ath12k_vif_iter {
+@@ -1025,6 +1029,15 @@ struct ath12k_soc_dp_stats {
+ 	u32 mon_drop_desc;
+ 	u32 hal_reo_cmd_drain;
+ 	u32 reo_cmd_cache_error;
++	u32 mcast_enqueued;
++	u32 ucast_enqueued;
++	u32 mcast_reinject;
++	u32 wbm_rel_source[HAL_WBM_REL_SRC_MODULE_MAX];
++	u32 tqm_rel_reason[MAX_TQM_RELEASE_REASON];
++	u32 fw_tx_status[MAX_FW_TX_STATUS];
++	u32 tx_enqueued[MAX_TCL_RING];
++	u32 tx_completed[MAX_TCL_RING];
++
+ 	struct ath12k_soc_dp_tx_err_stats tx_err;
+ 	struct ath12k_dp_ring_bp_stats bp_stats;
+ };

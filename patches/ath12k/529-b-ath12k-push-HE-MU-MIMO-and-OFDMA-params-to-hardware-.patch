@@ -1,7 +1,7 @@
-From 64d6fe4c36110cdd94e2f98fe97e5bd71211bde4 Mon Sep 17 00:00:00 2001
+From 1e1da99788ae89dc2a52922cf26c4dc763032f99 Mon Sep 17 00:00:00 2001
 From: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 Date: Wed, 26 Jan 2022 17:38:34 -0800
-Subject: [PATCH 2/6] ath12k: push HE MU-MIMO and OFDMA params to hardware for
+Subject: [PATCH] ath12k: push HE MU-MIMO and OFDMA params to hardware for
  configuration
 
 Currently MU-MIMO and OFDMA configurations are being set
@@ -12,13 +12,15 @@ Co-developed-by: Muna Sinada <quic_msinada@quicinc.com>
 Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/mac.c | 206 ++++++++++++++++----------
- drivers/net/wireless/ath/ath12k/wmi.h |  22 ++-
- 2 files changed, 145 insertions(+), 83 deletions(-)
+ drivers/net/wireless/ath/ath12k/mac.c | 210 ++++++++++++++++----------
+ drivers/net/wireless/ath/ath12k/wmi.h |  12 +-
+ 2 files changed, 140 insertions(+), 82 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 181d0d1..6adaf08 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -2001,6 +2001,122 @@ static int ath12k_setup_peer_smps(struct
+@@ -2052,6 +2052,122 @@ static int ath12k_setup_peer_smps(struct ath12k *ar, struct ath12k_vif *arvif,
  					 ath12k_smps_map[smps]);
  }
  
@@ -141,15 +143,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static void ath12k_bss_assoc(struct ieee80211_hw *hw,
  			     struct ieee80211_vif *vif,
  			     struct ieee80211_bss_conf *bss_conf)
-@@ -2010,6 +2126,7 @@ static void ath12k_bss_assoc(struct ieee
- 	struct peer_assoc_params peer_arg;
+@@ -2061,6 +2177,7 @@ static void ath12k_bss_assoc(struct ieee80211_hw *hw,
+ 	struct ath12k_wmi_peer_assoc_arg peer_arg;
  	struct ieee80211_sta *ap_sta;
  	struct ath12k_peer *peer;
 +	struct ieee80211_sta_he_cap he_cap;
  	bool is_auth = false;
  	int ret;
  
-@@ -2027,6 +2144,8 @@ static void ath12k_bss_assoc(struct ieee
+@@ -2078,6 +2195,8 @@ static void ath12k_bss_assoc(struct ieee80211_hw *hw,
  		rcu_read_unlock();
  		return;
  	}
@@ -158,7 +160,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	ath12k_peer_assoc_prepare(ar, vif, ap_sta, &peer_arg, false);
  
-@@ -2053,6 +2172,12 @@ static void ath12k_bss_assoc(struct ieee
+@@ -2104,6 +2223,12 @@ static void ath12k_bss_assoc(struct ieee80211_hw *hw,
  		return;
  	}
  
@@ -171,7 +173,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	WARN_ON(arvif->is_up);
  
  	arvif->aid = vif->cfg.aid;
-@@ -2311,6 +2436,8 @@ static void ath12k_mac_op_bss_info_chang
+@@ -2362,6 +2487,8 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  		ether_addr_copy(arvif->bssid, info->bssid);
  
  	if (changed & BSS_CHANGED_BEACON_ENABLED) {
@@ -180,7 +182,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		ath12k_control_beaconing(arvif, info);
  
  		if (arvif->is_up && vif->bss_conf.he_support &&
-@@ -4139,9 +4266,10 @@ static int ath12k_mac_copy_he_cap(struct
+@@ -4263,9 +4390,10 @@ static int ath12k_mac_copy_he_cap(struct ath12k *ar,
  
  		he_cap_elem->mac_cap_info[1] &=
  			IEEE80211_HE_MAC_CAP1_TF_MAC_PAD_DUR_MASK;
@@ -194,8 +196,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		he_cap_elem->phy_cap_info[5] &=
  			~IEEE80211_HE_PHY_CAP5_BEAMFORMEE_NUM_SND_DIM_ABOVE_80MHZ_MASK;
  		he_cap_elem->phy_cap_info[5] |= ar->num_tx_chains - 1;
-@@ -4737,71 +4865,6 @@ ath12k_mac_setup_vdev_create_params(stru
- 	params->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
+@@ -4875,71 +5003,6 @@ static void ath12k_mac_setup_vdev_create_arg(struct ath12k_vif *arvif,
+ 	arg->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
  }
  
 -static u32
@@ -204,7 +206,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -	struct ath12k_pdev_cap *pdev_cap = &pdev->cap;
 -	struct ath12k_band_cap *cap_band = NULL;
 -	u32 *hecap_phy_ptr = NULL;
--	u32 hemode = 0;
+-	u32 hemode;
 -
 -	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP)
 -		cap_band = &pdev_cap->band[NL80211_BAND_2GHZ];
@@ -219,7 +221,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -		 u32_encode_bits(HECAP_PHY_ULMUMIMO_GET(hecap_phy_ptr),
 -				 HE_MODE_UL_MUMIMO);
 -
--	/* TODO WDS and other modes */
+-	/* TODO: WDS and other modes */
 -	if (viftype == NL80211_IFTYPE_AP) {
 -		hemode |= u32_encode_bits(HECAP_PHY_MUBFMR_GET(hecap_phy_ptr),
 -					  HE_MODE_MU_TX_BFER) |
@@ -237,7 +239,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -{
 -	u32 param_id, param_value;
 -	struct ath12k_base *ab = ar->ab;
--	int ret = 0;
+-	int ret;
 -
 -	param_id = WMI_VDEV_PARAM_SET_HEMU_MODE;
 -	param_value = ath12k_mac_prepare_he_mode(ar->pdev, arvif->vif->type);
@@ -266,18 +268,20 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static void ath12k_mac_op_update_vif_offload(struct ieee80211_hw *hw,
  					     struct ieee80211_vif *vif)
  {
-@@ -5345,7 +5408,6 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -5482,7 +5545,6 @@ ath12k_mac_vdev_start_restart(struct ath12k_vif *arvif,
  	struct ath12k *ar = arvif->ar;
  	struct ath12k_base *ab = ar->ab;
  	struct wmi_vdev_start_req_arg arg = {};
 -	int he_support = arvif->vif->bss_conf.he_support;
- 	int ret = 0;
+ 	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -5386,14 +5448,6 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -5519,16 +5581,6 @@ ath12k_mac_vdev_start_restart(struct ath12k_vif *arvif,
+ 		spin_lock_bh(&ab->base_lock);
+ 		arg.regdomain = ar->ab->dfs_region;
  		spin_unlock_bh(&ab->base_lock);
- 
- 		/* TODO: Notify if secondary 80Mhz also needs radar detection */
+-
+-		/* TODO: Notify if secondary 80Mhz also needs radar detection */
 -		if (he_support) {
 -			ret = ath12k_set_he_mu_sounding_mode(ar, arvif);
 -			if (ret) {
@@ -288,10 +292,12 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -		}
  	}
  
- 	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
+ 	arg.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index d89c12b..4ec894f 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -2783,9 +2783,11 @@ struct rx_reorder_queue_remove_params {
+@@ -2844,9 +2844,11 @@ struct ath12k_wmi_rx_reorder_queue_remove_arg {
  #define WMI_VDEV_PARAM_TXBF_SU_TX_BFER BIT(2)
  #define WMI_VDEV_PARAM_TXBF_MU_TX_BFER BIT(3)
  
@@ -306,32 +312,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  #define HECAP_PHY_SU_BFER		BIT(31)
  #define HECAP_PHY_SU_BFEE		BIT(0)
-@@ -2794,19 +2796,19 @@ struct rx_reorder_queue_remove_params {
- #define HECAP_PHY_UL_MUOFDMA		BIT(23)
- 
- #define HECAP_PHY_SUBFMR_GET(hecap_phy) \
--	FIELD_GET(HECAP_PHY_SU_BFER, hecap_phy[HECAP_PHYDWORD_0])
-+	FIELD_GET(HECAP_PHY_SU_BFER, hecap_phy[HE_PHYCAP_BYTE_0])
- 
- #define HECAP_PHY_SUBFME_GET(hecap_phy) \
--	FIELD_GET(HECAP_PHY_SU_BFEE, hecap_phy[HECAP_PHYDWORD_1])
-+	FIELD_GET(HECAP_PHY_SU_BFEE, hecap_phy[HE_PHYCAP_BYTE_1])
- 
- #define HECAP_PHY_MUBFMR_GET(hecap_phy) \
--	FIELD_GET(HECAP_PHY_MU_BFER, hecap_phy[HECAP_PHYDWORD_1])
-+	FIELD_GET(HECAP_PHY_MU_BFER, hecap_phy[HE_PHYCAP_BYTE_1])
- 
- #define HECAP_PHY_ULMUMIMO_GET(hecap_phy) \
--	FIELD_GET(HECAP_PHY_UL_MUMIMO, hecap_phy[HECAP_PHYDWORD_0])
-+	FIELD_GET(HECAP_PHY_UL_MUMIMO, hecap_phy[HE_PHYCAP_BYTE_0])
- 
- #define HECAP_PHY_ULOFDMA_GET(hecap_phy) \
--	FIELD_GET(HECAP_PHY_UL_MUOFDMA, hecap_phy[HECAP_PHYDWORD_0])
-+	FIELD_GET(HECAP_PHY_UL_MUOFDMA, hecap_phy[HE_PHYCAP_BYTE_0])
- 
- #define HE_MODE_SU_TX_BFEE	BIT(0)
- #define HE_MODE_SU_TX_BFER	BIT(1)
-@@ -2819,8 +2821,12 @@ struct rx_reorder_queue_remove_params {
+@@ -2880,8 +2882,12 @@ struct ath12k_wmi_rx_reorder_queue_remove_arg {
  #define HE_DL_MUOFDMA_ENABLE	1
  #define HE_UL_MUOFDMA_ENABLE	1
  #define HE_DL_MUMIMO_ENABLE	1
@@ -344,3 +325,6 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  #define HE_VHT_SOUNDING_MODE_ENABLE		1
  #define HE_SU_MU_SOUNDING_MODE_ENABLE		1
+-- 
+2.17.1
+

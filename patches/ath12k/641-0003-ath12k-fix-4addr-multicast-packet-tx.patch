@@ -1,4 +1,4 @@
-From c90451a158219231d1611a52112b677bec8f7079 Mon Sep 17 00:00:00 2001
+From 580a0ab44c33343f209b22cd44725573f849fc9a Mon Sep 17 00:00:00 2001
 From: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
 Date: Mon, 27 Jun 2022 11:43:42 +0530
 Subject: [PATCH] ath12k: fix 4addr multicast packet tx
@@ -16,26 +16,26 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp_tx.c | 12 ++++++++++--
  drivers/net/wireless/ath/ath12k/dp_tx.h |  2 +-
  drivers/net/wireless/ath/ath12k/mac.c   |  5 ++++-
- drivers/net/wireless/ath/ath12k/peer.c  | 13 +++++++++++++
- 5 files changed, 29 insertions(+), 4 deletions(-)
+ drivers/net/wireless/ath/ath12k/peer.c  | 12 ++++++++++++
+ 5 files changed, 28 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index c7c9cc5..1d9d94e 100644
+index de2c48f..b79c0db 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -487,6 +487,7 @@ struct ath12k_sta {
- 	bool aggr_mode;
+@@ -426,6 +426,7 @@ struct ath12k_sta {
  #endif
+ 
  	bool use_4addr_set;
 +	u16 tcl_metadata;
  };
  
  #define ATH12K_HALF_20MHZ_BW 10
 diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
-index 862f261..fd5d675 100644
+index cf1299d..53868e2 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -122,7 +122,7 @@ static void ath12k_hal_tx_cmd_ext_desc_setup(struct ath12k_base *ab, void *cmd,
+@@ -129,7 +129,7 @@ static void ath12k_hal_tx_cmd_ext_desc_setup(struct ath12k_base *ab, void *cmd,
  }
  
  int ath12k_dp_tx(struct ath12k *ar, struct ath12k_vif *arvif,
@@ -44,7 +44,7 @@ index 862f261..fd5d675 100644
  {
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_dp *dp = &ab->dp;
-@@ -175,7 +175,15 @@ tcl_ring_sel:
+@@ -182,7 +182,15 @@ tcl_ring_sel:
  		return -ENOMEM;
  
  	ti.bank_id = arvif->bank_id;
@@ -62,7 +62,7 @@ index 862f261..fd5d675 100644
  	ti.encap_type = ath12k_dp_tx_get_encap_type(arvif, skb);
  	ti.addr_search_flags = arvif->hal_addr_search_flags;
 diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.h b/drivers/net/wireless/ath/ath12k/dp_tx.h
-index 422024e..98f7704 100644
+index 3d7a07e..aa0c266 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.h
 @@ -18,7 +18,7 @@ struct ath12k_dp_htt_wbm_tx_status {
@@ -72,13 +72,13 @@ index 422024e..98f7704 100644
 -		 struct sk_buff *skb);
 +		 struct ath12k_sta *arsta, struct sk_buff *skb);
  void ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id);
- int ath12k_dp_tx_send_reo_cmd(struct ath12k_base *ab, struct dp_rx_tid *rx_tid,
- 			      enum hal_reo_cmd_type type,
+ 
+ int ath12k_dp_tx_htt_h2t_ppdu_stats_req(struct ath12k *ar, u32 mask);
 diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index d07e811..5e7e16c 100644
+index c57559c..416c509 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -6234,6 +6234,7 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -6428,6 +6428,7 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
  	struct ath12k_vif *arvif = ath12k_vif_to_arvif(vif);
  	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
  	struct ieee80211_key_conf *key = info->control.hw_key;
@@ -86,7 +86,7 @@ index d07e811..5e7e16c 100644
  	u32 info_flags = info->flags;
  	bool is_prb_rsp;
  	int ret;
-@@ -6258,8 +6259,10 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
+@@ -6452,8 +6453,10 @@ static void ath12k_mac_op_tx(struct ieee80211_hw *hw,
  		}
  		return;
  	}
@@ -99,19 +99,18 @@ index d07e811..5e7e16c 100644
  		ath12k_warn(ar->ab, "failed to transmit frame %d\n", ret);
  		ieee80211_free_txskb(ar->hw, skb);
 diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
-index ab0ea37..bfb4732 100644
+index 19c0626..bc4d451 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -266,6 +266,8 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_vif *arvif,
- 		       struct ieee80211_sta *sta, struct peer_create_params *param)
+@@ -266,6 +266,7 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_vif *arvif,
+ 		       struct ath12k_wmi_peer_create_arg *arg)
  {
  	struct ath12k_peer *peer;
 +	struct ath12k_sta *arsta;
-+
  	int ret;
  
  	lockdep_assert_held(&ar->conf_mutex);
-@@ -334,6 +336,17 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_vif *arvif,
+@@ -334,6 +335,17 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_vif *arvif,
  	peer->sec_type = HAL_ENCRYPT_TYPE_OPEN;
  	peer->sec_type_grp = HAL_ENCRYPT_TYPE_OPEN;
  
@@ -130,5 +129,5 @@ index ab0ea37..bfb4732 100644
  
  	spin_unlock_bh(&ar->ab->base_lock);
 -- 
-2.7.4
+2.17.1
 

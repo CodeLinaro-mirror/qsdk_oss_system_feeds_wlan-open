@@ -1,7 +1,7 @@
-From 0f010961dd09ba1c44ba84c000ad7f084a28778d Mon Sep 17 00:00:00 2001
+From 9a3c1b1edd65e0e2d2339ccc8f4578b2e58d531d Mon Sep 17 00:00:00 2001
 From: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
 Date: Tue, 15 Jun 2021 12:27:39 +0530
-Subject: [PATCH 1/4] ath12k: Add MLO caps
+Subject: [PATCH] ath12k: Add MLO caps
 
 Added MLO setup related handsake message in QMI. Also filled MLO
 parameter in host capability send message. Added MLO global memory
@@ -10,13 +10,14 @@ type request support in host with RDDM download support.
 Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
 Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c |  95 ++++++-
- drivers/net/wireless/ath/ath12k/core.h |  16 ++
- drivers/net/wireless/ath/ath12k/qmi.c  | 364 ++++++++++++++++++++++++-
- drivers/net/wireless/ath/ath12k/qmi.h  |  26 +-
- drivers/net/wireless/ath/ath12k/wmi.c  |  14 +-
- drivers/net/wireless/ath/ath12k/wmi.h  |  25 +-
- 6 files changed, 513 insertions(+), 27 deletions(-)
+ drivers/net/wireless/ath/ath12k/core.c |  56 ++++--
+ drivers/net/wireless/ath/ath12k/core.h |  14 +-
+ drivers/net/wireless/ath/ath12k/hw.c   |   6 +
+ drivers/net/wireless/ath/ath12k/hw.h   |   2 +
+ drivers/net/wireless/ath/ath12k/qmi.c  | 257 ++++++++++++++++++++++---
+ drivers/net/wireless/ath/ath12k/qmi.h  |   8 +-
+ drivers/net/wireless/ath/ath12k/wmi.h  |  21 ++
+ 7 files changed, 322 insertions(+), 42 deletions(-)
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
@@ -126,7 +127,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  err_debugfs:
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -191,6 +191,8 @@ struct ath12k_he {
+@@ -186,6 +186,8 @@ struct ath12k_he {
  #define ATH12K_GROUP_MAX_RADIO (ATH12K_MAX_SOCS * MAX_RADIOS)
  #define ATH12K_INVALID_GRP_ID  0xFF
  #define ATH12K_INVALID_CHIP_ID 0xFF
@@ -135,7 +136,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  enum {
  	WMI_HOST_TP_SCALE_MAX   = 0,
  	WMI_HOST_TP_SCALE_50    = 1,
-@@ -943,6 +945,15 @@ struct ath12k_hw {
+@@ -782,6 +784,15 @@ struct ath12k_hw {
  	struct ath12k radio[0] __aligned(sizeof(void *));
  };
  
@@ -148,10 +149,10 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	u32 size;
 +};
 +
- /* Holds info on the group of SOCs that are registered as a single wiphy */
- struct ath12k_hw_group {
- 	/* Keep this always as first member */
-@@ -955,6 +966,7 @@ struct ath12k_hw_group {
+ struct ath12k_band_cap {
+ 	u32 phy_id;
+ 	u32 max_bw_supported;
+@@ -919,6 +930,7 @@ struct ath12k_hw_group {
  	unsigned long dev_flags;
  	struct ath12k_hw *ah[ATH12K_GROUP_MAX_RADIO];
  	struct ath12k_base *ab[ATH12K_MAX_SOCS];
@@ -159,6 +160,46 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	struct mutex mutex_lock;
  };
  
+@@ -1038,7 +1050,7 @@ struct ath12k_base {
+ 	bool stats_disable;
+ 	u32 rx_hash_ix2;
+ 	u32 rx_hash_ix3;
+-	
++
+ 	struct vendor_info id;
+ 
+ 	/* must be last */
+--- a/drivers/net/wireless/ath/ath12k/hw.c
++++ b/drivers/net/wireless/ath/ath12k/hw.c
+@@ -923,6 +923,8 @@ static const struct ath12k_hw_params ath
+ 
+ 		.supports_ap_ps = true,
+ 		.alloc_cacheable_memory = true,
++		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
++		.num_local_link = 1,
+ 	},
+ 	{
+ 		.name = "wcn7850 hw2.0",
+@@ -1043,6 +1045,8 @@ static const struct ath12k_hw_params ath
+ 		.supports_ap_ps = true,
+ 		.credit_flow = false,
+ 		.alloc_cacheable_memory = true,
++		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
++		.num_local_link = 1,
+ 	},
+ };
+ 
+--- a/drivers/net/wireless/ath/ath12k/hw.h
++++ b/drivers/net/wireless/ath/ath12k/hw.h
+@@ -198,6 +198,8 @@ struct ath12k_hw_params {
+ 	bool supports_ap_ps;
+ 	bool credit_flow;
+ 	bool alloc_cacheable_memory;
++	u16 max_mlo_peer;
++	u8 num_local_link;
+ };
+ 
+ struct ath12k_hw_ops {
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
 @@ -12,6 +12,7 @@
@@ -178,13 +219,13 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		.elem_len	= 1,
  		.elem_size	= sizeof(u8),
  		.array_type	= NO_ARRAY,
-@@ -2755,28 +2756,106 @@ static int ath12k_qmi_send_qdss_config(s
- 	return 0;
+@@ -2726,28 +2727,103 @@ out:
+ 	return ret;
  }
  
 -static void ath12k_host_cap_parse_mlo(struct qmi_wlanfw_host_cap_req_msg_v01 *req)
 +static int ath12k_qmi_fill_mlo_host_caps(struct ath12k_base *ab,
-+					 struct qmi_wlanfw_host_cap_req_msg_v01 *req)
++										 struct qmi_wlanfw_host_cap_req_msg_v01 *req)
  {
 -	req->mlo_capable_valid = 1;
 -	req->mlo_capable = 1;
@@ -274,7 +315,6 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +
 +	req->max_mlo_peer = 0;
 +	req->max_mlo_peer_valid = 0;
-+
  	req->mlo_group_id = 0;
 -	req->max_mlo_peer_valid = 1;
 -	/* Max peer number generally won't change for the same device
@@ -291,10 +331,8 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 -	req->mlo_chip_info[0].valid_mlo_link_id[0] = 1;
 -	req->mlo_chip_info[0].valid_mlo_link_id[1] = 1;
 +	req->mlo_group_id_valid = 0;
-+
 +	req->mlo_chip_id = 0;
 +	req->mlo_chip_id_valid = 0;
-+
 +	req->mlo_capable = 0;
 +	req->mlo_capable_valid = 0;
 +
@@ -305,7 +343,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  }
  
  static int ath12k_qmi_host_cap_send(struct ath12k_base *ab)
-@@ -2820,8 +2899,12 @@ static int ath12k_qmi_host_cap_send(stru
+@@ -2796,8 +2872,12 @@ static int ath12k_qmi_host_cap_send(stru
  		 */
  		req.nm_modem |= SLEEP_CLOCK_SELECT_INTERNAL_BIT;
  		req.nm_modem |= PLATFORM_CAP_PCIE_GLOBAL_RESET;
@@ -319,7 +357,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	}
  
  	ret = qmi_txn_init(&ab->qmi.handle, &txn,
-@@ -3007,6 +3090,29 @@ out:
+@@ -2983,6 +3063,29 @@ out:
  	return ret;
  }
  
@@ -349,7 +387,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  void ath12k_qmi_free_target_mem_chunk(struct ath12k_base *ab)
  {
  	int i;
-@@ -3015,8 +3121,13 @@ void ath12k_qmi_free_target_mem_chunk(st
+@@ -2991,8 +3094,13 @@ void ath12k_qmi_free_target_mem_chunk(st
  		if (ab->bus_params.fixed_mem_region) {
  			if (!ab->qmi.target_mem[i].v.ioaddr)
  				continue;
@@ -365,7 +403,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		} else {
  			if (!ab->qmi.target_mem[i].v.addr)
  				continue;
-@@ -3078,6 +3189,79 @@ static int ath12k_qmi_alloc_target_mem_c
+@@ -3054,6 +3162,79 @@ static int ath12k_qmi_alloc_target_mem_c
  	return 0;
  }
  
@@ -445,7 +483,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab)
  {
  	struct device *dev = ab->dev;
-@@ -3102,12 +3286,14 @@ static int ath12k_qmi_assign_target_mem_
+@@ -3079,12 +3260,14 @@ static int ath12k_qmi_assign_target_mem_
  	host_ddr_sz = (res.end - res.start) + 1;
  
  	for (i = 0, idx = 0; i < ab->qmi.mem_seg_count; i++) {
@@ -465,7 +503,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		}
  
  		switch (ab->qmi.target_mem[i].type) {
-@@ -3169,12 +3355,26 @@ static int ath12k_qmi_assign_target_mem_
+@@ -3146,12 +3329,26 @@ static int ath12k_qmi_assign_target_mem_
  			sz += ab->qmi.target_mem[i].size;
  			idx++;
  			break;
@@ -492,7 +530,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	}
  	ab->host_ddr_fixed_mem_off = sz;
  	ab->qmi.mem_seg_count = idx;
-@@ -4231,6 +4431,7 @@ static void ath12k_qmi_msg_mem_request_c
+@@ -4239,6 +4436,7 @@ static void ath12k_qmi_msg_mem_request_c
  	for (i = 0; i < qmi->mem_seg_count ; i++) {
  		ab->qmi.target_mem[i].type = msg->mem_seg[i].type;
  		ab->qmi.target_mem[i].size = msg->mem_seg[i].size;
@@ -500,7 +538,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi mem seg type %d size %d\n",
  			   msg->mem_seg[i].type, msg->mem_seg[i].size);
  	}
-@@ -4545,6 +4746,7 @@ static void ath12k_qmi_driver_event_work
+@@ -4561,6 +4759,7 @@ static void ath12k_qmi_driver_event_work
  	int ret;
  
  	spin_lock(&qmi->event_lock);
@@ -510,7 +548,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  					 struct ath12k_qmi_driver_event, list);
 --- a/drivers/net/wireless/ath/ath12k/qmi.h
 +++ b/drivers/net/wireless/ath/ath12k/qmi.h
-@@ -222,7 +222,7 @@ struct qmi_wlanfw_qdss_trace_mode_resp_m
+@@ -223,7 +223,7 @@ struct qmi_wlanfw_qdss_trace_mode_resp_m
  	struct qmi_response_type_v01 resp;
  };
  
@@ -519,7 +557,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  struct qmi_wlanfw_m3_dump_upload_done_req_msg_v01 {
  	u32 pdev_id;
-@@ -251,6 +251,7 @@ enum ath12k_qmi_target_mem {
+@@ -252,6 +252,7 @@ enum ath12k_qmi_target_mem {
  	BDF_MEM_REGION_TYPE = 0x2,
  	M3_DUMP_REGION_TYPE = 0x3,
  	CALDB_MEM_REGION_TYPE = 0x4,
@@ -527,7 +565,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	PAGEABLE_MEM_REGION_TYPE = 0x9,
  };
  
-@@ -400,6 +401,11 @@ enum qmi_wlanfw_mem_type_enum_v01 {
+@@ -409,6 +410,11 @@ enum qmi_wlanfw_mem_type_enum_v01 {
  	QMI_WLANFW_MEM_M3_V01 = 3,
  	QMI_WLANFW_MEM_CAL_V01 = 4,
  	QMI_WLANFW_MEM_DPD_V01 = 5,
@@ -541,7 +579,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -2329,6 +2329,23 @@ enum {
+@@ -2455,6 +2455,23 @@ enum {
  	WMI_HOST_VDEV_FLAGS_SCAN_MODE_VAP       = 0x00000010,
  };
  
@@ -565,69 +603,23 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  /*
   * 0 – index indicated EHT-MCS map for 20Mhz only sta (4 bytes valid)
   * 1 – index for <= 80MHz bw  (only 3 bytes are valid and other is reserved)
-@@ -2569,11 +2586,14 @@ struct wmi_soc_mac_phy_hw_mode_caps {
- 	u32 num_chainmask_tables;
+@@ -2777,6 +2794,9 @@ struct ath12k_wmi_soc_mac_phy_hw_mode_ca
+ 	__le32 num_chainmask_tables;
  } __packed;
  
 +#define WMI_HW_MODE_INFO0_CONFIG_TYPE          GENMASK(26, 0)
 +#define WMI_HW_MODE_INFO0_MLO_CAP_FLAG         GENMASK(31, 27)
 +
- struct wmi_hw_mode_capabilities {
+ struct ath12k_wmi_hw_mode_cap_params {
  	__le32 tlv_header;
- 	u32 hw_mode_id;
- 	u32 phy_id_map;
--	u32 hw_mode_config_type;
-+	u32 hw_mode_info0;
- } __packed;
+ 	__le32 hw_mode_id;
+@@ -2794,7 +2814,8 @@ struct ath12k_wmi_hw_mode_cap_params {
  
- #define WMI_MAX_HECAP_PHY_SIZE                 (3)
-@@ -2586,7 +2606,8 @@ struct wmi_hw_mode_capabilities {
- 
- struct wmi_mac_phy_capabilities {
- 	u32 hw_mode_id;
--	u32 pdev_id;
-+	u16 pdev_id;
-+	u16 hw_link_id;
- 	u32 phy_id;
- 	u32 supported_flags;
- 	u32 supported_bands;
---- a/drivers/net/wireless/ath/ath12k/hw.c
-+++ b/drivers/net/wireless/ath/ath12k/hw.c
-@@ -1016,6 +1016,8 @@ static const struct ath12k_hw_params ath
- 		.credit_flow = false,
- 		.wakeup_mhi = false,
- 		.alloc_cacheable_memory = true,
-+		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
-+		.num_local_link = 1,
- 	},
- 	{
- 		.name = "wcn7850 hw2.0",
-@@ -1082,6 +1084,8 @@ static const struct ath12k_hw_params ath
- 		.credit_flow = false,
- 		.wakeup_mhi = false,
- 		.alloc_cacheable_memory = false,
-+		.max_mlo_peer = 32,
-+		.num_local_link = 2,
- 	},
- 	{
- 		.name = "qcn9274 hw2.0",
-@@ -1148,6 +1152,8 @@ static const struct ath12k_hw_params ath
- 		.credit_flow = false,
- 		.wakeup_mhi = false,
- 		.alloc_cacheable_memory = true,
-+		.max_mlo_peer = ATH12K_MAX_MLO_PEER,
-+		.num_local_link = 1,
- 	},
- };
- 
---- a/drivers/net/wireless/ath/ath12k/hw.h
-+++ b/drivers/net/wireless/ath/ath12k/hw.h
-@@ -203,6 +203,8 @@ struct ath12k_hw_params {
- 	bool credit_flow;
- 	bool wakeup_mhi;
- 	bool alloc_cacheable_memory;
-+	u16 max_mlo_peer;
-+	u8 num_local_link;
- };
- 
- /* BRINGUP: move to dp.h */
+ struct ath12k_wmi_mac_phy_caps_params {
+ 	__le32 hw_mode_id;
+-	__le32 pdev_id;
++	__le16 pdev_id;
++	__le16 hw_link_id;
+ 	__le32 phy_id;
+ 	__le32 supported_flags;
+ 	__le32 supported_bands;

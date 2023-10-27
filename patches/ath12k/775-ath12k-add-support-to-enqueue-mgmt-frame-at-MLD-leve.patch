@@ -25,7 +25,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -107,6 +107,7 @@ enum ath12k_skb_flags {
+@@ -96,6 +96,7 @@ enum ath12k_skb_flags {
  	ATH12K_SKB_HW_80211_ENCAP = BIT(0),
  	ATH12K_SKB_CIPHER_SET = BIT(1),
  	ATH12K_SKB_TX_STATUS = BIT(2),
@@ -35,7 +35,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  struct ath12k_skb_cb {
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8473,6 +8473,7 @@ static int ath12k_mac_mgmt_tx_wmi(struct
+@@ -8649,6 +8649,7 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  	struct ath12k_skb_cb *skb_cb;
  	int buf_id;
  	int ret;
@@ -43,7 +43,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	ATH12K_SKB_CB(skb)->ar = ar;
  	spin_lock_bh(&ar->txmgmt_idr_lock);
-@@ -8502,7 +8503,10 @@ static int ath12k_mac_mgmt_tx_wmi(struct
+@@ -8677,7 +8678,10 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  
  	skb_cb->paddr = paddr;
  
@@ -55,7 +55,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to send mgmt frame: %d\n", ret);
  		goto err_unmap_buf;
-@@ -8639,6 +8643,22 @@ static void ath12k_mlo_mcast_update_tx_l
+@@ -8810,6 +8814,22 @@ static void ath12k_mlo_mcast_update_tx_l
  		ether_addr_copy(hdr->addr2, bss_conf->addr);
  }
  
@@ -78,7 +78,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static u8 ath12k_mac_get_tx_link(struct ieee80211_sta *sta, struct ieee80211_vif *vif,
  				 u8 link, struct sk_buff *skb, u32 info_flags)
  {
-@@ -8721,6 +8741,19 @@ static u8 ath12k_mac_get_tx_link(struct
+@@ -8892,6 +8912,19 @@ static u8 ath12k_mac_get_tx_link(struct
  				   sta->valid_links, ahvif->links_map, ahsta->links_map);
  			link = IEEE80211_MLD_MAX_NUM_LINKS;
  		}
@@ -100,14 +100,14 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	return link;
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -867,19 +867,26 @@ struct sk_buff *ath12k_wmi_alloc_skb(str
+@@ -1215,18 +1215,25 @@ struct sk_buff *ath12k_wmi_alloc_skb(str
  }
  
  int ath12k_wmi_mgmt_send(struct ath12k *ar, u32 vdev_id, u32 buf_id,
 -			 struct sk_buff *frame)
 +			 struct sk_buff *frame, bool link_agnostic)
  {
- 	struct ath12k_pdev_wmi *wmi = ar->wmi;
+ 	struct ath12k_wmi_pdev *wmi = ar->wmi;
  	struct wmi_mgmt_send_cmd *cmd;
 +	struct wmi_mlo_mgmt_send_params *ml_params;
  	struct wmi_tlv *frame_tlv;
@@ -117,8 +117,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	void *ptr;
 +	struct wmi_tlv *tlv;
  
- 	buf_len = frame->len < WMI_MGMT_SEND_DOWNLD_LEN ?
- 		  frame->len : WMI_MGMT_SEND_DOWNLD_LEN;
+ 	buf_len = min_t(int, frame->len, WMI_MGMT_SEND_DOWNLD_LEN);
  
 -	len = sizeof(*cmd) + sizeof(*frame_tlv) + roundup(buf_len, 4);
 +	len = sizeof(*cmd) + sizeof(*frame_tlv) + roundup(buf_len, sizeof(u32));
@@ -129,7 +128,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
  	if (!skb)
-@@ -898,12 +905,36 @@ int ath12k_wmi_mgmt_send(struct ath12k *
+@@ -1245,10 +1252,34 @@ int ath12k_wmi_mgmt_send(struct ath12k *
  	cmd->tx_params_valid = 0;
  
  	frame_tlv = (struct wmi_tlv *)(skb->data + sizeof(*cmd));
@@ -137,8 +136,6 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	frame_tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_BYTE, roundup(buf_len, sizeof(u32)));
  
  	memcpy(frame_tlv->value, frame->data, buf_len);
- 
- 	ath12k_ce_byte_swap(frame_tlv->value, buf_len);
  
 +	if (!link_agnostic)
 +		goto send;
@@ -169,7 +166,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ath12k_warn(ar->ab,
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -4409,6 +4409,7 @@ struct wmi_scan_chan_list_cmd {
+@@ -4415,6 +4415,7 @@ struct wmi_scan_chan_list_cmd {
  	__le32 pdev_id;
  } __packed;
  
@@ -177,7 +174,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  #define WMI_MGMT_SEND_DOWNLD_LEN	64
  
  #define WMI_TX_PARAMS_DWORD0_POWER		GENMASK(7, 0)
-@@ -4436,6 +4437,18 @@ struct wmi_mgmt_send_cmd {
+@@ -4442,6 +4443,18 @@ struct wmi_mgmt_send_cmd {
  	/* This TLV is followed by struct wmi_mgmt_frame */
  
  	/* Followed by struct wmi_mgmt_send_params */
@@ -196,7 +193,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  } __packed;
  
  struct wmi_sta_powersave_mode_cmd {
-@@ -8258,7 +8271,7 @@ int ath12k_wmi_cmd_send(struct ath12k_pd
+@@ -7692,7 +7705,7 @@ int ath12k_wmi_cmd_send(struct ath12k_wm
  			u32 cmd_id);
  struct sk_buff *ath12k_wmi_alloc_skb(struct ath12k_wmi_base *wmi_sc, u32 len);
  int ath12k_wmi_mgmt_send(struct ath12k *ar, u32 vdev_id, u32 buf_id,

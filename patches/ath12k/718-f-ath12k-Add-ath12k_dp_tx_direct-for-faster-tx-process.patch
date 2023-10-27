@@ -180,14 +180,6 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	if (ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
  		ieee80211_free_txskb(hw, skb);
  		return;
-@@ -8493,7 +8496,6 @@ static void ath12k_mac_op_tx(struct ieee
- 
- 	memset(skb_cb, 0, sizeof(*skb_cb));
- 	skb_cb->vif = vif;
--
- 	/* handle only for MLO case, use deflink for non MLO case */
- 	if (vif->valid_links) {
- 		link = ath12k_mac_get_tx_link(sta, vif, link, skb, info_flags);
 @@ -8512,6 +8514,15 @@ static void ath12k_mac_op_tx(struct ieee
  		ieee80211_free_txskb(hw, skb);
  		return;
@@ -204,79 +196,3 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  
  	ar = arvif->ar;
  	ah = ar->ah;
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -7408,7 +7408,6 @@ static void ath11k_mac_op_tx(struct ieee
- 	struct ath11k_sta *arsta = NULL;
- 	struct ieee80211_mgmt *mgmt;
- 	u32 info_flags = info->flags;
--	struct ieee80211_sta *sta = control->sta;
- 	bool is_prb_rsp;
- 	u16 frm_type = 0;
- 	u8 tid, *qos_ctl;
-@@ -7416,6 +7415,9 @@ static void ath11k_mac_op_tx(struct ieee
- 	int ret;
- 	u64 adjusted_tsf;
- 
-+	if (skb->fast_xmit)
-+		info_flags |= IEEE80211_TX_CTL_HW_80211_ENCAP;
-+
- 	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
- 		ieee80211_free_txskb(ar->hw, skb);
- 		return;
-@@ -7476,13 +7478,13 @@ static void ath11k_mac_op_tx(struct ieee
- 		return;
- 	}
- 
--	if (control->sta)
-+	if (control && control->sta)
- 		arsta = (struct ath11k_sta *)control->sta->drv_priv;
- 
- 	/* Must call mac80211 tx status handler, else when stats is disabled we free
- 	 * the skb from driver. Own tx packets on monitor will also be disabled.
- 	 */
--	if ((info->flags & (IEEE80211_TX_CTL_REQ_TX_STATUS | IEEE80211_TX_INTFL_NL80211_FRAME_TX)) ||
-+	if ((info_flags & (IEEE80211_TX_CTL_REQ_TX_STATUS | IEEE80211_TX_INTFL_NL80211_FRAME_TX)) ||
- 	    info->ack_frame_id || vif->type == NL80211_IFTYPE_MESH_POINT ||
- 	    test_bit(ATH11K_FLAG_MONITOR_VDEV_CREATED, &ar->monitor_flags))
- 		skb_cb->flags |= ATH11K_SKB_TX_STATUS;
-@@ -7497,8 +7499,7 @@ static void ath11k_mac_op_tx(struct ieee
- 		/* sta specific config has high precedence over vif specific config
- 		 * Hence overwrite sta specific config if it is present
- 		 */
--		if (sta) {
--			arsta = (struct ath11k_sta *)sta->drv_priv;
-+		if (arsta) {
- 			if (arsta->tid_cfg[tid].noack == WMI_PEER_TID_CONFIG_NOACK)
- 				noack = true;
- 
-@@ -7512,9 +7513,8 @@ static void ath11k_mac_op_tx(struct ieee
- 
- 	if (ar->ab->nss.enabled)
- 		ret = ath11k_nss_tx(arvif, skb);
--	else if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
--		ret = ath11k_dp_tx_simple(ar, arvif, skb,
--					  (control->sta) ? control->sta->drv_priv : NULL);
-+	else if (info_flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
-+		ret = ath11k_dp_tx_simple(ar, arvif, skb, arsta);
- 	else
- 		ret = ath11k_dp_tx(ar, arvif, arsta, skb);
- 
-@@ -7525,13 +7525,10 @@ static void ath11k_mac_op_tx(struct ieee
- 		return;
- 	}
- 
--	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar) && sta) {
--		arsta = (struct ath11k_sta *)sta->drv_priv;
--		if (arsta) {
--			atomic_inc(&arsta->drv_tx_pkts.pkts_in);
--			if (!ret)
--				atomic_inc(&arsta->drv_tx_pkts.pkts_out);
--		}
-+	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar) && arsta) {
-+		atomic_inc(&arsta->drv_tx_pkts.pkts_in);
-+		if (!ret)
-+			atomic_inc(&arsta->drv_tx_pkts.pkts_out);
- 	}
- }
- 

@@ -1,4 +1,4 @@
-From f50a4ca1ba2bdb0a52aaeca338b02fe97e77e716 Mon Sep 17 00:00:00 2001
+From 6bc61e5c95ebacc17222e653024d3acfd0081cfb Mon Sep 17 00:00:00 2001
 From: P Praneesh <quic_ppranees@quicinc.com>
 Date: Wed, 8 Jun 2022 23:14:11 +0530
 Subject: [PATCH] ath12k: add monitor buffer address TLV parsing
@@ -13,14 +13,16 @@ headers are added based on the capability and send it to mac80211.
 
 Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/dp_mon.c | 455 +++++++++++++++++++++++--------
- drivers/net/wireless/ath/ath12k/dp_mon.h |   2 +-
- drivers/net/wireless/ath/ath12k/hal_rx.h |  27 ++
- 3 files changed, 369 insertions(+), 115 deletions(-)
+ drivers/net/wireless/ath/ath12k/dp_mon.c | 442 +++++++++++++++++------
+ drivers/net/wireless/ath/ath12k/dp_mon.h |   4 +-
+ drivers/net/wireless/ath/ath12k/hal_rx.h |  28 +-
+ 3 files changed, 367 insertions(+), 107 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
+index 233ed97..293f0b2 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -582,10 +582,9 @@ static void ath12k_dp_mon_parse_he_sig_s
+@@ -584,10 +584,9 @@ static void ath12k_dp_mon_parse_he_sig_su(u8 *tlv_data,
  
  static enum hal_rx_mon_status
  ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
@@ -29,10 +31,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				  u32 tlv_tag, u8 *tlv_data, u32 userid)
  {
 -	struct hal_rx_mon_ppdu_info *ppdu_info = &pmon->mon_ppdu_info;
- 	u32 info[6];
+ 	u32 info[7];
  
  	switch (tlv_tag) {
-@@ -600,7 +599,7 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -602,7 +601,7 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  		info[1] = __le32_to_cpu(ppdu_start->info1);
  		ppdu_info->chan_num = u32_get_bits(info[1],
  						   HAL_RX_PPDU_START_INFO1_CHAN_NUM);
@@ -41,7 +43,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  					       HAL_RX_PPDU_START_INFO1_CHAN_FREQ);
  		ppdu_info->ppdu_ts = ((__le32_to_cpu(ppdu_start->ppdu_start_ts_31_0) |
  				      (__le32_to_cpu(ppdu_start->ppdu_start_ts_63_32) << 31)));
-@@ -759,6 +758,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -761,6 +760,9 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  			ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
  			break;
  		}
@@ -51,7 +53,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	}
  	case HAL_RXPCU_PPDU_END_INFO: {
-@@ -794,49 +796,17 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -796,49 +798,17 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  
  		break;
  	}
@@ -72,7 +74,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -		spin_unlock_bh(&buf_ring->idr_lock);
 -
 -		if (unlikely(!msdu)) {
--			ath12k_dbg(ab, ATH12K_DBG_DATA,
+-		ath12k_dbg(ab, ATH12K_DBG_DATA,
 -				   "montior destination with invalid buf_id %d\n",
 -				    buf_id);
 -			return HAL_RX_MON_STATUS_PPDU_NOT_DONE;
@@ -91,13 +93,15 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -		/* TODO: RX_MSDU TLV will be handled once MON BUF ADDR TLVs are
 -		 * enabled
 -		 */
+-		break;
+-	}
 +	case HAL_PHYRX_OTHER_RECEIVE_INFO: {
 +		struct phyrx_common_user_info *cmn_usr_info =
 +			(struct phyrx_common_user_info *)tlv_data;
 +		ppdu_info->gi = u32_get_bits(__le32_to_cpu(cmn_usr_info->info0),
 +					     HAL_RX_PHY_CMN_USER_INFO0_GI);
- 		break;
- 	}
++ 		break;
++ 	}
 +	case HAL_MON_BUF_ADDR:
 +		return HAL_RX_MON_STATUS_BUF_ADDR;
  	case HAL_RX_MPDU_END:
@@ -109,7 +113,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	case HAL_DUMMY:
  		return HAL_RX_MON_STATUS_BUF_DONE;
  	case HAL_RX_PPDU_END_STATUS_DONE:
-@@ -849,54 +819,178 @@ ath12k_dp_mon_rx_parse_status_tlv(struct
+@@ -851,25 +821,152 @@ ath12k_dp_mon_rx_parse_status_tlv(struct ath12k_base *ab,
  	return HAL_RX_MON_STATUS_PPDU_NOT_DONE;
  }
  
@@ -257,7 +261,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +#define DP_MON_RX_PKT_OFFSET	8
 +#define DP_MON_RX_L2_HDR_OFFSET	2
 +
-+
  static struct sk_buff *
 -ath12k_dp_mon_rx_merg_msdus(struct ath12k *ar,
 -			    u32 mac_id, struct sk_buff *head_msdu,
@@ -269,16 +272,12 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	struct ath12k_base *ab = ar->ab;
  	struct sk_buff *msdu, *mpdu_buf, *prev_buf;
 -	struct hal_rx_desc *rx_desc;
--	char *hdr_desc;
--	u8 *dest, decap_format;
+-	u8 *hdr_desc, *dest, decap_format;
 +	u8 *dest, *msdu_payload, decap_format;
  	struct ieee80211_hdr_3addr *wh;
--	static u32 pkt_type;
  	u32 err_bitmap;
  
--	pkt_type++;
- 	mpdu_buf = NULL;
- 
+@@ -878,24 +975,23 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12k *ar,
  	if (!head_msdu)
  		goto err_merge_fail;
  
@@ -308,7 +307,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  			prev_buf = msdu;
  			msdu = msdu->next;
-@@ -904,15 +998,14 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12
+@@ -903,15 +999,14 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12k *ar,
  
  		prev_buf->next = NULL;
  
@@ -327,7 +326,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		if (ieee80211_is_data_qos(wh->frame_control))
  			qos_pkt = 1;
-@@ -920,12 +1013,13 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12
+@@ -919,12 +1014,13 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12k *ar,
  		msdu = head_msdu;
  
  		while (msdu) {
@@ -343,7 +342,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  			}
  			prev_buf = msdu;
  			msdu = msdu->next;
-@@ -1050,7 +1144,8 @@ static void ath12k_dp_mon_update_radiota
+@@ -1049,7 +1145,8 @@ static void ath12k_dp_mon_update_radiotap(struct ath12k *ar,
  }
  
  static void ath12k_dp_mon_rx_deliver_msdu(struct ath12k *ar, struct napi_struct *napi,
@@ -353,7 +352,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  					  struct ieee80211_rx_status *status)
  {
  	static const struct ieee80211_radiotap_he known = {
-@@ -1075,7 +1170,7 @@ static void ath12k_dp_mon_rx_deliver_msd
+@@ -1074,7 +1171,7 @@ static void ath12k_dp_mon_rx_deliver_msdu(struct ath12k *ar, struct napi_struct
  	}
  
  	if (!(status->flag & RX_FLAG_ONLY_MONITOR))
@@ -362,7 +361,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath12k_dp_rx_h_find_peer(ar->ab, msdu);
  	if (peer && peer->sta)
-@@ -1124,7 +1219,7 @@ static void ath12k_dp_mon_rx_deliver_msd
+@@ -1123,7 +1220,7 @@ static void ath12k_dp_mon_rx_deliver_msdu(struct ath12k *ar, struct napi_struct
  	ieee80211_rx_napi(ar->hw, pubsta, msdu, napi);
  }
  
@@ -371,7 +370,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				    struct sk_buff *head_msdu,
  				    struct hal_rx_mon_ppdu_info *ppduinfo,
  				    struct napi_struct *napi)
-@@ -1134,8 +1229,8 @@ static int ath12k_dp_mon_rx_deliver(stru
+@@ -1133,8 +1230,8 @@ static int ath12k_dp_mon_rx_deliver(struct ath12k *ar, u32 mac_id,
  	struct ieee80211_rx_status *rxs = &dp->rx_status;
  	bool fcs_err = false;
  
@@ -382,7 +381,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	if (!mon_skb)
  		goto mon_deliver_fail;
  
-@@ -1160,7 +1255,8 @@ static int ath12k_dp_mon_rx_deliver(stru
+@@ -1159,7 +1256,8 @@ static int ath12k_dp_mon_rx_deliver(struct ath12k *ar, u32 mac_id,
  		}
  		rxs->flag |= RX_FLAG_ONLY_MONITOR;
  		ath12k_dp_mon_update_radiotap(ar, ppduinfo, mon_skb, rxs);
@@ -392,7 +391,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		mon_skb = skb_next;
  	} while (mon_skb);
  	rxs->flag = 0;
-@@ -1177,18 +1273,147 @@ mon_deliver_fail:
+@@ -1176,24 +1274,154 @@ mon_deliver_fail:
  	return -EINVAL;
  }
  
@@ -538,13 +537,23 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	u32 tlv_userid = 0;
  	u16 tlv_tag, tlv_len;
  	u8 *ptr = skb->data;
--
+ 
 -	memset(ppdu_info, 0, sizeof(struct hal_rx_mon_ppdu_info));
 +	bool montior_started = test_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
  
  	do {
- 		tlv = (struct hal_tlv_64_hdr *)ptr;
-@@ -1206,50 +1431,53 @@ ath12k_dp_mon_parse_rx_dest(struct ath12
+-+		tlv = (struct hal_tlv_64_hdr *)ptr;
+-+		tlv_tag = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_TAG);
+-+		tlv_len = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_LEN);
+-+		tlv_userid = u64_get_bits(tlv->tl, HAL_TLV_USR_ID);
++		tlv = (struct hal_tlv_64_hdr *)ptr;
++		tlv_tag = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_TAG);
++		tlv_len = u64_get_bits(tlv->tl, HAL_TLV_64_HDR_LEN);
++		tlv_userid = u64_get_bits(tlv->tl, HAL_TLV_USR_ID);
+ 		ptr += sizeof(*tlv);
+ 
+ 		/* The actual length of PPDU_END is the combined length of many PHY
+@@ -1205,50 +1433,53 @@ ath12k_dp_mon_parse_rx_dest(struct ath12k_base *ab, struct ath12k_mon_data *pmon
  		if (tlv_tag == HAL_RX_PPDU_END)
  			tlv_len = sizeof(struct hal_rx_rxpcu_classification_overview);
  
@@ -619,17 +628,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  	return hal_status;
  }
-@@ -1262,7 +1490,8 @@ int ath12k_dp_mon_buf_replenish(struct a
- 	struct sk_buff *skb;
- 	struct hal_srng *srng;
- 	dma_addr_t paddr;
--	u32 cookie, buf_id;
-+	u32 cookie;
-+	int buf_id;
- 
- 	srng = &ab->hal.srng_list[buf_ring->refill_buf_ring.ring_id];
- 	spin_lock_bh(&srng->lock);
-@@ -2468,8 +2697,9 @@ move_next:
+@@ -2468,8 +2699,9 @@ move_next:
  						log_type, rx_buf_sz);
  
  		if (flag == ATH12K_DP_RX_MONITOR_MODE)
@@ -641,7 +640,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		else
  			hal_status =
  				ath12k_dp_mon_tx_parse_mon_status(ar, pmon, mac_id,
-@@ -2610,7 +2840,7 @@ move_next:
+@@ -2607,7 +2839,7 @@ move_next:
  
  	while ((skb = __skb_dequeue(&skb_list))) {
  
@@ -650,18 +649,20 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		if (hal_status != HAL_RX_MON_STATUS_PPDU_DONE) {
  			ppdu_info->ppdu_continuation = true;
  			dev_kfree_skb_any(skb);
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.h b/drivers/net/wireless/ath/ath12k/dp_mon.h
+index c18c385..04098e2 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.h
-@@ -12,6 +12,8 @@
- #define ATH12K_DP_TX_MONITOR_MODE 0
- #define ATH12K_DP_RX_MONITOR_MODE 1
+@@ -14,6 +14,8 @@ enum dp_monitor_mode {
+ 	ATH12K_DP_RX_MONITOR_MODE
+ };
  
 +#define ATH12K_WIFIRX_DOT11_OFFSET	5
 +
  enum dp_mon_tx_ppdu_info_type {
  	DP_MON_TX_PROT_PPDU_INFO,
  	DP_MON_TX_DATA_PPDU_INFO
-@@ -74,7 +76,7 @@ struct dp_mon_tx_ppdu_info {
+@@ -76,7 +78,7 @@ struct dp_mon_tx_ppdu_info {
  
  enum hal_rx_mon_status
  ath12k_dp_mon_rx_parse_mon_status(struct ath12k *ar,
@@ -670,6 +671,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  				  int mac_id, struct sk_buff *skb,
  				  struct napi_struct *napi);
  int ath12k_dp_mon_buf_replenish(struct ath12k_base *ab,
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.h b/drivers/net/wireless/ath/ath12k/hal_rx.h
+index 45503c8..de9c1a2 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -108,9 +108,12 @@ enum hal_rx_mon_status {
@@ -716,7 +719,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
-@@ -443,6 +461,7 @@ enum hal_rx_ul_reception_type {
+@@ -444,6 +462,7 @@ enum hal_rx_ul_reception_type {
  };
  
  #define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO0_RECEPTION   GENMASK(3, 0)
@@ -724,9 +727,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #define HAL_RX_PHYRX_RSSI_LEGACY_INFO_INFO1_RSSI_COMB   GENMASK(15, 8)
  
  struct hal_rx_phyrx_rssi_legacy_info {
-@@ -526,6 +545,13 @@ struct hal_rx_resp_req_info {
- 	__le32 reserved2[5];
- } __packed;
+@@ -640,6 +659,13 @@ struct hal_rx_resp_req_info {
+ #define HAL_RX_MPDU_ERR_MPDU_LEN		BIT(6)
+ #define HAL_RX_MPDU_ERR_UNENCRYPTED_FRAME	BIT(7)
  
 +#define HAL_RX_PHY_CMN_USER_INFO0_GI   GENMASK(17, 16)
 +struct phyrx_common_user_info {
@@ -735,6 +738,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +	__le32 rsvd1;
 +};
 +
- void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab, u32 *reo_desc,
+ void ath12k_hal_reo_status_queue_stats(struct ath12k_base *ab,
+ 				       struct hal_tlv_64_hdr *tlv,
  				       struct hal_reo_status *status);
- void ath12k_hal_reo_flush_queue_status(struct ath12k_base *ab, u32 *reo_desc,
+-- 
+2.17.1
+

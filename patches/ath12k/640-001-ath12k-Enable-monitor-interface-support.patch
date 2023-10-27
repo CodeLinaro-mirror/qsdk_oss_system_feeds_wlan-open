@@ -1,7 +1,7 @@
-From e0fe0badf88df8e2035f18f852c6ee7e90cc1e5b Mon Sep 17 00:00:00 2001
+From 7411939aacbb76c3574c800bb001bc6db1064217 Mon Sep 17 00:00:00 2001
 From: P Praneesh <quic_ppranees@quicinc.com>
 Date: Wed, 8 Jun 2022 16:49:01 +0530
-Subject: [PATCH 1/4] ath12k: Enable monitor interface support
+Subject: [PATCH] ath12k: Enable monitor interface support
 
 mac80211 enables monitor interface based on the hardware flag
 advertised by the driver. Set WANT_MONITOR_VIF hardware  flag
@@ -10,15 +10,18 @@ various monitor vdev state machine.
 
 Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c   |  2 +-
- drivers/net/wireless/ath/ath12k/core.h   |  7 ++-
+ drivers/net/wireless/ath/ath12k/core.c   |  4 ++
+ drivers/net/wireless/ath/ath12k/core.h   |  6 +-
  drivers/net/wireless/ath/ath12k/dp_mon.c |  2 +-
- drivers/net/wireless/ath/ath12k/mac.c    | 73 +++++++++++++++++++++-----------
- 4 files changed, 53 insertions(+), 31 deletions(-)
+ drivers/net/wireless/ath/ath12k/hw.c     |  2 +-
+ drivers/net/wireless/ath/ath12k/mac.c    | 71 ++++++++++++++++--------
+ 5 files changed, 56 insertions(+), 29 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index fadd470..4b8160f 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -827,6 +827,10 @@ static void ath12k_core_restart(struct w
+@@ -787,6 +787,10 @@ static void ath12k_core_restart(struct work_struct *work)
  			     ath12k_mac_tx_mgmt_pending_free, ar);
  		idr_destroy(&ar->txmgmt_idr);
  		wake_up(&ar->txmgmt_empty_waitq);
@@ -29,20 +32,21 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
  	wake_up(&ab->wmi_ab.tx_credits_wq);
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 6de51fa..22421d9 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -208,7 +208,9 @@ enum ath12k_dev_flags {
- };
+@@ -195,6 +195,9 @@ enum ath12k_dev_flags {
  
  enum ath12k_monitor_flags {
--	ATH12K_FLAG_MONITOR_ENABLED,
+ 	ATH12K_FLAG_MONITOR_ENABLED,
 +	MONITOR_VDEV_CREATED,
 +	MONITOR_VDEV_STARTED,
 +	MONITOR_CONF_ENABLED,
  };
  
- struct ath12k_fw_vdev_ol_stats {
-@@ -710,9 +712,6 @@ struct ath12k {
+ struct ath12k_vif {
+@@ -646,9 +649,6 @@ struct ath12k {
  #endif
  	bool dfs_block_radar_events;
  	struct ath12k_thermal thermal;
@@ -52,9 +56,11 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	int monitor_vdev_id;
  	u8 twt_enabled;
  	s8 max_allowed_tx_power;
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
+index 0b836b6..504bc5f 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -2608,7 +2608,7 @@ int ath12k_dp_mon_process_ring(struct at
+@@ -2600,7 +2600,7 @@ int ath12k_dp_mon_process_ring(struct ath12k_base *ab, int mac_id,
  	struct ath12k *ar = ath12k_ab_to_ar(ab, mac_id);
  	int num_buffs_reaped = 0;
  
@@ -63,9 +69,24 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		num_buffs_reaped = ath12k_dp_mon_rx_process_stats(ar, mac_id,
  								  napi, &budget);
  	else
+diff --git a/drivers/net/wireless/ath/ath12k/hw.c b/drivers/net/wireless/ath/ath12k/hw.c
+index f3c03d3..74cb448 100644
+--- a/drivers/net/wireless/ath/ath12k/hw.c
++++ b/drivers/net/wireless/ath/ath12k/hw.c
+@@ -891,7 +891,7 @@ static const struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.interface_modes = BIT(NL80211_IFTYPE_STATION) |
+ 					BIT(NL80211_IFTYPE_AP) |
+ 					BIT(NL80211_IFTYPE_MESH_POINT),
+-		.supports_monitor = false,
++		.supports_monitor = true,
+ 
+ 		.idle_ps = false,
+ 		.download_calib = true,
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 8e9df9a..026211e 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -980,7 +980,7 @@ static int ath12k_mac_monitor_vdev_creat
+@@ -1126,7 +1126,7 @@ static int ath12k_mac_monitor_vdev_create(struct ath12k *ar)
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -73,8 +94,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +	if (test_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags))
  		return 0;
  
- 	memset(&param, 0, sizeof(param));
-@@ -1034,7 +1034,8 @@ static int ath12k_mac_monitor_vdev_creat
+ 	if (ar->ab->free_vdev_map == 0) {
+@@ -1178,7 +1178,8 @@ static int ath12k_mac_monitor_vdev_create(struct ath12k *ar)
  	ar->allocated_vdev_map |= 1LL << ar->monitor_vdev_id;
  	ar->ab->free_vdev_map &= ~(1LL << ar->monitor_vdev_id);
  	ar->num_created_vdevs++;
@@ -84,7 +105,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac monitor vdev %d created\n",
  		   ar->monitor_vdev_id);
  
-@@ -1048,7 +1049,7 @@ static int ath12k_mac_monitor_vdev_delet
+@@ -1192,7 +1193,7 @@ static int ath12k_mac_monitor_vdev_delete(struct ath12k *ar)
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -93,7 +114,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		return 0;
  
  	reinit_completion(&ar->vdev_delete_done);
-@@ -1071,7 +1072,7 @@ static int ath12k_mac_monitor_vdev_delet
+@@ -1215,7 +1216,7 @@ static int ath12k_mac_monitor_vdev_delete(struct ath12k *ar)
  			   ar->monitor_vdev_id);
  		ar->num_created_vdevs--;
  		ar->monitor_vdev_id = -1;
@@ -102,7 +123,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
  	return ret;
-@@ -1094,7 +1095,7 @@ static int ath12k_mac_monitor_start(stru
+@@ -1238,7 +1239,7 @@ static int ath12k_mac_monitor_start(struct ath12k *ar)
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -111,7 +132,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		return 0;
  
  	ieee80211_iter_chan_contexts_atomic(ar->hw,
-@@ -1110,9 +1111,16 @@ static int ath12k_mac_monitor_start(stru
+@@ -1254,9 +1255,16 @@ static int ath12k_mac_monitor_start(struct ath12k *ar)
  		return ret;
  	}
  
@@ -130,7 +151,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac monitor started ret %d\n", ret);
  
  	return ret;
-@@ -1124,7 +1132,7 @@ static int ath12k_mac_monitor_stop(struc
+@@ -1268,7 +1276,7 @@ static int ath12k_mac_monitor_stop(struct ath12k *ar)
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -139,7 +160,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		return 0;
  
  	ret = ath12k_mac_monitor_vdev_stop(ar);
-@@ -1133,7 +1141,7 @@ static int ath12k_mac_monitor_stop(struc
+@@ -1277,7 +1285,7 @@ static int ath12k_mac_monitor_stop(struct ath12k *ar)
  		return ret;
  	}
  
@@ -148,7 +169,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	ar->num_started_vdevs--;
  	ret = ath12k_dp_tx_htt_monitor_mode_ring_config(ar, true);
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac monitor stopped ret %d\n", ret);
-@@ -1149,10 +1157,12 @@ static int ath12k_mac_op_config(struct i
+@@ -1293,10 +1301,12 @@ static int ath12k_mac_op_config(struct ieee80211_hw *hw, u32 changed)
  	mutex_lock(&ar->conf_mutex);
  
  	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
@@ -164,7 +185,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  			ret = ath12k_mac_monitor_vdev_create(ar);
  			if (ret)
  				goto exit;
-@@ -1160,8 +1170,11 @@ static int ath12k_mac_op_config(struct i
+@@ -1304,8 +1314,11 @@ static int ath12k_mac_op_config(struct ieee80211_hw *hw, u32 changed)
  			if (ret)
  				goto err_mon_del;
  		} else {
@@ -177,7 +198,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  			ret = ath12k_mac_monitor_stop(ar);
  			if (ret)
  				goto exit;
-@@ -3394,7 +3407,7 @@ static int ath12k_mac_config_obss_pd(str
+@@ -3468,7 +3481,7 @@ static int ath12k_mac_config_obss_pd(struct ath12k *ar,
  
  	/* Set and enable SRG/non-SRG OBSS PD Threshold */
  	param_id = WMI_PDEV_PARAM_SET_CMD_OBSS_PD_THRESHOLD;
@@ -186,7 +207,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ret = ath12k_wmi_pdev_set_param(ar, param_id, 0, pdev_id);
  		if (ret)
  			ath12k_warn(ar->ab,
-@@ -6806,6 +6819,9 @@ static int ath12k_mac_op_add_interface(s
+@@ -6917,6 +6930,9 @@ static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
  			goto err_peer_del;
  		}
  		break;
@@ -196,7 +217,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	default:
  		break;
  	}
-@@ -6828,7 +6844,8 @@ static int ath12k_mac_op_add_interface(s
+@@ -6939,7 +6955,8 @@ static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
  
  	ath12k_mac_ap_ps_recalc(ar);
  
@@ -206,7 +227,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_mac_monitor_vdev_create(ar);
  
  	ret = ath12k_debugfs_add_interface(arvif);
-@@ -6945,8 +6962,9 @@ static void ath12k_mac_op_remove_interfa
+@@ -7056,8 +7073,9 @@ static void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
  
  	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
  		ar->monitor_vdev_id = -1;
@@ -218,7 +239,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ret = ath12k_mac_monitor_vdev_delete(ar);
  	}
  
-@@ -6975,7 +6993,7 @@ err_vdev_del:
+@@ -7086,7 +7104,7 @@ err_vdev_del:
  	/* Recalc txpower for remaining vdev */
  	ath12k_mac_txpower_recalc(ar);
  	ath12k_mac_ap_ps_recalc(ar);
@@ -227,7 +248,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	ath12k_debugfs_remove_interface(arvif);
  
-@@ -7003,7 +7021,6 @@ static void ath12k_mac_op_configure_filt
+@@ -7114,7 +7132,6 @@ static void ath12k_mac_op_configure_filter(struct ieee80211_hw *hw,
  
  	mutex_lock(&ar->conf_mutex);
  
@@ -235,7 +256,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	*total_flags &= SUPPORTED_FILTERS;
  	ar->filter_flags = *total_flags;
  
-@@ -7478,7 +7495,8 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -7581,7 +7598,8 @@ ath12k_mac_update_vif_chan(struct ath12k *ar,
  	}
  
  	/* Restart the internal monitor vdev on new channel */
@@ -245,7 +266,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		if (!ath12k_mac_monitor_stop(ar))
  			ath12k_mac_monitor_start(ar);
  	}
-@@ -8167,7 +8185,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -8275,7 +8293,7 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  
  	if (ab->hw_params->vdev_start_delay &&
  	    (arvif->vdev_type == WMI_VDEV_TYPE_AP ||
@@ -254,7 +275,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		param.vdev_id = arvif->vdev_id;
  		param.peer_type = WMI_PEER_TYPE_DEFAULT;
  		param.peer_addr = ar->mac_addr;
-@@ -8196,7 +8214,8 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -8304,7 +8322,8 @@ ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  		goto out;
  	}
  
@@ -264,15 +285,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_mac_monitor_start(ar);
  
  	arvif->is_started = true;
-@@ -8244,6 +8263,7 @@ ath12k_mac_op_unassign_vif_chanctx(struc
- 
- 		arvif->is_started = false;
- 		mutex_unlock(&ar->conf_mutex);
-+		return;
- 	}
- 
- 	ret = ath12k_mac_vdev_stop(arvif);
-@@ -8258,7 +8278,8 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -8363,7 +8382,8 @@ ath12k_mac_op_unassign_vif_chanctx(struct ieee80211_hw *hw,
  		ath12k_wmi_vdev_down(ar, arvif->vdev_id);
  
  	if (arvif->vdev_type != WMI_VDEV_TYPE_MONITOR &&
@@ -282,7 +295,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_mac_monitor_stop(ar);
  
  	mutex_unlock(&ar->conf_mutex);
-@@ -9692,6 +9713,7 @@ static int __ath12k_mac_register(struct
+@@ -9794,6 +9814,7 @@ static int __ath12k_mac_register(struct ath12k *ar)
  	ieee80211_hw_set(ar->hw, SPECTRUM_MGMT);
  	ieee80211_hw_set(ar->hw, CONNECTION_MONITOR);
  	ieee80211_hw_set(ar->hw, SUPPORTS_PER_STA_GTK);
@@ -290,7 +303,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	ieee80211_hw_set(ar->hw, CHANCTX_STA_CSA);
  	ieee80211_hw_set(ar->hw, QUEUE_CONTROL);
  	ieee80211_hw_set(ar->hw, SUPPORTS_TX_FRAG);
-@@ -9928,7 +9950,9 @@ int ath12k_mac_allocate(struct ath12k_ba
+@@ -10032,7 +10053,9 @@ int ath12k_mac_allocate(struct ath12k_base *ab)
  
  		INIT_WORK(&ar->wmi_mgmt_tx_work, ath12k_mgmt_over_wmi_tx_work);
  		skb_queue_head_init(&ar->wmi_mgmt_tx_queue);
@@ -301,14 +314,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
  	return 0;
---- a/drivers/net/wireless/ath/ath12k/hw.c
-+++ b/drivers/net/wireless/ath/ath12k/hw.c
-@@ -853,7 +853,7 @@ static const struct ath12k_hw_params ath
- 		.interface_modes = BIT(NL80211_IFTYPE_STATION) |
- 					BIT(NL80211_IFTYPE_AP) |
- 					BIT(NL80211_IFTYPE_MESH_POINT),
--		.supports_monitor = false,
-+		.supports_monitor = true,
- 
- 		.idle_ps = false,
- 		.cold_boot_calib = false,
+-- 
+2.17.1
+

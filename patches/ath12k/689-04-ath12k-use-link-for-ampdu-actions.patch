@@ -19,17 +19,17 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -110,6 +110,7 @@ struct ath12k_skb_cb {
- 	struct ath12k *ar;
- 	struct ieee80211_vif *vif;
+@@ -100,6 +100,7 @@ struct ath12k_skb_cb {
  	dma_addr_t paddr_ext_desc;
+ 	u32 cipher;
+ 	u8 flags;
 +	u8 link_id;
- } __packed;
+ };
  
  struct ath12k_skb_rxcb {
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1116,16 +1116,23 @@ err_mem_free:
+@@ -1123,16 +1123,23 @@ err_mem_free:
  }
  
  int ath12k_dp_rx_ampdu_start(struct ath12k *ar,
@@ -58,7 +58,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  					  params->tid, params->buf_size,
  					  params->ssn, ahsta->pn_type);
  	if (ret)
-@@ -1135,19 +1142,26 @@ int ath12k_dp_rx_ampdu_start(struct ath1
+@@ -1142,19 +1149,26 @@ int ath12k_dp_rx_ampdu_start(struct ath1
  }
  
  int ath12k_dp_rx_ampdu_stop(struct ath12k *ar,
@@ -87,8 +87,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -	peer = ath12k_peer_find(ab, vdev_id, params->sta->addr);
 +	peer = ath12k_peer_find(ab, vdev_id, arsta->addr);
  	if (!peer) {
- 		ath12k_warn(ab, "failed to find the peer to stop rx aggregation\n");
  		spin_unlock_bh(&ab->base_lock);
+ 		ath12k_warn(ab, "failed to find the peer to stop rx aggregation\n");
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -85,9 +85,11 @@ static inline u32 ath12k_he_gi_to_nl8021
@@ -107,7 +107,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  				       enum set_key_cmd key_cmd,
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -7889,7 +7889,9 @@ static void ath12k_mgmt_over_wmi_tx_work
+@@ -7987,7 +7987,9 @@ static void ath12k_mgmt_over_wmi_tx_work
  	struct ath12k_link_vif *arvif;
  	struct sk_buff *skb;
  	int ret;
@@ -117,7 +117,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	while ((skb = skb_dequeue(&ar->wmi_mgmt_tx_queue)) != NULL) {
  		skb_cb = ATH12K_SKB_CB(skb);
  		if (!skb_cb->vif) {
-@@ -7899,8 +7901,23 @@ static void ath12k_mgmt_over_wmi_tx_work
+@@ -7997,8 +7999,23 @@ static void ath12k_mgmt_over_wmi_tx_work
  		}
  
  		ahvif = ath12k_vif_to_ahvif(skb_cb->vif);
@@ -143,7 +143,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		mutex_lock(&ar->conf_mutex);
  		if (ar->allocated_vdev_map & (1LL << arvif->vdev_id) &&
  		    arvif->is_started) {
-@@ -7916,13 +7933,15 @@ static void ath12k_mgmt_over_wmi_tx_work
+@@ -8010,13 +8027,15 @@ static void ath12k_mgmt_over_wmi_tx_work
  			}
  		} else {
  			ath12k_warn(ar->ab,
@@ -161,7 +161,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static int ath12k_mac_mgmt_tx(struct ath12k *ar, struct sk_buff *skb,
-@@ -8065,18 +8084,22 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -8164,14 +8183,18 @@ static void ath12k_mac_op_tx(struct ieee
  			ieee80211_free_txskb(hw, skb);
  			return;
  		}
@@ -185,13 +185,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +	ar = arvif->ar;
  	ah = ar->ah;
  
- 	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags))) {
--		ieee80211_free_txskb(ar->ah->hw, skb);
-+		ieee80211_free_txskb(ah->hw, skb);
- 		return;
- 	}
- 
-@@ -8090,6 +8113,7 @@ static void ath12k_mac_op_tx(struct ieee
+ 	if (key) {
+@@ -8184,6 +8207,7 @@ static void ath12k_mac_op_tx(struct ieee
  	} else if (ieee80211_is_mgmt(hdr->frame_control)) {
  		frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, hdr->frame_control);
  		is_prb_rsp = ieee80211_is_probe_resp(hdr->frame_control);
@@ -199,7 +194,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ret = ath12k_mac_mgmt_tx(ar, skb, is_prb_rsp);
  		if (ret) {
  			if (ret != -EBUSY)
-@@ -9428,24 +9452,20 @@ static int ath12k_mac_op_set_antenna(str
+@@ -9528,24 +9552,20 @@ static int ath12k_mac_op_set_antenna(str
  	return ret;
  }
  
@@ -230,7 +225,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		return -EPERM;
  	}
  
-@@ -9453,10 +9473,10 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -9553,10 +9573,10 @@ static int ath12k_mac_op_ampdu_action(st
  
  	switch (params->action) {
  	case IEEE80211_AMPDU_RX_START:
@@ -243,7 +238,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		break;
  	case IEEE80211_AMPDU_TX_START:
  	case IEEE80211_AMPDU_TX_STOP_CONT:
-@@ -9470,7 +9490,36 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -9570,7 +9590,36 @@ static int ath12k_mac_op_ampdu_action(st
  		break;
  	}
  

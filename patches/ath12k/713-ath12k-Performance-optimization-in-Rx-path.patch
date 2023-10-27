@@ -17,14 +17,12 @@ Signed-off-by: Balamurugan S <quic_bselvara@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp_rx.c | 31 ++++++++--------
  2 files changed, 50 insertions(+), 29 deletions(-)
 
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp.c
-@@ -927,15 +927,28 @@ int ath12k_dp_service_srng(struct ath12k
- 	int i = 0, j;
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -934,15 +934,28 @@ int ath12k_dp_service_srng(struct ath12k
  	int tot_work_done = 0;
- 	bool flag;
+ 	enum dp_monitor_mode monitor_mode;
+ 	u8 ring_mask;
 +	struct ath12k_hw_ring_mask *ring_mask = ab->hw_params->ring_mask;
 +	u8 tx_mask = ring_mask->tx[grp_id];
 +	u8 rx_err_mask = ring_mask->rx_err[grp_id];
@@ -47,14 +45,13 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  			ath12k_dp_tx_completion_handler(ab, i);
  		i++;
  	}
--
+ 
 -	if (ab->hw_params->ring_mask->rx_err[grp_id]) {
-+	
 +	if (rx_err_mask) {
  		work_done = ath12k_dp_rx_process_err(ab, napi, budget);
  		budget -= work_done;
  		tot_work_done += work_done;
-@@ -943,7 +956,7 @@ int ath12k_dp_service_srng(struct ath12k
+@@ -950,7 +963,7 @@ int ath12k_dp_service_srng(struct ath12k
  			goto done;
  	}
  
@@ -63,18 +60,18 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  		work_done = ath12k_dp_rx_process_wbm_err(ab,
  							 napi,
  							 budget);
-@@ -954,8 +967,8 @@ int ath12k_dp_service_srng(struct ath12k
+@@ -961,8 +974,8 @@ int ath12k_dp_service_srng(struct ath12k
  			goto done;
  	}
  
 -	if (ab->hw_params->ring_mask->rx[grp_id]) {
--		i =  fls(ab->hw_params->ring_mask->rx[grp_id]) - 1;
+-		i = fls(ab->hw_params->ring_mask->rx[grp_id]) - 1;
 +	if (rx_mask) {
 +		i =  fls(rx_mask) - 1;
  		work_done = ath12k_dp_rx_process(ab, i, napi,
  						 budget);
  		budget -= work_done;
-@@ -964,14 +977,17 @@ int ath12k_dp_service_srng(struct ath12k
+@@ -971,7 +984,10 @@ int ath12k_dp_service_srng(struct ath12k
  			goto done;
  	}
  
@@ -83,35 +80,19 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
 +		goto done;
 +
 +	if (rx_mon_dest_mask) {
+ 		monitor_mode = ATH12K_DP_RX_MONITOR_MODE;
+ 		ring_mask = ab->hw_params->ring_mask->rx_mon_dest[grp_id];
  		for (i = 0; i < ab->num_radios; i++) {
- 			for (j = 0; j < ab->hw_params->num_rxmda_per_pdev; j++) {
- 				int id = i * ab->hw_params->num_rxmda_per_pdev + j;
- 
- 				flag = ATH12K_DP_RX_MONITOR_MODE;
- 
--				if (ab->hw_params->ring_mask->rx_mon_dest[grp_id] &
-+				if (rx_mon_dest_mask &
- 					BIT(id)) {
- 					work_done =
- 					ath12k_dp_mon_process_ring(ab, id, napi, budget,
-@@ -986,14 +1002,14 @@ int ath12k_dp_service_srng(struct ath12k
+@@ -992,7 +1008,7 @@ int ath12k_dp_service_srng(struct ath12k
  		}
  	}
  
 -	if (ab->hw_params->ring_mask->tx_mon_dest[grp_id]) {
 +	if (tx_mon_dest_mask) {
+ 		monitor_mode = ATH12K_DP_TX_MONITOR_MODE;
+ 		ring_mask = ab->hw_params->ring_mask->tx_mon_dest[grp_id];
  		for (i = 0; i < ab->num_radios; i++) {
- 			for (j = 0; j < ab->hw_params->num_rxmda_per_pdev; j++) {
- 				int id = i * ab->hw_params->num_rxmda_per_pdev + j;
- 
- 				flag = ATH12K_DP_TX_MONITOR_MODE;
- 
--				if (ab->hw_params->ring_mask->tx_mon_dest[grp_id] &
-+				if (tx_mon_dest_mask &
- 					BIT(id)) {
- 					work_done =
- 					ath12k_dp_mon_process_ring(ab, id, napi, budget,
-@@ -1008,10 +1024,10 @@ int ath12k_dp_service_srng(struct ath12k
+@@ -1013,10 +1029,10 @@ int ath12k_dp_service_srng(struct ath12k
  		}
  	}
  
@@ -124,11 +105,9 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  		struct ath12k_dp *dp = &ab->dp;
  		struct dp_rxdma_ring *rx_ring = &dp->rx_refill_buf_ring;
  
-Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
-===================================================================
---- backports-20220822-5.4.213-ef7197996efe.orig/drivers/net/wireless/ath/ath12k/dp_rx.c
-+++ backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -328,7 +328,7 @@ int ath12k_dp_rx_bufs_replenish(struct a
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -315,7 +315,7 @@ int ath12k_dp_rx_bufs_replenish(struct a
  	while (num_remain > 0) {
  		skb = dev_alloc_skb(DP_RX_BUFFER_SIZE +
  				    DP_RX_BUFFER_ALIGN_SIZE);
@@ -137,7 +116,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  			break;
  
  		if (!IS_ALIGNED((unsigned long)skb->data,
-@@ -344,7 +344,7 @@ int ath12k_dp_rx_bufs_replenish(struct a
+@@ -331,7 +331,7 @@ int ath12k_dp_rx_bufs_replenish(struct a
  		if (dma_mapping_error(ab->dev, paddr))
  			goto fail_free_skb;
  
@@ -146,7 +125,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  			spin_lock_bh(&dp->rx_desc_lock);
  
  			/* Get desc from free list and store in used list
-@@ -2671,7 +2671,6 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2629,7 +2629,6 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	u32 vp;
  #endif
  	struct wireless_dev *wdev = NULL;
@@ -154,7 +133,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  
  	/* PN for multicast packets will be checked in mac80211 */
  	rxcb = ATH12K_SKB_RXCB(msdu);
-@@ -2705,11 +2704,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2663,11 +2662,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  				}
  #endif
  				msdu->protocol = eth_type_trans(msdu, msdu->dev);
@@ -167,7 +146,21 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  				return;
  		        }
  		}
-@@ -3212,6 +3207,7 @@ int ath12k_dp_rx_process(struct ath12k_b
+@@ -3160,19 +3155,20 @@ int ath12k_dp_rx_process(struct ath12k_b
+ 	struct ath12k_rx_desc_info *desc_info;
+ 	struct ath12k_dp *dp = &ab->dp;
+ 	struct dp_rxdma_ring *rx_ring = &dp->rx_refill_buf_ring;
+-	struct hal_reo_dest_ring *desc;
+ 	int i, num_buffs_reaped[ATH12K_MAX_SOCS] = { };
+ 	struct sk_buff_head msdu_list;
+ 	struct ath12k_skb_rxcb *rxcb;
+ 	int total_msdu_reaped = 0;
+ 	struct hal_srng *srng;
+ 	struct sk_buff *msdu;
++	u32 *rx_desc;
+ 	bool done = false;
+ 	u64 desc_va;
+ 	struct ath12k_link_sta *arsta = NULL;
  	struct ath12k_peer *peer = NULL;
  	struct ath12k *ar;
  	u8 hw_link_id;
@@ -175,7 +168,7 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  
  	__skb_queue_head_init(&msdu_list);
  
-@@ -3221,8 +3217,15 @@ int ath12k_dp_rx_process(struct ath12k_b
+@@ -3182,19 +3178,27 @@ int ath12k_dp_rx_process(struct ath12k_b
  
  try_again:
  	ath12k_hal_srng_access_begin(ab, srng);
@@ -187,21 +180,36 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
 +	}
 +	ath12k_hal_srng_dst_invalidate_entry(ab, srng, valid_entries);
  
--	while ((rx_desc = ath12k_hal_srng_dst_get_next_entry(ab, srng))) {
+-	while ((desc = ath12k_hal_srng_dst_get_next_entry(ab, srng))) {
 +	while (likely((rx_desc = ath12k_hal_srng_dst_get_next_cache_entry(ab, srng)))) {
- 		struct hal_reo_dest_ring desc = *(struct hal_reo_dest_ring *)rx_desc;
++		struct hal_reo_dest_ring desc = *(struct hal_reo_dest_ring *)rx_desc;
  		enum hal_reo_dest_ring_push_reason push_reason;
  		u32 cookie;
-@@ -3260,7 +3263,7 @@ try_again:
- 		rcu_read_unlock();
+ 
+-		cookie = le32_get_bits(desc->buf_addr_info.info1,
++		cookie = le32_get_bits(desc.buf_addr_info.info1,
+ 				       BUFFER_ADDR_INFO1_SW_COOKIE);
+ 
+ 
+ 		hw_link_id = le32_get_bits(desc.info0,
+ 					  HAL_REO_DEST_RING_INFO0_SRC_LINK_ID);
+-		desc_va = ((u64)le32_to_cpu(desc->buf_va_hi) << 32 |
+-			   le32_to_cpu(desc->buf_va_lo));
++		desc_va = ((u64)le32_to_cpu(desc.buf_va_hi) << 32 |
++			   le32_to_cpu(desc.buf_va_lo));
+ 		desc_info = (struct ath12k_rx_desc_info *)((unsigned long)desc_va);
+ 		rcu_read_lock();
+ 
+@@ -3221,7 +3225,7 @@ try_again:
+ 
  
  		/* retry manual desc retrieval */
 -		if (!desc_info) {
 +		if (unlikely(!desc_info)) {
  			desc_info = ath12k_dp_get_rx_desc(src_ab, cookie);
  			if (!desc_info) {
- 				ath12k_warn(ab, "Rx with invalid buf cookie 0x%x\n", cookie);
-@@ -3268,7 +3271,7 @@ try_again:
+ 				ath12k_warn(ab, "Invalid cookie in manual desc retrieval cookie 0x%x", cookie);
+@@ -3229,7 +3233,7 @@ try_again:
  			}
  		}
  
@@ -210,10 +218,13 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  			ath12k_warn(ab, "Check HW CC implementation");
  
  		msdu = desc_info->skb;
-@@ -3287,8 +3290,8 @@ try_again:
+@@ -3246,25 +3250,25 @@ try_again:
  
- 		push_reason = u32_get_bits(desc.info0,
- 					   HAL_REO_DEST_RING_INFO0_PUSH_REASON);
+ 		num_buffs_reaped[src_ab->chip_id]++;
+ 
+-		push_reason = le32_get_bits(desc->info0,
++		push_reason = le32_get_bits(desc.info0,
+ 					    HAL_REO_DEST_RING_INFO0_PUSH_REASON);
 -		if (push_reason !=
 -		    HAL_REO_DEST_RING_PUSH_REASON_ROUTING_INSTRUCTION) {
 +		if (unlikely(push_reason !=
@@ -221,7 +232,27 @@ Index: backports-20220822-5.4.213-ef7197996efe/drivers/net/wireless/ath/ath12k/d
  			dev_kfree_skb_any(msdu);
  			ab->soc_stats.hal_reo_error[dp->reo_dst_ring[ring_id].ring_id]++;
  			continue;
-@@ -3346,7 +3349,7 @@ try_again:
+ 		}
+ 
+-		rxcb->is_first_msdu = !!(le32_to_cpu(desc->rx_msdu_info.info0) &
++		rxcb->is_first_msdu = !!(le32_to_cpu(desc.rx_msdu_info.info0) &
+ 					 RX_MSDU_DESC_INFO0_FIRST_MSDU_IN_MPDU);
+-		rxcb->is_last_msdu = !!(le32_to_cpu(desc->rx_msdu_info.info0) &
++		rxcb->is_last_msdu = !!(le32_to_cpu(desc.rx_msdu_info.info0) &
+ 					RX_MSDU_DESC_INFO0_LAST_MSDU_IN_MPDU);
+-		rxcb->is_continuation = !!(le32_to_cpu(desc->rx_msdu_info.info0) &
++		rxcb->is_continuation = !!(le32_to_cpu(desc.rx_msdu_info.info0) &
+ 					   RX_MSDU_DESC_INFO0_MSDU_CONTINUATION);
+ 		rxcb->hw_link_id = hw_link_id;
+-		rxcb->peer_id = le32_get_bits(desc->rx_mpdu_info.peer_meta_data,
++		rxcb->peer_id = le32_get_bits(desc.rx_mpdu_info.peer_meta_data,
+ 					      RX_MPDU_DESC_META_DATA_PEER_ID);
+-		rxcb->tid = le32_get_bits(desc->rx_mpdu_info.info0,
++		rxcb->tid = le32_get_bits(desc.rx_mpdu_info.info0,
+ 					  RX_MPDU_DESC_INFO0_TID);
+ 		
+ 		if (ath12k_debugfs_is_extd_rx_stats_enabled(ar) && rxcb->peer_id) {
+@@ -3307,7 +3311,7 @@ try_again:
  
  	spin_unlock_bh(&srng->lock);
  

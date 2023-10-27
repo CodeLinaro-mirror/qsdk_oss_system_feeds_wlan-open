@@ -19,11 +19,9 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  drivers/net/wireless/ath/ath12k/dp_tx.c   |  2 +-
  4 files changed, 64 insertions(+), 11 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 8efd75fb257a..3a2a9082a489 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1079,11 +1079,15 @@ struct ath12k_soc_dp_stats {
+@@ -1049,11 +1049,15 @@ struct ath12k_soc_dp_stats {
  	u32 mcast_enqueued;
  	u32 ucast_enqueued;
  	u32 mcast_reinject;
@@ -37,14 +35,12 @@ index 8efd75fb257a..3a2a9082a489 100644
 +	u32 fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
 +	u32 non_fast_rx[DP_REO_DST_RING_MAX] [ATH12K_MAX_SOCS];
 +	u32 rx_wbm_rel_source[HAL_WBM_REL_SRC_MODULE_MAX] [ATH12K_MAX_SOCS];
+ 
  	struct ath12k_soc_dp_tx_err_stats tx_err;
- 	struct ath12k_dp_ring_bp_stats bp_stats;
- };
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index f117c435c524..6ed3e86008cf 100644
+ 	u32 reo_cmd_update_rx_queue_error;
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1514,6 +1514,8 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -1514,6 +1514,8 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			"Frame SN equal SSN", "PN check fail", "2k err",
  			"PN err", "Desc blocked"};
  
@@ -53,7 +49,7 @@ index f117c435c524..6ed3e86008cf 100644
  	char *buf;
  
  	buf = kzalloc(size, GFP_KERNEL);
-@@ -1578,12 +1580,12 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -1582,12 +1584,12 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			soc_stats->mcast_reinject);
  
  	len += scnprintf(buf + len, size - len,
@@ -72,7 +68,7 @@ index f117c435c524..6ed3e86008cf 100644
  
  	len += scnprintf(buf + len, size - len,
  			"\ntqm_rel_reason: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u 8:%u 9:%u 10:%u 11:%u 12:%u 13:%u\n",
-@@ -1626,6 +1628,42 @@ static ssize_t ath12k_debugfs_dump_soc_dp_stats(struct file *file,
+@@ -1630,6 +1632,42 @@ static ssize_t ath12k_debugfs_dump_soc_d
  			soc_stats->tx_completed[2],
  			soc_stats->tx_completed[3]);
  
@@ -115,11 +111,9 @@ index f117c435c524..6ed3e86008cf 100644
  	len += ath12k_debugfs_dump_soc_ring_bp_stats(ab, buf + len, size - len);
  
  	if (len > size)
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index 05501b0f03f5..5fa88738e02b 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -3230,8 +3230,12 @@ static void ath12k_dp_rx_process_received_packets(struct ath12k_base *ab,
+@@ -3264,8 +3264,12 @@ static void ath12k_dp_rx_process_receive
  			continue;
  		}
  
@@ -133,7 +127,7 @@ index 05501b0f03f5..5fa88738e02b 100644
  	}
  
  	rcu_read_unlock();
-@@ -3299,7 +3303,7 @@ try_again:
+@@ -3333,7 +3337,7 @@ try_again:
  		if (!ar) {
  			rcu_read_unlock();
  
@@ -142,14 +136,14 @@ index 05501b0f03f5..5fa88738e02b 100644
  			ath12k_warn(ab, "Rx with invalid/inactive hw_link_id %d cookie 0x%x\n", hw_link_id, cookie);
  
  			if (desc_info) {
-@@ -3338,13 +3342,14 @@ try_again:
+@@ -3373,13 +3377,14 @@ try_again:
  				       DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
  
  		num_buffs_reaped[src_ab->chip_id]++;
 +		ab->soc_stats.reo_rx[ring_id][src_ab->chip_id]++;
  
- 		push_reason = u32_get_bits(desc.info0,
- 					   HAL_REO_DEST_RING_INFO0_PUSH_REASON);
+ 		push_reason = le32_get_bits(desc.info0,
+ 					    HAL_REO_DEST_RING_INFO0_PUSH_REASON);
  		if (unlikely(push_reason !=
  		    HAL_REO_DEST_RING_PUSH_REASON_ROUTING_INSTRUCTION)) {
  			dev_kfree_skb_any(msdu);
@@ -158,15 +152,15 @@ index 05501b0f03f5..5fa88738e02b 100644
  			continue;
  		}
  
-@@ -4537,6 +4542,7 @@ int ath12k_dp_rx_process_wbm_err(struct ath12k_base *ab,
+@@ -4590,6 +4595,7 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 	int mac_id;
  	int num_buffs_reaped = 0;
- 	int total_num_buffs_reaped = 0;
  	struct ath12k_rx_desc_info *desc_info;
 +	struct ath12k_soc_dp_stats *soc_stats = &ab->soc_stats;
  	int ret;
  	u8 src_link_id;
  
-@@ -4641,6 +4647,11 @@ int ath12k_dp_rx_process_wbm_err(struct ath12k_base *ab,
+@@ -4693,6 +4699,11 @@ int ath12k_dp_rx_process_wbm_err(struct
  			continue;
  		}
  
@@ -178,11 +172,18 @@ index 05501b0f03f5..5fa88738e02b 100644
  		ath12k_dp_rx_wbm_err(ar, napi, msdu, &msdu_list);
  	}
  	rcu_read_unlock();
-diff --git a/drivers/net/wireless/ath/ath12k/dp_tx.c b/drivers/net/wireless/ath/ath12k/dp_tx.c
-index ed20b568dbbe..8da71658e419 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -1029,7 +1029,7 @@ int ath12k_dp_tx_completion_handler(struct ath12k_base *ab, int ring_id,
+@@ -646,7 +646,7 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+ 		}
+ 	}
+ 
+-	if (flags & ATH12K_SKB_HW_80211_ENCAP)
++	if ((!flags & ATH12K_SKB_HW_80211_ENCAP))
+ 		ieee80211_tx_status_8023(ar->ah->hw, vif, msdu);
+ 	else
+ 		ieee80211_tx_status(ar->ah->hw, msdu);
+@@ -1098,7 +1098,7 @@ int ath12k_dp_tx_completion_handler(stru
  		ath12k_dp_tx_release_txbuf(dp, tx_desc, tx_desc->pool_id);
  		/* Find the HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE value */
  		buf_rel_source = tx_status->info0 & HAL_WBM_RELEASE_INFO0_REL_SRC_MASK;
@@ -191,6 +192,3 @@ index ed20b568dbbe..8da71658e419 100644
  		if (unlikely(buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)) {
  			ath12k_dp_tx_process_htt_tx_complete(ab,
  							     (void *)tx_status,
--- 
-2.37.0
-

@@ -1,4 +1,4 @@
-From 30f9030503fa82b63f49909f98ac0d9f91b98096 Mon Sep 17 00:00:00 2001
+From 6c550d79c6eece27a9cba312b309e8521085a55b Mon Sep 17 00:00:00 2001
 From: Aishwarya R <quic_aisr@quicinc.com>
 Date: Mon, 14 Mar 2022 23:54:14 +0530
 Subject: [PATCH] ath12K: Enable RAM dump support
@@ -13,23 +13,26 @@ whether firmware / full core needs to be dumped.
 Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
 Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/Makefile   |   1 +
+ drivers/net/wireless/ath/ath12k/Makefile   |   3 +-
  drivers/net/wireless/ath/ath12k/core.c     |   4 +
- drivers/net/wireless/ath/ath12k/core.h     |  13 +-
+ drivers/net/wireless/ath/ath12k/core.h     |  12 ++
  drivers/net/wireless/ath/ath12k/coredump.c | 222 +++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/coredump.h |  87 ++++++++
- drivers/net/wireless/ath/ath12k/mhi.c      |   6 +
+ drivers/net/wireless/ath/ath12k/mhi.c      |   7 +
  drivers/net/wireless/ath/ath12k/mhi.h      |   2 +
- 7 files changed, 328 insertions(+), 7 deletions(-)
+ 7 files changed, 336 insertions(+), 1 deletion(-)
  create mode 100644 drivers/net/wireless/ath/ath12k/coredump.c
  create mode 100644 drivers/net/wireless/ath/ath12k/coredump.h
 
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -27,6 +27,7 @@ ath12k-$(CPTCFG_NL80211_TESTMODE) += tes
+@@ -23,8 +23,9 @@ ath12k-y += core.o \
+ 
+ ath12k-$(CPTCFG_ATH12K_DEBUGFS) += debugfs.o debugfs_htt_stats.o debugfs_sta.o
  ath12k-$(CPTCFG_ATH12K_TRACING) += trace.o
+-ath12k-$(CPTCFG_NL80211_TESTMODE) += testmode.o
  ath12k-$(CONFIG_THERMAL) += thermal.o
- ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spectral.o
++ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spectral.o
 +ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
  
  # for tracing framework to find trace.h
@@ -44,7 +47,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
  #include "dp_tx.h"
  #include "dp_rx.h"
  #include "debug.h"
-@@ -925,6 +926,9 @@ static void ath12k_core_reset(struct wor
+@@ -913,6 +914,9 @@ static void ath12k_core_reset(struct wor
  	ath12k_dbg(ab, ATH12K_DBG_BOOT, "reset starting\n");
  
  	ab->is_reset = true;
@@ -56,7 +59,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
  	ath12k_core_pre_reconfigure_recovery(ab);
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -504,6 +504,14 @@ struct ath12k_per_peer_tx_stats {
+@@ -498,6 +498,14 @@ struct ath12k_per_peer_tx_stats {
  	bool is_ampdu;
  };
  
@@ -71,13 +74,14 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
  #define ATH12K_FLUSH_TIMEOUT (5 * HZ)
  #define ATH12K_VDEV_DELETE_TIMEOUT_HZ (5 * HZ)
  
-@@ -834,6 +842,7 @@ struct ath12k_base {
- 	struct timer_list mon_reap_timer;
+@@ -827,6 +835,8 @@ struct ath12k_base {
  
  	struct completion htc_suspend;
-+	bool fw_recovery_support;
  
++	bool fw_recovery_support;
++
  	u64 fw_soc_drop_count;
+ 	bool static_window_map;
  
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/coredump.c
@@ -191,7 +195,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 +	header_size = sizeof(*file_data);
 +	header_size += num_seg * sizeof(*segments);
 +	header_size = PAGE_ALIGN(header_size);
-+	buf = vzalloc(header_size);
++	buf = kzalloc(header_size, GFP_KERNEL);
 +	if (!buf)
 +		return;
 +
@@ -227,7 +231,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 +
 +	/* Wait until the dump is read and free is called */
 +	wait_for_completion(&dump_state.dump_done);
-+	vfree(file_data);
++	kfree(file_data);
 +}
 +
 +void ath12k_coredump_download_rddm(struct ath12k_base *ab)
@@ -253,7 +257,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 +	num_seg = fw_img->entries + rddm_img->entries + rem_seg_cnt;
 +	len = num_seg * sizeof(*segment);
 +
-+	segment = vzalloc(len);
++	segment = kzalloc(len, GFP_KERNEL);
 +	if (!segment)
 +		return;
 +
@@ -302,7 +306,7 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 +		ath12k_coredump_build_inline(ab, segment, num_seg);
 +	}
 +
-+	vfree(segment);
++	kfree(segment);
 +}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/coredump.h
@@ -396,15 +400,16 @@ Signed-off-by: Balamurugan Selvarajan <quic_bselvara@quicinc.com>
 +
 --- a/drivers/net/wireless/ath/ath12k/mhi.c
 +++ b/drivers/net/wireless/ath/ath12k/mhi.c
-@@ -394,6 +394,7 @@ int ath12k_mhi_register(struct ath12k_pc
- #if LINUX_VERSION_IS_GEQ(5,10,0)
+@@ -397,6 +397,8 @@ int ath12k_mhi_register(struct ath12k_pc
+ 	mhi_ctrl->regs = ab->mem;
  	mhi_ctrl->reg_len = ab->mem_len;
- #endif
-+	mhi_ctrl->rddm_size = ATH12K_PCI_FW_RDDM_SZ;
  
++	mhi_ctrl->rddm_size = ATH12K_PCI_FW_RDDM_SZ;
++
  	ret = ath12k_mhi_get_msi(ab_pci);
  	if (ret) {
-@@ -650,3 +651,8 @@ void ath12k_mhi_resume(struct ath12k_pci
+ 		ath12k_err(ab, "failed to get msi for mhi\n");
+@@ -653,3 +655,8 @@ void ath12k_mhi_resume(struct ath12k_pci
  {
  	ath12k_mhi_set_state(ab_pci, ATH12K_MHI_RESUME);
  }

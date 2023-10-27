@@ -1,4 +1,4 @@
-From 36e81f08830b00707d67731f5740495866191330 Mon Sep 17 00:00:00 2001
+From acb50c271002f2f5775a2da841dd8ad9a44e80aa Mon Sep 17 00:00:00 2001
 From: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 Date: Mon, 19 Sep 2022 16:32:29 +0530
 Subject: [PATCH] ath12k: Add support for cold boot calibartion
@@ -12,16 +12,17 @@ support cold boot calibration.
 
 Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c     |  2 +-
- drivers/net/wireless/ath/ath12k/coredump.c | 23 ++++++++-----
+ drivers/net/wireless/ath/ath12k/coredump.c | 23 +++++++++-----
  drivers/net/wireless/ath/ath12k/pci.c      |  2 ++
- drivers/net/wireless/ath/ath12k/qmi.c      | 39 +++++++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/qmi.c      | 35 ++++++++++++++++++++++
  drivers/net/wireless/ath/ath12k/qmi.h      |  2 ++
- 5 files changed, 58 insertions(+), 10 deletions(-)
+ 4 files changed, 54 insertions(+), 8 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/coredump.c b/drivers/net/wireless/ath/ath12k/coredump.c
+index 94610ed..5aa6e7f 100644
 --- a/drivers/net/wireless/ath/ath12k/coredump.c
 +++ b/drivers/net/wireless/ath/ath12k/coredump.c
-@@ -162,7 +162,7 @@ void ath12k_coredump_download_rddm(struc
+@@ -162,7 +162,7 @@ void ath12k_coredump_download_rddm(struct ath12k_base *ab)
  
  	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
  		if (ab->qmi.target_mem[i].type == HOST_DDR_REGION_TYPE ||
@@ -30,7 +31,7 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  		    ab->qmi.target_mem[i].type == M3_DUMP_REGION_TYPE ||
  		    ab->qmi.target_mem[i].type == PAGEABLE_MEM_REGION_TYPE ||
  		    ab->qmi.target_mem[i].type == MLO_GLOBAL_MEM_REGION_TYPE)
-@@ -207,13 +207,20 @@ void ath12k_coredump_download_rddm(struc
+@@ -204,13 +204,20 @@ void ath12k_coredump_download_rddm(struct ath12k_base *ab)
  	}
  
  	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
@@ -58,9 +59,11 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  		}
  
  		if (ab->qmi.target_mem[i].type == MLO_GLOBAL_MEM_REGION_TYPE) {
+diff --git a/drivers/net/wireless/ath/ath12k/pci.c b/drivers/net/wireless/ath/ath12k/pci.c
+index 4197c4a..726b706 100644
 --- a/drivers/net/wireless/ath/ath12k/pci.c
 +++ b/drivers/net/wireless/ath/ath12k/pci.c
-@@ -1368,6 +1368,8 @@ static int ath12k_pci_probe(struct pci_d
+@@ -1414,6 +1414,8 @@ static int ath12k_pci_probe(struct pci_dev *pdev,
  		goto err_free_irq;
  	}
  
@@ -69,6 +72,8 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  	return 0;
  
  err_free_irq:
+diff --git a/drivers/net/wireless/ath/ath12k/qmi.c b/drivers/net/wireless/ath/ath12k/qmi.c
+index bb06fa7..1ac053b 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
 @@ -8,6 +8,7 @@
@@ -79,11 +84,10 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  #include "debug.h"
  #include "coredump.h"
  #include <linux/of.h>
-@@ -4002,6 +4003,41 @@ int ath12k_qmi_firmware_start(struct ath
+@@ -3954,6 +3955,40 @@ int ath12k_qmi_firmware_start(struct ath12k_base *ab,
  	return 0;
  }
  
-+
 +int ath12k_qmi_fwreset_from_cold_boot(struct ath12k_base *ab)
 +{
 +	int timeout;
@@ -118,22 +122,14 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
 +}
 +EXPORT_SYMBOL(ath12k_qmi_fwreset_from_cold_boot);
 +
- static int ath12k_qmi_process_coldboot_calibration(struct ath12k_base *ab)
+ int ath12k_qmi_m3_dump_upload_done_ind_send(struct ath12k_base *ab,
+ 					    u32 pdev_id, int status)
  {
- 	int timeout;
-@@ -4793,7 +4829,8 @@ static void ath12k_qmi_driver_event_work
- 			}
- 
- 			if (ath12k_cold_boot_cal && ab->qmi.cal_done == 0 &&
--			    ab->hw_params->cold_boot_calib) {
-+			    ab->hw_params->cold_boot_calib &&
-+			    ab->qmi.cal_timeout == 0) {
- 				ath12k_qmi_process_coldboot_calibration(ab);
- 			} else {
- 				clear_bit(ATH12K_FLAG_CRASH_FLUSH,
+diff --git a/drivers/net/wireless/ath/ath12k/qmi.h b/drivers/net/wireless/ath/ath12k/qmi.h
+index 112aea0..b61573b 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.h
 +++ b/drivers/net/wireless/ath/ath12k/qmi.h
-@@ -164,6 +164,7 @@ struct ath12k_qmi {
+@@ -162,6 +162,7 @@ struct ath12k_qmi {
  	u32 target_mem_mode;
  	bool target_mem_delayed;
  	u8 cal_done;
@@ -141,7 +137,7 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  	struct target_info target;
  	struct m3_mem_region m3_mem;
  	unsigned int service_ins_id;
-@@ -744,6 +745,7 @@ int ath12k_qmi_init_service(struct ath12
+@@ -750,6 +751,7 @@ int ath12k_qmi_init_service(struct ath12k_base *ab);
  
  int ath12k_send_qdss_trace_mode_req(struct ath12k_base *ab,
  				    enum qmi_wlanfw_qdss_trace_mode_enum_v01 mode);
@@ -149,3 +145,6 @@ Signed-off-by: Ganesh Babu Jothiram <quic_gjothira@quicinc.com>
  int ath12k_enable_fwlog(struct ath12k_base *ab);
  int ath12k_qmi_m3_dump_upload_done_ind_send(struct ath12k_base *ab,
  					    u32 pdev_id, int status);
+-- 
+2.17.1
+

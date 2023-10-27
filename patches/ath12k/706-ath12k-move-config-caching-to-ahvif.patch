@@ -21,25 +21,25 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -353,7 +353,6 @@ struct ath12k_link_vif {
+@@ -286,7 +286,6 @@ struct ath12k_link_vif {
+ 	u8 nontransmitting_vif_count;
  	bool bcca_zero_sent;
  	bool do_not_send_tmpl;
- 	u32 vht_cap;
 -	struct ath12k_vif_cache cache;
  #ifdef CPTCFG_ATH12K_DEBUGFS
  	struct dentry *debugfs_twt;
  #endif /* CPTCFG_ATH12K_DEBUGFS */
-@@ -400,6 +399,7 @@ struct ath12k_vif {
+@@ -333,6 +332,7 @@ struct ath12k_vif {
  	struct ath12k_mgmt_frame_stats mgmt_stats;
  	u8 num_vdev_created;
  	u8 num_vdev_started;
 +	struct ath12k_vif_cache cache[IEEE80211_MLD_MAX_NUM_LINKS];
- };
+  };
  
  struct ath12k_vif_iter {
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4458,18 +4458,12 @@ static void ath12k_mac_op_bss_info_chang
+@@ -4523,18 +4523,12 @@ static void ath12k_mac_op_bss_info_chang
  	mutex_lock(&ah->conf_mutex);
  	arvif = ahvif->link[link_id];
  
@@ -60,7 +60,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		mutex_unlock(&ah->conf_mutex);
  		return;
  	}
-@@ -4581,7 +4575,6 @@ ath12k_mac_assign_link_vif( struct ath12
+@@ -4646,7 +4640,6 @@ ath12k_mac_assign_link_vif( struct ath12
  				return NULL;
  
  			INIT_LIST_HEAD(&arvif->list);
@@ -68,7 +68,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			INIT_WORK(&arvif->update_obss_color_notify_work,
  				  ath12k_update_obss_color_notify_work);
  			INIT_WORK(&arvif->update_bcn_template_work,
-@@ -5280,13 +5273,13 @@ static int ath12k_mac_op_set_key(struct
+@@ -5341,13 +5334,13 @@ static int ath12k_mac_op_set_key(struct
  
  	if (key->link_id >= 0 && key->link_id < IEEE80211_MLD_MAX_NUM_LINKS) {
  		arvif = ahvif->link[key->link_id];
@@ -85,7 +85,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		key_conf = kzalloc(sizeof(*key_conf), GFP_ATOMIC);
  
  		if (!key_conf) {
-@@ -5298,7 +5291,8 @@ static int ath12k_mac_op_set_key(struct
+@@ -5359,7 +5352,8 @@ static int ath12k_mac_op_set_key(struct
  		key_conf->sta = sta;
  		key_conf->key = key;
  
@@ -95,7 +95,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  		ath12k_info(NULL, "set key param cached since vif not assign to radio\n");
  		mutex_unlock(&ah->conf_mutex);
-@@ -7090,24 +7084,21 @@ static int ath12k_mac_op_conf_tx(struct
+@@ -7193,24 +7187,21 @@ static int ath12k_mac_op_conf_tx(struct
  	struct ath12k_link_vif *arvif;
  	int ret;
  
@@ -128,7 +128,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		mutex_unlock(&ah->conf_mutex);
  		return 0;
  	}
-@@ -9210,7 +9201,8 @@ err:
+@@ -9304,38 +9295,47 @@ err:
  	return ret;
  }
  
@@ -138,10 +138,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  {
  	struct ath12k_hw *ah = ar->ah;
  	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
-@@ -9218,32 +9210,41 @@ static void ath12k_mac_vif_cache_flush(s
+ 	struct ath12k_link_vif *arvif;
  	struct ath12k_key_conf *key_conf, *tmp;
- 	struct ath12k_link_sta *arsta = NULL;
- 	struct ath12k_sta *ahsta;
 +	struct ath12k_vif_cache *cache;
  	int ret;
  
@@ -150,7 +148,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -	/* TODO extend for all link vifs */
 -	arvif = &ahvif->deflink;
 +	arvif = ahvif->link[link_id];
-+
+ 
+-	if (arvif->cache.tx_conf.changed) {
+-		ret = ath12k_mac_conf_tx(ar, arvif, arvif->cache.tx_conf.ac,
+-					 &arvif->cache.tx_conf.tx_queue_params);
 +	if (WARN_ON(!arvif))
 +		return;
 +
@@ -158,10 +159,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		return;
 +
 +	cache = &ahvif->cache[link_id];
- 
--	if (arvif->cache.tx_conf.changed) {
--		ret = ath12k_mac_conf_tx(ar, arvif, arvif->cache.tx_conf.ac,
--					 &arvif->cache.tx_conf.tx_queue_params);
++
 +	if (cache->tx_conf.changed) {
 +		ret = ath12k_mac_conf_tx(ar, arvif, cache->tx_conf.ac,
 +					 &cache->tx_conf.tx_queue_params);
@@ -185,13 +183,12 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
 -	if (!list_empty(&arvif->cache.key_conf.list)) {
 -		list_for_each_entry_safe(key_conf, tmp, &arvif->cache.key_conf.list, list) {
-+
 +	if (!list_empty(&cache->key_conf.list)) {
 +		list_for_each_entry_safe(key_conf, tmp, &cache->key_conf.list, list) {
- 			if (key_conf->sta) {
- 				ahsta = (struct ath12k_sta *)key_conf->sta->drv_priv;
- 				arsta = ahsta->link[link_id];
-@@ -9313,7 +9314,7 @@ static struct ath12k *ath12k_mac_assign_
+ 			ret = ath12k_mac_set_key(ar, key_conf->cmd,
+ 					arvif, key_conf->sta,
+ 					key_conf->key);
+@@ -9400,7 +9400,7 @@ static struct ath12k *ath12k_mac_assign_
  	/* Apply any parameters for the vdev which were received after
  	 * add_interface, corresponding to this vif
  	 */
@@ -200,7 +197,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  unlock:
  	mutex_unlock(&ar->conf_mutex);
-@@ -9346,7 +9347,6 @@ static int ath12k_mac_op_add_interface(s
+@@ -9433,7 +9433,6 @@ static int ath12k_mac_op_add_interface(s
  	ahvif->deflink.ahvif = ahvif;
  	ahvif->deflink.link_id = 0;
  	INIT_LIST_HEAD(&ahvif->deflink.list);
@@ -208,7 +205,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	INIT_WORK(&ahvif->deflink.update_obss_color_notify_work,
  		  ath12k_update_obss_color_notify_work);
  	INIT_WORK(&ahvif->deflink.update_bcn_template_work,
-@@ -9359,6 +9359,9 @@ static int ath12k_mac_op_add_interface(s
+@@ -9446,6 +9445,9 @@ static int ath12k_mac_op_add_interface(s
  	for (i = 0; i < ARRAY_SIZE(vif->hw_queue); i++)
  		vif->hw_queue[i] = ATH12K_HW_DEFAULT_QUEUE;
  
@@ -218,7 +215,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	vif->driver_flags |= IEEE80211_VIF_SUPPORTS_UAPSD;
  	mutex_unlock(&ah->conf_mutex);
  	return 0;
-@@ -9396,7 +9399,7 @@ static void ath12k_mac_remove_link_inter
+@@ -9483,7 +9485,7 @@ static void ath12k_mac_remove_link_inter
  	struct ath12k *ar;
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_vif *vif = ahvif->vif;
@@ -227,7 +224,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	struct ath12k_base *ab;
  	int ret;
  
-@@ -9465,8 +9468,10 @@ err_vdev_del:
+@@ -9552,8 +9554,10 @@ err_vdev_del:
  
  	ath12k_debugfs_remove_interface(arvif);
  

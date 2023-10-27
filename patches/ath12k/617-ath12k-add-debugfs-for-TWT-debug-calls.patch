@@ -1,7 +1,7 @@
-From 384ad0940bc6b5ae56a6097a75021ba9f85275f2 Mon Sep 17 00:00:00 2001
+From adbb7806f21d3bfa3e1b9a8b7453bfc60caead66 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <quic_alokad@quicinc.com>
 Date: Sun, 30 Jan 2022 19:10:43 -0800
-Subject: [PATCH 2/2] ath12k: add debugfs for TWT debug calls
+Subject: [PATCH] ath12k: add debugfs for TWT debug calls
 
 New debugfs files to manually add/delete/pause/resume TWT
 dialogs for test/debug purposes.
@@ -38,15 +38,17 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/core.h    |   3 +
  drivers/net/wireless/ath/ath12k/debugfs.c | 222 ++++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/debugfs.h |  14 +-
+ drivers/net/wireless/ath/ath12k/debugfs.h |  11 ++
  drivers/net/wireless/ath/ath12k/mac.c     |   7 +
- 4 files changed, 245 insertions(+), 1 deletion(-)
+ 4 files changed, 243 insertions(+)
 
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 3e0216b..7a9d7b8 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -278,6 +278,9 @@ struct ath12k_vif {
+@@ -249,6 +249,9 @@ struct ath12k_vif {
+ 	u8 tx_encap_type;
  	u8 vdev_stats_id;
- 	struct ath12k_fw_vdev_ol_stats vdev_stats;
  	u8 nontransmitting_vif_count;
 +#ifdef CPTCFG_ATH12K_DEBUGFS
 +	struct dentry *debugfs_twt;
@@ -54,39 +56,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  struct ath12k_vif_iter {
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -6717,6 +6717,10 @@ static int ath12k_mac_op_add_interface(s
- 	if (vif->type != NL80211_IFTYPE_MONITOR && ar->monitor_conf_enabled)
- 		ath12k_mac_monitor_vdev_create(ar);
- 
-+	ret = ath12k_debugfs_add_interface(arvif);
-+	if (ret)
-+		goto err_peer_del;
-+
- 	mutex_unlock(&ar->conf_mutex);
- 
- 	return ret;
-@@ -6752,6 +6756,7 @@ err_vdev_del:
- 	spin_unlock_bh(&ar->data_lock);
- 
- err:
-+	ath12k_debugfs_remove_interface(arvif);
- 	mutex_unlock(&ar->conf_mutex);
- 
- 	return ret;
-@@ -6852,6 +6857,8 @@ err_vdev_del:
- 	ath12k_mac_txpower_recalc(ar);
- 	clear_bit(ATH12K_FLAG_MONITOR_ENABLED, &ar->monitor_flags);
- 
-+	ath12k_debugfs_remove_interface(arvif);
-+
- 	/* TODO: recal traffic pause state based on the available vdevs */
- 
- 	mutex_unlock(&ar->conf_mutex);
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
+index a6adfb0..1543b43 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1263,3 +1263,225 @@ void ath12k_debugfs_destroy(void)
+@@ -1339,3 +1339,225 @@ void ath12k_debugfs_destroy(void)
  	debugfs_remove_recursive(debugfs_ath12k);
  	debugfs_ath12k = NULL;
  }
@@ -312,9 +286,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	debugfs_remove_recursive(arvif->debugfs_twt);
 +	arvif->debugfs_twt = NULL;
 +}
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs.h b/drivers/net/wireless/ath/ath12k/debugfs.h
+index 8c31328..e9911c6 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.h
-@@ -160,6 +160,9 @@ static inline int ath12k_debugfs_rx_filt
+@@ -160,6 +160,9 @@ static inline int ath12k_debugfs_rx_filter(struct ath12k *ar)
  	return ar->debug.rx_filter;
  }
  
@@ -324,12 +300,13 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #else
  static inline int ath12k_debugfs_create(void)
  {
-@@ -236,6 +239,13 @@ static inline int ath12k_debugfs_rx_filt
+@@ -236,6 +239,14 @@ static inline int ath12k_debugfs_rx_filter(struct ath12k *ar)
  	return 0;
  }
  
 +static inline int ath12k_debugfs_add_interface(struct ath12k_vif *arvif)
 +{
++	return 0;
 +}
 +
 +static inline void ath12k_debugfs_remove_interface(struct ath12k_vif *arvif)
@@ -338,3 +315,38 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #endif /* CPTCFG_MAC80211_DEBUGFS*/
  
  #endif /* _ATH12K_DEBUGFS_H_ */
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 906c04f..f610f8c 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -6844,6 +6844,10 @@ static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+ 	if (vif->type != NL80211_IFTYPE_MONITOR && ar->monitor_conf_enabled)
+ 		ath12k_mac_monitor_vdev_create(ar);
+ 
++	ret = ath12k_debugfs_add_interface(arvif);
++	if (ret)
++		goto err_peer_del;
++
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	return ret;
+@@ -6879,6 +6883,7 @@ err_vdev_del:
+ 	spin_unlock_bh(&ar->data_lock);
+ 
+ err:
++	ath12k_debugfs_remove_interface(arvif);
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	return ret;
+@@ -6979,6 +6984,8 @@ err_vdev_del:
+ 	ath12k_mac_txpower_recalc(ar);
+ 	clear_bit(ATH12K_FLAG_MONITOR_ENABLED, &ar->monitor_flags);
+ 
++	ath12k_debugfs_remove_interface(arvif);
++
+ 	/* TODO: recal traffic pause state based on the available vdevs */
+ 
+ 	mutex_unlock(&ar->conf_mutex);
+-- 
+2.17.1
+

@@ -23,16 +23,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -362,6 +362,8 @@ struct ath12k_link_vif {
+@@ -317,6 +317,8 @@ struct ath12k_link_vif {
  	struct work_struct update_obss_color_notify_work;
- 	u8 link_id;
- 	struct ath12k_vif *ahvif;
+     u8 link_id;
+     struct ath12k_vif *ahvif;
 +
 +	bool mvr_processing;
  };
  
  struct ath12k_vif {
-@@ -870,6 +872,8 @@ struct ath12k {
+@@ -821,6 +823,8 @@ struct ath12k {
  	bool fw_stats_done;
  
  	unsigned long last_tx_power_update;
@@ -40,10 +40,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct completion mvr_complete;
  };
  
- struct ath12k_band_cap {
+ struct ath12k_hw {
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9941,12 +9941,19 @@ static int ath12k_vdev_restart_sequence(
+@@ -10002,12 +10002,19 @@ static int ath12k_vdev_restart_sequence(
  	memcpy(&arvif->chanctx, new_ctx, sizeof(*new_ctx));
  	spin_unlock_bh(&ar->data_lock);
  
@@ -65,7 +65,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to restart vdev %d: %d\n",
-@@ -9957,6 +9964,7 @@ static int ath12k_vdev_restart_sequence(
+@@ -10018,6 +10025,7 @@ static int ath12k_vdev_restart_sequence(
  		return ret;
  	}
  
@@ -73,7 +73,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (!arvif->is_up)
  		return -EOPNOTSUPP;
  
-@@ -10211,6 +10219,45 @@ static void ath12k_mac_update_rx_channel
+@@ -10279,6 +10287,45 @@ static void ath12k_mac_update_rx_channel
  	ar->chan_tx_pwr = ATH12K_PDEV_TX_POWER_INVALID;
  }
  
@@ -119,7 +119,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static void
  ath12k_mac_update_vif_chan_extras(struct ath12k *ar,
  				  struct ieee80211_vif_chanctx_switch *vifs,
-@@ -10369,6 +10416,148 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -10437,6 +10484,148 @@ ath12k_mac_update_vif_chan(struct ath12k
  				    arvif->vdev_id, ret);
  		}
  	}
@@ -268,7 +268,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	ath12k_mac_update_vif_chan_extras(ar, vifs, n_vifs);
  }
-@@ -10400,7 +10589,7 @@ ath12k_mac_update_active_vif_chan(struct
+@@ -10466,7 +10655,7 @@ ath12k_mac_update_active_vif_chan(struct
  						   ath12k_mac_change_chanctx_fill_iter,
  						   &arg);
  
@@ -276,8 +276,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	ath12k_mac_process_update_vif_chan(ar, arg.vifs, arg.n_vifs);
  
  	kfree(arg.vifs);
- out:
-@@ -11321,7 +11510,7 @@ ath12k_mac_op_switch_vif_chanctx(struct
+ }
+@@ -11387,7 +11576,7 @@ ath12k_mac_op_switch_vif_chanctx(struct
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC,
  		   "mac chanctx switch n_vifs %d mode %d\n",
  		   n_vifs, mode);
@@ -286,7 +286,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	mutex_unlock(&ar->conf_mutex);
  
-@@ -13616,6 +13805,7 @@ static int ath12k_mac_setup(struct ath12
+@@ -13617,6 +13806,7 @@ static int ath12k_mac_chip_setup(struct
  	init_completion(&ar->scan.completed);
  	init_completion(&ar->thermal.wmi_sync);
  	init_completion(&ar->mlo_setup_done);
@@ -296,94 +296,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	INIT_WORK(&ar->regd_update_work, ath12k_regd_update_work);
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -956,55 +956,55 @@ int ath12k_wmi_vdev_down(struct ath12k *
- }
- 
- static void ath12k_wmi_put_wmi_channel(struct wmi_channel *chan,
--				       struct wmi_vdev_start_req_arg *arg)
-+				       struct wmi_channel_arg chan_arg)
- {
--	u32 center_freq1 = arg->channel.band_center_freq1;
-+	u32 center_freq1 = chan_arg.band_center_freq1;
- 
- 	memset(chan, 0, sizeof(*chan));
- 
--	chan->mhz = arg->channel.freq;
--	chan->band_center_freq1 = arg->channel.band_center_freq1;
-+	chan->mhz = chan_arg.freq;
-+	chan->band_center_freq1 = chan_arg.band_center_freq1;
- 
--	if ((arg->channel.mode == MODE_11AX_HE160) || (arg->channel.mode == MODE_11BE_EHT160)) {
--		if (arg->channel.freq > arg->channel.band_center_freq1)
-+	if ((chan_arg.mode == MODE_11AX_HE160) || (chan_arg.mode == MODE_11BE_EHT160)) {
-+		if (chan_arg.freq > chan_arg.band_center_freq1)
- 			chan->band_center_freq1 = center_freq1 + 40;
- 		else
- 			chan->band_center_freq1 = center_freq1 - 40;
- 
--		chan->band_center_freq2 = arg->channel.band_center_freq1;
-+		chan->band_center_freq2 = chan_arg.band_center_freq1;
- 
--	} else if (arg->channel.mode == MODE_11AC_VHT80_80) {
--		chan->band_center_freq2 = arg->channel.band_center_freq2;
-+	} else if (chan_arg.mode == MODE_11AC_VHT80_80) {
-+		chan->band_center_freq2 = chan_arg.band_center_freq2;
- 	} else {
- 		chan->band_center_freq2 = 0;
- 	}
- 
--	chan->info |= u32_encode_bits(arg->channel.mode, WMI_CHAN_INFO_MODE);
--	if (arg->channel.passive)
-+	chan->info |= u32_encode_bits(chan_arg.mode, WMI_CHAN_INFO_MODE);
-+	if (chan_arg.passive)
- 		chan->info |= WMI_CHAN_INFO_PASSIVE;
--	if (arg->channel.allow_ibss)
-+	if (chan_arg.allow_ibss)
- 		chan->info |= WMI_CHAN_INFO_ADHOC_ALLOWED;
--	if (arg->channel.allow_ht)
-+	if (chan_arg.allow_ht)
- 		chan->info |= WMI_CHAN_INFO_ALLOW_HT;
--	if (arg->channel.allow_vht)
-+	if (chan_arg.allow_vht)
- 		chan->info |= WMI_CHAN_INFO_ALLOW_VHT;
--	if (arg->channel.allow_he)
-+	if (chan_arg.allow_he)
- 		chan->info |= WMI_CHAN_INFO_ALLOW_HE;
--	if (arg->channel.ht40plus)
-+	if (chan_arg.ht40plus)
- 		chan->info |= WMI_CHAN_INFO_HT40_PLUS;
--	if (arg->channel.chan_radar)
-+	if (chan_arg.chan_radar)
- 		chan->info |= WMI_CHAN_INFO_DFS;
--	if (arg->channel.freq2_radar)
-+	if (chan_arg.freq2_radar)
- 		chan->info |= WMI_CHAN_INFO_DFS_FREQ2;
- 
--	chan->reg_info_1 = u32_encode_bits(arg->channel.max_power,
-+	chan->reg_info_1 = u32_encode_bits(chan_arg.max_power,
- 					   WMI_CHAN_REG_INFO1_MAX_PWR) |
--		u32_encode_bits(arg->channel.max_reg_power,
-+		u32_encode_bits(chan_arg.max_reg_power,
- 				WMI_CHAN_REG_INFO1_MAX_REG_PWR);
- 
--	chan->reg_info_2 = u32_encode_bits(arg->channel.max_antenna_gain,
-+	chan->reg_info_2 = u32_encode_bits(chan_arg.max_antenna_gain,
- 					   WMI_CHAN_REG_INFO2_ANT_MAX) |
--		u32_encode_bits(arg->channel.max_power, WMI_CHAN_REG_INFO2_MAX_TX_PWR);
-+		u32_encode_bits(chan_arg.max_power, WMI_CHAN_REG_INFO2_MAX_TX_PWR);
- }
- 
- int ath12k_wmi_vdev_start(struct ath12k *ar, struct wmi_vdev_start_req_arg *arg,
-@@ -1067,7 +1067,7 @@ int ath12k_wmi_vdev_start(struct ath12k
- 	ptr = skb->data + sizeof(*cmd);
- 	chan = ptr;
- 
--	ath12k_wmi_put_wmi_channel(chan, arg);
-+	ath12k_wmi_put_wmi_channel(chan, arg->channel);
- 
- 	chan->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_CHANNEL,
- 						  sizeof(*chan));
-@@ -9471,6 +9471,108 @@ static void ath12k_wmi_event_teardown_co
+@@ -801,6 +801,108 @@ static void ath12k_wmi_event_teardown_co
  	kfree(tb);
  }
  
@@ -489,10 +402,95 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	ath12k_wmi_process_mvr_event(ab, parse.vdev_id_bm, parse.num_vdevs_bm);
 +}
 +
- static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
+ static int
+ ath12k_pull_reg_cap_svc_rdy_ext(struct ath12k_wmi_pdev *wmi_handle,
+ 				const struct ath12k_wmi_soc_hal_reg_caps_params *reg_caps,
+@@ -1183,53 +1285,53 @@ int ath12k_wmi_vdev_down(struct ath12k *
+ }
+ 
+ static void ath12k_wmi_put_wmi_channel(struct ath12k_wmi_channel_params *chan,
+-				       struct wmi_vdev_start_req_arg *arg)
++				       struct wmi_channel_arg chan_arg)
  {
- 	struct wmi_cmd_hdr *cmd_hdr;
-@@ -9617,6 +9719,9 @@ static void ath12k_wmi_tlv_op_rx(struct
+-	u32 center_freq1 = arg->band_center_freq1;
++	u32 center_freq1 = chan_arg.band_center_freq1;
+ 	memset(chan, 0, sizeof(*chan));
+ 
+-	chan->mhz = arg->channel.freq;
+-	chan->band_center_freq1 = arg->channel.band_center_freq1;
+-	if ((arg->mode == MODE_11AX_HE160) || (arg->mode == MODE_11BE_EHT160)) {
+-		if (arg->freq > arg->band_center_freq1)
++	chan->mhz = chan_arg.freq;
++	chan->band_center_freq1 = chan_arg.band_center_freq1;
++	if ((chan_arg.mode == MODE_11AX_HE160) || (chan_arg.mode == MODE_11BE_EHT160)) {
++		if (chan_arg.freq > chan_arg.band_center_freq1)
+ 			chan->band_center_freq1 = center_freq1 + 40;
+ 		else
+ 			chan->band_center_freq1 = center_freq1 - 40;
+ 
+-		chan->band_center_freq2 = arg->band_center_freq1;
++		chan->band_center_freq2 = chan_arg.band_center_freq1;
+ 
+-	} else if (arg->mode == MODE_11AC_VHT80_80) {
+-		chan->band_center_freq2 = arg->channel.band_center_freq2;
++	} else if (chan_arg.mode == MODE_11AC_VHT80_80) {
++		chan->band_center_freq2 = chan_arg.band_center_freq2;
+ 	}else{
+ 		chan->band_center_freq2 = 0;
+ 	}
+ 
+-	chan->info |= u32_encode_bits(arg->channel.mode, WMI_CHAN_INFO_MODE);
+-	if (arg->channel.passive)
++	chan->info |= u32_encode_bits(chan_arg.mode, WMI_CHAN_INFO_MODE);
++	if (chan_arg.passive)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_PASSIVE);
+-	if (arg->channel.allow_ibss)
++	if (chan_arg.allow_ibss)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_ADHOC_ALLOWED);
+-	if (arg->channel.allow_ht)
++	if (chan_arg.allow_ht)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_ALLOW_HT);
+-	if (arg->channel.allow_vht)
++	if (chan_arg.allow_vht)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_ALLOW_VHT);
+-	if (arg->channel.allow_he)
++	if (chan_arg.allow_he)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_ALLOW_HE);
+-	if (arg->channel.ht40plus)
++	if (chan_arg.ht40plus)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_HT40_PLUS);
+-	if (arg->channel.chan_radar)
++	if (chan_arg.chan_radar)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_DFS);
+-	if (arg->channel.freq2_radar)
++	if (chan_arg.freq2_radar)
+ 		chan->info |= cpu_to_le32(WMI_CHAN_INFO_DFS_FREQ2);
+ 
+-	chan->reg_info_1 = u32_encode_bits(arg->channel.max_power,
++	chan->reg_info_1 = le32_encode_bits(chan_arg.max_power,
+ 					    WMI_CHAN_REG_INFO1_MAX_PWR) |
+-		le32_encode_bits(arg->channel.max_reg_power,
++		le32_encode_bits(chan_arg.max_reg_power,
+ 				 WMI_CHAN_REG_INFO1_MAX_REG_PWR);
+ 
+-	chan->reg_info_2 = le32_encode_bits(arg->channel.max_antenna_gain,
++	chan->reg_info_2 = le32_encode_bits(chan_arg.max_antenna_gain,
+ 					    WMI_CHAN_REG_INFO2_ANT_MAX) |
+-		le32_encode_bits(arg->channel.max_power, WMI_CHAN_REG_INFO2_MAX_TX_PWR);
++		le32_encode_bits(chan_arg.max_power, WMI_CHAN_REG_INFO2_MAX_TX_PWR);
+ }
+ 
+ int ath12k_wmi_vdev_start(struct ath12k *ar, struct wmi_vdev_start_req_arg *arg,
+@@ -1292,7 +1394,7 @@ int ath12k_wmi_vdev_start(struct ath12k
+ 	ptr = skb->data + sizeof(*cmd);
+ 	chan = ptr;
+ 
+-	ath12k_wmi_put_wmi_channel(chan, arg);
++	ath12k_wmi_put_wmi_channel(chan, arg->channel);
+ 
+ 	chan->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_CHANNEL,
+ 						  sizeof(*chan));
+@@ -9605,6 +9707,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_MLO_TEARDOWN_COMPLETE_EVENTID:
  		ath12k_wmi_event_teardown_complete(ab, skb);
  		break;
@@ -502,7 +500,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -10073,3 +10178,82 @@ int ath12k_wmi_mlo_teardown(struct ath12
+@@ -10015,3 +10120,82 @@ int ath12k_wmi_mlo_teardown(struct ath12
  
  	return ret;
  }
@@ -522,7 +520,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +{
 +	struct ath12k_pdev_wmi *wmi = ar->wmi;
 +	struct wmi_pdev_multiple_vdev_restart_request_cmd *cmd;
-+	struct wmi_channel *chan;
++	struct ath12k_wmi_channel_params *chan;
 +	struct wmi_tlv *tlv;
 +	u32 num_vdev_ids;
 +	__le32 *vdev_ids;
@@ -563,7 +561,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +		vdev_ids[i] = cpu_to_le32(arg->vdev_ids.id[i]);
 +
 +	ptr += TLV_HDR_SIZE + vdev_ids_len;
-+	chan = (struct wmi_channel *)ptr;
++	chan = (struct ath12k_wmi_channel_params *)ptr;
 +
 +	ath12k_wmi_put_wmi_channel(chan, arg->channel);
 +
@@ -587,7 +585,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +}
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -1919,6 +1919,7 @@ enum wmi_tlv_tag {
+@@ -2054,6 +2054,7 @@ enum wmi_tlv_tag {
  	WMI_TAG_MUEDCA_PARAMS_CONFIG_EVENT = 0x32a,
  	WMI_TAG_SERVICE_READY_EXT2_EVENT = 0x334,
  	WMI_TAG_FILS_DISCOVERY_TMPL_CMD = 0x344,
@@ -595,7 +593,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	WMI_TAG_MAC_PHY_CAPABILITIES_EXT = 0x36F,
  	WMI_TAG_PDEV_SRG_BSS_COLOR_BITMAP_CMD = 0x37b,
  	WMI_TAG_PDEV_SRG_PARTIAL_BSSID_BITMAP_CMD,
-@@ -2176,6 +2177,7 @@ enum wmi_tlv_service {
+@@ -2311,6 +2312,7 @@ enum wmi_tlv_service {
  	WMI_TLV_SERVICE_PER_PEER_HTT_STATS_RESET = 213,
  	WMI_TLV_SERVICE_FREQINFO_IN_METADATA = 219,
  	WMI_TLV_SERVICE_EXT2_MSG = 220,
@@ -603,7 +601,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	WMI_TLV_SERVICE_5_9GHZ_SUPPORT = 247,
  	WMI_TLV_SERVICE_SRG_SRP_SPATIAL_REUSE_SUPPORT = 249,
  
-@@ -6354,6 +6356,47 @@ struct wmi_mlo_teardown_complete_fixed_p
+@@ -6081,6 +6083,47 @@ struct wmi_mlo_teardown_complete_fixed_p
  	u32 status;
  } __packed;
  
@@ -645,13 +643,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +struct wmi_pdev_mvr_resp_event_parse {
 +	struct wmi_pdev_mvr_resp_event_fixed_param fixed_param;
 +	u32 num_vdevs_bm;
-+	u32 vdev_id_bm[];
++	u32 vdev_id_bm[WMI_MVR_RESP_VDEV_BM_MAX_LEN];
 +} __packed;
 +
  #define ATH12K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
-@@ -6522,4 +6565,7 @@ int ath12k_wmi_mlo_setup(struct ath12k *
+@@ -6248,4 +6291,7 @@ int ath12k_wmi_mlo_setup(struct ath12k *
  			 struct wmi_mlo_setup_params *mlo_params);
  int ath12k_wmi_mlo_ready(struct ath12k *ar);
  int ath12k_wmi_mlo_teardown(struct ath12k *ar);

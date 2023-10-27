@@ -1,7 +1,7 @@
-From 31ba379043c3bde8f69d1e898dcd0d54b669e3c5 Mon Sep 17 00:00:00 2001
+From f10e281108b7fc419e02a10d2991cbca7a5b2551 Mon Sep 17 00:00:00 2001
 From: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
 Date: Tue, 14 Sep 2021 13:06:02 +0530
-Subject: [PATCH 2/4] ath12k: Add mlo wmi setup apis
+Subject: [PATCH] ath12k: Add mlo wmi setup apis
 
 Added WMI helper function for the MLO setup/teardown command and event.
 Add appropriate WMI tag, command id and event id to parse the event and
@@ -10,15 +10,14 @@ send request.
 Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
 Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c |   8 --
  drivers/net/wireless/ath/ath12k/core.h |   3 +-
- drivers/net/wireless/ath/ath12k/wmi.c  | 170 ++++++++++++++++++++++++-
- drivers/net/wireless/ath/ath12k/wmi.h  |  66 +++++++++-
- 4 files changed, 229 insertions(+), 18 deletions(-)
+ drivers/net/wireless/ath/ath12k/wmi.c  | 164 +++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/wmi.h  |  80 ++++++++++++
+ 3 files changed, 246 insertions(+), 1 deletion(-)
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -853,7 +853,8 @@ struct mlo_timestamp {
+@@ -839,7 +839,8 @@ struct mlo_timestamp {
  
  struct ath12k_pdev {
  	struct ath12k *ar;
@@ -30,17 +29,16 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	struct mlo_timestamp timestamp;
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -485,6 +485,8 @@ ath12k_pull_mac_phy_cap_svc_ready_ext(st
- 	mac_phy_caps = wmi_mac_phy_caps + phy_idx;
+@@ -613,6 +613,7 @@ ath12k_pull_mac_phy_cap_svc_ready_ext(st
+ 	mac_caps = wmi_mac_phy_caps + phy_idx;
  
- 	pdev->pdev_id = mac_phy_caps->pdev_id;
-+	pdev->hw_link_id = mac_phy_caps->hw_link_id;
-+
- 	pdev_cap->supported_bands |= mac_phy_caps->supported_bands;
- 	pdev_cap->ampdu_density = mac_phy_caps->ampdu_density;
+ 	pdev->pdev_id = le32_to_cpu(mac_caps->pdev_id);
++	pdev->hw_link_id = mac_caps->hw_link_id;
+ 	pdev_cap->supported_bands |= le32_to_cpu(mac_caps->supported_bands);
+ 	pdev_cap->ampdu_density = le32_to_cpu(mac_caps->ampdu_density);
  
-@@ -9026,6 +9028,66 @@ exit:
- 	kfree(tb);
+@@ -714,6 +715,66 @@ ath12k_pull_mac_phy_cap_svc_ready_ext(st
+ 	return 0;
  }
  
 +static void ath12k_wmi_event_mlo_setup_complete(struct ath12k_base *ab,
@@ -103,10 +101,10 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	kfree(tb);
 +}
 +
- static void ath12k_wmi_tlv_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
- {
- 	struct wmi_cmd_hdr *cmd_hdr;
-@@ -9160,6 +9222,12 @@ static void ath12k_wmi_tlv_op_rx(struct
+ static int
+ ath12k_pull_reg_cap_svc_rdy_ext(struct ath12k_wmi_pdev *wmi_handle,
+ 				const struct ath12k_wmi_soc_hal_reg_caps_params *reg_caps,
+@@ -9185,6 +9246,12 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_STATS_CTRL_PATH_EVENTID:
  		ath12k_process_tpc_stats(ab, skb);
  		break;
@@ -119,7 +117,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -9516,3 +9584,100 @@ int ath12k_wmi_pdev_ap_ps_cmd_send(struc
+@@ -9495,3 +9562,100 @@ int ath12k_wmi_pdev_ap_ps_cmd_send(struc
  
  	return ret;
  }
@@ -222,7 +220,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +}
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -202,6 +202,7 @@ enum wmi_cmd_group {
+@@ -338,6 +338,7 @@ enum wmi_cmd_group {
  	WMI_GRP_TWT            = 0x3e,
  	WMI_GRP_MOTION_DET     = 0x3f,
  	WMI_GRP_SPATIAL_REUSE  = 0x40,
@@ -230,7 +228,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  };
  
  #define WMI_CMD_GRP(grp_id) (((grp_id) << 12) | 0x1)
-@@ -626,6 +627,11 @@ enum wmi_tlv_cmd_id {
+@@ -761,6 +762,11 @@ enum wmi_tlv_cmd_id {
  	WMI_PDEV_OBSS_PD_SPATIAL_REUSE_CMDID =
  				WMI_TLV_CMD(WMI_GRP_SPATIAL_REUSE),
  	WMI_PDEV_OBSS_PD_SPATIAL_REUSE_SET_DEF_OBSS_THRESH_CMDID,
@@ -242,7 +240,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  };
  
  enum wmi_tlv_event_id {
-@@ -849,6 +855,9 @@ enum wmi_tlv_event_id {
+@@ -984,6 +990,9 @@ enum wmi_tlv_event_id {
  	WMI_TWT_DEL_DIALOG_EVENTID,
  	WMI_TWT_PAUSE_DIALOG_EVENTID,
  	WMI_TWT_RESUME_DIALOG_EVENTID,
@@ -252,7 +250,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  };
  
  enum wmi_tlv_pdev_param {
-@@ -1923,6 +1932,14 @@ enum wmi_tlv_tag {
+@@ -2058,6 +2067,14 @@ enum wmi_tlv_tag {
  	WMI_TAG_VDEV_CH_POWER_INFO,
  	WMI_TAG_EHT_RATE_SET = 0x3C4,
  	WMI_TAG_DCS_AWGN_INT_TYPE = 0x3C5,
@@ -267,15 +265,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	WMI_TAG_PDEV_PKTLOG_DECODE_INFO = 0x414,
  	WMI_TAG_TPC_STATS_GET_CMD = 0x38B,
  	WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM,
-@@ -2278,6 +2295,7 @@ struct ath12k_ppe_threshold {
- 	u32 ru_bit_mask;
- 	u32 ppet16_ppet8_ru3_ru0[PSOC_HOST_MAX_NUM_SS];
- };
-+
- struct ath12k_service_ext_param {
- 	u32 default_conc_scan_config_bits;
- 	u32 default_fw_config_bits;
-@@ -2699,6 +2717,25 @@ enum wmi_eht_mcs_support {
+@@ -2907,6 +2924,25 @@ enum wmi_eht_mcs_support {
  	WMI_EHT_MCS_NOT_SUPPORTED = 3,
  };
  
@@ -301,7 +291,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  struct wmi_mac_phy_caps_ext {
  	u32 hw_mode_id;
  	union {
-@@ -2720,6 +2757,8 @@ struct wmi_mac_phy_caps_ext {
+@@ -2928,6 +2964,8 @@ struct wmi_mac_phy_caps_ext {
  	u32 eht_cap_info_internal;
  	u32 eht_supp_mcs_ext_2G[WMI_MAX_EHT_SUPP_MCS_2G_SIZE];
  	u32 eht_supp_mcs_ext_5G[WMI_MAX_EHT_SUPP_MCS_5G_SIZE];
@@ -309,8 +299,8 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +	u32 mld_info;
  } __packed;
  
- /* 2 word representation of MAC addr */
-@@ -5975,6 +6014,7 @@ struct wmi_dbglog_config_cmd_fixed_param
+ 
+@@ -5859,6 +5897,7 @@ struct wmi_dbglog_config_cmd_fixed_param
  
  #define MAX_RADIOS 3
  
@@ -318,8 +308,8 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  #define WMI_SERVICE_READY_TIMEOUT_HZ (5 * HZ)
  #define WMI_SEND_TIMEOUT_HZ (3 * HZ)
  
-@@ -6162,6 +6202,43 @@ struct wmi_wow_ev_arg {
- 	u32 data_len;
+@@ -5890,6 +5929,43 @@ struct ath12k_wmi_base {
+ 	struct ath12k_wmi_target_cap_arg *targ_cap;
  };
  
 +struct wmi_mlo_setup_cmd_fixed_param {
@@ -362,7 +352,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  #define ATH12K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
-@@ -6326,4 +6403,8 @@ int ath12k_wmi_send_vdev_set_tpc_power(s
+@@ -6053,4 +6129,8 @@ int ath12k_wmi_pdev_ap_ps_cmd_send(struc
  int ath12k_wmi_pdev_m3_dump_enable(struct ath12k *ar, u32 enable);
  int ath12k_wmi_pdev_get_tpc_table_cmdid(struct ath12k *ar);
  void ath12k_wmi_free_tpc_stats_mem(struct ath12k *ar);

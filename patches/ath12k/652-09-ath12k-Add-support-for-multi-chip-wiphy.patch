@@ -1,7 +1,7 @@
-From 8fe0063cde2e7874678589015ba3b0f283213748 Mon Sep 17 00:00:00 2001
+From 91aa4b03dc2e64ed5548568bbcfc3f7eac11be71 Mon Sep 17 00:00:00 2001
 From: Sriram R <quic_srirrama@quicinc.com>
 Date: Fri, 31 Dec 2021 15:09:19 +0530
-Subject: [PATCH 10/10] ath12k: Add support for multi chip wiphy
+Subject: [PATCH] ath12k: Add support for multi chip wiphy
 
 Similar to combining multiple links(ar) of
 the soc(ab) into single wiphy, support for
@@ -22,18 +22,21 @@ Co-developed-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.c    | 348 ++++++++++++++++++++++++------
- drivers/net/wireless/ath/ath12k/core.h    |  13 ++
- drivers/net/wireless/ath/ath12k/mac.c     | 234 ++++++++++++--------
+ drivers/net/wireless/ath/ath12k/core.c    | 730 +++++++++++++++++-----
+ drivers/net/wireless/ath/ath12k/core.h    |  25 +-
+ drivers/net/wireless/ath/ath12k/mac.c     | 295 ++++++---
  drivers/net/wireless/ath/ath12k/mac.h     |   9 +-
+ drivers/net/wireless/ath/ath12k/mhi.c     |   2 +-
+ drivers/net/wireless/ath/ath12k/pci.c     |   4 +-
+ drivers/net/wireless/ath/ath12k/qmi.c     |  13 +-
  drivers/net/wireless/ath/ath12k/reg.c     |   9 +-
  drivers/net/wireless/ath/ath12k/reg.h     |   3 +-
- drivers/net/wireless/ath/ath12k/thermal.c |   8 +-
- 7 files changed, 459 insertions(+), 165 deletions(-)
+ drivers/net/wireless/ath/ath12k/thermal.c |  38 +-
+ 10 files changed, 853 insertions(+), 275 deletions(-)
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -31,6 +31,192 @@ module_param_named(frame_mode, ath12k_fr
+@@ -30,6 +30,192 @@ module_param_named(frame_mode, ath12k_fr
  MODULE_PARM_DESC(frame_mode,
  		 "Datapath frame mode (0: raw, 1: native wifi (default), 2: ethernet)");
  
@@ -226,7 +229,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  int ath12k_core_suspend(struct ath12k_base *ab)
  {
  	int ret;
-@@ -414,6 +600,11 @@ success:
+@@ -401,6 +587,11 @@ success:
  
  static void ath12k_core_stop(struct ath12k_base *ab)
  {
@@ -238,7 +241,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (!test_bit(ATH12K_FLAG_CRASH_FLUSH, &ab->dev_flags))
  		ath12k_qmi_firmware_stop(ab);
  
-@@ -434,22 +625,14 @@ static int ath12k_core_soc_create(struct
+@@ -421,22 +612,14 @@ static int ath12k_core_soc_create(struct
  		return ret;
  	}
  
@@ -262,7 +265,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_qmi_deinit:
  	ath12k_qmi_deinit_service(ab);
  	return ret;
-@@ -457,39 +640,20 @@ err_qmi_deinit:
+@@ -444,39 +627,20 @@ err_qmi_deinit:
  
  static void ath12k_core_soc_destroy(struct ath12k_base *ab)
  {
@@ -304,7 +307,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	ret = ath12k_spectral_init(ab);
-@@ -502,11 +666,36 @@ static int ath12k_core_pdev_create(struc
+@@ -489,11 +653,36 @@ static int ath12k_core_pdev_create(struc
  
  err_thermal_unregister:
  	ath12k_thermal_unregister(ab);
@@ -346,7 +349,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_debugfs_pdev_destroy(ab);
  
  	return ret;
-@@ -514,10 +703,6 @@ err_pdev_debug:
+@@ -501,10 +690,6 @@ err_pdev_debug:
  
  static void ath12k_core_pdev_destroy(struct ath12k_base *ab)
  {
@@ -357,7 +360,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_dp_pdev_free(ab);
  	ath12k_debugfs_pdev_destroy(ab);
  }
-@@ -527,6 +712,9 @@ static int ath12k_core_start(struct ath1
+@@ -514,6 +699,9 @@ static int ath12k_core_start(struct ath1
  {
  	int ret;
  
@@ -367,7 +370,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ret = ath12k_wmi_attach(ab);
  	if (ret) {
  		ath12k_err(ab, "failed to attach wmi: %d\n", ret);
-@@ -578,32 +766,23 @@ static int ath12k_core_start(struct ath1
+@@ -565,32 +753,23 @@ static int ath12k_core_start(struct ath1
  
  	ath12k_dp_cc_config(ab);
  
@@ -402,7 +405,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	}
  
  	/* put hardware to DBS mode */
-@@ -611,7 +790,7 @@ static int ath12k_core_start(struct ath1
+@@ -598,7 +777,7 @@ static int ath12k_core_start(struct ath1
  		ret = ath12k_wmi_set_hw_mode(ab, WMI_HOST_HW_MODE_DBS);
  		if (ret) {
  			ath12k_err(ab, "failed to send dbs mode: %d\n", ret);
@@ -411,7 +414,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		}
  	}
  
-@@ -619,13 +798,16 @@ static int ath12k_core_start(struct ath1
+@@ -606,13 +785,16 @@ static int ath12k_core_start(struct ath1
  	if (ret) {
  		ath12k_err(ab, "failed to send htt version request message: %d\n",
  			   ret);
@@ -431,7 +434,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_reo_cleanup:
  	ath12k_dp_rx_pdev_reo_cleanup(ab);
  err_hif_stop:
-@@ -635,6 +817,110 @@ err_wmi_detach:
+@@ -622,6 +804,110 @@ err_wmi_detach:
  	return ret;
  }
  
@@ -542,7 +545,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  static int ath12k_core_start_firmware(struct ath12k_base *ab,
  				      enum ath12k_firmware_mode mode)
  {
-@@ -654,6 +940,7 @@ static int ath12k_core_start_firmware(st
+@@ -641,6 +927,7 @@ static int ath12k_core_start_firmware(st
  
  int ath12k_core_qmi_firmware_ready(struct ath12k_base *ab)
  {
@@ -550,12 +553,34 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	int ret;
  
  	ret = ath12k_core_start_firmware(ab, ATH12K_FIRMWARE_MODE_NORMAL);
-@@ -691,36 +978,44 @@ int ath12k_core_qmi_firmware_ready(struc
- 	if (ath12k_frame_mode == ATH12K_HW_TXRX_RAW)
- 		set_bit(ATH12K_FLAG_RAW_MODE, &ab->dev_flags);
+@@ -661,14 +948,16 @@ int ath12k_core_qmi_firmware_ready(struc
+ 		goto err_firmware_stop;
+ 	}
  
 +	ag = ab->ag;
 +
+ 	switch (ath12k_crypto_mode) {
+ 	case ATH12K_CRYPT_MODE_SW:
+-		set_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ab->dev_flags);
+-		set_bit(ATH12K_FLAG_RAW_MODE, &ab->dev_flags);
++		set_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ag->dev_flags);
++		set_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags);
+ 		break;
+ 	case ATH12K_CRYPT_MODE_HW:
+-		clear_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ab->dev_flags);
+-		clear_bit(ATH12K_FLAG_RAW_MODE, &ab->dev_flags);
++		clear_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ag->dev_flags);
++		clear_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags);
+ 		break;
+ 	default:
+ 		ath12k_info(ab, "invalid crypto_mode: %d\n", ath12k_crypto_mode);
+@@ -676,38 +965,44 @@ int ath12k_core_qmi_firmware_ready(struc
+ 	}
+ 
+ 	if (ath12k_frame_mode == ATH12K_HW_TXRX_RAW)
+-		set_bit(ATH12K_FLAG_RAW_MODE, &ab->dev_flags);
++		set_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags);
+ 
 +	mutex_lock(&ag->mutex_lock);
  	mutex_lock(&ab->core_lock);
 +
@@ -607,7 +632,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  err_firmware_stop:
  	ath12k_qmi_firmware_stop(ab);
  
-@@ -732,10 +1027,9 @@ static int ath12k_core_reconfigure_on_cr
+@@ -719,10 +1014,9 @@ static int ath12k_core_reconfigure_on_cr
  	int ret;
  
  	mutex_lock(&ab->core_lock);
@@ -619,7 +644,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	ath12k_hif_stop(ab);
  	ath12k_wmi_detach(ab);
  	ath12k_dp_rx_pdev_reo_cleanup(ab);
-@@ -788,102 +1082,109 @@ void ath12k_core_halt(struct ath12k *ar)
+@@ -775,102 +1069,109 @@ void ath12k_core_halt(struct ath12k *ar)
  static void ath12k_core_restart(struct work_struct *work)
  {
  	struct ath12k_base *ab = container_of(work, struct ath12k_base, restart_work);
@@ -804,7 +829,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static void ath12k_core_reset(struct work_struct *work)
-@@ -939,31 +1240,163 @@ int ath12k_core_pre_init(struct ath12k_b
+@@ -926,31 +1227,163 @@ int ath12k_core_pre_init(struct ath12k_b
  	return 0;
  }
  
@@ -979,7 +1004,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  void ath12k_core_free(struct ath12k_base *ab)
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -176,7 +176,9 @@ struct ath12k_he {
+@@ -169,7 +169,9 @@ struct ath12k_he {
  };
  
  #define MAX_RADIOS 3
@@ -990,7 +1015,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  enum {
  	WMI_HOST_TP_SCALE_MAX   = 0,
  	WMI_HOST_TP_SCALE_50    = 1,
-@@ -205,6 +207,8 @@ enum ath12k_dev_flags {
+@@ -198,6 +200,8 @@ enum ath12k_dev_flags {
  	ATH12K_FLAG_REGISTERED,
  	ATH12K_FLAG_QMI_FAIL,
  	ATH12K_FLAG_HTC_SUSPEND_COMPLETE,
@@ -999,7 +1024,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  };
  
  enum ath12k_monitor_flags {
-@@ -685,6 +689,8 @@ struct ath12k {
+@@ -641,6 +645,8 @@ struct ath12k {
  	/* pdev_idx starts from 0 whereas pdev->pdev_id starts with 1 */
  	u8 pdev_idx;
  	u8 lmac_id;
@@ -1008,8 +1033,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  	struct completion peer_assoc_done;
  	struct completion peer_delete_done;
-@@ -879,16 +885,31 @@ struct ath12k_hw {
- 	struct ath12k radio[0] __aligned(sizeof(void *));
+@@ -835,16 +841,31 @@ struct ath12k_reg_freq {
+          u32 end_freq;
  };
  
 +/* Holds info on the group of SOCs that are registered as a single wiphy */
@@ -1040,7 +1065,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	/* HW channel counters frequency value in hertz common to all MACs */
  	u32 cc_freq_hz;
  
-@@ -1142,6 +1163,8 @@ int ath12k_coredump_mhi_update_bhie_tabl
+@@ -1096,6 +1117,8 @@ int ath12k_coredump_mhi_update_bhie_tabl
  					  void __iomem *va,
  					  phys_addr_t pa, size_t size);
  
@@ -1051,7 +1076,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -6464,7 +6464,8 @@ static void ath12k_mac_setup_he_eht_cap(
+@@ -6528,7 +6528,8 @@ static void ath12k_mac_setup_he_eht_cap(
  		band->n_iftype_data = count;
  	}
  
@@ -1061,17 +1086,17 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		count = ath12k_mac_copy_he_eht_cap(ar, cap,
  						   ar->mac.iftype[NL80211_BAND_5GHZ],
  						   NL80211_BAND_5GHZ);
-@@ -7116,7 +7117,8 @@ static int ath12k_mac_setup_vdev_create_
- 		params->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
- 		params->chains[NL80211_BAND_2GHZ].rx = ar->num_rx_chains;
+@@ -7175,7 +7176,8 @@ static int ath12k_mac_setup_vdev_create_
+ 		arg->chains[NL80211_BAND_2GHZ].tx = ar->num_tx_chains;
+ 		arg->chains[NL80211_BAND_2GHZ].rx = ar->num_rx_chains;
  	}
 -	if (pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP) {
 +	if (pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP &&
 +	    !ar->supports_6ghz) {
- 		params->chains[NL80211_BAND_5GHZ].tx = ar->num_tx_chains;
- 		params->chains[NL80211_BAND_5GHZ].rx = ar->num_rx_chains;
+ 		arg->chains[NL80211_BAND_5GHZ].tx = ar->num_tx_chains;
+ 		arg->chains[NL80211_BAND_5GHZ].rx = ar->num_rx_chains;
  	}
-@@ -10007,22 +10009,36 @@ static void
+@@ -10075,22 +10077,36 @@ static void
  ath12k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
  				enum ieee80211_reconfig_type reconfig_type)
  {
@@ -1117,7 +1142,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static void
-@@ -10548,10 +10564,13 @@ static const struct wiphy_iftype_ext_cap
+@@ -10616,10 +10632,13 @@ static const struct wiphy_iftype_ext_cap
  	},
  };
  
@@ -1132,19 +1157,19 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	idr_for_each(&ar->txmgmt_idr, ath12k_mac_tx_mgmt_pending_free, ar);
  	idr_destroy(&ar->txmgmt_idr);
  
-@@ -10560,26 +10579,39 @@ static void __ath12k_mac_unregister(stru
+@@ -10628,25 +10647,40 @@ static void __ath12k_mac_unregister(stru
  	kfree(ar->mac.sbands[NL80211_BAND_6GHZ].channels);
  }
  
 -void ath12k_mac_unregister(struct ath12k_base *ab)
 +static void __ath12k_mac_unregister(struct ath12k *ar)
- {
++ {
 +	__ath12k_mac_pre_unregister(ar);
 +	__ath12k_mac_post_unregister(ar);
 +}
 +
 +void ath12k_mac_unregister(struct ath12k_hw_group *ag)
-+{
+ {
 +	struct ath12k_hw *ah = ag->ah;
  	struct ath12k *ar;
 -	struct ath12k_pdev *pdev;
@@ -1160,17 +1185,18 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
 -		__ath12k_mac_unregister(ar);
 +	ar = ah->radio;
++
 +	for (i = 0; i < ah->num_radio; i++) {
 +		__ath12k_mac_pre_unregister(ar);
 +		ar++;
  	}
- 
 -	kfree(ab->ah->hw->wiphy->iface_combinations[0].limits);
 -	kfree(ab->ah->hw->wiphy->iface_combinations);
-+	ieee80211_unregister_hw(ah->hw);
  
 -	ieee80211_unregister_hw(ab->ah->hw);
 -	SET_IEEE80211_DEV(ab->ah->hw, NULL);
++	ieee80211_unregister_hw(ah->hw);
++
 +	ar = ah->radio;
 +	for (i = 0; i < ah->num_radio; i++) {
 +		__ath12k_mac_post_unregister(ar);
@@ -1184,7 +1210,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  }
  
  static int __ath12k_mac_register(struct ath12k *ar)
-@@ -10611,12 +10643,6 @@ static int __ath12k_mac_register(struct
+@@ -10679,12 +10713,6 @@ static int __ath12k_mac_register(struct
  	if (cap->nss_ratio_enabled)
  		ieee80211_hw_set(hw, SUPPORTS_VHT_EXT_NSS_BW);
  
@@ -1197,7 +1223,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	/* TODO: Check if HT capability advertised from firmware is different
  	 * for each band for a dual band capable radio. It will be tricky to
  	 * handle it when the ht capability different for each band.
-@@ -10634,14 +10660,15 @@ static int __ath12k_mac_register(struct
+@@ -10702,14 +10730,15 @@ static int __ath12k_mac_register(struct
  	return 0;
  }
  
@@ -1216,20 +1242,21 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	u32 antennas_rx, antennas_tx;
  	bool unregister = false;
  	static const u32 cipher_suites[] = {
-@@ -10656,17 +10683,23 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10724,18 +10753,24 @@ int ath12k_mac_register(struct ath12k_ba
  		WLAN_CIPHER_SUITE_CCMP_256,
  	};
  
--	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
--		return 0;
 +	/* Use the first chip in group to advertise some features/info
 +	 * these are expected to be similar for chips in group
 +	 */
 +	ab_dflt = ag->ab[0];
  
--	hw = ab->ah->hw;
+-	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
+-		return 0;
 +	ah = ag->ah;
 +	hw = ah->hw;
+ 
+-	hw = ab->ah->hw;
  	hw->wiphy->max_ap_assoc_sta = 0;
  	antennas_rx = 0;
  	antennas_tx = 0;
@@ -1246,7 +1273,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		if (ab->pdevs_macaddr_valid) {
  			ether_addr_copy(ar->mac_addr, pdev->mac_addr);
  		} else {
-@@ -10686,25 +10719,28 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10755,25 +10790,28 @@ int ath12k_mac_register(struct ath12k_ba
  		antennas_tx = max_t(u32, antennas_tx, cap->tx_chain_mask);
  
  		hw->wiphy->max_ap_assoc_sta += ar->max_num_stations;
@@ -1272,19 +1299,19 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 -	/* Initialize channel counters frequency value in hertz */
 -	ab->cc_freq_hz = 320000;
 -	ab->free_vdev_map = (1LL << (ab->num_radios * TARGET_NUM_VDEVS)) - 1;
+-
+-	/* TODO: SET_IEEE80211_PERM_ADDR() */
+-	SET_IEEE80211_DEV(hw, ab->dev);
 +	SET_IEEE80211_PERM_ADDR(hw, ab_dflt->mac_addr);
 +	SET_IEEE80211_DEV(hw, ab_dflt->dev);
  
--	/* TODO: SET_IEEE80211_PERM_ADDR() */
--	SET_IEEE80211_DEV(hw, ab->dev);
--
 -	hw->wiphy->interface_modes = ab->hw_params->interface_modes;
 +	/* Iface modes are expected to be similar for partner chips */
 +	hw->wiphy->interface_modes = ab_dflt->hw_params->interface_modes;
  	hw->wiphy->ru_punct_supp_bw = NL80211_RU_PUNCT_SUPP_BW_80;
  
  	ieee80211_hw_set(hw, SIGNAL_DBM);
-@@ -10722,6 +10758,12 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10791,6 +10829,12 @@ int ath12k_mac_register(struct ath12k_ba
  	ieee80211_hw_set(hw, QUEUE_CONTROL);
  	ieee80211_hw_set(hw, SUPPORTS_TX_FRAG);
  	ieee80211_hw_set(hw, REPORTS_LOW_ACK);
@@ -1297,7 +1324,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	if (ath12k_frame_mode == ATH12K_HW_TXRX_ETHERNET) {
  		ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
  		ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
-@@ -10746,6 +10788,7 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10815,6 +10859,7 @@ int ath12k_mac_register(struct ath12k_ba
  	hw->wiphy->features |= NL80211_FEATURE_AP_MODE_CHAN_WIDTH_CHANGE |
  			       NL80211_FEATURE_AP_SCAN;
  
@@ -1305,7 +1332,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	hw->queues = ATH12K_HW_MAX_QUEUES;
  	hw->wiphy->tx_queue_len = ATH12K_QUEUE_LEN;
  	hw->offchannel_tx_hw_queue = ATH12K_HW_MAX_QUEUES - 1;
-@@ -10770,9 +10813,10 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10839,9 +10884,10 @@ int ath12k_mac_register(struct ath12k_ba
  	hw->wiphy->mbssid_max_interfaces = ab->num_radios * TARGET_NUM_VDEVS;
  	hw->wiphy->ema_max_profile_periodicity = TARGET_EMA_MAX_PROFILE_PERIOD;
  
@@ -1318,7 +1345,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		hw->netdev_features = NETIF_F_HW_CSUM;
  		ieee80211_hw_set(hw, SW_CRYPTO_CONTROL);
  		ieee80211_hw_set(hw, SUPPORT_FAST_XMIT);
-@@ -10780,11 +10824,11 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10849,11 +10895,11 @@ int ath12k_mac_register(struct ath12k_ba
  
  	ret = ieee80211_register_hw(hw);
  	if (ret) {
@@ -1332,7 +1359,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		/* There's a race between calling ieee80211_register_hw()
  		 * and here where the monitor mode is enabled for a little
  		 * while. But that time is so short and in practise it make
-@@ -10792,10 +10836,10 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10861,10 +10907,10 @@ int ath12k_mac_register(struct ath12k_ba
  		 */
  		hw->wiphy->interface_modes &= ~BIT(NL80211_IFTYPE_MONITOR);
  
@@ -1346,11 +1373,10 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		ret = ath12k_regd_update(ar, true);
  		if (ret) {
  			ath12k_err(ar->ab, "ath12k regd update failed: %d\n", ret);
-@@ -10807,76 +10851,70 @@ int ath12k_mac_register(struct ath12k_ba
+@@ -10876,76 +10922,69 @@ int ath12k_mac_register(struct ath12k_ba
  			ath12k_err(ar->ab, "debugfs registration failed: %d\n", ret);
  			goto err_unregister_hw;
  		}
-+
 +		ar++;
  	}
  
@@ -1434,7 +1460,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	for (i = 0; i < ab->num_radios; i++) {
  		pdev = &ab->pdevs[i];
 -		ar = ath12k_mac_get_ar(ah, i);
-+		ar = ath12k_mac_get_ar(ah, *link_id);
++	ar = ath12k_mac_get_ar(ah, *link_id);
 +		if (!ar)
 +			return -EINVAL;
  
@@ -1447,8 +1473,8 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
 +		ar->link_idx = *link_id;
  
  		ar->wmi = &ab->wmi_ab.wmi[i];
- 		/* FIXME wmi[0] is already initialized during attach,
-@@ -10912,26 +10950,91 @@ int ath12k_mac_allocate(struct ath12k_ba
+ 		/* FIXME: wmi[0] is already initialized during attach,
+@@ -10981,26 +11020,91 @@ int ath12k_mac_allocate(struct ath12k_ba
  		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
  		ar->monitor_vdev_id = -1;
  		clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
@@ -1559,7 +1585,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  
  struct ath12k_generic_iter {
  	struct ath12k *ar;
-@@ -129,10 +130,10 @@ struct ath12k_generic_iter {
+@@ -58,10 +59,10 @@ enum ath12k_supported_bw {
  extern const struct htt_rx_ring_tlv_filter ath12k_mac_mon_status_filter_default;
  
  void ath12k_mac_ap_ps_recalc(struct ath12k *ar);
@@ -1574,6 +1600,69 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  int ath12k_mac_hw_ratecode_to_legacy_rate(u8 hw_rc, u8 preamble, u8 *rateidx,
  					  u16 *rate);
  u8 ath12k_mac_bitrate_to_idx(const struct ieee80211_supported_band *sband,
+--- a/drivers/net/wireless/ath/ath12k/mhi.c
++++ b/drivers/net/wireless/ath/ath12k/mhi.c
+@@ -332,7 +332,7 @@ static void ath12k_mhi_op_status_cb(stru
+ 		ath12k_warn(ab, "firmware crashed: MHI_CB_SYS_ERROR\n");
+ 		break;
+ 	case MHI_CB_EE_RDDM:
+-		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags)))
++		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags)))
+ 			queue_work(ab->workqueue_aux, &ab->reset_work);
+ 		ath12k_hal_dump_srng_stats(ab);
+ 		break;
+--- a/drivers/net/wireless/ath/ath12k/pci.c
++++ b/drivers/net/wireless/ath/ath12k/pci.c
+@@ -1387,6 +1387,7 @@ static int ath12k_pci_probe(struct pci_d
+ 		ath12k_err(ab, "failed to init core: %d\n", ret);
+ 		goto err_free_irq;
+ 	}
++
+ 	return 0;
+ 
+ err_free_irq:
+@@ -1422,10 +1423,11 @@ static void ath12k_pci_remove(struct pci
+ 		ath12k_pci_power_down(ab);
+ 		ath12k_debugfs_soc_destroy(ab);
+ 		ath12k_qmi_deinit_service(ab);
++		ath12k_core_put_hw_group(ab);
+ 		goto qmi_fail;
+ 	}
+ 
+-	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags);
++	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags);
+ 
+ 	cancel_work_sync(&ab->reset_work);
+ 	ath12k_core_deinit(ab);
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4587,7 +4587,8 @@ static void ath12k_qmi_driver_event_work
+ 			break;
+ 		case ATH12K_QMI_EVENT_FW_READY:
+ 			clear_bit(ATH12K_FLAG_QMI_FAIL, &ab->dev_flags);
+-			if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags)) {
++			if (test_bit(ATH12K_FLAG_QMI_FW_READY_COMPLETE,
++				     &ab->dev_flags)) {
+ 				ath12k_hal_dump_srng_stats(ab);
+ 				queue_work(ab->workqueue, &ab->restart_work);
+ 				break;
+@@ -4600,8 +4601,14 @@ static void ath12k_qmi_driver_event_work
+ 				clear_bit(ATH12K_FLAG_CRASH_FLUSH,
+ 					  &ab->dev_flags);
+ 				clear_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags);
+-				ath12k_core_qmi_firmware_ready(ab);
+-				set_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags);
++			ret = ath12k_core_qmi_firmware_ready(ab);
++			if (ret) {
++				ath12k_warn(ab, "failed to init after firmware ready: %d\n", ret);
++				set_bit(ATH12K_FLAG_QMI_FAIL, &ab->dev_flags);
++				break;
++			}
++			set_bit(ATH12K_FLAG_QMI_FW_READY_COMPLETE,
++				&ab->dev_flags);
+ 			}
+ 
+ 			break;
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
 @@ -126,8 +126,7 @@ ath12k_reg_send_request(struct ath12k *a
@@ -1586,7 +1675,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  {
  	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
  	struct ath12k_hw *ah = hw->priv;
-@@ -747,12 +746,6 @@ void ath12k_regd_update_work(struct work
+@@ -746,12 +745,6 @@ void ath12k_regd_update_work(struct work
  	}
  }
  
@@ -1601,19 +1690,19 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  	int i;
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
-@@ -26,7 +26,8 @@ enum ath12k_dfs_region {
+@@ -83,7 +83,8 @@ struct ath12k_reg_info {
+ 		[WMI_REG_CURRENT_MAX_AP_TYPE][WMI_REG_MAX_CLIENT_TYPE];
  };
  
- /* ATH12K Regulatory API's */
 -void ath12k_reg_init(struct ath12k_base *ab);
 +void ath12k_reg_notifier(struct wiphy *wiphy,
 +			 struct regulatory_request *request);
  void ath12k_reg_free(struct ath12k_base *ab);
  void ath12k_regd_update_work(struct work_struct *work);
- struct ieee80211_regdomain *
+ struct ieee80211_regdomain *ath12k_reg_build_regd(struct ath12k_base *ab,
 --- a/drivers/net/wireless/ath/ath12k/thermal.c
 +++ b/drivers/net/wireless/ath/ath12k/thermal.c
-@@ -155,36 +155,44 @@ int ath12k_thermal_set_throttling(struct
+@@ -153,36 +153,44 @@ int ath12k_thermal_set_throttling(struct
  	return ret;
  }
  
@@ -1664,7 +1753,7 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  			goto err_thermal_destroy;
  		}
  
-@@ -205,23 +213,31 @@ int ath12k_thermal_register(struct ath12
+@@ -203,23 +211,31 @@ int ath12k_thermal_register(struct ath12
  	return 0;
  
  err_thermal_destroy:
@@ -1701,67 +1790,3 @@ Signed-off-by: Sriram R <quic_srirrama@quicinc.com>
  		thermal_cooling_device_unregister(ar->thermal.cdev);
  	}
  }
---- a/drivers/net/wireless/ath/ath12k/pci.c
-+++ b/drivers/net/wireless/ath/ath12k/pci.c
-@@ -1326,6 +1326,7 @@ static int ath12k_pci_probe(struct pci_d
- 		ath12k_err(ab, "failed to init core: %d\n", ret);
- 		goto err_free_irq;
- 	}
-+
- 	return 0;
- 
- err_free_irq:
-@@ -1361,10 +1362,11 @@ static void ath12k_pci_remove(struct pci
- 		ath12k_pci_power_down(ab);
- 		ath12k_debugfs_soc_destroy(ab);
- 		ath12k_qmi_deinit_service(ab);
-+		ath12k_core_put_hw_group(ab);
- 		goto qmi_fail;
- 	}
- 
--	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags);
-+	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags);
- 
- 	cancel_work_sync(&ab->reset_work);
- 	ath12k_core_deinit(ab);
---- a/drivers/net/wireless/ath/ath12k/qmi.c
-+++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -4576,7 +4576,8 @@ static void ath12k_qmi_driver_event_work
- 			break;
- 		case ATH12K_QMI_EVENT_FW_READY:
- 			clear_bit(ATH12K_FLAG_QMI_FAIL, &ab->dev_flags);
--			if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags)) {
-+			if (test_bit(ATH12K_FLAG_QMI_FW_READY_COMPLETE,
-+				     &ab->dev_flags)) {
- 				ath12k_hal_dump_srng_stats(ab);
- 				queue_work(ab->workqueue, &ab->restart_work);
- 				break;
-@@ -4589,8 +4590,15 @@ static void ath12k_qmi_driver_event_work
- 				clear_bit(ATH12K_FLAG_CRASH_FLUSH,
- 					  &ab->dev_flags);
- 				clear_bit(ATH12K_FLAG_RECOVERY, &ab->dev_flags);
--				ath12k_core_qmi_firmware_ready(ab);
--				set_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags);
-+				ret = ath12k_core_qmi_firmware_ready(ab);
-+				if (ret) {
-+					ath12k_warn(ab, "failed to init after firmware ready: %d\n", ret);
-+					set_bit(ATH12K_FLAG_QMI_FAIL, &ab->dev_flags);
-+					break;
-+				}
-+				set_bit(ATH12K_FLAG_QMI_FW_READY_COMPLETE,
-+					&ab->dev_flags);
-+
- 			}
- 
- 			break;
---- a/drivers/net/wireless/ath/ath12k/mhi.c
-+++ b/drivers/net/wireless/ath/ath12k/mhi.c
-@@ -328,7 +328,7 @@ static void ath12k_mhi_op_status_cb(stru
- 		ath12k_warn(ab, "firmware crashed: MHI_CB_SYS_ERROR\n");
- 		break;
- 	case MHI_CB_EE_RDDM:
--		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->dev_flags)))
-+		if (!(test_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags)))
- 			queue_work(ab->workqueue_aux, &ab->reset_work);
- 		ath12k_hal_dump_srng_stats(ab);
- 		break;

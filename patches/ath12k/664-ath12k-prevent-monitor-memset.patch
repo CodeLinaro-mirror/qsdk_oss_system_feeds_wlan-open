@@ -1,4 +1,4 @@
-From ae44eeef4e8395932faa9ea8929e08220a356eb7 Mon Sep 17 00:00:00 2001
+From bbb941a0e03470e5690f92b1094df7238a86f30b Mon Sep 17 00:00:00 2001
 From: P Praneesh <quic_ppranees@quicinc.com>
 Date: Thu, 1 Sep 2022 19:31:21 +0530
 Subject: [PATCH] ath12k: improve CPU utilisation by avoiding memset
@@ -33,13 +33,15 @@ PerfTop:   12664 irqs/sec  kernel:98.2%  exact:  0.0% lost: 0/0 drop: 0/54782 [4
 
 Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/dp_mon.c | 66 +++++++++++++++++++++-----------
- drivers/net/wireless/ath/ath12k/hal_rx.h |  8 +++-
+ drivers/net/wireless/ath/ath12k/dp_mon.c | 66 +++++++++++++++---------
+ drivers/net/wireless/ath/ath12k/hal_rx.h |  8 ++-
  2 files changed, 49 insertions(+), 25 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
+index 9f880d2..0e6d540 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -1841,12 +1841,12 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12
+@@ -1842,12 +1842,12 @@ ath12k_dp_mon_rx_merg_msdus(struct ath12k *ar, u32 mpdu_idx,
  	if (!head_msdu)
  		goto err_merge_fail;
  
@@ -54,7 +56,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	ath12k_dp_mon_fill_rx_stats(ar, ppdu_info, rxs);
  
-@@ -2145,7 +2145,7 @@ static void ath12k_dp_mon_rx_deliver_msd
+@@ -2147,7 +2147,7 @@ static void ath12k_dp_mon_rx_deliver_msdu(struct ath12k *ar, struct napi_struct
  	}
  
  	if (!(status->flag & RX_FLAG_ONLY_MONITOR))
@@ -63,7 +65,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	spin_lock_bh(&ar->ab->base_lock);
  	peer = ath12k_dp_rx_h_find_peer(ar->ab, msdu);
  	if (peer && peer->sta)
-@@ -2299,10 +2299,10 @@ ath12k_dp_mon_parse_rx_msdu_end(u8 *tlv_
+@@ -2301,10 +2301,10 @@ ath12k_dp_mon_parse_rx_msdu_end(u8 *tlv_data, struct hal_rx_mon_ppdu_info *ppdu_
  
  	decap_format = u32_get_bits(info, RX_MSDU_END_INFO11_DECAP_FORMAT);
  
@@ -78,7 +80,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  }
  
  static void
-@@ -2312,7 +2312,7 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct a
+@@ -2314,7 +2314,7 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct ath12k *ar,
  {
  	int offset;
  
@@ -87,7 +89,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_warn(ar->ab, "MPDU count reached max limit\n");
  		return;
  	}
-@@ -2327,7 +2327,7 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct a
+@@ -2329,7 +2329,7 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct ath12k *ar,
  		struct ath12k_skb_rxcb *rxcb;
  		struct dp_rxdma_ring *buf_ring;
  		struct ath12k_dp *dp = &ar->ab->dp;
@@ -96,7 +98,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  		buf_ring = &dp->rxdma_mon_buf_ring;
  		spin_lock_bh(&buf_ring->idr_lock);
-@@ -2348,7 +2348,8 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct a
+@@ -2350,7 +2350,8 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct ath12k *ar,
  
  		offset = packet_info->dma_length + ATH12K_WIFIRX_DOT11_OFFSET;
  
@@ -104,9 +106,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +		mpdu_count = ppdu_info->cmn_mpdu_info.mpdu_count;
 +		msdu_count = ppdu_info->cmn_mpdu_info.mon_mpdu[mpdu_count].msdu_count;
  		if (ath12k_dp_pkt_set_pktlen(msdu, offset) ||
- 		    msdu_count > HAL_RX_MAX_MSDU) {
+ 		    msdu_count >= HAL_RX_MAX_MSDU) {
  			dev_kfree_skb_any(msdu);
-@@ -2356,20 +2357,22 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct a
+@@ -2358,20 +2359,22 @@ ath12k_dp_mon_parse_rx_dest_tlv(struct ath12k *ar,
  		}
  
  		if (!msdu_count)
@@ -136,7 +138,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		break;
  	}
  	case HAL_RX_MON_STATUS_MSDU_END:
-@@ -2449,8 +2452,8 @@ ath12k_dp_mon_rx_parse_mon_status(struct
+@@ -2452,8 +2455,8 @@ ath12k_dp_mon_rx_parse_mon_status(struct ath12k *ar,
  	if (hal_status != HAL_RX_MON_STATUS_PPDU_DONE)
  		return hal_status;
  
@@ -147,7 +149,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		if (!mon_mpdu)
  			continue;
  
-@@ -3564,6 +3567,23 @@ ath12k_dp_mon_rx_update_peer_mu_stats(st
+@@ -3568,6 +3571,23 @@ ath12k_dp_mon_rx_update_peer_mu_stats(struct ath12k *ar,
  		ath12k_dp_mon_rx_update_user_stats(ar, ppdu_info, i);
  }
  
@@ -171,7 +173,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  int ath12k_dp_mon_srng_process(struct ath12k *ar, int mac_id, int *budget,
  			       bool flag, struct napi_struct *napi)
  {
-@@ -3652,7 +3672,7 @@ move_next:
+@@ -3670,7 +3690,7 @@ move_next:
  		return 0;
  
  	if (!ppdu_info->ppdu_continuation)
@@ -179,8 +181,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +		ath12k_dp_mon_rx_memset_ppdu_info(ppdu_info);
  
  	while ((skb = __skb_dequeue(&skb_list))) {
- 		if (flag == ATH12K_DP_RX_MONITOR_MODE)
-@@ -3697,7 +3717,7 @@ next_skb:
+ 		if (log_type)
+@@ -3723,7 +3743,7 @@ next_skb:
  		rcu_read_unlock();
  free_skb:
  		dev_kfree_skb_any(skb);
@@ -189,7 +191,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ppdu_info->peer_id = HAL_INVALID_PEERID;
  	}
  
-@@ -3801,7 +3821,7 @@ move_next:
+@@ -3814,7 +3834,7 @@ move_next:
  		return 0;
  
  	if (!ppdu_info->ppdu_continuation)
@@ -198,7 +200,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  
  	while ((skb = __skb_dequeue(&skb_list))) {
  
-@@ -3846,7 +3866,7 @@ next_skb:
+@@ -3853,7 +3873,7 @@ next_skb:
  		rcu_read_unlock();
  free_skb:
  		dev_kfree_skb_any(skb);
@@ -207,6 +209,8 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ppdu_info->peer_id = HAL_INVALID_PEERID;
  	}
  
+diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.h b/drivers/net/wireless/ath/ath12k/hal_rx.h
+index d368ddb..18cb0bf 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.h
 @@ -181,6 +181,11 @@ struct hal_rx_u_sig_info {
@@ -238,3 +242,6 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  };
  
  #define HAL_RX_PPDU_START_INFO0_PPDU_ID		GENMASK(15, 0)
+-- 
+2.17.1
+

@@ -1,4 +1,4 @@
-From e59e0243756319b1556903deb4a3ae6a4d5157c7 Mon Sep 17 00:00:00 2001
+From 4a6746ae23ec864e34b98829db8bdb0e114fce5d Mon Sep 17 00:00:00 2001
 From: Dinesh Karthikeyan <quic_dinek@quicinc.com>
 Date: Thu, 9 Jun 2022 14:45:57 +0530
 Subject: [PATCH] ath12k: Add support for PCSS SSR dump collection
@@ -20,19 +20,19 @@ PCSS dump collection. Add devcoredump support to save collected dump.
 
 Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.h     |   1 +
- drivers/net/wireless/ath/ath12k/coredump.c |  54 +++++++
+ drivers/net/wireless/ath/ath12k/coredump.c |  49 +++++
  drivers/net/wireless/ath/ath12k/coredump.h |   7 +
- drivers/net/wireless/ath/ath12k/debugfs.c  |  64 ++++++++
- drivers/net/wireless/ath/ath12k/qmi.c      | 231 +++++++++++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/qmi.h      |  39 +++++
- drivers/net/wireless/ath/ath12k/wmi.c      |  31 ++++
+ drivers/net/wireless/ath/ath12k/qmi.c      | 213 +++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/qmi.h      |  39 ++++
+ drivers/net/wireless/ath/ath12k/wmi.c      |  31 +++
  drivers/net/wireless/ath/ath12k/wmi.h      |  15 ++
- 8 files changed, 442 insertions(+)
+ 6 files changed, 354 insertions(+)
 
+diff --git a/drivers/net/wireless/ath/ath12k/coredump.c b/drivers/net/wireless/ath/ath12k/coredump.c
+index 838bdf7..3d0039b 100644
 --- a/drivers/net/wireless/ath/ath12k/coredump.c
 +++ b/drivers/net/wireless/ath/ath12k/coredump.c
-@@ -220,6 +220,13 @@ void ath12k_coredump_download_rddm(struc
+@@ -217,6 +217,13 @@ void ath12k_coredump_download_rddm(struct ath12k_base *ab)
  			seg_info->type = ATH12K_FW_PAGEABLE_DATA;
  			seg_info++;
  		}
@@ -46,7 +46,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  		seg_info->len = ab->qmi.target_mem[i].size;
  		seg_info->addr = ab->qmi.target_mem[i].paddr;
  		seg_info->vaddr = ab->qmi.target_mem[i].v.addr;
-@@ -337,3 +344,45 @@ int ath12k_coredump_mhi_update_bhie_tabl
+@@ -326,3 +333,45 @@ int ath12k_coredump_mhi_update_bhie_table(struct ath12k_base *ab,
  
  	return ret;
  }
@@ -92,9 +92,11 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
 +       if (ret < 0)
 +               ath12k_warn(ab, "qmi M3 dump upload done failed\n");
 +}
+diff --git a/drivers/net/wireless/ath/ath12k/coredump.h b/drivers/net/wireless/ath/ath12k/coredump.h
+index 45ab53a..464cb03 100644
 --- a/drivers/net/wireless/ath/ath12k/coredump.h
 +++ b/drivers/net/wireless/ath/ath12k/coredump.h
-@@ -79,6 +79,8 @@ void ath12k_coredump_build_inline(struct
+@@ -79,6 +79,8 @@ void ath12k_coredump_build_inline(struct ath12k_base *ab,
  				  struct ath12k_dump_segment *segments, int num_seg);
  void ath12k_coredump_qdss_dump(struct ath12k_base *ab,
  			       struct ath12k_qmi_event_qdss_trace_save_data *event_data);
@@ -103,7 +105,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  #else
  static inline void ath12k_coredump_download_rddm(struct ath12k_base *ab)
  {
-@@ -94,6 +96,11 @@ ath12k_coredump_qdss_dump(struct ath12k_
+@@ -94,6 +96,11 @@ ath12k_coredump_qdss_dump(struct ath12k_base *ab,
  			  struct ath12k_qmi_event_qdss_trace_save_data *event_data)
  {
  }
@@ -115,6 +117,8 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  #endif
  
  #endif
+diff --git a/drivers/net/wireless/ath/ath12k/qmi.c b/drivers/net/wireless/ath/ath12k/qmi.c
+index 2e08fa2..b29e7ac 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
 @@ -15,6 +15,7 @@
@@ -125,10 +129,11 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  
  #define SLEEP_CLOCK_SELECT_INTERNAL_BIT	0x02
  #define HOST_CSTATE_BIT			0x04
-@@ -968,6 +969,24 @@ static struct qmi_elem_info qmi_wlanfw_i
+@@ -967,6 +968,24 @@ static struct qmi_elem_info qmi_wlanfw_ind_register_req_msg_v01_ei[] = {
+ 		.offset         = offsetof(struct qmi_wlanfw_ind_register_req_msg_v01,
  		                           qdss_trace_save_enable),
  	},
- 	{
++	{
 +                .data_type      = QMI_OPT_FLAG,
 +                .elem_len       = 1,
 +                .elem_size      = sizeof(u8),
@@ -146,11 +151,10 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
 +                .offset         = offsetof(struct qmi_wlanfw_ind_register_req_msg_v01,
 +                                           m3_dump_upload_req_enable),
 +        },
-+	{
+ 	{
  		.data_type	= QMI_EOTI,
  		.array_type	= NO_ARRAY,
- 		.tlv_type	= QMI_COMMON_TLV_TYPE,
-@@ -2519,6 +2538,87 @@ out:
+@@ -2518,6 +2537,87 @@ out:
  	return ret;
  }
  
@@ -238,7 +242,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  static int ath12k_qmi_send_qdss_trace_config_download_req(struct ath12k_base *ab,
  							  const u8 *buffer,
  							  unsigned int buffer_len)
-@@ -2789,6 +2889,8 @@ static int ath12k_qmi_fw_ind_register_se
+@@ -2765,6 +2865,8 @@ static int ath12k_qmi_fw_ind_register_send(struct ath12k_base *ab)
  	req->qdss_trace_save_enable = 1;
  	req->qdss_trace_free_enable_valid = 1;
  	req->qdss_trace_free_enable = 1;
@@ -247,7 +251,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  
  	req->pin_connect_result_enable_valid = 0;
  	req->pin_connect_result_enable = 0;
-@@ -3056,6 +3158,17 @@ static int ath12k_qmi_assign_target_mem_
+@@ -3033,6 +3135,17 @@ static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab)
  				            "qmi fail to update BHI table %d\n", ret);
  			idx++;
  			break;
@@ -265,7 +269,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  
  		default:
  			ath12k_warn(ab, "qmi ignore invalid mem req type %d\n",
-@@ -3710,6 +3823,71 @@ static int ath12k_qmi_process_coldboot_c
+@@ -3639,6 +3752,71 @@ int ath12k_qmi_firmware_start(struct ath12k_base *ab,
  	return 0;
  }
  
@@ -337,8 +341,8 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  static void ath12k_qmi_qdss_mem_free(struct ath12k_qmi *qmi)
  {
  	struct ath12k_base *ab = qmi->ab;
-@@ -4114,6 +4292,30 @@ static void ath12k_qmi_msg_cold_boot_cal
- 	ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi cold boot calibration done\n");
+@@ -4091,6 +4269,30 @@ static void ath12k_qmi_msg_cold_boot_cal_done_cb(struct qmi_handle *qmi_hdl,
+         ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi cold boot calibration done\n");
  }
  
 +static void ath12k_qmi_m3_dump_upload_req_ind_cb(struct qmi_handle *qmi_hdl,
@@ -368,22 +372,22 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  static void ath12k_wlfw_qdss_trace_req_mem_ind_cb(struct qmi_handle *qmi_hdl,
  						  struct sockaddr_qrtr *sq,
  						  struct qmi_txn *txn,
-@@ -4270,6 +4472,14 @@ static const struct qmi_msg_handler ath1
- 	},
- 	{
- 		.type = QMI_INDICATION,
+@@ -4245,6 +4447,14 @@ static const struct qmi_msg_handler ath12k_qmi_msg_handlers[] = {
+                         sizeof(struct qmi_wlanfw_fw_cold_cal_done_ind_msg_v01),
+                 .fn = ath12k_qmi_msg_cold_boot_cal_done_cb,
+     },
++	{
++ 		.type = QMI_INDICATION,
 +		.msg_id = QMI_WLFW_M3_DUMP_UPLOAD_REQ_IND_V01,
 +		.ei = qmi_wlanfw_m3_dump_upload_req_ind_msg_v01_ei,
 +		.decoded_size =
 +			sizeof(struct qmi_wlanfw_m3_dump_upload_req_ind_msg_v01),
 +		.fn = ath12k_qmi_m3_dump_upload_req_ind_cb,
 +	},
-+	{
-+		.type = QMI_INDICATION,
+ 	{
+ 		.type = QMI_INDICATION,
  		.msg_id = QMI_WLFW_QDSS_TRACE_REQ_MEM_IND_V01,
- 		.ei = qmi_wlanfw_request_mem_ind_msg_v01_ei,
- 		.decoded_size =
-@@ -4392,6 +4602,9 @@ static void ath12k_qmi_driver_event_work
+@@ -4362,6 +4572,9 @@ static void ath12k_qmi_driver_event_work(struct work_struct *work)
  		case ATH12K_QMI_EVENT_QDSS_TRACE_SAVE:
  			ath12k_qmi_event_qdss_trace_save_hdlr(qmi, event->data);
  			break;
@@ -393,6 +397,8 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  		default:
  			ath12k_warn(ab, "invalid event type: %d", event->type);
  			break;
+diff --git a/drivers/net/wireless/ath/ath12k/qmi.h b/drivers/net/wireless/ath/ath12k/qmi.h
+index 93fb49d..2b3ddab 100644
 --- a/drivers/net/wireless/ath/ath12k/qmi.h
 +++ b/drivers/net/wireless/ath/ath12k/qmi.h
 @@ -31,6 +31,7 @@
@@ -412,7 +418,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  
  #define QMI_WLANFW_MAX_DATA_SIZE_V01		6144
  #define ATH12K_FIRMWARE_MODE_OFF		4
-@@ -79,6 +82,7 @@ enum ath12k_qmi_event_type {
+@@ -77,6 +80,7 @@ enum ath12k_qmi_event_type {
  	ATH12K_QMI_EVENT_POWER_DOWN,
  	ATH12K_QMI_EVENT_QDSS_TRACE_REQ_MEM = 15,
  	ATH12K_QMI_EVENT_QDSS_TRACE_SAVE,
@@ -420,7 +426,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  	ATH12K_QMI_EVENT_MAX,
  };
  
-@@ -88,6 +92,13 @@ struct ath12k_qmi_driver_event {
+@@ -86,6 +90,13 @@ struct ath12k_qmi_driver_event {
  	void *data;
  };
  
@@ -434,7 +440,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  struct ath12k_qmi_ce_cfg {
  	const struct ce_pipe_config *tgt_ce;
  	int tgt_ce_len;
-@@ -160,6 +171,12 @@ struct ath12k_qmi {
+@@ -158,6 +169,12 @@ struct ath12k_qmi {
  	struct dev_mem_info dev_mem[ATH12K_QMI_WLFW_MAX_DEV_MEM_NUM_V01];
  };
  
@@ -447,7 +453,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  #define QMI_WLANFW_QDSS_TRACE_CONFIG_DOWNLOAD_REQ_MSG_V01_MAX_LEN 6167
  #define QMI_WLANFW_QDSS_TRACE_CONFIG_DOWNLOAD_RESP_MSG_V01_MAX_LEN 7
  #define QMI_WLANFW_QDSS_TRACE_CONFIG_DOWNLOAD_REQ_V01 0x0044
-@@ -206,6 +223,16 @@ struct qmi_wlanfw_qdss_trace_mode_resp_m
+@@ -204,6 +221,16 @@ struct qmi_wlanfw_qdss_trace_mode_resp_msg_v01 {
  };
  
  #define QMI_WLANFW_HOST_CAP_REQ_MSG_V01_MAX_LEN		261
@@ -464,7 +470,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  #define QMI_WLANFW_HOST_CAP_REQ_V01			0x0034
  #define QMI_WLANFW_HOST_CAP_RESP_MSG_V01_MAX_LEN	7
  #define QMI_WLFW_HOST_CAP_RESP_V01			0x0034
-@@ -339,6 +366,8 @@ struct qmi_wlanfw_ind_register_req_msg_v
+@@ -345,6 +372,8 @@ struct qmi_wlanfw_ind_register_req_msg_v01 {
  	u8 qdss_trace_save_enable;
  	u8 qdss_trace_free_enable_valid;
  	u8 qdss_trace_free_enable;
@@ -473,7 +479,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  };
  
  struct qmi_wlanfw_ind_register_resp_msg_v01 {
-@@ -563,6 +592,8 @@ struct qmi_wlanfw_bdf_download_resp_msg_
+@@ -569,6 +598,8 @@ struct qmi_wlanfw_bdf_download_resp_msg_v01 {
  #define QMI_WLANFW_M3_INFO_RESP_V01		0x003C
  #define QMI_WLANFW_M3_INFO_REQ_V01		0x003C
  
@@ -482,7 +488,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  struct qmi_wlanfw_m3_info_req_msg_v01 {
  	u64 addr;
  	u32 size;
-@@ -691,6 +722,12 @@ struct wlfw_ini_resp_msg_v01 {
+@@ -697,6 +728,12 @@ struct wlfw_ini_resp_msg_v01 {
  	struct qmi_response_type_v01 resp;
  };
  
@@ -495,16 +501,18 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  int ath12k_qmi_firmware_start(struct ath12k_base *ab,
  			      u32 mode);
  void ath12k_qmi_firmware_stop(struct ath12k_base *ab);
-@@ -702,4 +739,6 @@ int ath12k_qmi_init_service(struct ath12
+@@ -708,4 +745,6 @@ int ath12k_qmi_init_service(struct ath12k_base *ab);
  int ath12k_send_qdss_trace_mode_req(struct ath12k_base *ab,
  				    enum qmi_wlanfw_qdss_trace_mode_enum_v01 mode);
  int ath12k_enable_fwlog(struct ath12k_base *ab);
 +int ath12k_qmi_m3_dump_upload_done_ind_send(struct ath12k_base *ab,
 +					    u32 pdev_id, int status);
  #endif
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 4c7708a..84aad9a 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -8683,6 +8683,37 @@ int ath12k_wmi_simulate_awgn(struct ath1
+@@ -7926,6 +7926,37 @@ int ath12k_wmi_simulate_awgn(struct ath12k *ar, u32 chan_bw_interference_bitmap)
          return ath12k_wmi_send_unit_test_cmd(ar, wmi_ut, awgn_args);
  }
  
@@ -542,9 +550,11 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  int ath12k_wmi_connect(struct ath12k_base *ab)
  {
  	u32 i;
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index 0905dcd..a7f14e8 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -2138,6 +2138,11 @@ enum wmi_tlv_service {
+@@ -2272,6 +2272,11 @@ enum wmi_tlv_service {
  	WMI_MAX_EXT2_SERVICE,
  };
  
@@ -556,7 +566,7 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  enum {
  	WMI_SMPS_FORCED_MODE_NONE = 0,
  	WMI_SMPS_FORCED_MODE_DISABLED,
-@@ -4204,6 +4209,15 @@ enum wmi_awgn_test_args_idx {
+@@ -4135,6 +4140,15 @@ enum wmi_awgn_test_args_idx {
          WMI_AWGN_MAX_TEST_ARGS,
  };
  
@@ -572,10 +582,12 @@ Signed-off-by: Dinesh Karthikeyan <quic_dinek@quicinc.com>
  struct wmi_unit_test_cmd {
  	__le32 tlv_header;
  	__le32 vdev_id;
-@@ -5985,5 +5999,6 @@ int ath12k_wmi_wow_enable(struct ath12k
- int ath12k_wmi_send_vdev_set_tpc_power(struct ath12k *ar,
+@@ -5418,4 +5432,5 @@ int ath12k_wmi_send_vdev_set_tpc_power(struct ath12k *ar,
                                          u32 vdev_id,
                                          struct ath12k_reg_tpc_power_info *param);
+ int ath12k_wmi_pdev_ap_ps_cmd_send(struct ath12k *ar, u8 pdev_id, u32 value);
 +int ath12k_wmi_pdev_m3_dump_enable(struct ath12k *ar, u32 enable);
- 
  #endif
+-- 
+2.17.1
+

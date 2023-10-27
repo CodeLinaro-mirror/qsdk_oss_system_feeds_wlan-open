@@ -1,8 +1,7 @@
-From 22f04f2a2893f5dfd13ea1871a61d127b13349f4 Mon Sep 17 00:00:00 2001
+From 6ef78d41c39ed9f50fca5333929d1ac82661da95 Mon Sep 17 00:00:00 2001
 From: Muna Sinada <quic_msinada@quicinc.com>
 Date: Mon, 8 Feb 2021 20:08:34 -0800
-Subject: [PATCH v2] ath12k: add support to configure spatial reuse parameter
- set
+Subject: [PATCH] ath12k: add support to configure spatial reuse parameter set
 
 The SPR parameter set comprises OBSS PD threshold for SRG
 and non SRG and Bitmap of BSS color and partial BSSID. This adds
@@ -10,17 +9,68 @@ support to configure fields of SPR element to firmware.
 
 Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 ---
- .../net/wireless/ath/ath12k/debugfs_htt_stats.c    |  12 ++
- .../net/wireless/ath/ath12k/debugfs_htt_stats.h    |  15 +-
- drivers/net/wireless/ath/ath12k/mac.c              | 179 +++++++++++++++-
- drivers/net/wireless/ath/ath12k/mac.h              |   6 +
- drivers/net/wireless/ath/ath12k/wmi.c              | 227 +++++++++++++++++++++
- drivers/net/wireless/ath/ath12k/wmi.h              |  36 ++++
- 6 files changed, 471 insertions(+), 4 deletions(-)
+ .../wireless/ath/ath12k/debugfs_htt_stats.c   |  11 +
+ .../wireless/ath/ath12k/debugfs_htt_stats.h   |  15 +-
+ drivers/net/wireless/ath/ath12k/mac.c         | 179 +++++++++++++-
+ drivers/net/wireless/ath/ath12k/mac.h         |   6 +
+ drivers/net/wireless/ath/ath12k/testmode.c    |   2 +-
+ drivers/net/wireless/ath/ath12k/wmi.c         | 228 +++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/wmi.h         |  36 +++
+ 7 files changed, 471 insertions(+), 6 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
+index 6319c00..8dc204b 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
+@@ -3846,6 +3846,17 @@ htt_print_pdev_obss_pd_stats_tlv_v(const void *tag_buf,
+ 			   htt_stats_buf->num_obss_tx_ppdu_success);
+ 	len += HTT_DBG_OUT(buf + len, buf_len - len, "OBSS Tx failures PPDU = %u\n",
+ 			   htt_stats_buf->num_obss_tx_ppdu_failure);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG Opportunities = %u\n",
++			   htt_stats_buf->num_non_srg_opportunities);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG tried PPDU = %u\n",
++			   htt_stats_buf->num_non_srg_ppdu_tried);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG success PPDU = %u\n",
++			   htt_stats_buf->num_non_srg_ppdu_success);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG Opportunities = %u\n",
++			   htt_stats_buf->num_srg_opportunities);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG tried PPDU = %u\n",
++			   htt_stats_buf->num_srg_ppdu_tried);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG success PPDU = %u\n",
+ 
+ 	if (len >= buf_len)
+ 		buf[buf_len - 1] = 0;
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+index c6d8ea5..9738680 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
++++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
+@@ -1785,8 +1785,19 @@ struct htt_tx_sounding_stats_tlv {
+ };
+ 
+ struct htt_pdev_obss_pd_stats_tlv {
+-	u32        num_obss_tx_ppdu_success;
+-	u32        num_obss_tx_ppdu_failure;
++	u32 num_obss_tx_ppdu_success;
++	u32 num_obss_tx_ppdu_failure;
++	u32 num_sr_tx_transmissions;
++	u32 num_spatial_reuse_opportunities;
++	u32 num_non_srg_opportunities;
++	u32 num_non_srg_ppdu_tried;
++	u32 num_non_srg_ppdu_success;
++	u32 num_srg_opportunities;
++	u32 num_srg_ppdu_tried;
++	u32 num_srg_ppdu_success;
++	u32 num_psr_opportunities;
++	u32 num_psr_ppdu_tried;
++	u32 num_psr_ppdu_success;
+ };
+ 
+ struct htt_ring_backpressure_stats_tlv {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index f6c3760..3c995b2 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -3125,6 +3125,182 @@ static int ath12k_mac_fils_discovery(str
+@@ -3178,6 +3178,182 @@ static int ath12k_mac_fils_discovery(struct ath12k_vif *arvif,
  	return ret;
  }
  
@@ -203,7 +253,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  					   struct ieee80211_vif *vif,
  					   struct ieee80211_bss_conf *info,
-@@ -3389,8 +3565,7 @@ static void ath12k_mac_op_bss_info_chang
+@@ -3442,8 +3618,7 @@ static void ath12k_mac_op_bss_info_changed(struct ieee80211_hw *hw,
  	}
  
  	if (changed & BSS_CHANGED_HE_OBSS_PD)
@@ -213,9 +263,11 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  
  	if (changed & BSS_CHANGED_HE_BSS_COLOR) {
  		if (vif->type == NL80211_IFTYPE_AP) {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.h b/drivers/net/wireless/ath/ath12k/mac.h
+index 18c1832..5e5a5bb 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.h
 +++ b/drivers/net/wireless/ath/ath12k/mac.h
-@@ -120,6 +120,12 @@ struct ath12k_generic_iter {
+@@ -38,6 +38,12 @@ struct ath12k_generic_iter {
  #define ATH12K_PEER_RX_NSS_160MHZ		GENMASK(2, 0)
  #define ATH12K_PEER_RX_NSS_80_80MHZ		GENMASK(5, 3)
  
@@ -225,18 +277,42 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +#define ATH12K_OBSS_PD_SRG_EN				BIT(30)
 +#define ATH12K_OBSS_PD_NON_SRG_EN			BIT(31)
 +
- extern const struct htt_rx_ring_tlv_filter ath12k_mac_mon_status_filter_default;
+ #define ATH12K_TX_POWER_MAX_VAL	70
+ #define ATH12K_TX_POWER_MIN_VAL	0
  
- void ath12k_mac_destroy(struct ath12k_base *ab);
+diff --git a/drivers/net/wireless/ath/ath12k/testmode.c b/drivers/net/wireless/ath/ath12k/testmode.c
+index d1cfb06..f09c551 100644
+--- a/drivers/net/wireless/ath/ath12k/testmode.c
++++ b/drivers/net/wireless/ath/ath12k/testmode.c
+@@ -155,7 +155,7 @@ static int ath12k_tm_cmd_get_version(struct ath12k *ar, struct nlattr *tb[])
+ 
+ static int ath12k_tm_cmd_wmi(struct ath12k *ar, struct nlattr *tb[])
+ {
+-	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
+ 	struct sk_buff *skb;
+ 	u32 cmd_id, buf_len;
+ 	int ret;
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 05a1b84..96805c5 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -3160,6 +3160,232 @@ int ath12k_wmi_obss_color_cfg_cmd(struct
+@@ -147,7 +147,7 @@ static const struct ath12k_wmi_tlv_policy ath12k_wmi_tlv_policies[] = {
+ 	[WMI_TAG_VDEV_DELETE_RESP_EVENT] = {
+ 		.min_len = sizeof(struct wmi_vdev_delete_resp_event) },
+ 	[WMI_TAG_MUEDCA_PARAMS_CONFIG_EVENT] = {
+-+		.min_len = sizeof(struct wmi_pdev_update_muedca_event) },
++		.min_len = sizeof(struct wmi_pdev_update_muedca_event) },
+ };
+ 
+ static __le32 ath12k_wmi_tlv_hdr(u32 cmd, u32 len)
+@@ -3110,6 +3110,232 @@ int ath12k_wmi_obss_color_cfg_cmd(struct ath12k *ar, u32 vdev_id,
  	return ret;
  }
  
 +int ath12k_wmi_pdev_set_srg_bss_color_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -273,7 +349,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +int
 +ath12k_wmi_pdev_set_srg_patial_bssid_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -311,7 +387,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +int
 +ath12k_wmi_pdev_srg_obss_color_enable_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -349,7 +425,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +int
 +ath12k_wmi_pdev_srg_obss_bssid_enable_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -387,7 +463,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +int
 +ath12k_wmi_pdev_non_srg_obss_color_enable_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -425,7 +501,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
 +int
 +ath12k_wmi_pdev_non_srg_obss_bssid_enable_bitmap(struct ath12k *ar, u32 *bitmap)
 +{
-+	struct ath12k_pdev_wmi *wmi = ar->wmi;
++	struct ath12k_wmi_pdev *wmi = ar->wmi;
 +	struct ath12k_base *ab = wmi->wmi_ab->ab;
 +	struct wmi_pdev_obss_pd_bitmap_cmd *cmd;
 +	struct sk_buff *skb;
@@ -463,9 +539,11 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  int ath12k_wmi_send_bss_color_change_enable_cmd(struct ath12k *ar, u32 vdev_id,
  						bool enable)
  {
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index a814120..eb34c84 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -270,6 +270,16 @@ enum wmi_tlv_cmd_id {
+@@ -379,6 +379,16 @@ enum wmi_tlv_cmd_id {
  	WMI_PDEV_DMA_RING_CFG_REQ_CMDID,
  	WMI_PDEV_HE_TB_ACTION_FRM_CMDID,
  	WMI_PDEV_PKTLOG_FILTER_CMDID,
@@ -482,7 +560,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  	WMI_VDEV_CREATE_CMDID = WMI_TLV_CMD(WMI_GRP_VDEV),
  	WMI_VDEV_DELETE_CMDID,
  	WMI_VDEV_START_REQUEST_CMDID,
-@@ -934,6 +944,9 @@ enum wmi_tlv_pdev_param {
+@@ -1043,6 +1053,9 @@ enum wmi_tlv_pdev_param {
  	WMI_PDEV_PARAM_RADIO_CHAN_STATS_ENABLE,
  	WMI_PDEV_PARAM_RADIO_DIAGNOSIS_ENABLE,
  	WMI_PDEV_PARAM_MESH_MCAST_ENABLE,
@@ -492,7 +570,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  };
  
  enum wmi_tlv_vdev_param {
-@@ -1845,6 +1858,12 @@ enum wmi_tlv_tag {
+@@ -1954,6 +1967,12 @@ enum wmi_tlv_tag {
  	WMI_TAG_SERVICE_READY_EXT2_EVENT = 0x334,
  	WMI_TAG_FILS_DISCOVERY_TMPL_CMD = 0x344,
  	WMI_TAG_MAC_PHY_CAPABILITIES_EXT = 0x36F,
@@ -505,7 +583,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  	WMI_TAG_REGULATORY_RULE_EXT_STRUCT = 0x3A9,
  	WMI_TAG_REG_CHAN_LIST_CC_EXT_EVENT,
  	WMI_TAG_EHT_RATE_SET = 0x3C4,
-@@ -2071,6 +2090,7 @@ enum wmi_tlv_service {
+@@ -2180,6 +2199,7 @@ enum wmi_tlv_service {
  	WMI_TLV_SERVICE_PER_PEER_HTT_STATS_RESET = 213,
  	WMI_TLV_SERVICE_FREQINFO_IN_METADATA = 219,
  	WMI_TLV_SERVICE_EXT2_MSG = 220,
@@ -513,7 +591,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  
  	WMI_MAX_EXT_SERVICE = 256,
  
-@@ -5080,6 +5100,12 @@ struct wmi_obss_spatial_reuse_params_cmd
+@@ -4717,6 +4737,12 @@ struct wmi_obss_spatial_reuse_params_cmd {
  	__le32 vdev_id;
  } __packed;
  
@@ -526,7 +604,7 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  #define ATH12K_BSS_COLOR_COLLISION_SCAN_PERIOD_MS		200
  #define ATH12K_OBSS_COLOR_COLLISION_DETECTION_DISABLE		0
  #define ATH12K_OBSS_COLOR_COLLISION_DETECTION			1
-@@ -5623,6 +5649,16 @@ int ath12k_wmi_send_twt_enable_cmd(struc
+@@ -5059,6 +5085,16 @@ int ath12k_wmi_send_twt_enable_cmd(struct ath12k *ar, u32 pdev_id);
  int ath12k_wmi_send_twt_disable_cmd(struct ath12k *ar, u32 pdev_id);
  int ath12k_wmi_send_obss_spr_cmd(struct ath12k *ar, u32 vdev_id,
  				 struct ieee80211_he_obss_pd *he_obss_pd);
@@ -543,47 +621,6 @@ Signed-off-by: Muna Sinada <quic_msinada@quicinc.com>
  int ath12k_wmi_obss_color_cfg_cmd(struct ath12k *ar, u32 vdev_id,
  				  u8 bss_color, u32 period,
  				  bool enable);
---- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
-+++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.c
-@@ -3846,6 +3846,17 @@ htt_print_pdev_obss_pd_stats_tlv_v(const
- 			   htt_stats_buf->num_obss_tx_ppdu_success);
- 	len += HTT_DBG_OUT(buf + len, buf_len - len, "OBSS Tx failures PPDU = %u\n",
- 			   htt_stats_buf->num_obss_tx_ppdu_failure);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG Opportunities = %u\n",
-+			   htt_stats_buf->num_non_srg_opportunities);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG tried PPDU = %u\n",
-+			   htt_stats_buf->num_non_srg_ppdu_tried);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "Non-SRG success PPDU = %u\n",
-+			   htt_stats_buf->num_non_srg_ppdu_success);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG Opportunities = %u\n",
-+			   htt_stats_buf->num_srg_opportunities);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG tried PPDU = %u\n",
-+			   htt_stats_buf->num_srg_ppdu_tried);
-+	len += HTT_DBG_OUT(buf + len, buf_len - len, "SRG success PPDU = %u\n",
- 
- 	if (len >= buf_len)
- 		buf[buf_len - 1] = 0;
---- a/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
-+++ b/drivers/net/wireless/ath/ath12k/debugfs_htt_stats.h
-@@ -1785,8 +1785,19 @@ struct htt_tx_sounding_stats_tlv {
- };
- 
- struct htt_pdev_obss_pd_stats_tlv {
--	u32        num_obss_tx_ppdu_success;
--	u32        num_obss_tx_ppdu_failure;
-+	u32 num_obss_tx_ppdu_success;
-+	u32 num_obss_tx_ppdu_failure;
-+	u32 num_sr_tx_transmissions;
-+	u32 num_spatial_reuse_opportunities;
-+	u32 num_non_srg_opportunities;
-+	u32 num_non_srg_ppdu_tried;
-+	u32 num_non_srg_ppdu_success;
-+	u32 num_srg_opportunities;
-+	u32 num_srg_ppdu_tried;
-+	u32 num_srg_ppdu_success;
-+	u32 num_psr_opportunities;
-+	u32 num_psr_ppdu_tried;
-+	u32 num_psr_ppdu_success;
- };
- 
- struct htt_ring_backpressure_stats_tlv {
+-- 
+2.17.1
+

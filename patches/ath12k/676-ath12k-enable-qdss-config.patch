@@ -1,4 +1,4 @@
-From 165ac2ffd9343e9f30fe5be7e75f228c2e79db88 Mon Sep 17 00:00:00 2001
+From bdc0cf3b4483735b47aca18c6d9f91f6149f556c Mon Sep 17 00:00:00 2001
 From: Harshitha Prem <quic_hprem@quicinc.com>
 Date: Fri, 11 Nov 2022 08:33:34 +0530
 Subject: [PATCH] ath12k: enable qdss config
@@ -7,12 +7,11 @@ QDSS config should be enabled by default.
 
 Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/coredump.c | 74 +++++++++++-----------
- drivers/net/wireless/ath/ath12k/coredump.h |  1 +
- drivers/net/wireless/ath/ath12k/hw.c       |  9 ---
- drivers/net/wireless/ath/ath12k/hw.h       |  3 -
- drivers/net/wireless/ath/ath12k/qmi.c      | 36 +++++------
- 5 files changed, 55 insertions(+), 68 deletions(-)
+ drivers/net/wireless/ath/ath12k/coredump.c | 85 +++++++++++++---------
+ drivers/net/wireless/ath/ath12k/coredump.h |  3 +
+ drivers/net/wireless/ath/ath12k/hw.c       |  3 -
+ drivers/net/wireless/ath/ath12k/qmi.c      |  9 +--
+ 4 files changed, 53 insertions(+), 47 deletions(-)
 
 --- a/drivers/net/wireless/ath/ath12k/coredump.c
 +++ b/drivers/net/wireless/ath/ath12k/coredump.c
@@ -55,30 +54,29 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  	struct ath12k_pci *ar_pci = (struct ath12k_pci *)ab->drv_priv;
 @@ -154,6 +184,7 @@ void ath12k_coredump_download_rddm(struc
  	struct ath12k_dump_segment *segment, *seg_info;
- 	int i, rem_seg_cnt = 0, len, num_seg, seg_sz, qdss_seg_cnt = 1;
+ 	int i, rem_seg_cnt = 0, len, num_seg, seg_sz;
  	int skip_count = 0;
 +	enum ath12k_fw_crash_dump_type mem_type;
  
  	ath12k_mhi_coredump(mhi_ctrl, false);
  
-@@ -208,51 +239,31 @@ void ath12k_coredump_download_rddm(struc
+@@ -204,50 +235,31 @@ void ath12k_coredump_download_rddm(struc
  	}
  
  	for (i = 0; i < ab->qmi.mem_seg_count; i++) {
--		if (ab->qmi.target_mem[i].type == CALDB_MEM_REGION_TYPE) {
--			if (ath12k_cold_boot_cal &&
--			    ab->hw_params->cold_boot_calib) {
--				seg_info->len = ab->qmi.target_mem[i].size;
--				seg_info->addr = ab->qmi.target_mem[i].paddr;
--				seg_info->vaddr = ab->qmi.target_mem[i].v.ioaddr;
--				seg_info->type = ATH12K_FW_CALDB;
--				ath12k_info(ab,
--					"seg vaddr is %px len is 0x%x type %d\n",
--					    seg_info->vaddr,
--					    seg_info->len,
+-		if (ab->qmi.target_mem[i].type == CALDB_MEM_REGION_TYPE &&
+-		    ath12k_cold_boot_cal &&
+-		    ab->hw_params->cold_boot_calib) {
+-			seg_info->len = ab->qmi.target_mem[i].size;
+-			seg_info->addr = ab->qmi.target_mem[i].paddr;
+-			seg_info->vaddr = ab->qmi.target_mem[i].v.ioaddr;
+-			seg_info->type = ATH12K_FW_CALDB;
+-			ath12k_info(ab,
+-				    "seg vaddr is %px len is 0x%x type %d\n",
+-				    seg_info->vaddr,
+-				    seg_info->len,
 -				    seg_info->type);
--				seg_info++;
--			}
+-			seg_info++;
 +		mem_type = ath12k_coredump_get_dump_type(ab->qmi.target_mem[i].type);
 +		if(mem_type == ATH12K_FW_DUMP_TYPE_MAX) {
 +			ath12k_info(ab, "target mem region type %d not supported", ab->qmi.target_mem[i].type);
@@ -91,9 +89,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 -			seg_info->vaddr = ab->qmi.target_mem[i].v.ioaddr;
 -			seg_info->type = ATH12K_FW_MLO_GLOBAL;
 -			seg_info++;
-+		if (mem_type == ATH12K_FW_CALDB &&
-+		    !(ath12k_cold_boot_cal && ab->hw_params->cold_boot_calib))
- 			continue;
+-			continue;
 -		}
 -		if (ab->qmi.target_mem[i].type == PAGEABLE_MEM_REGION_TYPE) {
 -			seg_info->len = ab->qmi.target_mem[i].size;
@@ -109,11 +105,14 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 -			seg_info->vaddr = ab->qmi.target_mem[i].v.ioaddr;
 -			seg_info->type = ATH12K_FW_M3_DUMP;
 -			seg_info++;
++		if (mem_type == ATH12K_FW_CALDB &&
++		    !(ath12k_cold_boot_cal && ab->hw_params->cold_boot_calib))
+ 			continue;
 +
 +		if (!ab->qmi.target_mem[i].paddr) {
 +			skip_count++;
 +			ath12k_info(ab, "Skipping mem region type %d", ab->qmi.target_mem[i].type);
- 			continue;
++ 			continue;
  		}
 +
  		seg_info->len = ab->qmi.target_mem[i].size;
@@ -123,7 +122,7 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
 +		seg_info->vaddr = ab->qmi.target_mem[i].v.ioaddr;
 +		seg_info->type = mem_type;
 +		ath12k_info(ab,
-+			    "seg vaddr is %px len is 0x%x type %d\n",
++		    "seg vaddr is %px len is 0x%x type %d\n",
 +			    seg_info->vaddr,
 +			    seg_info->len,
 +			    seg_info->type);
@@ -142,101 +141,13 @@ Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
  };
  
  struct ath12k_dump_segment {
---- a/drivers/net/wireless/ath/ath12k/hw.c
-+++ b/drivers/net/wireless/ath/ath12k/hw.c
-@@ -1007,9 +1007,6 @@ static const struct ath12k_hw_params ath
- 
- 		.hal_ops = &hal_qcn9274_ops,
- 
--		.qdss_config = NULL,
--		.qdss_config_len = 0,
--
- 		.fix_l1ss = false,
- 
- 		.supports_ap_ps = true,
-@@ -1075,9 +1072,6 @@ static const struct ath12k_hw_params ath
- 
- 		.hal_ops = &hal_wcn7850_ops,
- 
--		.qdss_config = ath12k_hw_qdss_config_wcn7850,
--		.qdss_config_len = sizeof(ath12k_hw_qdss_config_wcn7850),
--
- 		.fix_l1ss = false,
- 
- 		.supports_ap_ps = true,
-@@ -1143,9 +1137,6 @@ static const struct ath12k_hw_params ath
- 
- 		.hal_ops = &hal_qcn9274_ops,
- 
--		.qdss_config = NULL,
--		.qdss_config_len = 0,
--
- 		.fix_l1ss = false,
- 
- 		.supports_ap_ps = true,
---- a/drivers/net/wireless/ath/ath12k/hw.h
-+++ b/drivers/net/wireless/ath/ath12k/hw.h
-@@ -195,9 +195,6 @@ struct ath12k_hw_params {
- 
- 	const struct hal_ops *hal_ops;
- 
--	const char *qdss_config;
--	unsigned int qdss_config_len;
--
- 	bool fix_l1ss;
- 
- 	bool supports_ap_ps;
 --- a/drivers/net/wireless/ath/ath12k/qmi.c
 +++ b/drivers/net/wireless/ath/ath12k/qmi.c
-@@ -2735,26 +2735,31 @@ out:
- 
- static int ath12k_qmi_send_qdss_config(struct ath12k_base *ab)
- {
--	unsigned int config_len;
--	const char *config;
-+	struct device *dev = ab->dev;
-+	const struct firmware *fw_entry;
-+	char filename[ATH12K_QMI_MAX_QDSS_CONFIG_FILE_NAME_SIZE];
- 	int ret;
- 
--	config = ab->hw_params->qdss_config;
--	if (!config)
--		/* this hw doesn't need qdss config */
--		return 0;
-+	snprintf(filename, sizeof(filename),
-+		"%s/%s/%s", ATH12K_FW_DIR, ab->hw_params->fw.dir,
-+		ATH12K_QMI_DEFAULT_QDSS_CONFIG_FILE_NAME);
-+	ret = request_firmware(&fw_entry, filename, dev);
- 
--	config_len = ab->hw_params->qdss_config_len;
-+	if (ret) {
-+		ath12k_warn(ab, "qmi failed to load QDSS config: %s\n", filename);
-+		return ret;
-+	}
- 
--	ret = ath12k_qmi_send_qdss_trace_config_download_req(ab,
--							     config,
--							     config_len);
-+	ret = ath12k_qmi_send_qdss_trace_config_download_req(ab, fw_entry->data,
-+							     fw_entry->size);
- 	if (ret < 0) {
- 		ath12k_warn(ab, "qmi failed to load QDSS config to FW: %d\n", ret);
--		return ret;
-+		goto out;
- 	}
-+out:
-+	release_firmware(fw_entry);
-+	return ret;
- 
--	return 0;
- }
- 
- static int ath12k_qmi_fill_mlo_host_caps(struct ath12k_base *ab,
-@@ -4440,13 +4445,6 @@ static int ath12k_qmi_event_load_bdf(str
+@@ -4165,13 +4165,6 @@ static int ath12k_qmi_event_mem_request(
  		return ret;
  	}
  
--	/* TODO: QDSS should be removed after WCN7850 firmware is fixed */
+-	/* BRINGUP: QDSS should be removed */
 -	ret = ath12k_qmi_send_qdss_config(ab);
 -	if (ret < 0) {
 -		ath12k_warn(ab, "Failed to download QDSS config to FW: %d\n", ret);

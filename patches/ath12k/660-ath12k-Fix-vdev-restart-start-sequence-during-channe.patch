@@ -1,4 +1,4 @@
-From 174dd4f864a480eea3ff45b959bb4095082a5a87 Mon Sep 17 00:00:00 2001
+From 4654e36e81cfcbe799dd6908395ccdc578580855 Mon Sep 17 00:00:00 2001
 From: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 Date: Tue, 16 Aug 2022 14:33:04 +0530
 Subject: [PATCH] ath12k: Fix vdev restart/start sequence during channel switch
@@ -26,22 +26,28 @@ other non transmitting vif.
 
 Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 170 ++++++++++++++++++++------
+ drivers/net/wireless/ath/ath12k/wmi.h |   2 +-
+ 2 files changed, 136 insertions(+), 36 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 88fef37..b5b3a69 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -897,8 +897,10 @@ static int ath12k_mac_vdev_setup_sync(st
- 	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "ath12k vdev setup timeout %d\n",
+@@ -1044,8 +1044,10 @@ static int ath12k_mac_vdev_setup_sync(struct ath12k *ar)
  		   ATH12K_VDEV_SETUP_TIMEOUT_HZ);
+ 
  	if (!wait_for_completion_timeout(&ar->vdev_setup_done,
 -					 ATH12K_VDEV_SETUP_TIMEOUT_HZ))
-+					 ATH12K_VDEV_SETUP_TIMEOUT_HZ)) {
++					 ATH12K_VDEV_SETUP_TIMEOUT_HZ)){
 +		WARN_ON(1);
  		return -ETIMEDOUT;
 +	}
  
  	return ar->last_wmi_vdev_start_status ? -EINVAL : 0;
  }
-@@ -8175,9 +8177,88 @@ static int ath12k_mac_vdev_start(struct
+@@ -8233,9 +8235,88 @@ static int ath12k_mac_vdev_start(struct ath12k_vif *arvif,
  }
  
  static int ath12k_mac_vdev_restart(struct ath12k_vif *arvif,
@@ -132,7 +138,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  }
  
  struct ath12k_mac_change_chanctx_arg {
-@@ -8302,19 +8383,23 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -8360,19 +8441,23 @@ ath12k_mac_update_vif_chan(struct ath12k *ar,
  	struct ath12k_vif *arvif, *tx_arvif;
  	struct cfg80211_chan_def *chandef = NULL;
  	int ret;
@@ -163,7 +169,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  		arvif = (void *)vifs[i].vif->drv_priv;
  
  		if (vifs[i].vif->type == NL80211_IFTYPE_MONITOR)
-@@ -8331,41 +8416,56 @@ ath12k_mac_update_vif_chan(struct ath12k
+@@ -8389,41 +8474,56 @@ ath12k_mac_update_vif_chan(struct ath12k *ar,
  		if (WARN_ON(!arvif->is_started))
  			continue;
  
@@ -173,15 +179,15 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 -                spin_unlock_bh(&ar->data_lock);
 +		if (!arvif->is_up)
 +			continue;
-+
+ 
+-		ret = ath12k_mac_vdev_restart(arvif, &vifs[i].new_ctx->def);
 +		if (arvif->vif->mbssid_tx_vif &&
 +		    arvif == (struct ath12k_vif *)arvif->vif->mbssid_tx_vif->drv_priv) {
 +			tx_vif = arvif->vif->mbssid_tx_vif;
 +			tx_arvif = ath12k_vif_to_arvif(tx_vif);
 +			trans_vdev_index = i;
 +		}
- 
--		ret = ath12k_mac_vdev_restart(arvif, &vifs[i].new_ctx->def);
++
 +		ret = ath12k_wmi_vdev_down(ar, arvif->vdev_id);
  		if (ret) {
 -			ath12k_warn(ab, "failed to restart vdev %d: %d\n",
@@ -245,14 +251,19 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  				    arvif->vdev_id, ret);
  			continue;
  		}
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index 97820da..8379352 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -2805,7 +2805,7 @@ struct wmi_ssid {
- 	u32 ssid[8];
+@@ -3001,7 +3001,7 @@ struct ath12k_wmi_ssid_params {
+ 	u8 ssid[ATH12K_WMI_SSID_LEN];
  } __packed;
  
--#define ATH12K_VDEV_SETUP_TIMEOUT_HZ (3 * HZ)
+-#define ATH12K_VDEV_SETUP_TIMEOUT_HZ (5 * HZ)
 +#define ATH12K_VDEV_SETUP_TIMEOUT_HZ (10 * HZ)
  
  struct wmi_vdev_start_request_cmd {
  	__le32 tlv_header;
+-- 
+2.17.1
+

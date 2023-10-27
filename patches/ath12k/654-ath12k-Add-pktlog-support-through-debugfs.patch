@@ -44,10 +44,13 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/Kconfig
 +++ b/drivers/net/wireless/ath/ath12k/Kconfig
-@@ -45,3 +45,13 @@ config ATH12K_SPECTRAL
+@@ -49,4 +49,13 @@ config ATH12K_SPECTRAL
+ 	help
  	  Enable ath12k spectral scan support
  
- 	  Say Y to enable access to the FFT/spectral data via debugfs.
+-	  Say Y to enable access to the FFT/spectral data via debugfs.
+\ No newline at end of file
++	  Say Y to enable access to the FFT/spectral data via debugfs.
 +
 +config ATH12K_PKTLOG
 +	bool "ath12k packet logging support"
@@ -57,10 +60,9 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
 +	and reception, rate information and ani state. The packet
 +	log uses ring buffer to dump the data. The buffer size,
 +	frame filters can be altered by debugfs entries.
-+
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
-@@ -28,6 +28,7 @@ ath12k-$(CPTCFG_ATH12K_TRACING) += trace
+@@ -26,6 +26,7 @@ ath12k-$(CPTCFG_ATH12K_TRACING) += trace
  ath12k-$(CONFIG_THERMAL) += thermal.o
  ath12k-$(CPTCFG_ATH12K_SPECTRAL) += spectral.o
  ath12k-$(CPTCFG_WANT_DEV_COREDUMP) += coredump.o
@@ -78,7 +80,7 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -587,6 +588,11 @@ struct ath12k_debug {
+@@ -546,6 +547,11 @@ struct ath12k_debug {
  	u32 pktlog_mode;
  	u32 pktlog_peer_valid;
  	u8 pktlog_peer_addr[ETH_ALEN];
@@ -92,7 +94,7 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1254,6 +1254,7 @@ int ath12k_debugfs_register(struct ath12
+@@ -1618,6 +1618,7 @@ int ath12k_debugfs_register(struct ath12
  	ath12k_debugfs_htt_stats_init(ar);
  
  	ath12k_debugfs_fw_stats_init(ar);
@@ -100,7 +102,7 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
  	debugfs_create_file("ext_tx_stats", 0644,
  			    ar->debug.debugfs_pdev, ar,
-@@ -1285,6 +1286,7 @@ int ath12k_debugfs_register(struct ath12
+@@ -1649,6 +1650,7 @@ int ath12k_debugfs_register(struct ath12
  
  void ath12k_debugfs_unregister(struct ath12k *ar)
  {
@@ -110,8 +112,8 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  int ath12k_debugfs_create(void)
 --- a/drivers/net/wireless/ath/ath12k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.h
-@@ -247,4 +247,31 @@ static inline int ath12k_debugfs_rx_filt
- 
+@@ -250,4 +250,31 @@ static inline void ath12k_debugfs_remove
+ }
  #endif /* CPTCFG_MAC80211_DEBUGFS*/
  
 +#ifdef CPTCFG_ATH12K_PKTLOG
@@ -144,7 +146,34 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  #endif /* _ATH12K_DEBUGFS_H_ */
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -1668,8 +1668,10 @@ static int ath12k_htt_pull_ppdu_stats(st
+@@ -1221,6 +1221,26 @@ static int ath12k_get_ppdu_user_index(st
+ 	return -EINVAL;
+ }
+ 
++static void ath12k_htt_pktlog(struct ath12k_base *ab, struct sk_buff *skb)
++{
++	struct htt_pktlog_msg *data = (struct htt_pktlog_msg *)skb->data;
++	struct ath_pktlog_hdr *hdr = (struct ath_pktlog_hdr *)data;
++	struct ath12k *ar;
++	u8 pdev_id;
++
++	pdev_id = u32_get_bits(data->hdr, HTT_T2H_PPDU_STATS_INFO_PDEV_ID);
++	ar = ath12k_mac_get_ar_by_pdev_id(ab, pdev_id);
++	if (!ar) {
++		ath12k_warn(ab, "invalid pdev id %d on htt pktlog\n", pdev_id);
++		return;
++	}
++	hdr->m_timestamp = ar->pdev->timestamp;
++
++	trace_ath12k_htt_pktlog(ar, data->payload, hdr->size,
++			ar->ab->pktlog_defs_checksum);
++	ath12k_htt_pktlog_process(ar, (u8 *)data->payload);
++}
++
+ static int ath12k_htt_tlv_ppdu_stats_parse(struct ath12k_base *ab,
+ 					   u16 tag, u16 len, const void *ptr,
+ 					   void *data)
+@@ -1691,8 +1711,10 @@ static int ath12k_htt_pull_ppdu_stats(st
  		goto exit;
  	}
  
@@ -156,14 +185,16 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
  	spin_lock_bh(&ar->data_lock);
  	ppdu_info = ath12k_dp_htt_get_ppdu_desc(ar, ppdu_id);
-@@ -1753,6 +1755,7 @@ static void ath12k_htt_pktlog(struct ath
- 
- 	trace_ath12k_htt_pktlog(ar, data->payload, hdr->size,
- 				ar->ab->pktlog_defs_checksum);
-+	ath12k_htt_pktlog_process(ar, (u8 *)data->payload);
- }
- 
- static void ath12k_htt_backpressure_event_handler(struct ath12k_base *ab,
+@@ -1940,6 +1962,9 @@ void ath12k_dp_htt_htc_t2h_msg_handler(s
+ 	case HTT_T2H_MSG_TYPE_EXT_STATS_CONF:
+ 		ath12k_debugfs_htt_ext_stats_handler(ab, skb);
+ 		break;
++	case HTT_T2H_MSG_TYPE_PKTLOG:
++		ath12k_htt_pktlog(ab, skb);
++		break;
+ 	case HTT_T2H_MSG_TYPE_MLO_TIMESTAMP_OFFSET_IND:
+ 		ath12k_htt_mlo_offset_event_handler(ab, skb);
+ 		break;
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/pktlog.c
 @@ -0,0 +1,528 @@
@@ -761,14 +792,17 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
 +
 --- a/local-symbols
 +++ b/local-symbols
-@@ -140,3 +140,4 @@ ATH12K_DEBUG=
- ATH12K_DEBUGFS=
- ATH12K_TRACING=
+@@ -182,6 +182,7 @@ ATH12K_TRACING=
+ ATH12K_PPE_DS_SUPPORT=
+ ATH12K_BONDED_DS_SUPPORT=
  ATH12K_SPECTRAL=
 +ATH12K_PKTLOG=
+ WLAN_VENDOR_ATMEL=
+ ATMEL=
+ PCI_ATMEL=
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -3664,9 +3664,12 @@ move_next:
+@@ -3673,9 +3673,12 @@ move_next:
  		memset(ppdu_info, 0, sizeof(*ppdu_info));
  
  	while ((skb = __skb_dequeue(&skb_list))) {
@@ -782,7 +816,7 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
  		if (flag == ATH12K_DP_RX_MONITOR_MODE)
  			hal_status =
-@@ -3705,9 +3708,12 @@ move_next:
+@@ -3714,9 +3717,12 @@ move_next:
  			ath12k_dp_mon_rx_update_peer_mu_stats(ar, ppdu_info);
  		}
  
@@ -796,3 +830,50 @@ Signed-off-by: Karthik M <quic_karm@quicinc.com>
  
  next_skb:
  		spin_unlock_bh(&ab->base_lock);
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -1622,6 +1622,44 @@ struct htt_ppdu_stats_info {
+ 	struct list_head list;
+ };
+ 
++/* @brief target -> host packet log message
++ *
++ * @details
++ * The following field definitions describe the format of the packet log
++ * message sent from the target to the host.
++ * The message consists of a 4-octet header,followed by a variable number
++ * of 32-bit character values.
++ *
++ * |31                         16|15  12|11   10|9    8|7            0|
++ * |------------------------------------------------------------------|
++ * |        payload_size         | rsvd |pdev_id|mac_id|   msg type   |
++ * |------------------------------------------------------------------|
++ * |                              payload                             |
++ * |------------------------------------------------------------------|
++ *   - MSG_TYPE
++ *     Bits 7:0
++ *     Purpose: identifies this as a pktlog message
++ *     Value: HTT_T2H_MSG_TYPE_PKTLOG
++ *   - mac_id
++ *     Bits 9:8
++ *     Purpose: identifies which MAC/PHY instance generated this pktlog info
++ *     Value: 0-3
++ *   - pdev_id
++ *     Bits 11:10
++ *     Purpose: pdev_id
++ *     Value: 0-3
++ *     0 (for rings at SOC level),
++ *     1/2/3 PDEV -> 0/1/2
++ *   - payload_size
++ *     Bits 31:16
++ *     Purpose: explicitly specify the payload size
++ *     Value: payload size in bytes (payload size is a multiple of 4 bytes)
++ */
++struct htt_pktlog_msg {
++	u32 hdr;
++	u8 payload[0];
++};
++
+ /* @brief target -> host MLO offset indiciation message
+  *
+  * @details

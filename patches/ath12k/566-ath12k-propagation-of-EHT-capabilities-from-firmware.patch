@@ -1,8 +1,8 @@
-From 813d79336da8367f94049bd22929d1f1001a39d2 Mon Sep 17 00:00:00 2001
+From 4ccfa68c5783d5aea97bdfca9f4daa31d3991c55 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <quic_alokad@quicinc.com>
 Date: Thu, 10 Feb 2022 17:09:20 -0800
-Subject: [PATCH 04/27] ath12k: propagation of EHT capabilities from firmware
- to kernel
+Subject: [PATCH] ath12k: propagation of EHT capabilities from firmware to
+ kernel
 
 This commit adds new WMI definitions and functions required to parse
 the EHT capabilities advertised by the firmware and propagate those
@@ -11,18 +11,19 @@ to the kernel.
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 ---
- drivers/net/wireless/ath/ath11k/wmi.h  |   1 -
  drivers/net/wireless/ath/ath12k/core.h |   8 +
  drivers/net/wireless/ath/ath12k/mac.c  | 283 ++++++++++++++++++-------
  drivers/net/wireless/ath/ath12k/wmi.c  | 132 +++++++++++-
- drivers/net/wireless/ath/ath12k/wmi.h  |  88 +++++++-
- 5 files changed, 433 insertions(+), 79 deletions(-)
+ drivers/net/wireless/ath/ath12k/wmi.h  | 105 +++++++++
+ 4 files changed, 450 insertions(+), 78 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index b609c9e..cbe1bb4 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -659,6 +659,14 @@ struct ath12k_band_cap {
+@@ -634,6 +634,14 @@ struct ath12k_band_cap {
  	u32 he_cap_phy_info[PSOC_HOST_MAX_PHY_SIZE];
- 	struct ath12k_ppe_threshold he_ppet;
+ 	struct ath12k_wmi_ppe_threshold_arg he_ppet;
  	u16 he_6ghz_capa;
 +	u32 eht_cap_mac_info[PSOC_HOST_MAX_MAC_SIZE];
 +	u32 eht_cap_phy_info[PSOC_HOST_MAX_PHY_SIZE];
@@ -35,9 +36,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  };
  
  struct ath12k_pdev_cap {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index b2ec703..a7c16e1 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4560,6 +4560,48 @@ static void ath12k_gen_ppe_thresh(struct
+@@ -4657,6 +4657,48 @@ static void ath12k_gen_ppe_thresh(struct ath12k_wmi_ppe_threshold_arg *fw_ppet,
  	}
  }
  
@@ -86,7 +89,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static void
  ath12k_mac_filter_he_cap_mesh(struct ieee80211_he_cap_elem *he_cap_elem)
  {
-@@ -4711,18 +4753,156 @@ static void ath12k_mac_set_hemcsmap(stru
+@@ -4808,18 +4850,156 @@ static void ath12k_mac_set_hemcsmap(struct ath12k *ar,
  		cpu_to_le16(txmcs_map_160 & 0xffff);
  }
  
@@ -94,7 +97,6 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -				  struct ath12k_pdev_cap *cap,
 -				  struct ieee80211_sband_iftype_data *data,
 -				  int band)
--{
 +static void ath12k_mac_copy_he_cap(struct ath12k *ar,
 +				   struct ath12k_band_cap *band_cap,
 +				   struct ieee80211_sta_he_cap *he_cap,
@@ -190,7 +192,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +				    struct ieee80211_sta_eht_cap *eht_cap,
 +				    struct ieee80211_eht_cap_elem_fixed *eht_cap_elem,
 +				    int iftype)
-+{
+ {
 +	memset(eht_cap, 0, sizeof(struct ieee80211_sta_eht_cap));
 +
 +	eht_cap->has_eht = true;
@@ -252,7 +254,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  		switch (i) {
  		case NL80211_IFTYPE_STATION:
-@@ -4735,91 +4915,40 @@ static int ath12k_mac_copy_he_cap(struct
+@@ -4832,91 +5012,40 @@ static int ath12k_mac_copy_he_cap(struct ath12k *ar,
  		}
  
  		data[idx].types_mask = BIT(i);
@@ -311,7 +313,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 -		    IEEE80211_HE_PHY_CAP6_PPE_THRESHOLD_PRESENT)
 -			ath12k_gen_ppe_thresh(&band_cap->he_ppet,
 -					      he_cap->ppe_thres);
- 
+-
++		
 +		ath12k_mac_copy_he_cap(ar, band_cap, he_cap, he_cap_elem, i);
  		if (band == NL80211_BAND_6GHZ) {
  			data[idx].he_6ghz_capa.capa =
@@ -356,7 +359,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		band = &ar->mac.sbands[NL80211_BAND_5GHZ];
  		band->iftype_data = ar->mac.iftype[NL80211_BAND_5GHZ];
  		band->n_iftype_data = count;
-@@ -4827,9 +4956,9 @@ static void ath12k_mac_setup_he_cap(stru
+@@ -4924,9 +5053,9 @@ static void ath12k_mac_setup_he_cap(struct ath12k *ar,
  
  	if (cap->supported_bands & WMI_HOST_WLAN_5G_CAP &&
  	    ar->supports_6ghz) {
@@ -369,7 +372,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		band = &ar->mac.sbands[NL80211_BAND_6GHZ];
  		band->iftype_data = ar->mac.iftype[NL80211_BAND_6GHZ];
  		band->n_iftype_data = count;
-@@ -4877,7 +5006,7 @@ static int __ath12k_set_antenna(struct a
+@@ -4974,7 +5103,7 @@ static int __ath12k_set_antenna(struct ath12k *ar, u32 tx_ant, u32 rx_ant)
  
  	/* Reload HT/VHT/HE capability */
  	ath12k_mac_setup_ht_vht_cap(ar, &ar->pdev->cap, NULL);
@@ -378,7 +381,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	return 0;
  }
-@@ -7532,7 +7661,7 @@ static int __ath12k_mac_register(struct
+@@ -7643,7 +7772,7 @@ static int __ath12k_mac_register(struct ath12k *ar)
  		goto err;
  
  	ath12k_mac_setup_ht_vht_cap(ar, cap, &ht_cap);
@@ -387,25 +390,27 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	ret = ath12k_mac_setup_iface_combinations(ar);
  	if (ret) {
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index d778783..b59992d 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -56,8 +56,11 @@ struct wmi_tlv_svc_rdy_ext_parse {
+@@ -63,8 +63,11 @@ struct ath12k_wmi_svc_rdy_ext_parse {
  };
  
- struct wmi_tlv_svc_rdy_ext2_parse {
+ struct ath12k_wmi_svc_rdy_ext2_parse {
 +	struct ath12k_service_ext2_param param;
- 	struct wmi_tlv_dma_ring_caps_parse dma_caps_parse;
+ 	struct ath12k_wmi_dma_ring_caps_parse dma_caps_parse;
  	bool dma_ring_cap_done;
 +	bool spectral_bin_scaling_done;
 +	bool mac_phy_caps_ext_done;
  };
  
- struct wmi_tlv_rdy_parse {
-@@ -4202,14 +4205,125 @@ err:
- 	return ret;
+ struct ath12k_wmi_rdy_parse {
+@@ -155,6 +158,107 @@ static __le32 ath12k_wmi_tlv_cmd_hdr(u32 cmd, u32 len)
+ 	return ath12k_wmi_tlv_hdr(cmd, len - TLV_HDR_SIZE);
  }
  
-+static int ath12k_pull_svc_ready_ext2(struct ath12k_pdev_wmi *wmi_handle,
++static int ath12k_pull_svc_ready_ext2(struct ath12k_wmi_pdev *wmi_handle,
 +				      const void *ptr,
 +				      struct ath12k_service_ext2_param *param)
 +{
@@ -506,12 +511,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	return 0;
 +}
 +
- static int ath12k_wmi_tlv_svc_rdy_ext2_parse(struct ath12k_base *ab,
- 					     u16 tag, u16 len,
- 					     const void *ptr, void *data)
+ void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
+ 			     struct ath12k_wmi_resource_config_arg *config)
  {
-+	struct ath12k_pdev_wmi *wmi_handle = &ab->wmi_ab.wmi[0];
- 	struct wmi_tlv_svc_rdy_ext2_parse *parse = data;
+@@ -4058,10 +4162,20 @@ static int ath12k_wmi_svc_rdy_ext2_parse(struct ath12k_base *ab,
+ 					 u16 tag, u16 len,
+ 					 const void *ptr, void *data)
+ {
++	struct ath12k_wmi_pdev *wmi_handle = &ab->wmi_ab.wmi[0];
+ 	struct ath12k_wmi_svc_rdy_ext2_parse *parse = data;
  	int ret;
  
  	switch (tag) {
@@ -526,8 +534,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
  	case WMI_TAG_ARRAY_STRUCT:
  		if (!parse->dma_ring_cap_done) {
- 			ret = ath12k_wmi_tlv_dma_ring_caps(ab, len, ptr,
-@@ -4218,6 +4332,22 @@ static int ath12k_wmi_tlv_svc_rdy_ext2_p
+ 			ret = ath12k_wmi_dma_ring_caps(ab, len, ptr,
+@@ -4070,6 +4184,22 @@ static int ath12k_wmi_svc_rdy_ext2_parse(struct ath12k_base *ab,
  				return ret;
  
  			parse->dma_ring_cap_done = true;
@@ -550,18 +558,29 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		}
  		break;
  	default:
-@@ -4230,7 +4360,7 @@ static int ath12k_wmi_tlv_svc_rdy_ext2_p
+@@ -4082,7 +4212,7 @@ static int ath12k_wmi_svc_rdy_ext2_parse(struct ath12k_base *ab,
  static int ath12k_service_ready_ext2_event(struct ath12k_base *ab,
  					   struct sk_buff *skb)
  {
--	struct wmi_tlv_svc_rdy_ext2_parse svc_rdy_ext2 = { };
-+	struct wmi_tlv_svc_rdy_ext2_parse svc_rdy_ext2 = { 0 };
+-	struct ath12k_wmi_svc_rdy_ext2_parse svc_rdy_ext2 = { };
++	struct ath12k_wmi_svc_rdy_ext2_parse svc_rdy_ext2 = { 0 };
  	int ret;
  
  	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index 0a5ab1c..98de21e 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -1831,6 +1831,7 @@ enum wmi_tlv_tag {
+@@ -25,6 +25,8 @@
+ struct ath12k_base;
+ struct ath12k;
+ 
++#define PSOC_HOST_MAX_NUM_SS (8)
++
+ /* There is no signed version of __le32, so for a temporary solution come
+  * up with our own version. The idea is from fs/ntfs/endian.h.
+  *
+@@ -1938,6 +1940,7 @@ enum wmi_tlv_tag {
  	/* TODO add all the missing cmds */
  	WMI_TAG_PDEV_PEER_PKTLOG_FILTER_CMD = 0x301,
  	WMI_TAG_PDEV_PEER_PKTLOG_FILTER_INFO,
@@ -569,23 +588,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	WMI_TAG_FILS_DISCOVERY_TMPL_CMD = 0x344,
  	WMI_TAG_MAC_PHY_CAPABILITIES_EXT = 0x36F,
  	WMI_TAG_REGULATORY_RULE_EXT_STRUCT = 0x3A9,
-@@ -2160,7 +2161,6 @@ struct ath12k_ppe_threshold {
- 	u32 ru_bit_mask;
- 	u32 ppet16_ppet8_ru3_ru0[PSOC_HOST_MAX_NUM_SS];
- };
--
- struct ath12k_service_ext_param {
- 	u32 default_conc_scan_config_bits;
- 	u32 default_fw_config_bits;
-@@ -2178,6 +2178,7 @@ struct ath12k_hw_mode_caps {
- 	u32 hw_mode_config_type;
+@@ -2274,6 +2277,7 @@ struct ath12k_wmi_ppe_threshold_arg {
+ 	u32 ppet16_ppet8_ru3_ru0[WMI_MAX_NUM_SS];
  };
  
 +#define PSOC_HOST_MAX_MAC_SIZE (2)
  #define PSOC_HOST_MAX_PHY_SIZE (3)
  #define ATH12K_11B_SUPPORT                 BIT(0)
  #define ATH12K_11G_SUPPORT                 BIT(1)
-@@ -2199,6 +2200,32 @@ struct ath12k_hal_reg_capabilities_ext {
+@@ -2295,6 +2299,32 @@ struct ath12k_wmi_hal_reg_capabilities_ext_arg {
  	u32 high_5ghz_chan;
  };
  
@@ -617,9 +628,31 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
  #define WMI_HOST_MAX_PDEV 3
  
- struct wlan_host_mem_chunk {
-@@ -2469,6 +2496,65 @@ struct wmi_soc_hal_reg_capabilities {
- 	u32 num_phy;
+ struct ath12k_wmi_host_mem_chunk_params {
+@@ -2408,6 +2438,21 @@ struct ath12k_wmi_ppe_threshold_params {
+ 	__le32 ppet16_ppet8_ru3_ru0[WMI_MAX_NUM_SS];
+ } __packed;
+ 
++struct ath12k_ppe_threshold {
++	u32 numss_m1;
++	u32 ru_bit_mask;
++	u32 ppet16_ppet8_ru3_ru0[PSOC_HOST_MAX_NUM_SS];
++};
++
++struct wmi_ppe_threshold {
++	u32 numss_m1; /** NSS - 1*/
++	union {
++		u32 ru_count;
++		u32 ru_mask;
++	} __packed;
++	u32 ppet16_ppet8_ru3_ru0[WMI_MAX_NUM_SS];
++} __packed;
++
+ #define HW_BD_INFO_SIZE       5
+ 
+ struct ath12k_wmi_abi_version_params {
+@@ -2630,6 +2675,66 @@ struct ath12k_wmi_soc_hal_reg_caps_params {
+ 	__le32 num_phy;
  } __packed;
  
 +struct wmi_service_ready_ext2_event {
@@ -681,6 +714,10 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	u32 eht_supp_mcs_ext_5G[WMI_MAX_EHT_SUPP_MCS_5G_SIZE];
 +} __packed;
 +
++
  /* 2 word representation of MAC addr */
- struct wmi_mac_addr {
- 	union {
+ struct ath12k_wmi_mac_addr_params {
+ 	u8 addr[ETH_ALEN];
+-- 
+2.17.1
+
