@@ -72,7 +72,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2300,7 +2300,7 @@ static void mpath_set_pinfo(struct mesh_
+@@ -2473,7 +2473,7 @@ static void mpath_set_pinfo(struct mesh_
  	if (mpath->flags & MESH_PATH_RESOLVED)
  		pinfo->flags |= NL80211_MPATH_FLAG_RESOLVED;
  	pinfo->hop_count = mpath->hop_count;
@@ -83,27 +83,27 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  static int ieee80211_get_mpath(struct wiphy *wiphy, struct net_device *dev,
 --- a/net/mac80211/mesh.h
 +++ b/net/mac80211/mesh.h
-@@ -124,7 +124,7 @@ struct mesh_path {
- 	unsigned long last_preq_to_root;
+@@ -126,7 +126,7 @@ struct mesh_path {
+ 	unsigned long fast_tx_check;
  	bool is_root;
  	bool is_gate;
 -	u32 path_change_count;
 +	atomic_t path_change_count;
  };
  
- struct mesh_hdr_cache {
-@@ -154,7 +154,7 @@ struct mhdr_cache_entry {
- 	struct mesh_path *mppath;
- 	unsigned long timestamp;
- 	struct rcu_head rcu;
--	u32 path_change_count;
-+	atomic_t path_change_count;
- };
- 
- /* Recent multicast cache */
+ #define MESH_FAST_TX_CACHE_MAX_SIZE		512
 --- a/net/mac80211/mesh_hwmp.c
 +++ b/net/mac80211/mesh_hwmp.c
-@@ -549,7 +549,7 @@ static u32 hwmp_route_info_get(struct ie
+@@ -558,7 +558,7 @@ static u32 hwmp_route_info_get(struct ie
+ 			if (next_hop)
+ 				ether_addr_copy(old_next_hop_addr, next_hop->sta.addr);
+ 			if (next_hop != sta) {
+-				mpath->path_change_count++;
++				atomic_inc(&mpath->path_change_count);
+                                 mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
+                                           " metric %d ft 0x%x\n",
+                                           mpath->dst, sta->deflink.addr, last_hop_metric, action);
+@@ -634,7 +634,7 @@ static u32 hwmp_route_info_get(struct ie
  			if (next_hop)
  				ether_addr_copy(old_next_hop_addr, next_hop->sta.addr);
  			if (next_hop != sta) {
@@ -111,49 +111,4 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +				atomic_inc(&mpath->path_change_count);
  				mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
  					  " metric %d ft 0x%x\n",
- 					  mpath->dst, sta->addr, last_hop_metric, action);
-@@ -622,7 +622,7 @@ static u32 hwmp_route_info_get(struct ie
- 			if (next_hop)
- 				ether_addr_copy(old_next_hop_addr, next_hop->sta.addr);
- 			if (next_hop != sta) {
--				mpath->path_change_count++;
-+				atomic_inc(&mpath->path_change_count);
- 				mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
- 					  " metric %d ft 0x%x\n",
- 					  mpath->dst, sta->addr, last_hop_metric, action);
---- a/net/mac80211/mesh_pathtbl.c
-+++ b/net/mac80211/mesh_pathtbl.c
-@@ -581,11 +581,11 @@ struct mhdr_cache_entry *mesh_fill_cache
- 	/* In case there was a path refresh and update after we last used
- 	 * update the next hop addr.
- 	 */
--	spin_lock_bh(&mpath->state_lock);
--	if (entry->path_change_count != mpath->path_change_count) {
-+	if (atomic_read(&entry->path_change_count) !=
-+	    atomic_read(&mpath->path_change_count)) {
-+		atomic_set(&entry->path_change_count, atomic_read(&mpath->path_change_count));
- 		new_nhop = rcu_dereference(mpath->next_hop);
- 		if (!new_nhop) {
--			spin_unlock_bh(&mpath->state_lock);
- 			return NULL;
- 		}
- 		memcpy(&entry->hdr[4], new_nhop->sta.addr, ETH_ALEN);
-@@ -597,9 +597,7 @@ struct mhdr_cache_entry *mesh_fill_cache
- 				key = rcu_access_pointer(sdata->default_unicast_key);
- 			rcu_assign_pointer(entry->key, key);
- 		}
--		entry->path_change_count = mpath->path_change_count;
- 	}
--	spin_unlock_bh(&mpath->state_lock);
- 
- 	/* backup eth SA to copy as eaddr2/SA in the mesh header */
- 	eth = (struct ethhdr *)skb->data;
-@@ -1306,7 +1304,7 @@ void mesh_path_fix_nexthop(struct mesh_p
- 	mpath->flags = MESH_PATH_FIXED | MESH_PATH_SN_VALID;
- 	mesh_path_activate(mpath);
- 	if (!old_next_hop || !ether_addr_equal(old_next_hop->addr, next_hop->addr))
--		mpath->path_change_count++;
-+		atomic_inc(&mpath->path_change_count);
- 	spin_unlock_bh(&mpath->state_lock);
- 	ewma_mesh_fail_avg_init(&next_hop->mesh->fail_avg);
- 	/* init it at a low value - 0 start is tricky */
+ 					  mpath->dst, sta->deflink.addr, last_hop_metric, action);

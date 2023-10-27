@@ -34,11 +34,9 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  net/wireless/nl80211.h       |  5 ++++
  10 files changed, 119 insertions(+), 33 deletions(-)
 
-Index: b/include/net/cfg80211.h
-===================================================================
---- a/include/net/cfg80211.h	2022-11-28 20:29:10.512278346 +0530
-+++ b/include/net/cfg80211.h	2022-11-28 20:29:10.504278410 +0530
-@@ -8110,6 +8110,19 @@ cfg80211_background_radar_event(struct w
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -8419,6 +8419,19 @@ cfg80211_background_radar_event(struct w
  }
  
  /**
@@ -58,11 +56,9 @@ Index: b/include/net/cfg80211.h
   * cfg80211_sta_opmode_change_notify - STA's ht/vht operation mode change event
   * @dev: network device
   * @mac: MAC address of a station which opmode got modified
-Index: b/include/net/mac80211.h
-===================================================================
---- a/include/net/mac80211.h	2022-11-28 20:29:10.512278346 +0530
-+++ b/include/net/mac80211.h	2022-11-28 20:29:10.504278410 +0530
-@@ -6414,9 +6414,10 @@ void ieee80211_channel_switch_disconnect
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -6649,9 +6649,10 @@ void ieee80211_channel_switch_disconnect
  /**
   * ieee80211_awgn_detected - inform that awgn interference is detected
   *
@@ -75,11 +71,9 @@ Index: b/include/net/mac80211.h
  
  /**
   * ieee80211_request_smps - request SM PS transition
-Index: b/include/uapi/linux/nl80211.h
-===================================================================
---- a/include/uapi/linux/nl80211.h	2022-11-28 20:29:10.512278346 +0530
-+++ b/include/uapi/linux/nl80211.h	2022-11-28 20:29:10.508278378 +0530
-@@ -1277,6 +1277,11 @@
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -1318,6 +1318,12 @@
   *	This event is used to update dynamic MU-EDCA parameters in Beacon frame,
   *	coming from driver and now need to be reflected in Beacon frame.
   *
@@ -87,12 +81,13 @@ Index: b/include/uapi/linux/nl80211.h
 + * @NL80211_CMD_AWGN_DETECT: Once AWGN interference is detected on the operating
 + *	channel, userspace is notified with the interference bitmap using
 + *	%NL80211_ATTR_AWGN_INTERFERENCE_BITMAP
-+
++ * @NL80211_ATTR_AWGN_INTERFERENCE_BITMAP: u32 attribute specifying the
++ *	interference bitmap of operating bandwidth for %NL80211_CMD_AWGN_DETECT
   * @NL80211_CMD_MAX: highest used command number
   * @__NL80211_CMD_AFTER_LAST: internal use
   */
-@@ -1529,6 +1534,8 @@ enum nl80211_commands {
- 	NL80211_CMD_REMOVE_LINK_STA,
+@@ -1574,6 +1580,8 @@ enum nl80211_commands {
+ 	NL80211_CMD_LINKS_REMOVED,
  
  	NL80211_CMD_UPDATE_HE_MUEDCA_PARAMS,
 +
@@ -100,16 +95,7 @@ Index: b/include/uapi/linux/nl80211.h
  	/* add new commands above here */
  
  	/* used to define NL80211_CMD_MAX below */
-@@ -2751,6 +2758,8 @@ enum nl80211_commands {
-  * @NL80211_ATTR_BEACON_TX_MODE: used to configure the beacon tx mode as
-  * 	staggered mode = 1 or burst mode = 2 in %NL80211_CMD_START_AP or
-  * 	%NL80211_CMD_JOIN_MESH from user-space.
-+ * @NL80211_ATTR_AWGN_INTERFERENCE_BITMAP: u32 attribute specifying the
-+ *	interference bitmap of operating bandwidth for %NL80211_CMD_AWGN_DETECT
-  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
-  * @NL80211_ATTR_MAX: highest attribute number currently defined
-  * @__NL80211_ATTR_AFTER_LAST: internal use
-@@ -3287,6 +3296,8 @@ enum nl80211_attrs {
+@@ -3376,6 +3384,8 @@ enum nl80211_attrs {
  
  	NL80211_ATTR_STA_MGMT_RTS_CTS_CONFIG,
  
@@ -118,20 +104,18 @@ Index: b/include/uapi/linux/nl80211.h
  	/* add attributes here, update the policy in nl80211.c */
  
  	__NL80211_ATTR_AFTER_LAST,
-Index: b/net/mac80211/ieee80211_i.h
-===================================================================
---- a/net/mac80211/ieee80211_i.h	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/mac80211/ieee80211_i.h	2022-11-28 20:29:10.508278378 +0530
-@@ -978,8 +978,6 @@ struct ieee80211_link_data {
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -1001,8 +1001,6 @@ struct ieee80211_link_data {
  
  	struct cfg80211_chan_def csa_chandef;
  
 -	struct work_struct awgn_detected_work;
 -
  	struct work_struct color_change_finalize_work;
- 
- 	/* context reservation -- protected with chanctx_mtx */
-@@ -1564,6 +1562,8 @@ struct ieee80211_local {
+ 	struct delayed_work color_collision_detect_work;
+ 	u64 color_bitmap;
+@@ -1622,6 +1620,8 @@ struct ieee80211_local {
  	struct cfg80211_chan_def monitor_chandef;
  
  	struct mac80211_memory_stats memory_stats;
@@ -140,7 +124,7 @@ Index: b/net/mac80211/ieee80211_i.h
  
  	/* extended capabilities provided by mac80211 */
  	u8 ext_capa[8];
-@@ -2477,6 +2477,7 @@ void ieee80211_dfs_cac_timer(unsigned lo
+@@ -2597,6 +2597,7 @@ void ieee80211_dfs_cac_timer(unsigned lo
  void ieee80211_dfs_cac_timer_work(struct work_struct *work);
  void ieee80211_dfs_cac_cancel(struct ieee80211_local *local);
  void ieee80211_dfs_radar_detected_work(struct work_struct *work);
@@ -148,20 +132,9 @@ Index: b/net/mac80211/ieee80211_i.h
  int ieee80211_send_action_csa(struct ieee80211_sub_if_data *sdata,
  			      struct cfg80211_csa_settings *csa_settings);
  
-Index: b/net/mac80211/iface.c
-===================================================================
---- a/net/mac80211/iface.c	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/mac80211/iface.c	2022-11-28 20:29:10.508278378 +0530
-@@ -400,8 +400,6 @@ static void ieee80211_link_init(struct i
- 
- 	INIT_WORK(&link->csa_finalize_work,
- 		  ieee80211_csa_finalize_work);
--	INIT_WORK(&sdata->awgn_detected_work,
--		  ieee80211_awgn_interference_detected_work);
- 	INIT_WORK(&link->color_change_finalize_work,
- 		  ieee80211_color_change_finalize_work);
- 	INIT_LIST_HEAD(&link->assigned_chanctx_list);
-@@ -719,7 +717,6 @@ static void ieee80211_do_stop(struct iee
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -544,7 +544,6 @@ static void ieee80211_do_stop(struct iee
  	sdata_unlock(sdata);
  
  	cancel_work_sync(&sdata->deflink.csa_finalize_work);
@@ -169,11 +142,9 @@ Index: b/net/mac80211/iface.c
  	cancel_work_sync(&sdata->deflink.color_change_finalize_work);
  
  	cancel_delayed_work_sync(&sdata->deflink.dfs_cac_timer_work);
-Index: b/net/mac80211/main.c
-===================================================================
---- a/net/mac80211/main.c	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/mac80211/main.c	2022-11-28 20:29:10.508278378 +0530
-@@ -349,6 +349,7 @@ static void ieee80211_restart_work(struc
+--- a/net/mac80211/main.c
++++ b/net/mac80211/main.c
+@@ -355,6 +355,7 @@ static void ieee80211_restart_work(struc
  	flush_workqueue(local->workqueue);
  	flush_work(&local->sched_scan_stopped_work);
  	flush_work(&local->radar_detected_work);
@@ -181,7 +152,7 @@ Index: b/net/mac80211/main.c
  
  	rtnl_lock();
  	/* we might do interface manipulations, so need both */
-@@ -816,6 +817,8 @@ struct ieee80211_hw *ieee80211_alloc_hw_
+@@ -826,6 +827,8 @@ struct ieee80211_hw *ieee80211_alloc_hw_
  
  	INIT_WORK(&local->radar_detected_work,
  		  ieee80211_dfs_radar_detected_work);
@@ -190,7 +161,7 @@ Index: b/net/mac80211/main.c
  
  	INIT_WORK(&local->reconfig_filter, ieee80211_reconfig_filter);
  	local->smps_mode = IEEE80211_SMPS_OFF;
-@@ -1487,6 +1490,7 @@ void ieee80211_unregister_hw(struct ieee
+@@ -1508,6 +1511,7 @@ void ieee80211_unregister_hw(struct ieee
  	cancel_work_sync(&local->reconfig_filter);
  	flush_work(&local->sched_scan_stopped_work);
  	flush_work(&local->radar_detected_work);
@@ -198,11 +169,9 @@ Index: b/net/mac80211/main.c
  
  	ieee80211_clear_tx_pending(local);
  	rate_control_deinitialize(local);
-Index: b/net/mac80211/util.c
-===================================================================
---- a/net/mac80211/util.c	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/mac80211/util.c	2022-11-28 20:29:10.508278378 +0530
-@@ -4074,6 +4074,32 @@ void ieee80211_dfs_cac_cancel(struct iee
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -4377,6 +4377,32 @@ void ieee80211_dfs_cac_cancel(struct iee
  	mutex_unlock(&local->mtx);
  }
  
@@ -235,7 +204,7 @@ Index: b/net/mac80211/util.c
  void ieee80211_dfs_radar_detected_work(struct work_struct *work)
  {
  	struct ieee80211_local *local =
-@@ -4113,6 +4139,15 @@ void ieee80211_radar_detected(struct iee
+@@ -4416,6 +4442,15 @@ void ieee80211_radar_detected(struct iee
  }
  EXPORT_SYMBOL(ieee80211_radar_detected);
  
@@ -251,7 +220,7 @@ Index: b/net/mac80211/util.c
  ieee80211_conn_flags_t ieee80211_chandef_downgrade(struct cfg80211_chan_def *c)
  {
  	ieee80211_conn_flags_t ret;
-@@ -4187,32 +4222,6 @@ ieee80211_conn_flags_t ieee80211_chandef
+@@ -4490,32 +4525,6 @@ ieee80211_conn_flags_t ieee80211_chandef
  	return ret;
  }
  
@@ -284,11 +253,9 @@ Index: b/net/mac80211/util.c
  /*
   * Returns true if smps_mode_new is strictly more restrictive than
   * smps_mode_old.
-Index: b/net/wireless/mlme.c
-===================================================================
---- a/net/wireless/mlme.c	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/wireless/mlme.c	2022-11-28 20:29:10.508278378 +0530
-@@ -962,6 +962,15 @@ void __cfg80211_radar_event(struct wiphy
+--- a/net/wireless/mlme.c
++++ b/net/wireless/mlme.c
+@@ -986,6 +986,15 @@ void __cfg80211_radar_event(struct wiphy
  }
  EXPORT_SYMBOL(__cfg80211_radar_event);
  
@@ -304,11 +271,9 @@ Index: b/net/wireless/mlme.c
  void cfg80211_cac_event(struct net_device *netdev,
  			const struct cfg80211_chan_def *chandef,
  			enum nl80211_radar_event event, gfp_t gfp)
-Index: b/net/wireless/nl80211.c
-===================================================================
---- a/net/wireless/nl80211.c	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/wireless/nl80211.c	2022-11-28 20:36:33.216789284 +0530
-@@ -835,6 +835,7 @@ static const struct nla_policy nl80211_p
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -823,6 +823,7 @@ static const struct nla_policy nl80211_p
  	[NL80211_ATTR_BEACON_TX_MODE] = NLA_POLICY_RANGE(NLA_U32, 1, 2),
  	[NL80211_ATTR_STA_MGMT_RTS_CTS_CONFIG] =
  					NLA_POLICY_MAX(NLA_U8, NL80211_MGMT_RTS_CTS_DISABLE),
@@ -316,7 +281,7 @@ Index: b/net/wireless/nl80211.c
  };
  
  /* policy for the key attributes */
-@@ -19054,6 +19055,55 @@ void cfg80211_ch_switch_notify(struct ne
+@@ -19507,6 +19508,55 @@ void cfg80211_ch_switch_notify(struct ne
  }
  EXPORT_SYMBOL(cfg80211_ch_switch_notify);
  
@@ -371,20 +336,29 @@ Index: b/net/wireless/nl80211.c
 +
  void cfg80211_ch_switch_started_notify(struct net_device *dev,
  				       struct cfg80211_chan_def *chandef,
- 				       u8 count, bool quiet)
-Index: b/net/wireless/nl80211.h
-===================================================================
---- a/net/wireless/nl80211.h	2022-11-28 20:29:10.512278346 +0530
-+++ b/net/wireless/nl80211.h	2022-11-28 20:29:10.512278346 +0530
-@@ -113,6 +113,11 @@ nl80211_radar_notify(struct cfg80211_reg
+ 				       unsigned int link_id, u8 count,
+--- a/net/mac80211/link.c
++++ b/net/mac80211/link.c
+@@ -39,8 +39,6 @@ void ieee80211_link_init(struct ieee8021
+ 
+ 	INIT_WORK(&link->csa_finalize_work,
+ 		  ieee80211_csa_finalize_work);
+-	INIT_WORK(&sdata->awgn_detected_work,
+-		  ieee80211_awgn_interference_detected_work);
+ 	INIT_WORK(&link->color_change_finalize_work,
+ 		  ieee80211_color_change_finalize_work);
+ 	INIT_DELAYED_WORK(&link->color_collision_detect_work,
+--- a/net/wireless/nl80211.h
++++ b/net/wireless/nl80211.h
+@@ -114,6 +114,11 @@ nl80211_radar_notify(struct cfg80211_reg
  		     enum nl80211_radar_event event,
  		     struct net_device *netdev, gfp_t gfp);
  
 +void nl80211_awgn_notify(struct cfg80211_registered_device *rdev,
-+			 struct cfg80211_chan_def *chandef,
-+			 struct net_device *netdev,
-+			 gfp_t gfp, u32 chan_bw_interference_bitmap);
++                        struct cfg80211_chan_def *chandef,
++                        struct net_device *netdev,
++                        gfp_t gfp, u32 chan_bw_interference_bitmap);
 +
- void nl80211_send_ap_stopped(struct wireless_dev *wdev);
+ void nl80211_send_ap_stopped(struct wireless_dev *wdev, unsigned int link_id);
  
  void cfg80211_rdev_free_coalesce(struct cfg80211_registered_device *rdev);

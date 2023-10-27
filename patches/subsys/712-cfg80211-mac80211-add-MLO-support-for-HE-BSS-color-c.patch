@@ -28,111 +28,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  net/wireless/trace.h                          |  11 +-
  16 files changed, 190 insertions(+), 88 deletions(-)
 
---- a/drivers/net/wireless/ath/ath10k/mac.c
-+++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -2033,7 +2033,7 @@ static void ath10k_mac_vif_ap_csa_count_
- 	if (!arvif->is_up)
- 		return;
- 
--	if (!ieee80211_beacon_cntdwn_is_complete(vif)) {
-+	if (!ieee80211_beacon_cntdwn_is_complete(vif, 0)) {
- 		ieee80211_beacon_update_cntdwn(vif, 0);
- 
- 		ret = ath10k_mac_setup_bcn_tmpl(arvif);
---- a/drivers/net/wireless/ath/ath10k/wmi.c
-+++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -3883,7 +3883,7 @@ void ath10k_wmi_event_host_swba(struct a
- 		 * actual channel switch is done
- 		 */
- 		if (arvif->vif->bss_conf.csa_active &&
--		    ieee80211_beacon_cntdwn_is_complete(arvif->vif)) {
-+		    ieee80211_beacon_cntdwn_is_complete(arvif->vif, 0)) {
- 			ieee80211_csa_finish(arvif->vif, 0);
- 			continue;
- 		}
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -1786,9 +1786,9 @@ void ath11k_mac_bcn_tx_event(struct ath1
- 		return;
- 
- 	if (vif->bss_conf.color_change_active &&
--	    ieee80211_beacon_cntdwn_is_complete(vif)) {
-+	    ieee80211_beacon_cntdwn_is_complete(vif, 0)) {
- 		arvif->bcca_zero_sent = true;
--		ieee80211_color_change_finish(vif);
-+		ieee80211_color_change_finish(vif, 0);
- 		return;
- 	}
- 
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -4603,7 +4603,7 @@ ath11k_wmi_obss_color_collision_event(st
- 	switch (ev->evt_type) {
- 	case WMI_BSS_COLOR_COLLISION_DETECTION:
- 		ieeee80211_obss_color_collision_notify(arvif->vif, ev->obss_color_bitmap,
--						       GFP_KERNEL);
-+						       GFP_KERNEL, 0);
- 		ath11k_dbg(ab, ATH11K_DBG_WMI,
- 			   "OBSS color collision detected vdev:%d, event:%d, bitmap:%08llx\n",
- 			   ev->vdev_id, ev->evt_type, ev->obss_color_bitmap);
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -1667,16 +1667,17 @@ void ath12k_mac_bcn_tx_event(struct ath1
- 	if (!link_conf->color_change_active && !arvif->bcca_zero_sent)
- 		return;
- 
--	if (link_conf->color_change_active && ieee80211_beacon_cntdwn_is_complete(vif)) {
-+	if (link_conf->color_change_active &&
-+	    ieee80211_beacon_cntdwn_is_complete(vif, arvif->link_id)) {
- 		arvif->bcca_zero_sent = true;
--		ieee80211_color_change_finish(vif);
-+		ieee80211_color_change_finish(vif, arvif->link_id);
- 		return;
- 	}
- 
- 	arvif->bcca_zero_sent = false;
- 
- 	if (link_conf->color_change_active && !vif->bss_conf.ema_ap)
--		ieee80211_beacon_update_cntdwn(vif, 0);
-+		ieee80211_beacon_update_cntdwn(vif, arvif->link_id);
- 	ieee80211_queue_work(ar->ah->hw, &arvif->update_bcn_template_work);
- }
- 
-@@ -9044,7 +9045,8 @@ static void ath12k_update_obss_color_not
- 	if (arvif->is_created)
- 		ieeee80211_obss_color_collision_notify(arvif->ahvif->vif,
- 						       arvif->obss_color_bitmap,
--						       GFP_KERNEL);
-+						       GFP_KERNEL,
-+						       arvif->link_id);
- 	arvif->obss_color_bitmap = 0;
- 	mutex_unlock(&ar->conf_mutex);
- }
---- a/drivers/net/wireless/ath/ath9k/beacon.c
-+++ b/drivers/net/wireless/ath/ath9k/beacon.c
-@@ -365,7 +365,7 @@ bool ath9k_csa_is_finished(struct ath_so
- 	if (!vif || !vif->bss_conf.csa_active)
- 		return false;
- 
--	if (!ieee80211_beacon_cntdwn_is_complete(vif))
-+	if (!ieee80211_beacon_cntdwn_is_complete(vif, 0))
- 		return false;
- 
- 	ieee80211_csa_finish(vif, 0);
---- a/drivers/net/wireless/ath/ath9k/htc_drv_beacon.c
-+++ b/drivers/net/wireless/ath/ath9k/htc_drv_beacon.c
-@@ -514,7 +514,7 @@ bool ath9k_htc_csa_is_finished(struct at
- 	if (!vif || !vif->bss_conf.csa_active)
- 		return false;
- 
--	if (!ieee80211_beacon_cntdwn_is_complete(vif))
-+	if (!ieee80211_beacon_cntdwn_is_complete(vif, 0))
- 		return false;
- 
- 	ieee80211_csa_finish(vif, 0);
---- a/drivers/net/wireless/mac80211_hwsim.c
-+++ b/drivers/net/wireless/mac80211_hwsim.c
-@@ -2079,7 +2079,8 @@ static void mac80211_hwsim_beacon_tx(voi
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -2270,7 +2270,8 @@ static void mac80211_hwsim_beacon_tx(voi
  			rcu_dereference(link_conf->chanctx_conf)->def.chan);
  	}
  
@@ -144,7 +42,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -4785,7 +4785,8 @@ struct cfg80211_ops {
+@@ -4879,7 +4879,8 @@ struct cfg80211_ops {
  				 struct cfg80211_sar_specs *sar);
  	int	(*color_change)(struct wiphy *wiphy,
  				struct net_device *dev,
@@ -154,13 +52,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	int     (*set_fils_aad)(struct wiphy *wiphy, struct net_device *dev,
  				struct cfg80211_fils_aad *fils_aad);
  	int	(*set_radar_background)(struct wiphy *wiphy,
-@@ -9201,64 +9202,74 @@ void cfg80211_bss_flush(struct wiphy *wi
+@@ -9465,60 +9466,70 @@ void cfg80211_bss_flush(struct wiphy *wi
   * @cmd: the actual event we want to notify
   * @count: the number of TBTTs until the color change happens
   * @color_bitmap: representations of the colors that the local BSS is aware of
 + * @link_id: valid link_id in case of MLO or 0 for non-MLO.
   */
- int cfg80211_bss_color_notify(struct net_device *dev, gfp_t gfp,
+ int cfg80211_bss_color_notify(struct net_device *dev,
  			      enum nl80211_commands cmd, u8 count,
 -			      u64 color_bitmap);
 +			      u64 color_bitmap,
@@ -170,16 +68,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   * cfg80211_obss_color_collision_notify - notify about bss color collision
   * @dev: network device
   * @color_bitmap: representations of the colors that the local BSS is aware of
-  * @gfp: allocation flags
 + * @link_id: valid link_id in case of MLO or 0 for non-MLO.
   */
  static inline int cfg80211_obss_color_collision_notify(struct net_device *dev,
--						       u64 color_bitmap, gfp_t gfp)
-+						       u64 color_bitmap, gfp_t gfp,
+-						       u64 color_bitmap)
++						       u64 color_bitmap,
 +						       unsigned int link_id)
  {
- 	return cfg80211_bss_color_notify(dev, gfp,
- 					 NL80211_CMD_OBSS_COLOR_COLLISION,
+ 	return cfg80211_bss_color_notify(dev, NL80211_CMD_OBSS_COLOR_COLLISION,
 -					 0, color_bitmap);
 +					 0, color_bitmap, link_id);
  }
@@ -188,7 +84,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   * cfg80211_color_change_started_notify - notify color change start
   * @dev: the device on which the color is switched
   * @count: the number of TBTTs until the color change happens
-+ * @link_id: valid link_id in case of MLO or 0 for non-MLO.
++ *@link_id: valid link_id in case of MLO or 0 for non-MLO.
   *
   * Inform the userspace about the color change that has started.
   */
@@ -197,8 +93,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +						       u8 count,
 +						       unsigned int link_id)
  {
- 	return cfg80211_bss_color_notify(dev, GFP_KERNEL,
- 					 NL80211_CMD_COLOR_CHANGE_STARTED,
+ 	return cfg80211_bss_color_notify(dev, NL80211_CMD_COLOR_CHANGE_STARTED,
 -					 count, 0);
 +					 count, 0, link_id);
  }
@@ -212,10 +107,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   */
 -static inline int cfg80211_color_change_aborted_notify(struct net_device *dev)
 +static inline int cfg80211_color_change_aborted_notify(struct net_device *dev,
-+						       unsigned int link_id)
++						      unsigned int link_id)
  {
- 	return cfg80211_bss_color_notify(dev, GFP_KERNEL,
- 					 NL80211_CMD_COLOR_CHANGE_ABORTED,
+ 	return cfg80211_bss_color_notify(dev, NL80211_CMD_COLOR_CHANGE_ABORTED,
 -					 0, 0);
 +					 0, 0, link_id);
  }
@@ -229,9 +123,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   */
 -static inline int cfg80211_color_change_notify(struct net_device *dev)
 +static inline int cfg80211_color_change_notify(struct net_device *dev,
-+					       unsigned int link_id)
++					      unsigned int link_id)
  {
- 	return cfg80211_bss_color_notify(dev, GFP_KERNEL,
+ 	return cfg80211_bss_color_notify(dev,
  					 NL80211_CMD_COLOR_CHANGE_COMPLETED,
 -					 0, 0);
 +					 0, 0, link_id);
@@ -240,7 +134,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  /**
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -5528,20 +5528,24 @@ void ieee80211_csa_finish(struct ieee802
+@@ -5618,20 +5618,24 @@ void ieee80211_csa_finish(struct ieee802
  /**
   * ieee80211_beacon_cntdwn_is_complete - find out if countdown reached 1
   * @vif: &struct ieee80211_vif pointer from the add_interface callback.
@@ -268,23 +162,23 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  /**
   * ieee80211_proberesp_get - retrieve a Probe Response template
-@@ -7414,10 +7418,12 @@ ieee80211_get_unsol_bcast_probe_resp_tmp
+@@ -7583,10 +7587,12 @@ ieee80211_get_unsol_bcast_probe_resp_tmp
   * @color_bitmap: a 64 bit bitmap representing the colors that the local BSS is
   *	aware of.
   * @gfp: allocation flags
 + * @link_id: valid link_id during MLO or 0 for non-MLO
   */
  void
- ieeee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
--				       u64 color_bitmap, gfp_t gfp);
-+				       u64 color_bitmap, gfp_t gfp,
-+				       unsigned int link_id);
+ ieee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
+-				      u64 color_bitmap, gfp_t gfp);
++				      u64 color_bitmap, gfp_t gfp,
++				      unsigned int link_id);
  
  /**
   * ieee80211_is_tx_data - check if frame is a data frame
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -1620,6 +1620,9 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1727,6 +1727,9 @@ static int ieee80211_stop_ap(struct wiph
  		link->csa_block_tx = false;
  	}
  
@@ -294,7 +188,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	mutex_unlock(&local->mtx);
  
  	/* The below work requires sdata lock which we have already acquired
-@@ -1629,6 +1632,9 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1736,6 +1739,9 @@ static int ieee80211_stop_ap(struct wiph
  	 */
  	cancel_work_sync(&link->csa_finalize_work);
  
@@ -304,7 +198,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	ieee80211_free_next_beacon(link);
  
  	/* turn off carrier for this interface and dependent VLANs */
-@@ -4033,13 +4039,13 @@ static int ieee80211_set_csa_beacon(stru
+@@ -4173,13 +4179,13 @@ static int ieee80211_set_csa_beacon(stru
  	return 0;
  }
  
@@ -322,7 +216,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
  
  static int
-@@ -4121,7 +4127,7 @@ __ieee80211_channel_switch(struct wiphy
+@@ -4261,7 +4267,7 @@ __ieee80211_channel_switch(struct wiphy
  
  	/* if there is a color change in progress, abort it */
  	if (link_conf->color_change_active)
@@ -331,13 +225,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	err = ieee80211_set_csa_beacon(link, params, &changed);
  	if (err) {
-@@ -4852,24 +4858,28 @@ static int ieee80211_set_sar_specs(struc
+@@ -4994,24 +5000,28 @@ static int ieee80211_set_sar_specs(struc
  }
  
  static int
 -ieee80211_set_after_color_change_beacon(struct ieee80211_sub_if_data *sdata,
 +ieee80211_set_after_color_change_beacon(struct ieee80211_link_data *link,
- 					u32 *changed)
+ 					u64 *changed)
  {
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
 +
@@ -353,7 +247,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 -					      sdata->deflink.u.ap.next_beacon,
 +		ret = ieee80211_assign_beacon(sdata, link,
 +					      link->u.ap.next_beacon,
- 					      NULL, NULL);
+ 					      NULL, NULL, changed);
 -		ieee80211_free_next_beacon(&sdata->deflink);
 +		ieee80211_free_next_beacon(link);
  
@@ -362,17 +256,17 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 +		link->conf->critical_update_flag &= ~IEEE80211_CU_INCLUDE_BCCA_ELEM;
 +
- 		*changed |= ret;
  		break;
  	}
-@@ -4882,18 +4892,19 @@ ieee80211_set_after_color_change_beacon(
+ 	default:
+@@ -5023,18 +5033,19 @@ ieee80211_set_after_color_change_beacon(
  }
  
  static int
 -ieee80211_set_color_change_beacon(struct ieee80211_sub_if_data *sdata,
 +ieee80211_set_color_change_beacon(struct ieee80211_link_data *link,
  				  struct cfg80211_color_change_settings *params,
- 				  u32 *changed)
+ 				  u64 *changed)
  {
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_color_change_settings color_change = {};
@@ -388,14 +282,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			return -ENOMEM;
  
  		if (params->count <= 1)
-@@ -4905,13 +4916,16 @@ ieee80211_set_color_change_beacon(struct
+@@ -5046,13 +5057,16 @@ ieee80211_set_color_change_beacon(struct
  			params->counter_offset_presp;
  		color_change.count = params->count;
  
 -		err = ieee80211_assign_beacon(sdata, &sdata->deflink,
 +		err = ieee80211_assign_beacon(sdata, link,
  					      &params->beacon_color_change,
- 					      NULL, &color_change);
+ 					      NULL, &color_change, changed);
  		if (err < 0) {
 -			ieee80211_free_next_beacon(&sdata->deflink);
 +			ieee80211_free_next_beacon(link);
@@ -404,16 +298,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
 +		link->conf->critical_update_flag |= IEEE80211_CU_INCLUDE_BCCA_ELEM;
 +
- 		*changed |= err;
  		break;
  	default:
-@@ -4922,16 +4936,20 @@ ieee80211_set_color_change_beacon(struct
+ 		return -EOPNOTSUPP;
+@@ -5062,16 +5076,20 @@ ieee80211_set_color_change_beacon(struct
  }
  
  static void
 -ieee80211_color_change_bss_config_notify(struct ieee80211_sub_if_data *sdata,
 +ieee80211_color_change_bss_config_notify(struct ieee80211_link_data *link,
- 					 u8 color, int enable, u32 changed)
+ 					 u8 color, int enable, u64 changed)
  {
 -	sdata->vif.bss_conf.he_bss_color.color = color;
 -	sdata->vif.bss_conf.he_bss_color.enabled = enable;
@@ -433,7 +327,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		struct ieee80211_sub_if_data *child;
  
  		mutex_lock(&sdata->local->iflist_mtx);
-@@ -4948,8 +4966,9 @@ ieee80211_color_change_bss_config_notify
+@@ -5088,8 +5106,9 @@ ieee80211_color_change_bss_config_notify
  	}
  }
  
@@ -442,9 +336,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  {
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_local *local = sdata->local;
- 	u32 changed = 0;
+ 	u64 changed = 0;
  	int err;
-@@ -4957,80 +4976,130 @@ static int ieee80211_color_change_finali
+@@ -5097,40 +5116,49 @@ static int ieee80211_color_change_finali
  	sdata_assert_lock(sdata);
  	lockdep_assert_held(&local->mtx);
  
@@ -505,6 +399,12 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  unlock:
  	mutex_unlock(&local->mtx);
+@@ -5146,54 +5174,85 @@ void ieee80211_color_collision_detection
+ 	struct ieee80211_sub_if_data *sdata = link->sdata;
+ 
+ 	sdata_lock(sdata);
+-	cfg80211_obss_color_collision_notify(sdata->dev, link->color_bitmap);
++	cfg80211_obss_color_collision_notify(sdata->dev, link->color_bitmap, link->link_id);
  	sdata_unlock(sdata);
  }
  
@@ -515,14 +415,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct ieee80211_link_data *link;
 +
 +	if (WARN_ON(link_id > IEEE80211_MLD_MAX_NUM_LINKS))
-+		return;
++        	return;
 +
 +	rcu_read_lock();
 +
 +	link = rcu_dereference(sdata->link[link_id]);
 +	if (WARN_ON(!link)) {
-+		rcu_read_unlock();
-+		return;
++        	rcu_read_unlock();
++        	return;
 +	}
  
  	ieee80211_queue_work(&sdata->local->hw,
@@ -534,38 +434,46 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  EXPORT_SYMBOL_GPL(ieee80211_color_change_finish);
  
  void
- ieeee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
+ ieee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
 -				       u64 color_bitmap, gfp_t gfp)
 +				       u64 color_bitmap, gfp_t gfp,
 +				       unsigned int link_id)
  {
  	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
+-	struct ieee80211_link_data *link = &sdata->deflink;
 +	struct ieee80211_link_data *link;
++
++	if (WARN_ON(link_id > IEEE80211_MLD_MAX_NUM_LINKS))
++		return;
++
++	rcu_read_lock();
  
 -	if (sdata->vif.bss_conf.color_change_active || sdata->vif.bss_conf.csa_active)
-+	if (WARN_ON(link_id > IEEE80211_MLD_MAX_NUM_LINKS))
- 		return;
- 
--	cfg80211_obss_color_collision_notify(sdata->dev, color_bitmap, gfp);
-+	rcu_read_lock();
-+
 +	link = rcu_dereference(sdata->link[link_id]);
 +	if (WARN_ON(!link)) {
 +		rcu_read_unlock();
-+		return;
+ 		return;
 +	}
-+
+ 
+-	if (delayed_work_pending(&link->color_collision_detect_work))
 +	if (link->conf->color_change_active || link->conf->csa_active) {
 +		rcu_read_unlock();
-+		return;
+ 		return;
 +	}
-+
+ 
+-	link->color_bitmap = color_bitmap;
+-	/* queue the color collision detection event every 500 ms in order to
+-	 * avoid sending too much netlink messages to userspace.
+-	 */
+-	ieee80211_queue_delayed_work(&sdata->local->hw,
+-				     &link->color_collision_detect_work,
+-				     msecs_to_jiffies(500));
 +	rcu_read_unlock();
 +
-+	cfg80211_obss_color_collision_notify(sdata->dev, color_bitmap, gfp,
++	cfg80211_obss_color_collision_notify(sdata->dev, color_bitmap,
 +					     link_id);
  }
- EXPORT_SYMBOL_GPL(ieeee80211_obss_color_collision_notify);
+ EXPORT_SYMBOL_GPL(ieee80211_obss_color_collision_notify);
  
  static int
  ieee80211_color_change(struct wiphy *wiphy, struct net_device *dev,
@@ -575,7 +483,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  	struct ieee80211_local *local = sdata->local;
- 	u32 changed = 0;
+ 	u64 changed = 0;
  	int err;
 +	struct ieee80211_bss_conf *link_conf;
 +	struct ieee80211_link_data *link;
@@ -593,7 +501,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		return -EINVAL;
  
  	mutex_lock(&local->mtx);
-@@ -5038,25 +5107,26 @@ ieee80211_color_change(struct wiphy *wip
+@@ -5201,25 +5260,26 @@ ieee80211_color_change(struct wiphy *wip
  	/* don't allow another color change if one is already active or if csa
  	 * is active
  	 */
@@ -615,10 +523,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 -	cfg80211_color_change_started_notify(sdata->dev, params->count);
 +	cfg80211_color_change_started_notify(sdata->dev, params->count,
-+					     link_id);
++					    link_id);
  
  	if (changed)
--		ieee80211_color_change_bss_config_notify(sdata, sdata->vif.bss_conf.he_bss_color.color, 0, changed);
+-		ieee80211_color_change_bss_config_notify(sdata, 0, 0, changed);
 +		ieee80211_color_change_bss_config_notify(link, link_conf->he_bss_color.color, 0, changed);
  	else
  		/* if the beacon didn't change, we can finalize immediately */
@@ -629,7 +537,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	mutex_unlock(&local->mtx);
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -3424,7 +3424,7 @@ ieee80211_rx_check_bss_color_collision(s
+@@ -3490,7 +3490,7 @@ ieee80211_rx_check_bss_color_collision(s
  				    rx->skb->len - baselen);
  	if (ie && ie->datalen >= sizeof(struct ieee80211_he_operation) &&
  	    ie->datalen >= ieee80211_he_oper_size(ie->data + 1)) {
@@ -638,19 +546,19 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		const struct ieee80211_he_operation *he_oper;
  		u8 color;
  
-@@ -3438,7 +3438,8 @@ ieee80211_rx_check_bss_color_collision(s
+@@ -3504,7 +3504,8 @@ ieee80211_rx_check_bss_color_collision(s
  		if (color == bss_conf->he_bss_color.color)
- 			ieeee80211_obss_color_collision_notify(&rx->sdata->vif,
- 							       BIT_ULL(color),
--							       GFP_ATOMIC);
-+							       GFP_ATOMIC,
-+							       bss_conf->link_id);
+ 			ieee80211_obss_color_collision_notify(&rx->sdata->vif,
+ 							      BIT_ULL(color),
+-							      GFP_ATOMIC);
++							      GFP_ATOMIC,
++							      bss_conf->link_id);
  	}
  }
  
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -5286,9 +5286,11 @@ unlock:
+@@ -5303,9 +5303,11 @@ unlock:
  }
  EXPORT_SYMBOL(ieee80211_beacon_set_cntdwn);
  
@@ -663,7 +571,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	struct beacon_data *beacon = NULL;
  	u8 *beacon_data;
  	size_t beacon_data_len;
-@@ -5297,9 +5299,19 @@ bool ieee80211_beacon_cntdwn_is_complete
+@@ -5314,9 +5316,19 @@ bool ieee80211_beacon_cntdwn_is_complete
  	if (!ieee80211_sdata_running(sdata))
  		return false;
  
@@ -686,7 +594,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		beacon_data = beacon->tail;
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -16565,6 +16565,7 @@ static int nl80211_color_change(struct s
+@@ -16762,6 +16762,7 @@ static int nl80211_color_change(struct s
  	struct nlattr **tb;
  	u16 offset;
  	int err;
@@ -694,7 +602,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	if (!rdev->ops->color_change)
  		return -EOPNOTSUPP;
-@@ -16648,7 +16649,7 @@ static int nl80211_color_change(struct s
+@@ -16847,7 +16848,7 @@ static int nl80211_color_change(struct s
  	}
  
  	wdev_lock(wdev);
@@ -703,7 +611,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	wdev_unlock(wdev);
  
  out:
-@@ -18017,7 +18018,8 @@ static const struct genl_small_ops nl802
+@@ -18242,7 +18243,8 @@ static const struct genl_small_ops nl802
  		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
  		.doit = nl80211_color_change,
  		.flags = GENL_UNS_ADMIN_PERM,
@@ -713,9 +621,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	},
  	{
  		.cmd = NL80211_CMD_SET_FILS_AAD,
-@@ -19966,7 +19968,8 @@ EXPORT_SYMBOL(cfg80211_ch_switch_started
+@@ -20292,7 +20294,8 @@ EXPORT_SYMBOL(cfg80211_ch_switch_started
  
- int cfg80211_bss_color_notify(struct net_device *dev, gfp_t gfp,
+ int cfg80211_bss_color_notify(struct net_device *dev,
  			      enum nl80211_commands cmd, u8 count,
 -			      u64 color_bitmap)
 +			      u64 color_bitmap,
@@ -723,7 +631,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  {
  	struct wireless_dev *wdev = dev->ieee80211_ptr;
  	struct wiphy *wiphy = wdev->wiphy;
-@@ -19989,6 +19992,10 @@ int cfg80211_bss_color_notify(struct net
+@@ -20315,6 +20318,10 @@ int cfg80211_bss_color_notify(struct net
  	if (nla_put_u32(msg, NL80211_ATTR_IFINDEX, dev->ifindex))
  		goto nla_put_failure;
  
@@ -736,7 +644,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		goto nla_put_failure;
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -1399,12 +1399,13 @@ static inline int rdev_set_sar_specs(str
+@@ -1412,12 +1412,13 @@ static inline int rdev_set_sar_specs(str
  
  static inline int rdev_color_change(struct cfg80211_registered_device *rdev,
  				    struct net_device *dev,
@@ -755,7 +663,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	return ret;
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -2845,14 +2845,16 @@ TRACE_EVENT(rdev_set_sar_specs,
+@@ -2864,14 +2864,16 @@ TRACE_EVENT(rdev_set_sar_specs,
  
  TRACE_EVENT(rdev_color_change,
  	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev,
@@ -774,7 +682,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	),
  	TP_fast_assign(
  		WIPHY_ASSIGN;
-@@ -2860,11 +2862,12 @@ TRACE_EVENT(rdev_color_change,
+@@ -2879,11 +2881,12 @@ TRACE_EVENT(rdev_color_change,
  		__entry->count = params->count;
  		__entry->bcn_ofs = params->counter_offset_beacon;
  		__entry->pres_ofs = params->counter_offset_presp;

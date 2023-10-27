@@ -23,7 +23,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/include/linux/ieee80211.h
 +++ b/include/linux/ieee80211.h
-@@ -2071,6 +2071,9 @@ struct ieee80211_eht_cap_elem {
+@@ -2086,6 +2086,9 @@ struct ieee80211_eht_cap_elem {
  #define IEEE80211_EHT_OPER_GROUP_ADDRESSED_BU_IND_LIMIT         0x08
  #define IEEE80211_EHT_OPER_GROUP_ADDRESSED_BU_IND_EXP_MASK      0x30
  
@@ -35,12 +35,12 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   *
 --- a/net/mac80211/mesh.c
 +++ b/net/mac80211/mesh.c
-@@ -698,8 +698,11 @@ int mesh_add_eht_oper_ie(struct ieee8021
+@@ -692,8 +692,11 @@ int mesh_add_eht_oper_ie(struct ieee8021
  	    sdata->vif.bss_conf.chandef.width == NL80211_CHAN_WIDTH_10)
  		return 0;
  
--	len = 2 + 1 + sizeof(struct ieee80211_eht_operation) +
--		      sizeof(struct ieee80211_eht_operation_info);
+-	len = 2 + 1 + offsetof(struct ieee80211_eht_operation, optional) +
+-		      offsetof(struct ieee80211_eht_operation_info, optional);
 +	len = 2 + 1 + IEEE80211_EHT_OPERATION_FIXED_LEN +
 +		      IEEE80211_EHT_OPERATION_INFO_FIXED_LEN;
 +
@@ -49,7 +49,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	if (skb_tailroom(skb) < len)
  		return -ENOMEM;
-@@ -905,6 +908,7 @@ ieee80211_mesh_build_beacon(struct ieee8
+@@ -975,6 +978,7 @@ ieee80211_mesh_build_beacon(struct ieee8
  	u8 *pos;
  	struct ieee80211_sub_if_data *sdata;
  	int hdr_len = offsetofend(struct ieee80211_mgmt, u.beacon);
@@ -57,7 +57,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	sdata = container_of(ifmsh, struct ieee80211_sub_if_data, u.mesh);
  	rcu_read_lock();
-@@ -916,6 +920,10 @@ ieee80211_mesh_build_beacon(struct ieee8
+@@ -986,6 +990,10 @@ ieee80211_mesh_build_beacon(struct ieee8
  						NL80211_IFTYPE_MESH_POINT);
  	ie_len_eht_cap = ieee80211_ie_len_eht_cap(sdata,
  						  NL80211_IFTYPE_MESH_POINT);
@@ -68,12 +68,12 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	head_len = hdr_len +
  		   2 + /* NULL SSID */
  		   /* Channel Switch Announcement */
-@@ -940,8 +948,9 @@ ieee80211_mesh_build_beacon(struct ieee8
+@@ -1010,8 +1018,9 @@ ieee80211_mesh_build_beacon(struct ieee8
  			   sizeof(struct ieee80211_he_6ghz_oper) +
  		   2 + 1 + sizeof(struct ieee80211_he_6ghz_capa) +
  		   ie_len_eht_cap +
--		   2 + 1 + sizeof(struct ieee80211_eht_operation) +
--		   	 + sizeof(struct ieee80211_eht_operation_info) +
+-		   2 + 1 + offsetof(struct ieee80211_eht_operation, optional) +
+-			   offsetof(struct ieee80211_eht_operation_info, optional) +
 +		   2 + 1 + IEEE80211_EHT_OPERATION_FIXED_LEN +
 +			   IEEE80211_EHT_OPERATION_INFO_FIXED_LEN +
 +			   eht_optional_sz +
@@ -82,71 +82,24 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	bcn = kzalloc(sizeof(*bcn) + head_len + tail_len, GFP_KERNEL);
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -3376,23 +3376,28 @@ u8 *ieee80211_ie_build_eht_oper(u8 *pos,
- {
+@@ -3585,13 +3585,17 @@ u8 *ieee80211_ie_build_eht_oper(u8 *pos,
+ 					&eht_cap->eht_mcs_nss_supp.only_20mhz;
  	struct ieee80211_eht_operation *eht_oper;
  	struct ieee80211_eht_operation_info *eht_oper_info;
--	u8 ie_len = 1 + sizeof(struct ieee80211_eht_operation) +
--			sizeof(struct ieee80211_eht_operation_info);
-+	u8 ie_len = 1 + IEEE80211_EHT_OPERATION_FIXED_LEN +
-+			IEEE80211_EHT_OPERATION_INFO_FIXED_LEN;
- 	u8 chwidth = 0;
+-	u8 eht_oper_len = offsetof(struct ieee80211_eht_operation, optional);
++	u8 eht_oper_len = IEEE80211_EHT_OPERATION_FIXED_LEN;
+ 	u8 eht_oper_info_len =
+-		offsetof(struct ieee80211_eht_operation_info, optional);
++		IEEE80211_EHT_OPERATION_INFO_FIXED_LEN;
++	u8 ie_len = 0;
+ 	u8 chan_width = 0;
  
- 	if (chandef->ru_punct_bitmap)
--		ie_len += 2;
++	if (chandef->ru_punct_bitmap)
 +		ie_len += DISABLED_SUBCHANNEL_BITMAP_BYTES_SIZE;
- 
++
  	*pos++ = WLAN_EID_EXTENSION;
- 	*pos++ = ie_len;
+-	*pos++ = 1 + eht_oper_len + eht_oper_info_len;
++	*pos++ = 1 + eht_oper_len + eht_oper_info_len + ie_len;
  	*pos++ = WLAN_EID_EXT_EHT_OPERATION;
  
  	eht_oper = (struct ieee80211_eht_operation *)pos;
--	pos += sizeof(struct ieee80211_eht_operation);
-+
-+	eht_oper->params |= IEEE80211_EHT_OPER_INFO_PRESENT;
-+
-+	memcpy(&eht_oper->basic_mcs_nss,
-+	       &eht_cap->eht_mcs_nss_supp.only_20mhz,
-+	       sizeof(struct ieee80211_eht_mcs_nss_supp_20mhz_only));
-+
-+	pos += IEEE80211_EHT_OPERATION_FIXED_LEN;
- 
- 	eht_oper_info = (struct ieee80211_eht_operation_info *)pos;
--	pos += sizeof(struct ieee80211_eht_operation_info) +
--	       chandef->ru_punct_bitmap ? 2 : 0;
- 
- 	eht_oper_info->ccfs0 =
- 		ieee80211_frequency_to_channel(chandef->center_freq1);
-@@ -3433,27 +3438,19 @@ u8 *ieee80211_ie_build_eht_oper(u8 *pos,
- 		break;
- 	}
- 
--	memcpy(&eht_oper->basic_mcs_nss,
--	       &eht_cap->eht_mcs_nss_supp.only_20mhz,
--	       sizeof(struct ieee80211_eht_mcs_nss_supp_20mhz_only));
--
--	eht_oper->params |= IEEE80211_EHT_OPER_INFO_PRESENT;
--
- 	eht_oper_info->control = chwidth;
- 
--	eht_oper->optional[0] = eht_oper_info->control;
--	eht_oper->optional[1] = eht_oper_info->ccfs0;
--	eht_oper->optional[2] = eht_oper_info->ccfs1;
-+	pos += IEEE80211_EHT_OPERATION_INFO_FIXED_LEN;
- 
- 	if (chandef->ru_punct_bitmap) {
-+		pos += DISABLED_SUBCHANNEL_BITMAP_BYTES_SIZE;
- 		eht_oper->params |=
- 			  IEEE80211_EHT_OPER_DISABLED_SUBCHANNEL_BITMAP_PRESENT;
- 
--		eht_oper_info->optional[0] = chandef->ru_punct_bitmap && 0x00FF;
-+		eht_oper_info->optional[0] = chandef->ru_punct_bitmap & 0x00FF;
- 		eht_oper_info->optional[1] = chandef->ru_punct_bitmap >> 8;
--
--		eht_oper->optional[3] = eht_oper_info->optional[0];
--		eht_oper->optional[4] = eht_oper_info->optional[1];
-+	} else {
-+		eht_oper->params &= ~IEEE80211_EHT_OPER_DISABLED_SUBCHANNEL_BITMAP_PRESENT;
- 	}
- 
- 	return pos;

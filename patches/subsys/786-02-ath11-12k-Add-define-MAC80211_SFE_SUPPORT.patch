@@ -16,96 +16,9 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  net/mac80211/tx.c                        | 8 +++++---
  5 files changed, 16 insertions(+), 4 deletions(-)
 
---- a/drivers/net/wireless/ath/ath11k/mac.c
-+++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -7584,8 +7584,10 @@
- 	int ret;
- 	u64 adjusted_tsf;
- 
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 	if (skb->fast_xmit)
- 		info_flags |= IEEE80211_TX_CTL_HW_80211_ENCAP;
-+#endif
- 
- 	if (arvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
- 		ieee80211_free_txskb(ar->hw, skb);
---- a/drivers/net/wireless/ath/ath12k/bondif.c
-+++ b/drivers/net/wireless/ath/ath12k/bondif.c
-@@ -570,7 +570,9 @@
- 		return 0;
- 	}
- 
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 	skb->fast_xmit = 0;
-+#endif
- 	return link_dev->netdev_ops->ndo_start_xmit(skb, link_dev);
- }
- 
---- a/drivers/net/wireless/ath/ath12k/dp_tx.c
-+++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -282,7 +282,11 @@
- #endif
- 	dma_addr_t paddr;
- 	int ret;
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 	int len = skb->fast_xmit ? 256 : skb->len;
-+#else
-+	int len = skb->len;
-+#endif
- 
- 	ring_id = smp_processor_id();
- 
-@@ -309,11 +313,13 @@
- 	tx_desc->recycler_fast_xmit = 0;
- 	tx_desc->timestamp = ktime_get_real();
- #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 	/* the edma driver uses this flags to optimize the cache invalidation */
- 	skb->fast_recycled = 1;
- 	if (skb->is_from_recycler)
- 		tx_desc->recycler_fast_xmit = 1;
- #endif
-+#endif
- 	skb_cb->vif = arvif->ahvif->vif;
- 	skb_cb->paddr =  paddr;
- 
-@@ -1373,11 +1379,15 @@
- 			skb_shinfo(msdu)->frag_list = NULL;
- 		}
- 
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 		if (likely(msdu->is_from_recycler)) {
- 			__skb_queue_head(&free_list_head, msdu);
- 		} else {
- 			dev_kfree_skb(msdu);
- 		}
-+#else
-+		dev_kfree_skb(msdu);
-+#endif
- 
- 		work_done++;
- 	}
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9054,6 +9054,7 @@
- 
- 	ar = arvif->ar;
- 
-+#ifdef CPTCFG_MAC80211_SFE_SUPPORT
- 	if (skb->fast_xmit) {
- 		ret = ath12k_mac_tx_check_max_limit(ar, skb);
- 		if (ret) {
-@@ -9072,6 +9073,7 @@
- 		}
- 		return;
- 	}
-+#endif
- 
- 	ah = ar->ah;
- 
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -4630,7 +4630,7 @@
+@@ -4605,7 +4605,7 @@ netdev_tx_t ieee80211_subif_start_xmit(s
  #ifdef CPTCFG_MAC80211_NSS_SUPPORT
  	ieee80211_xmit_nss_fixup(skb, dev);
  #endif
@@ -114,7 +27,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	skb->fast_xmit = 0;
  #endif
  
-@@ -4872,6 +4872,7 @@
+@@ -4887,6 +4887,7 @@ void ieee80211_8023_xmit_ap(struct ieee8
  netdev_tx_t ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
  					    struct net_device *dev)
  {
@@ -122,7 +35,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
  	struct ieee80211_tx_control control = {};
-@@ -4906,9 +4907,10 @@
+@@ -4921,9 +4922,10 @@ out:
  		}
  
  		return NETDEV_TX_OK;
@@ -135,19 +48,9 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  }
  
  netdev_tx_t __ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
---- a/local-symbols
-+++ b/local-symbols
-@@ -68,6 +68,7 @@
- MAC80211_NSS_SUPPORT=
- MAC80211_PPE_SUPPORT=
- MAC80211_BONDED_SUPPORT=
-+MAC80211_SFE_SUPPORT=
- WLAN=
- PCMCIA_RAYCS=
- PCMCIA_WL3501=
 --- a/net/mac80211/Kconfig
 +++ b/net/mac80211/Kconfig
-@@ -131,12 +131,12 @@
+@@ -131,12 +131,12 @@ config MAC80211_BONDED_SUPPORT
  
  	  If unsure, say N.
  
@@ -163,3 +66,13 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  
  	  If unsure, say N.
  
+--- a/local-symbols
++++ b/local-symbols
+@@ -68,6 +68,7 @@ MAC80211_STA_HASH_MAX_SIZE=
+ MAC80211_NSS_SUPPORT=
+ MAC80211_PPE_SUPPORT=
+ MAC80211_BONDED_SUPPORT=
++MAC80211_SFE_SUPPORT=
+ QCOM_AOSS_QMP=
+ QCOM_COMMAND_DB=
+ QCOM_CPR=

@@ -16,7 +16,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -377,6 +377,20 @@ enum ieee80211_bss_change {
+@@ -380,6 +380,20 @@ enum ieee80211_bss_change {
  	/* when adding here, make sure to change ieee80211_reconfig */
  };
  
@@ -37,25 +37,24 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  /*
   * The maximum number of IPv4 addresses listed for ARP filtering. If the number
   * of addresses for an interface increase beyond this value, hardware ARP
-@@ -651,6 +665,7 @@ struct ieee80211_fils_discovery {
-  *	write-protected by sdata_lock and local->mtx so holding either is fine
-  *	for read access.
-  * @color_change_color: the bss color that will be used after the change.
+@@ -683,6 +697,7 @@ struct ieee80211_fils_discovery {
+  *	beamformee
+  * @eht_mu_beamformer: in AP-mode, does this BSS enable operation as an EHT MU
+  *	beamformer
 + * @nss_ap_isolate: Used for notifying the NSS host about AP isolate feature
   */
  struct ieee80211_bss_conf {
- 	const u8 *bssid;
-@@ -725,6 +740,8 @@ struct ieee80211_bss_conf {
- 
- 	bool color_change_active;
- 	u8 color_change_color;
-+
+ 	struct ieee80211_vif *vif;
+@@ -777,6 +792,7 @@ struct ieee80211_bss_conf {
+ 	bool eht_su_beamformer;
+ 	bool eht_su_beamformee;
+ 	bool eht_mu_beamformer;
 +	bool nss_ap_isolate;
  };
  
  /**
-@@ -1905,6 +1922,16 @@ struct ieee80211_vif *wdev_to_ieee80211_
- struct wireless_dev *ieee80211_vif_to_wdev(struct ieee80211_vif *vif);
+@@ -1990,6 +2006,16 @@ static inline bool lockdep_vif_mutex_hel
+ 			      lockdep_vif_mutex_held(vif))
  
  /**
 + * ieee80211_vif_to_wdev_relaxed - return a wdev struct from a vif
@@ -71,7 +70,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
   * enum ieee80211_key_flags - key flags
   *
   * These flags are used for communication about keys between the driver
-@@ -2558,6 +2585,8 @@ struct ieee80211_txq {
+@@ -2680,6 +2706,8 @@ struct ieee80211_txq {
   * @IEEE80211_HW_MLO_MCAST_MULTI_LINK_TX: Hardware/driver handles transmitting
   *	multicast frames on all links, mac80211 should not do that.
   *
@@ -80,7 +79,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
   * @NUM_IEEE80211_HW_FLAGS: number of hardware flags, used for sizing arrays
   */
  enum ieee80211_hw_flags {
-@@ -2615,6 +2644,7 @@ enum ieee80211_hw_flags {
+@@ -2737,6 +2765,7 @@ enum ieee80211_hw_flags {
  	IEEE80211_HW_SUPPORTS_CONC_MON_RX_DECAP,
  	IEEE80211_HW_DETECTS_COLOR_COLLISION,
  	IEEE80211_HW_MLO_MCAST_MULTI_LINK_TX,
@@ -88,7 +87,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
-@@ -3627,6 +3657,10 @@ struct ieee80211_prep_tx_info {
+@@ -3749,6 +3778,10 @@ struct ieee80211_prep_tx_info {
   *	non-MLO connections.
   *	The callback can sleep.
   *
@@ -99,7 +98,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
   * @prepare_multicast: Prepare for multicast filter configuration.
   *	This callback is optional, and its return value is passed
   *	to configure_filter(). This callback must be atomic.
-@@ -4152,7 +4186,9 @@ struct ieee80211_ops {
+@@ -4298,7 +4331,9 @@ struct ieee80211_ops {
  				  struct ieee80211_vif *vif,
  				  struct ieee80211_bss_conf *info,
  				  u64 changed);
@@ -122,7 +121,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -889,6 +889,22 @@ struct wireless_dev *ieee80211_vif_to_wd
+@@ -848,6 +848,22 @@ struct wireless_dev *ieee80211_vif_to_wd
  }
  EXPORT_SYMBOL_GPL(ieee80211_vif_to_wdev);
  
@@ -147,25 +146,25 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
   * the suspend->resume cycle. Since we can't check each caller
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -290,6 +290,17 @@ void ieee80211_link_info_change_notify(s
+@@ -296,6 +296,17 @@ void ieee80211_link_info_change_notify(s
  	drv_link_info_changed(local, sdata, link->conf, link->link_id, changed);
  }
  
 +void ieee80211_nss_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
-+					  u64 changed)
++                                         u64 changed)
 +{
-+	struct ieee80211_local *local = sdata->local;
++       struct ieee80211_local *local = sdata->local;
 +
-+	if (!changed || sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
-+		return;
++       if (!changed || sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
++               return;
 +
-+	drv_nss_bss_info_changed(local, sdata, &sdata->vif.bss_conf, changed);
++       drv_nss_bss_info_changed(local, sdata, &sdata->vif.bss_conf, changed);
 +}
 +
- u32 ieee80211_reset_erp_info(struct ieee80211_sub_if_data *sdata)
+ u64 ieee80211_reset_erp_info(struct ieee80211_sub_if_data *sdata)
  {
  	sdata->vif.bss_conf.use_cts_prot = false;
-@@ -692,12 +703,6 @@ struct ieee80211_hw *ieee80211_alloc_hw_
+@@ -699,12 +710,6 @@ struct ieee80211_hw *ieee80211_alloc_hw_
  			   NL80211_FEATURE_FULL_AP_CLIENT_STATE;
  	wiphy_ext_feature_set(wiphy, NL80211_EXT_FEATURE_FILS_STA);
  	wiphy_ext_feature_set(wiphy,
@@ -176,9 +175,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 -			      NL80211_EXT_FEATURE_CONTROL_PORT_OVER_NL80211_TX_STATUS);
 -	wiphy_ext_feature_set(wiphy,
  			      NL80211_EXT_FEATURE_SCAN_FREQ_KHZ);
- 
- 	if (!ops->hw_scan) {
-@@ -1006,6 +1011,18 @@ int ieee80211_register_hw(struct ieee802
+ 	wiphy_ext_feature_set(wiphy,
+ 			      NL80211_EXT_FEATURE_POWERED_ADDR_CHANGE);
+@@ -1013,6 +1018,18 @@ int ieee80211_register_hw(struct ieee802
  			return -EINVAL;
  	}
  
@@ -199,7 +198,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		return -EINVAL;
 --- a/net/mac80211/sta_info.c
 +++ b/net/mac80211/sta_info.c
-@@ -2229,6 +2229,9 @@ sta_get_last_rx_stats(struct sta_info *s
+@@ -2385,6 +2385,9 @@ sta_get_last_rx_stats(struct sta_info *s
  	struct ieee80211_sta_rx_stats *stats = &sta->deflink.rx_stats;
  	int cpu;
  
@@ -211,7 +210,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -1007,11 +1007,23 @@ ieee80211_tx_h_stats(struct ieee80211_tx
+@@ -1028,11 +1028,23 @@ ieee80211_tx_h_stats(struct ieee80211_tx
  {
  	struct sk_buff *skb;
  	int ac = -1;
@@ -235,7 +234,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		ac = skb_get_queue_mapping(skb);
  		tx->sta->deflink.tx_stats.bytes[ac] += skb->len;
  	}
-@@ -2830,7 +2842,9 @@ static struct sk_buff *ieee80211_build_h
+@@ -2857,7 +2869,9 @@ static struct sk_buff *ieee80211_build_h
  
  	if (unlikely(!multicast && ((skb->sk &&
  		     skb_shinfo(skb)->tx_flags & SKBTX_WIFI_STATUS) ||
@@ -246,7 +245,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		info_id = ieee80211_store_ack_skb(local, skb, &info_flags,
  						  cookie);
  
-@@ -4492,7 +4506,8 @@ static void ieee80211_8023_xmit(struct i
+@@ -4639,13 +4653,16 @@ static void ieee80211_8023_xmit(struct i
  	}
  
  	if (unlikely(skb->sk &&
@@ -256,22 +255,19 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		info->ack_frame_id = ieee80211_store_ack_skb(local, skb,
  							     &info->flags, NULL);
  
-@@ -4500,8 +4515,10 @@ static void ieee80211_8023_xmit(struct i
- 
- 	dev_sw_netstats_tx_add(dev, 1, skb->len);
- 
--	sta->deflink.tx_stats.bytes[skb_get_queue_mapping(skb)] += skb->len;
--	sta->deflink.tx_stats.packets[skb_get_queue_mapping(skb)]++;
+ 	dev_sw_netstats_tx_add(dev, skbs, len);
+-	sta->deflink.tx_stats.packets[queue] += skbs;
+-	sta->deflink.tx_stats.bytes[queue] += len;
 +	if (!ieee80211_hw_check(&local->hw, SUPPORTS_NSS_OFFLOAD)) {
-+		sta->deflink.tx_stats.bytes[skb_get_queue_mapping(skb)] += skb->len;
-+		sta->deflink.tx_stats.packets[skb_get_queue_mapping(skb)]++;
++		sta->deflink.tx_stats.packets[queue] += skbs;
++		sta->deflink.tx_stats.bytes[queue] += len;
 +	}
  
- 	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
- 		sdata = container_of(sdata->bss,
+ 	ieee80211_tpt_led_trig_tx(local, len);
+ 
 --- a/net/wireless/util.c
 +++ b/net/wireless/util.c
-@@ -2252,6 +2252,9 @@ bool cfg80211_does_bw_fit_range(const st
+@@ -2447,6 +2447,9 @@ bool cfg80211_does_bw_fit_range(const st
  
  int cfg80211_sinfo_alloc_tid_stats(struct station_info *sinfo, gfp_t gfp)
  {
@@ -283,16 +279,16 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  				gfp);
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2474,7 +2474,7 @@ static int ieee80211_change_bss(struct w
- {
+@@ -2680,7 +2680,7 @@ static int ieee80211_change_bss(struct w
  	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_link_data *link;
  	struct ieee80211_supported_band *sband;
--	u32 changed = 0;
-+	u32 changed = 0, nss_changed = 0;;
+-	u64 changed = 0;
++	u32 changed = 0, nss_changed = 0;
  
- 	if (!sdata_dereference(sdata->deflink.u.ap.beacon, sdata))
- 		return -ENOENT;
-@@ -2521,6 +2521,8 @@ static int ieee80211_change_bss(struct w
+ 	link = ieee80211_link_or_deflink(sdata, params->link_id, true);
+ 	if (IS_ERR(link))
+@@ -2730,6 +2730,8 @@ static int ieee80211_change_bss(struct w
  			sdata->flags |= IEEE80211_SDATA_DONT_BRIDGE_PACKETS;
  		else
  			sdata->flags &= ~IEEE80211_SDATA_DONT_BRIDGE_PACKETS;
@@ -301,9 +297,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  		ieee80211_check_fast_rx_iface(sdata);
  	}
  
-@@ -2550,6 +2552,8 @@ static int ieee80211_change_bss(struct w
+@@ -2758,6 +2760,8 @@ static int ieee80211_change_bss(struct w
  
- 	ieee80211_link_info_change_notify(sdata, &sdata->deflink, changed);
+ 	ieee80211_link_info_change_notify(sdata, link, changed);
  
 +	ieee80211_nss_bss_info_change_notify(sdata, nss_changed);
 +
@@ -312,9 +308,9 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -200,6 +200,23 @@ static inline void drv_link_info_changed
- 	trace_drv_return_void(local);
- }
+@@ -172,6 +172,23 @@ void drv_link_info_changed(struct ieee80
+ 			   struct ieee80211_bss_conf *info,
+ 			   int link_id, u64 changed);
  
 +static inline void drv_nss_bss_info_changed(struct ieee80211_local *local,
 +					struct ieee80211_sub_if_data *sdata,
@@ -338,14 +334,14 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  {
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1767,6 +1767,8 @@ void ieee80211_vif_cfg_change_notify(str
+@@ -1852,6 +1852,8 @@ void ieee80211_vif_cfg_change_notify(str
  void ieee80211_link_info_change_notify(struct ieee80211_sub_if_data *sdata,
  				       struct ieee80211_link_data *link,
  				       u64 changed);
 +void ieee80211_nss_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 +					  u64 changed);
  void ieee80211_configure_filter(struct ieee80211_local *local);
- u32 ieee80211_reset_erp_info(struct ieee80211_sub_if_data *sdata);
+ u64 ieee80211_reset_erp_info(struct ieee80211_sub_if_data *sdata);
  
 --- a/net/mac80211/trace.h
 +++ b/net/mac80211/trace.h
@@ -390,7 +386,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	TP_PROTO(struct ieee80211_local *local,
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -1151,7 +1151,8 @@ static bool ieee80211_set_sdata_offload_
+@@ -910,7 +910,8 @@ static bool ieee80211_set_sdata_offload_
  		    local->hw.wiphy->frag_threshold != (u32)-1)
  			flags &= ~IEEE80211_OFFLOAD_ENCAP_ENABLED;
  
@@ -425,6 +421,6 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  MAC80211_DEBUG_COUNTERS=
  MAC80211_STA_HASH_MAX_SIZE=
 +MAC80211_NSS_SUPPORT=
- WLAN=
- PCMCIA_RAYCS=
- PCMCIA_WL3501=
+ QCOM_AOSS_QMP=
+ QCOM_COMMAND_DB=
+ QCOM_CPR=

@@ -24,7 +24,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -739,6 +739,8 @@ struct ieee80211_bss_conf {
+@@ -758,6 +758,8 @@ struct ieee80211_bss_conf {
  	struct ieee80211_ftm_responder_params *ftmr_params;
  	/* Multiple BSSID data */
  	bool nontransmitted;
@@ -33,15 +33,15 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	u8 transmitter_bssid[ETH_ALEN];
  	u8 bssid_index;
  	u8 bssid_indicator;
-@@ -1964,8 +1966,6 @@ struct ieee80211_vif {
- 	bool txqs_stopped[IEEE80211_NUM_ACS];
+@@ -1978,8 +1980,6 @@ struct ieee80211_vif {
+ 
  	bool noqueue_enable;
  
 -	struct ieee80211_vif *mbssid_tx_vif;
 -
- #ifdef CPTCFG_MAC80211_PPE_SUPPORT
- 	u32 ppe_vp_num;
- #endif
+ 	/* must be last */
+ 	u8 drv_priv[] __aligned(sizeof(void *));
+ };
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
 @@ -142,8 +142,10 @@ static int ieee80211_set_ap_mbssid_optio
@@ -56,7 +56,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	link_conf->bssid_index = 0;
  	link_conf->nontransmitted = false;
  	link_conf->ema_ap = false;
-@@ -156,9 +158,25 @@ static int ieee80211_set_ap_mbssid_optio
+@@ -157,9 +159,25 @@ static int ieee80211_set_ap_mbssid_optio
  		return -EINVAL;
  
  	if (tx_sdata == sdata) {
@@ -84,7 +84,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  		link_conf->nontransmitted = true;
  		link_conf->bssid_index = params.index;
  	}
-@@ -1604,8 +1622,12 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1702,8 +1720,12 @@ static int ieee80211_stop_ap(struct wiph
  	struct cfg80211_chan_def chandef;
  	struct ieee80211_link_data *link =
  		sdata_dereference(sdata->link[link_id], sdata);
@@ -98,9 +98,17 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	sdata_assert_lock(sdata);
  
  	old_beacon = sdata_dereference(link->u.ap.beacon, sdata);
-@@ -1671,7 +1693,10 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1767,7 +1789,6 @@ static int ieee80211_stop_ap(struct wiph
+ 	kfree(link_conf->ftmr_params);
+ 	link_conf->ftmr_params = NULL;
+ 
+-	sdata->vif.mbssid_tx_vif = NULL;
+ 	link_conf->bssid_index = 0;
+ 	link_conf->nontransmitted = false;
+ 	link_conf->ema_ap = false;
+@@ -1775,7 +1796,10 @@ static int ieee80211_stop_ap(struct wiph
+ 
  	__sta_info_flush(sdata, true);
- 	ieee80211_free_keys(sdata, true);
  
 +	ieee80211_stop_mbssid(sdata);
  	link_conf->enable_beacon = false;
@@ -109,7 +117,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	sdata->beacon_rate_set = false;
  	sdata->vif.cfg.ssid_len = 0;
  	clear_bit(SDATA_STATE_OFFCHANNEL_BEACON_STOPPED, &sdata->state);
-@@ -3717,23 +3742,41 @@ void ieee80211_csa_finish(struct ieee802
+@@ -3848,23 +3872,41 @@ void ieee80211_csa_finish(struct ieee802
  		return;
  	}
  
@@ -122,7 +130,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  		 * transmitting interface
  		 */
 +		unsigned int link_id_iter;
-+		u16 valid_links;
++		unsigned long valid_links;
  		struct ieee80211_sub_if_data *iter;
 +		struct ieee80211_link_data *link_iter;
  
@@ -156,7 +164,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  		}
  	}
  	ieee80211_queue_work(&local->hw, &link->csa_finalize_work);
-@@ -4949,6 +4992,7 @@ ieee80211_color_change_bss_config_notify
+@@ -5081,6 +5123,7 @@ ieee80211_color_change_bss_config_notify
  {
  	struct ieee80211_sub_if_data *sdata = link->sdata;
  
@@ -164,7 +172,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	link->conf->he_bss_color.color = color;
  	link->conf->he_bss_color.enabled = enable;
  
-@@ -4956,19 +5000,38 @@ ieee80211_color_change_bss_config_notify
+@@ -5088,19 +5131,38 @@ ieee80211_color_change_bss_config_notify
  
  	ieee80211_link_info_change_notify(sdata, link, changed);
  
@@ -172,7 +180,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
 -	if (!link->conf->nontransmitted && sdata->vif.mbssid_tx_vif) {
 +	if (!link->conf->nontransmitted && link->conf->mbssid_tx_vif) {
 +		unsigned int link_id_iter;
-+		u16 valid_links;
++		unsigned long valid_links;
  		struct ieee80211_sub_if_data *child;
 +		struct ieee80211_link_data *link_iter;
  
@@ -212,7 +220,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  	}
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -670,46 +670,95 @@ static void ieee80211_do_stop(struct iee
+@@ -731,46 +731,96 @@ static void ieee80211_do_stop(struct iee
  		ieee80211_add_virtual_monitor(local);
  }
  
@@ -236,7 +244,8 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
 -			non_tx_sdata->vif.mbssid_tx_vif = NULL;
 -			dev_close(non_tx_sdata->wdev.netdev);
 +	struct ieee80211_vif *tx_vif;
-+	unsigned int valid_links, link_id, tx_link_id, iter_valid_links, iter_link_id;
++	unsigned int link_id, tx_link_id, iter_link_id;
++	unsigned long iter_valid_links, valid_links;
 +	struct ieee80211_link_data *link_iter, *link;
 +
 +	lockdep_assert_wiphy(sdata->local->hw.wiphy);
@@ -331,8 +340,8 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
 -		ieee80211_stop_mbssid(sdata);
  	}
  
- #ifdef CPTCFG_MAC80211_NSS_SUPPORT
-@@ -730,6 +779,14 @@ static int ieee80211_stop(struct net_dev
+ 	cancel_work_sync(&sdata->activate_links_work);
+@@ -783,6 +833,14 @@ static int ieee80211_stop(struct net_dev
  #endif
  
  	wiphy_lock(sdata->local->hw.wiphy);
@@ -349,7 +358,7 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -2624,4 +2624,5 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(stru
+@@ -2709,4 +2709,5 @@ ieee80211_eht_cap_ie_to_sta_eht_cap(stru
  				    struct link_sta_info *link_sta);
  void ieee80211_eht_op_ie_to_bss_conf(struct ieee80211_bss_conf *link_conf,
  				     const struct ieee80211_eht_operation *op_ie);
@@ -357,17 +366,19 @@ Signed-off-by: Rameshkumar Sundaram <quic_ramess@quicinc.com>
  #endif /* IEEE80211_I_H */
 --- a/net/wireless/sme.c
 +++ b/net/wireless/sme.c
-@@ -1514,6 +1514,7 @@ void cfg80211_autodisconnect_wk(struct w
+@@ -1584,7 +1584,7 @@ void cfg80211_autodisconnect_wk(struct w
  		container_of(work, struct wireless_dev, disconnect_wk);
  	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
  
+-	wiphy_lock(wdev->wiphy);
 +	wiphy_lock(&rdev->wiphy);
  	wdev_lock(wdev);
  
  	if (wdev->conn_owner_nlportid) {
-@@ -1552,4 +1553,5 @@ void cfg80211_autodisconnect_wk(struct w
+@@ -1623,5 +1623,5 @@ void cfg80211_autodisconnect_wk(struct w
  	}
  
  	wdev_unlock(wdev);
+-	wiphy_unlock(wdev->wiphy);
 +	wiphy_unlock(&rdev->wiphy);
  }

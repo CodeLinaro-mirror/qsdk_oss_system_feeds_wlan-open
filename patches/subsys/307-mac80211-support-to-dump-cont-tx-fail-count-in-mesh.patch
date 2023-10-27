@@ -16,7 +16,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
 
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -8057,6 +8057,11 @@ void cfg80211_cqm_pktloss_notify(struct
+@@ -8366,6 +8366,11 @@ void cfg80211_cqm_pktloss_notify(struct
  void cfg80211_cqm_txe_notify(struct net_device *dev, const u8 *peer,
  			     u32 num_packets, u32 rate, u32 intvl, gfp_t gfp);
  
@@ -30,7 +30,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
   * @dev: network device
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -5236,6 +5236,11 @@ enum nl80211_ps_state {
+@@ -5350,6 +5350,11 @@ enum nl80211_ps_state {
  	NL80211_PS_ENABLED,
  };
  
@@ -42,7 +42,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  /**
   * enum nl80211_attr_cqm - connection quality monitor attributes
   * @__NL80211_ATTR_CQM_INVALID: invalid
-@@ -5280,6 +5285,7 @@ enum nl80211_attr_cqm {
+@@ -5394,6 +5399,7 @@ enum nl80211_attr_cqm {
  	NL80211_ATTR_CQM_TXE_INTVL,
  	NL80211_ATTR_CQM_BEACON_LOSS_EVENT,
  	NL80211_ATTR_CQM_RSSI_LEVEL,
@@ -50,76 +50,6 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  
  	/* keep last */
  	__NL80211_ATTR_CQM_AFTER_LAST,
---- a/net/mac80211/debugfs_sta.c
-+++ b/net/mac80211/debugfs_sta.c
-@@ -526,6 +526,57 @@ static ssize_t sta_ht_capa_read(struct f
- }
- STA_OPS(ht_capa);
- 
-+static ssize_t sta_tx_fail_cnt_read(struct file *file, char __user *userbuf,
-+				    size_t count, loff_t *ppos)
-+{
-+	struct sta_info *sta = file->private_data;
-+	char buf[18 * MAX_TX_FAIL_CNT], *p = buf;
-+	int i;
-+
-+	if(!sta->mesh) {
-+		p += scnprintf(p, sizeof(buf) + buf - p, "tx_fail_cnt is supported only for mesh\n");
-+		return simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
-+	}
-+
-+	p += scnprintf(p, sizeof(buf) + buf - p, "\nTx Cont fail cnt info : \n");
-+	for (i = 0; i < MAX_TX_FAIL_CNT; i++) {
-+		if (!sta->mesh->tx_fail_cnt[i])
-+			continue;
-+		p += scnprintf(p, sizeof(buf) + buf - p, "%d : %u\n",i,
-+			       sta->mesh->tx_fail_cnt[i]);
-+	}
-+
-+	p += scnprintf(p, sizeof(buf) + buf - p, "mgmt fail cnt : %u\n", sta->mesh->mgmt_fail_cnt);
-+	p += scnprintf(p, sizeof(buf) + buf - p, "current fail avg : %lu\n",
-+		       ewma_mesh_fail_avg_read(&sta->mesh->fail_avg));
-+
-+	return simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
-+}
-+
-+static ssize_t sta_tx_fail_cnt_write(struct file *file,
-+				     const char __user *userbuf,
-+				     size_t count, loff_t *ppos)
-+{
-+	struct sta_info *sta = file->private_data;
-+	int ret;
-+	u8 val;
-+
-+	ret = kstrtou8_from_user(userbuf, count, 0, &val);
-+
-+	if (!sta->mesh || ret || val >= MESH_TX_FAILURE_LOG_CTRL_MAX)
-+		return -EINVAL;
-+
-+	if (val & MESH_RESET_TX_FAIL_COUNT) {
-+		memset(sta->mesh->tx_fail_cnt, 0, sizeof(u32) * MAX_TX_FAIL_CNT);
-+		return count;
-+	}
-+
-+	sta->mesh->tx_fail_log = val;
-+	return count;
-+}
-+
-+STA_OPS_RW(tx_fail_cnt);
-+
- static ssize_t sta_vht_capa_read(struct file *file, char __user *userbuf,
- 				 size_t count, loff_t *ppos)
- {
-@@ -1225,6 +1276,9 @@ void ieee80211_sta_debugfs_add(struct st
- 	DEBUGFS_ADD(reset_mac80211_rx_pkts_flow);
- 	DEBUGFS_ADD(mac80211_tx_pkts_flow);
- 	DEBUGFS_ADD(mac80211_rx_pkts_flow);
-+#ifdef CPTCFG_MAC80211_MESH
-+        DEBUGFS_ADD(tx_fail_cnt);
-+#endif
- 
- 	DEBUGFS_ADD_COUNTER(rx_duplicates, deflink.rx_stats.num_duplicates);
- 	DEBUGFS_ADD_COUNTER(rx_fragments, deflink.rx_stats.fragments);
 --- a/net/mac80211/mesh_hwmp.c
 +++ b/net/mac80211/mesh_hwmp.c
 @@ -71,6 +71,9 @@ static inline u16 u16_field_get(const u8
@@ -196,8 +126,8 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  /**
   * hwmp_route_info_get - Update routing info to originator and transmitter
   *
-@@ -404,6 +450,8 @@ static u32 hwmp_route_info_get(struct ie
- 	u32 last_hop_metric, new_metric;
+@@ -405,6 +451,8 @@ static u32 hwmp_route_info_get(struct ie
+ 	bool flush_mpath = false;
  	bool process = true;
  	u8 hopcount;
 +	int signal_avg;
@@ -205,58 +135,55 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  
  	rcu_read_lock();
  	sta = sta_info_get(sdata, mgmt->sa);
-@@ -502,8 +550,23 @@ static u32 hwmp_route_info_get(struct ie
- 			next_hop = rcu_dereference(mpath->next_hop);
- 			if (next_hop)
+@@ -505,8 +553,22 @@ static u32 hwmp_route_info_get(struct ie
  				ether_addr_copy(old_next_hop_addr, next_hop->sta.addr);
--			if (next_hop != sta)
-+			if (next_hop != sta) {
+ 			if (next_hop != sta) {
  				mpath->path_change_count++;
-+				mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
-+					  " metric %d ft 0x%x\n",
-+					  mpath->dst, sta->deflink.addr, last_hop_metric, action);
-+			} else if (MP_DIFF(new_metric, mpath->metric) >
-+				   (mpath->metric*LOG_PERCENT_DIFF)/100) {
-+				signal_avg = -ewma_signal_read(&sta->deflink.rx_stats_avg.signal);
-+				mpath_dbg(sdata, "MESH MPLMU DIRECT dst %pM next hop"
-+					  " %pM metric from %d to %d ft 0x%x signal %d"
-+					  "dbm signal_avg %d dbm\n",
-+					  mpath->dst, sta->deflink.addr, mpath->metric,
-+					  new_metric, action,
-+					  sta->deflink.rx_stats.last_signal,
-+					  signal_avg);
-+				mpath_metric_change = 1;
-+			}
++                                mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
++                                          " metric %d ft 0x%x\n",
++                                          mpath->dst, sta->deflink.addr, last_hop_metric, action);
+ 				flush_mpath = true;
+-			}
++                        } else if (MP_DIFF(new_metric, mpath->metric) >
++                                   (mpath->metric*LOG_PERCENT_DIFF)/100) {
++                                signal_avg = -ewma_signal_read(&sta->deflink.rx_stats_avg.signal);
++                                mpath_dbg(sdata, "MESH MPLMU DIRECT dst %pM next hop"
++                                          " %pM metric from %d to %d ft 0x%x signal %d"
++                                          "dbm signal_avg %d dbm\n",
++                                          mpath->dst, sta->deflink.addr, mpath->metric,
++                                          new_metric, action,
++                                          sta->deflink.rx_stats.last_signal,
++                                          signal_avg);
++                                mpath_metric_change = 1;
++                        }
  			mesh_path_assign_nexthop(mpath, sta);
  			mpath->flags |= MESH_PATH_SN_VALID;
  			mpath->metric = new_metric;
-@@ -559,8 +622,24 @@ static u32 hwmp_route_info_get(struct ie
- 			next_hop = rcu_dereference(mpath->next_hop);
- 			if (next_hop)
+@@ -566,8 +628,22 @@ static u32 hwmp_route_info_get(struct ie
  				ether_addr_copy(old_next_hop_addr, next_hop->sta.addr);
--			if (next_hop != sta)
-+			if (next_hop != sta) {
+ 			if (next_hop != sta) {
  				mpath->path_change_count++;
 +				mpath_dbg(sdata, "MESH MPU dst %pM next hop %pM"
 +					  " metric %d ft 0x%x\n",
 +					  mpath->dst, sta->deflink.addr, last_hop_metric, action);
-+			} else if (MP_DIFF(last_hop_metric, mpath->metric) >
-+				   (mpath->metric*LOG_PERCENT_DIFF)/100) {
-+				signal_avg = -ewma_signal_read(&sta->deflink.rx_stats_avg.signal);
-+				mpath_dbg(sdata, "MESH MPLMU DIRECT dst %pM next hop"
-+					  " %pM metric from %d to %d ft 0x%x signal"
-+					  " %d dbm signal_avg %d dbm\n",
-+					  mpath->dst, sta->deflink.addr, mpath->metric,
-+					  last_hop_metric, action,
-+					  sta->deflink.rx_stats.last_signal,
-+					  signal_avg);
-+				mpath_metric_change = 1;
-+			}
-+
+ 				flush_mpath = true;
+-			}
++                        } else if (MP_DIFF(new_metric, mpath->metric) >
++                                   (mpath->metric*LOG_PERCENT_DIFF)/100) {
++                                signal_avg = -ewma_signal_read(&sta->deflink.rx_stats_avg.signal);
++                                mpath_dbg(sdata, "MESH MPLMU DIRECT dst %pM next hop"
++                                          " %pM metric from %d to %d ft 0x%x signal %d"
++                                          "dbm signal_avg %d dbm\n",
++                                          mpath->dst, sta->deflink.addr, mpath->metric,
++                                          new_metric, action,
++                                          sta->deflink.rx_stats.last_signal,
++                                          signal_avg);
++                                mpath_metric_change = 1;
++                        }
  			mesh_path_assign_nexthop(mpath, sta);
  			mpath->metric = last_hop_metric;
  			mpath->exp_time = time_after(mpath->exp_time, exp_time)
-@@ -578,6 +657,9 @@ static u32 hwmp_route_info_get(struct ie
+@@ -587,6 +663,9 @@ static u32 hwmp_route_info_get(struct ie
  			spin_unlock_bh(&mpath->state_lock);
  	}
  
@@ -268,7 +195,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  	return process ? new_metric : 0;
 --- a/net/mac80211/mesh_pathtbl.c
 +++ b/net/mac80211/mesh_pathtbl.c
-@@ -596,6 +596,7 @@ void mesh_plink_broken(struct sta_info *
+@@ -871,6 +871,7 @@ void mesh_plink_broken(struct sta_info *
  	struct mesh_table *tbl = &sdata->u.mesh.mesh_paths;
  	static const u8 bcast[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
  	struct mesh_path *mpath;
@@ -276,7 +203,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  
  	rcu_read_lock();
  	hlist_for_each_entry_rcu(mpath, &tbl->walk_head, walk_list) {
-@@ -610,9 +611,19 @@ void mesh_plink_broken(struct sta_info *
+@@ -885,9 +886,19 @@ void mesh_plink_broken(struct sta_info *
  				sdata->u.mesh.mshcfg.element_ttl,
  				mpath->dst, mpath->sn,
  				WLAN_REASON_MESH_PATH_DEST_UNREACHABLE, bcast);
@@ -326,7 +253,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  };
  
  DECLARE_EWMA(signal, 10, 8)
-@@ -923,6 +937,8 @@ void ieee80211_sta_remove_link(struct st
+@@ -939,6 +953,8 @@ void ieee80211_sta_remove_link(struct st
  void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta);
  void ieee80211_sta_ps_deliver_poll_response(struct sta_info *sta);
  void ieee80211_sta_ps_deliver_uapsd(struct sta_info *sta);
@@ -337,7 +264,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -18749,6 +18749,28 @@ void cfg80211_cqm_txe_notify(struct net_
+@@ -19192,6 +19192,28 @@ void cfg80211_cqm_txe_notify(struct net_
  }
  EXPORT_SYMBOL(cfg80211_cqm_txe_notify);
  
@@ -366,3 +293,73 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  void cfg80211_cqm_pktloss_notify(struct net_device *dev,
  				 const u8 *peer, u32 num_packets, gfp_t gfp)
  {
+--- a/net/mac80211/debugfs_sta.c
++++ b/net/mac80211/debugfs_sta.c
+@@ -548,6 +548,57 @@ static ssize_t link_sta_ht_capa_read(str
+ }
+ LINK_STA_OPS(ht_capa);
+ 
++static ssize_t sta_tx_fail_cnt_read(struct file *file, char __user *userbuf,
++                                   size_t count, loff_t *ppos)
++{
++       struct sta_info *sta = file->private_data;
++       char buf[18 * MAX_TX_FAIL_CNT], *p = buf;
++       int i;
++
++       if(!sta->mesh) {
++               p += scnprintf(p, sizeof(buf) + buf - p, "tx_fail_cnt is supported only for mesh\n");
++               return simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
++       }
++
++       p += scnprintf(p, sizeof(buf) + buf - p, "\nTx Cont fail cnt info : \n");
++       for (i = 0; i < MAX_TX_FAIL_CNT; i++) {
++               if (!sta->mesh->tx_fail_cnt[i])
++                       continue;
++               p += scnprintf(p, sizeof(buf) + buf - p, "%d : %u\n",i,
++                              sta->mesh->tx_fail_cnt[i]);
++       }
++
++       p += scnprintf(p, sizeof(buf) + buf - p, "mgmt fail cnt : %u\n", sta->mesh->mgmt_fail_cnt);
++       p += scnprintf(p, sizeof(buf) + buf - p, "current fail avg : %lu\n",
++                      ewma_mesh_fail_avg_read(&sta->mesh->fail_avg));
++
++       return simple_read_from_buffer(userbuf, count, ppos, buf, p - buf);
++}
++
++static ssize_t sta_tx_fail_cnt_write(struct file *file,
++                                    const char __user *userbuf,
++                                    size_t count, loff_t *ppos)
++{
++       struct sta_info *sta = file->private_data;
++       int ret;
++       u8 val;
++
++       ret = kstrtou8_from_user(userbuf, count, 0, &val);
++
++       if (!sta->mesh || ret || val >= MESH_TX_FAILURE_LOG_CTRL_MAX)
++               return -EINVAL;
++
++       if (val & MESH_RESET_TX_FAIL_COUNT) {
++               memset(sta->mesh->tx_fail_cnt, 0, sizeof(u32) * MAX_TX_FAIL_CNT);
++               return count;
++       }
++
++       sta->mesh->tx_fail_log = val;
++       return count;
++}
++
++STA_OPS_RW(tx_fail_cnt);
++
+ static ssize_t link_sta_vht_capa_read(struct file *file, char __user *userbuf,
+ 				      size_t count, loff_t *ppos)
+ {
+@@ -1428,6 +1479,9 @@ void ieee80211_sta_debugfs_add(struct st
+ 	DEBUGFS_ADD(reset_mac80211_rx_pkts_flow);
+ 	DEBUGFS_ADD(mac80211_tx_pkts_flow);
+ 	DEBUGFS_ADD(mac80211_rx_pkts_flow);
++#ifdef CPTCFG_MAC80211_MESH
++        DEBUGFS_ADD(tx_fail_cnt);
++#endif
+ 	/* FIXME: Kept here as the statistics are only done on the deflink */
+ 	DEBUGFS_ADD_COUNTER(tx_filtered, deflink.status_stats.filtered);
+ 

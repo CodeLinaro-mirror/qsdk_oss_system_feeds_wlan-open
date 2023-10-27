@@ -24,7 +24,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -2005,6 +2005,8 @@ enum ieee80211_key_flags {
+@@ -2089,6 +2089,8 @@ enum ieee80211_key_flags {
   * @tx_pn: PN used for TX keys, may be used by the driver as well if it
   *	needs to do software PN assignment by itself (e.g. due to TSO)
   * @flags: key flags, see &enum ieee80211_key_flags.
@@ -33,17 +33,17 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
   * @keyidx: the key index (0-3)
   * @keylen: key material length
   * @key: key material. For ALG_TKIP the key is encoded as a 256-bit (32 byte)
-@@ -2023,6 +2025,7 @@ struct ieee80211_key_conf {
+@@ -2108,6 +2110,7 @@ struct ieee80211_key_conf {
  	u8 hw_key_idx;
  	s8 keyidx;
  	u16 flags;
 +	u16 vlan_id;
+ 	s8 link_id;
  	u8 keylen;
  	u8 key[];
- };
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -500,6 +500,7 @@ static int ieee80211_add_key(struct wiph
+@@ -538,6 +538,7 @@ static int ieee80211_add_key(struct wiph
  		break;
  	case NL80211_IFTYPE_AP:
  	case NL80211_IFTYPE_AP_VLAN:
@@ -53,7 +53,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  			key->conf.flags |= IEEE80211_KEY_FLAG_RX_MGMT;
 --- a/net/mac80211/driver-ops.c
 +++ b/net/mac80211/driver-ops.c
-@@ -114,7 +114,11 @@ int drv_sta_state(struct ieee80211_local
+@@ -116,7 +116,11 @@ int drv_sta_state(struct ieee80211_local
  
  	might_sleep();
  
@@ -68,7 +68,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -283,7 +283,9 @@ static inline int drv_set_key(struct iee
+@@ -453,7 +453,9 @@ static inline int drv_sta_add(struct iee
  
  	might_sleep();
  
@@ -91,32 +91,33 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		/*
  		 * The driver doesn't know anything about VLAN interfaces.
  		 * Hence, don't send GTKs for VLAN interfaces to the driver.
-@@ -569,6 +570,8 @@ ieee80211_key_alloc(u32 cipher, int idx,
+@@ -611,6 +612,8 @@ ieee80211_key_alloc(u32 cipher, int idx,
  	 */
  	key->conf.flags = 0;
  	key->flags = 0;
 +	/* VLAN ID initialised to zero for non-vlan interfaces */
 +	key->conf.vlan_id = 0;
  
+ 	key->conf.link_id = -1;
  	key->conf.cipher = cipher;
- 	key->conf.keyidx = idx;
 --- a/net/mac80211/tx.c
 +++ b/net/mac80211/tx.c
-@@ -4529,8 +4529,11 @@ static void ieee80211_8023_xmit(struct i
+@@ -4654,16 +4654,25 @@ static void ieee80211_8023_xmit(struct i
  				struct ieee80211_key *key, struct sk_buff *skb)
  {
  	struct ieee80211_tx_info *info;
 +	struct ethhdr *ehdr = (struct ethhdr *)skb->data;
  	struct ieee80211_local *local = sdata->local;
  	struct tid_ampdu_tx *tid_tx;
+ 	struct sk_buff *seg, *next;
+ 	unsigned int skbs = 0, len = 0;
+ 	u16 queue;
 +	unsigned char *ra = ehdr->h_dest;
 +	bool multicast;
  	u8 tid;
  
- 	if (local->ops->wake_tx_queue) {
-@@ -4539,6 +4542,12 @@ static void ieee80211_8023_xmit(struct i
- 		skb_get_hash(skb);
- 	}
+ 	queue = ieee80211_select_queue(sdata, sta, skb);
+ 	skb_set_queue_mapping(skb, queue);
  
 +	multicast = is_multicast_ether_addr(ra);
 +

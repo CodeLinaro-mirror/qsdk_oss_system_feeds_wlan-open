@@ -17,15 +17,15 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -750,6 +750,7 @@ struct ieee80211_bss_conf {
+@@ -787,6 +787,7 @@ struct ieee80211_bss_conf {
  
  	bool color_change_active;
  	u8 color_change_color;
 +	u8 bmiss_threshold;
  
- 	bool nss_ap_isolate;
- 	enum nl80211_beacon_tx_mode beacon_tx_mode;
-@@ -2676,6 +2677,12 @@ enum ieee80211_hw_flags {
+ 	bool ht_ldpc;
+ 	bool vht_ldpc;
+@@ -2797,6 +2798,12 @@ enum ieee80211_hw_flags {
  	NUM_IEEE80211_HW_FLAGS
  };
  
@@ -38,7 +38,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  /**
   * struct ieee80211_hw - hardware information and state
   *
-@@ -2841,6 +2848,7 @@ struct ieee80211_hw {
+@@ -2962,6 +2969,7 @@ struct ieee80211_hw {
  	u32 max_mtu;
  	const s8 *tx_power_levels;
  	u8 max_txpwr_levels_idx;
@@ -95,14 +95,14 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  	DEBUGFS_ADD_MODE(aql_enable, 0600);
  	DEBUGFS_ADD(aql_pending);
 +	DEBUGFS_ADD(dbg_mask);
+ 	DEBUGFS_ADD_MODE(aqm, 0600);
  
- 	if (local->ops->wake_tx_queue)
- 		DEBUGFS_ADD_MODE(aqm, 0600);
+ 	DEBUGFS_ADD_MODE(airtime_flags, 0600);
 --- a/net/mac80211/debugfs_netdev.c
 +++ b/net/mac80211/debugfs_netdev.c
-@@ -297,6 +297,32 @@ static ssize_t ieee80211_if_parse_smps(s
+@@ -325,6 +325,32 @@ static ssize_t ieee80211_if_parse_smps(s
  }
- IEEE80211_IF_FILE_RW(smps);
+ IEEE80211_IF_LINK_FILE_RW(smps);
  
 +int ieee80211_if_fmt_bmiss_threshold(const struct ieee80211_sub_if_data *sdata,
 +				     char *buf, int buflen)
@@ -133,7 +133,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  static ssize_t ieee80211_if_parse_tkip_mic_test(
  	struct ieee80211_sub_if_data *sdata, const char *buf, int buflen)
  {
-@@ -681,6 +707,7 @@ static void add_ap_files(struct ieee8021
+@@ -746,6 +772,7 @@ static void add_ap_files(struct ieee8021
  	DEBUGFS_ADD(num_buffered_multicast);
  	DEBUGFS_ADD_MODE(tkip_mic_test, 0200);
  	DEBUGFS_ADD_MODE(multicast_to_unicast, 0600);
@@ -141,7 +141,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  }
  
  static void add_vlan_files(struct ieee80211_sub_if_data *sdata)
-@@ -701,6 +728,7 @@ static void add_mesh_files(struct ieee80
+@@ -766,6 +793,7 @@ static void add_mesh_files(struct ieee80
  {
  	DEBUGFS_ADD_MODE(tsf, 0600);
  	DEBUGFS_ADD_MODE(estab_plinks, 0400);
@@ -151,16 +151,16 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  static void add_mesh_stats(struct ieee80211_sub_if_data *sdata)
 --- a/net/mac80211/mesh.c
 +++ b/net/mac80211/mesh.c
-@@ -163,6 +163,8 @@ void mesh_sta_cleanup(struct sta_info *s
+@@ -164,6 +164,8 @@ void mesh_sta_cleanup(struct sta_info *s
  	struct ieee80211_sub_if_data *sdata = sta->sdata;
- 	u32 changed = mesh_plink_deactivate(sta);
+ 	u64 changed = mesh_plink_deactivate(sta);
  
 +	del_timer_sync(&sta->mesh->bmiss_timer);
 +
  	if (changed)
  		ieee80211_mbss_info_change_notify(sdata, changed);
  }
-@@ -1361,6 +1363,9 @@ static void ieee80211_mesh_rx_bcn_presp(
+@@ -1520,6 +1522,9 @@ static void ieee80211_mesh_rx_bcn_presp(
  		if (ifmsh->csa_role != IEEE80211_MESH_CSA_ROLE_INIT &&
  		    !sdata->vif.bss_conf.csa_active)
  			ieee80211_mesh_process_chnswitch(sdata, elems, true);
@@ -172,7 +172,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  	if (ifmsh->sync_ops)
 --- a/net/mac80211/mesh.h
 +++ b/net/mac80211/mesh.h
-@@ -267,7 +267,9 @@ int mesh_path_send_to_gates(struct mesh_
+@@ -302,7 +302,9 @@ int mesh_path_send_to_gates(struct mesh_
  int mesh_gate_num(struct ieee80211_sub_if_data *sdata);
  u32 airtime_link_metric_get(struct ieee80211_local *local,
  			    struct sta_info *sta);
@@ -183,17 +183,17 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
  /* Mesh plinks */
  void mesh_neighbour_update(struct ieee80211_sub_if_data *sdata,
  			   u8 *hw_addr, struct ieee802_11_elems *ie,
-@@ -302,6 +304,7 @@ void mesh_path_discard_frame(struct ieee
+@@ -337,6 +339,7 @@ void mesh_path_discard_frame(struct ieee
  void mesh_path_tx_root_frame(struct ieee80211_sub_if_data *sdata);
  
  bool mesh_action_is_path_sel(struct ieee80211_mgmt *mgmt);
 +void mesh_bmiss_event(struct timer_list *t);
  void mesh_nss_offld_path_update(struct mesh_path *mpath, bool is_mpath, u8 *old_next_hop_addr);
- 
- #ifdef CPTCFG_MAC80211_MESH
+ struct ieee80211_mesh_fast_tx *
+ mesh_fast_tx_get(struct ieee80211_sub_if_data *sdata, const u8 *addr);
 --- a/net/mac80211/mesh_plink.c
 +++ b/net/mac80211/mesh_plink.c
-@@ -598,6 +598,58 @@ mesh_sta_info_get(struct ieee80211_sub_i
+@@ -607,6 +607,58 @@ mesh_sta_info_get(struct ieee80211_sub_i
  	return sta;
  }
  
@@ -254,7 +254,7 @@ Signed-off-by: Hari Chandrakanthan <haric@codeaurora.org>
   *
 --- a/net/mac80211/sta_info.c
 +++ b/net/mac80211/sta_info.c
-@@ -529,6 +529,7 @@ __sta_info_alloc(struct ieee80211_sub_if
+@@ -579,6 +579,7 @@ __sta_info_alloc(struct ieee80211_sub_if
  		if (!sdata->u.mesh.user_mpm)
  			timer_setup(&sta->mesh->plink_timer, mesh_plink_timer,
  				    0);

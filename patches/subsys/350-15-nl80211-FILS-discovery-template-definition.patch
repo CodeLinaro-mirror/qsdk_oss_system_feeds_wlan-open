@@ -23,7 +23,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -4373,7 +4373,7 @@ struct cfg80211_ops {
+@@ -4506,7 +4506,7 @@ struct cfg80211_ops {
  	int	(*start_ap)(struct wiphy *wiphy, struct net_device *dev,
  			    struct cfg80211_ap_settings *settings);
  	int	(*change_beacon)(struct wiphy *wiphy, struct net_device *dev,
@@ -32,74 +32,9 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	int	(*stop_ap)(struct wiphy *wiphy, struct net_device *dev,
  			   unsigned int link_id);
  
---- a/net/mac80211/cfg.c
-+++ b/net/mac80211/cfg.c
-@@ -1391,17 +1391,18 @@ error:
- }
- 
- static int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
--				   struct cfg80211_beacon_data *params)
-+				   struct cfg80211_ap_settings *params)
- {
- 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
- 	struct ieee80211_link_data *link;
- 	struct beacon_data *old;
- 	int err;
- 	struct ieee80211_bss_conf *link_conf;
-+	u32 changed;
- 
- 	sdata_assert_lock(sdata);
- 
--	link = sdata_dereference(sdata->link[params->link_id], sdata);
-+	link = sdata_dereference(sdata->link[params->beacon.link_id], sdata);
- 	if (!link)
- 		return -ENOLINK;
- 
-@@ -1417,17 +1418,36 @@ static int ieee80211_change_beacon(struc
- 	if (!old)
- 		return -ENOENT;
- 
--	err = ieee80211_assign_beacon(sdata, link, params, NULL, NULL);
-+	err = ieee80211_assign_beacon(sdata, link, &params->beacon, NULL, NULL);
- 	if (err < 0)
- 		return err;
- 
--	if (params->he_bss_color_valid &&
--	    params->he_bss_color.enabled != link_conf->he_bss_color.enabled) {
--		link_conf->he_bss_color.enabled = params->he_bss_color.enabled;
-+	if (params->beacon.he_bss_color_valid &&
-+	    params->beacon.he_bss_color.enabled != link_conf->he_bss_color.enabled) {
-+		link_conf->he_bss_color.enabled = params->beacon.he_bss_color.enabled;
- 		err |= BSS_CHANGED_HE_BSS_COLOR;
- 	}
- 
--	ieee80211_link_info_change_notify(sdata, link, err);
-+	changed = err;
-+	if (params->fils_discovery.max_interval) {
-+		err = ieee80211_set_fils_discovery(sdata,
-+						   &params->fils_discovery,
-+						   link, link_conf);
-+		if (err < 0)
-+			return err;
-+		changed |= BSS_CHANGED_FILS_DISCOVERY;
-+	}
-+
-+	if (params->unsol_bcast_probe_resp.interval) {
-+		err = ieee80211_set_unsol_bcast_probe_resp(sdata,
-+							   &params->unsol_bcast_probe_resp,
-+							   link, link_conf);
-+		if (err < 0)
-+			return err;
-+		changed |= BSS_CHANGED_UNSOL_BCAST_PROBE_RESP;
-+	}
-+
-+	ieee80211_link_info_change_notify(sdata, link, changed);
- 	return 0;
- }
- 
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -6098,7 +6098,7 @@ static int nl80211_set_beacon(struct sk_
+@@ -6324,7 +6324,7 @@ static int nl80211_set_beacon(struct sk_
  	unsigned int link_id = nl80211_link_id(info->attrs);
  	struct net_device *dev = info->user_ptr[1];
  	struct wireless_dev *wdev = dev->ieee80211_ptr;
@@ -108,35 +43,34 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	int err;
  
  	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP &&
-@@ -6111,17 +6111,38 @@ static int nl80211_set_beacon(struct sk_
+@@ -6337,17 +6337,37 @@ static int nl80211_set_beacon(struct sk_
  	if (!wdev->links[link_id].ap.beacon_interval)
  		return -EINVAL;
  
--	err = nl80211_parse_beacon(rdev, info->attrs, &params);
+-	err = nl80211_parse_beacon(rdev, info->attrs, &params, info->extack);
 +	params = kzalloc(sizeof(*params), GFP_KERNEL);
 +	if (!params)
 +		return -ENOMEM;
 +
-+	err = nl80211_parse_beacon(rdev, info->attrs, &params->beacon);
++	err = nl80211_parse_beacon(rdev, info->attrs, &params->beacon, info->extack);
  	if (err)
  		goto out;
  
 +	if (info->attrs[NL80211_ATTR_FILS_DISCOVERY]) {
 +		err = nl80211_parse_fils_discovery(rdev,
-+						   info->attrs[NL80211_ATTR_FILS_DISCOVERY],
-+						   params);
++						    info->attrs[NL80211_ATTR_FILS_DISCOVERY],
++						    params);
 +		if (err)
 +			goto out;
 +	}
 +
 +	if (info->attrs[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP]) {
 +		err = nl80211_parse_unsol_bcast_probe_resp(rdev,
-+							   info->attrs[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP],
-+							   params);
++							    info->attrs[NL80211_ATTR_UNSOL_BCAST_PROBE_RESP],
++							    params);
 +		if (err)
 +			goto out;
 +	}
-+
  	wdev_lock(wdev);
 -	err = rdev_change_beacon(rdev, dev, &params);
 +	err = rdev_change_beacon(rdev, dev, params);
@@ -153,7 +87,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -167,7 +167,7 @@ static inline int rdev_start_ap(struct c
+@@ -173,7 +173,7 @@ static inline int rdev_start_ap(struct c
  
  static inline int rdev_change_beacon(struct cfg80211_registered_device *rdev,
  				     struct net_device *dev,
@@ -164,7 +98,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	trace_rdev_change_beacon(&rdev->wiphy, dev, info);
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -599,46 +599,50 @@ TRACE_EVENT(rdev_start_ap,
+@@ -615,46 +615,50 @@ TRACE_EVENT(rdev_start_ap,
  
  TRACE_EVENT(rdev_change_beacon,
  	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev,
@@ -239,3 +173,63 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		} else {
  			__entry->link_id = -1;
  		}
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -1560,7 +1560,7 @@ error:
+ }
+ 
+ static int ieee80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
+-				   struct cfg80211_beacon_data *params)
++				   struct cfg80211_ap_settings *params)
+ {
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_link_data *link;
+@@ -1571,7 +1571,7 @@ static int ieee80211_change_beacon(struc
+ 
+ 	sdata_assert_lock(sdata);
+ 
+-	link = sdata_dereference(sdata->link[params->link_id], sdata);
++	link = sdata_dereference(sdata->link[params->beacon.link_id], sdata);
+ 	if (!link)
+ 		return -ENOLINK;
+ 
+@@ -1587,17 +1587,35 @@ static int ieee80211_change_beacon(struc
+ 	if (!old)
+ 		return -ENOENT;
+ 
+-	err = ieee80211_assign_beacon(sdata, link, params, NULL, NULL,
++	err = ieee80211_assign_beacon(sdata, link, &params->beacon, NULL, NULL,
+ 				      &changed);
+ 	if (err < 0)
+ 		return err;
+ 
+-	if (params->he_bss_color_valid &&
+-	    params->he_bss_color.enabled != link_conf->he_bss_color.enabled) {
+-		link_conf->he_bss_color.enabled = params->he_bss_color.enabled;
++	if (params->beacon.he_bss_color_valid &&
++	    params->beacon.he_bss_color.enabled != link_conf->he_bss_color.enabled) {
++		link_conf->he_bss_color.enabled = params->beacon.he_bss_color.enabled;
+ 		changed |= BSS_CHANGED_HE_BSS_COLOR;
+ 	}
+ 
++	if (params->fils_discovery.max_interval) {
++		err = ieee80211_set_fils_discovery(sdata,
++						    &params->fils_discovery,
++						    link, link_conf);
++		if (err < 0)
++			return err;
++		changed |= BSS_CHANGED_FILS_DISCOVERY;
++	}
++
++	if (params->unsol_bcast_probe_resp.interval) {
++		err = ieee80211_set_unsol_bcast_probe_resp(sdata,
++							    &params->unsol_bcast_probe_resp,
++							    link, link_conf);
++		if (err < 0)
++			return err;
++		changed |= BSS_CHANGED_UNSOL_BCAST_PROBE_RESP;
++	}
++
+ 	ieee80211_link_info_change_notify(sdata, link, changed);
+ 	return 0;
+ }

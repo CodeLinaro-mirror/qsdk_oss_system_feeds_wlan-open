@@ -31,75 +31,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  net/wireless/trace.h                          |  12 +-
  16 files changed, 113 insertions(+), 72 deletions(-)
 
---- a/drivers/net/wireless/ath/ath10k/mac.c
-+++ b/drivers/net/wireless/ath/ath10k/mac.c
-@@ -2046,7 +2046,7 @@ static void ath10k_mac_vif_ap_csa_count_
- 			ath10k_warn(ar, "failed to update prb tmpl during csa: %d\n",
- 				    ret);
- 	} else {
--		ieee80211_csa_finish(vif);
-+		ieee80211_csa_finish(vif, 0);
- 	}
- }
- 
---- a/drivers/net/wireless/ath/ath10k/wmi.c
-+++ b/drivers/net/wireless/ath/ath10k/wmi.c
-@@ -3884,7 +3884,7 @@ void ath10k_wmi_event_host_swba(struct a
- 		 */
- 		if (arvif->vif->bss_conf.csa_active &&
- 		    ieee80211_beacon_cntdwn_is_complete(arvif->vif)) {
--			ieee80211_csa_finish(arvif->vif);
-+			ieee80211_csa_finish(arvif->vif, 0);
- 			continue;
- 		}
- 
---- a/drivers/net/wireless/ath/ath11k/wmi.c
-+++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -9394,7 +9394,7 @@ ath11k_wmi_process_csa_switch_count_even
- 		}
- 
- 		if (arvif->is_up && arvif->vif->bss_conf.csa_active)
--			ieee80211_csa_finish(arvif->vif);
-+			ieee80211_csa_finish(arvif->vif, 0);
- 	}
- 	rcu_read_unlock();
- }
---- a/drivers/net/wireless/ath/ath12k/wmi.c
-+++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -8052,7 +8052,7 @@ ath12k_wmi_process_csa_switch_count_even
- 		/* FIXME some changes are expected for ML vifs */
- 		if (arvif->is_up && link_conf->csa_active) {
- 			if (!ev->current_switch_count)
--				ieee80211_csa_finish(arvif->ahvif->vif);
-+				ieee80211_csa_finish(arvif->ahvif->vif, arvif->link_id);
- 			else if (ev->current_switch_count > 1)
- 				ieee80211_beacon_update_cntdwn(arvif->ahvif->vif);
- 		}
---- a/drivers/net/wireless/ath/ath9k/beacon.c
-+++ b/drivers/net/wireless/ath/ath9k/beacon.c
-@@ -368,7 +368,7 @@ bool ath9k_csa_is_finished(struct ath_so
- 	if (!ieee80211_beacon_cntdwn_is_complete(vif))
- 		return false;
- 
--	ieee80211_csa_finish(vif);
-+	ieee80211_csa_finish(vif, 0);
- 	return true;
- }
- 
---- a/drivers/net/wireless/ath/ath9k/htc_drv_beacon.c
-+++ b/drivers/net/wireless/ath/ath9k/htc_drv_beacon.c
-@@ -517,7 +517,7 @@ bool ath9k_htc_csa_is_finished(struct at
- 	if (!ieee80211_beacon_cntdwn_is_complete(vif))
- 		return false;
- 
--	ieee80211_csa_finish(vif);
-+	ieee80211_csa_finish(vif, 0);
- 
- 	priv->csa_vif = NULL;
- 	return true;
---- a/drivers/net/wireless/mac80211_hwsim.c
-+++ b/drivers/net/wireless/mac80211_hwsim.c
-@@ -2080,7 +2080,7 @@ static void mac80211_hwsim_beacon_tx(voi
+--- a/drivers/net/wireless/virtual/mac80211_hwsim.c
++++ b/drivers/net/wireless/virtual/mac80211_hwsim.c
+@@ -2271,7 +2271,7 @@ static void mac80211_hwsim_beacon_tx(voi
  	}
  
  	if (link_conf->csa_active && ieee80211_beacon_cntdwn_is_complete(vif))
@@ -110,7 +44,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static enum hrtimer_restart
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -4672,7 +4672,8 @@ struct cfg80211_ops {
+@@ -4766,7 +4766,8 @@ struct cfg80211_ops {
  
  	int	(*channel_switch)(struct wiphy *wiphy,
  				  struct net_device *dev,
@@ -120,7 +54,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	int     (*set_qos_map)(struct wiphy *wiphy,
  			       struct net_device *dev,
-@@ -6085,6 +6086,7 @@ struct wireless_dev {
+@@ -6277,6 +6278,7 @@ struct wireless_dev {
  			struct {
  				unsigned int beacon_interval;
  				struct cfg80211_chan_def chandef;
@@ -130,7 +64,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  				struct cfg80211_internal_bss *current_bss;
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -5502,12 +5502,13 @@ void ieee80211_beacon_set_cntdwn(struct
+@@ -5592,12 +5592,13 @@ void ieee80211_beacon_set_cntdwn(struct
  /**
   * ieee80211_csa_finish - notify mac80211 about channel switch
   * @vif: &struct ieee80211_vif pointer from the add_interface callback.
@@ -147,7 +81,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
   * ieee80211_beacon_cntdwn_is_complete - find out if countdown reached 1
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -1616,6 +1616,13 @@ static int ieee80211_stop_ap(struct wiph
+@@ -1721,6 +1721,13 @@ static int ieee80211_stop_ap(struct wiph
  
  	mutex_unlock(&local->mtx);
  
@@ -161,7 +95,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	ieee80211_free_next_beacon(link);
  
  	/* turn off carrier for this interface and dependent VLANs */
-@@ -3615,13 +3622,24 @@ error:
+@@ -3752,13 +3759,24 @@ error:
  	return NULL;
  }
  
@@ -187,7 +121,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (vif->mbssid_tx_vif == vif) {
  		/* Trigger ieee80211_csa_finish() on the non-transmitting
  		 * interfaces when channel switch is received on
-@@ -3640,7 +3658,7 @@ void ieee80211_csa_finish(struct ieee802
+@@ -3777,7 +3795,7 @@ void ieee80211_csa_finish(struct ieee802
  					     &iter->deflink.csa_finalize_work);
  		}
  	}
@@ -196,13 +130,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	rcu_read_unlock();
  }
-@@ -3658,23 +3676,25 @@ void ieee80211_channel_switch_disconnect
+@@ -3795,20 +3813,21 @@ void ieee80211_channel_switch_disconnect
  }
  EXPORT_SYMBOL(ieee80211_channel_switch_disconnect);
  
 -static int ieee80211_set_after_csa_beacon(struct ieee80211_sub_if_data *sdata,
 +static int ieee80211_set_after_csa_beacon(struct ieee80211_link_data *link,
- 					  u32 *changed)
+ 					  u64 *changed)
  {
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	int err;
@@ -217,17 +151,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 -					      sdata->deflink.u.ap.next_beacon,
 +		err = ieee80211_assign_beacon(sdata, link,
 +					      link->u.ap.next_beacon,
- 					      NULL, NULL);
+ 					      NULL, NULL, changed);
 -		ieee80211_free_next_beacon(&sdata->deflink);
 +		ieee80211_free_next_beacon(link);
  
  		if (err < 0)
  			return err;
-+
- 		*changed |= err;
- 		break;
- 	case NL80211_IFTYPE_ADHOC:
-@@ -3699,9 +3719,11 @@ static int ieee80211_set_after_csa_beaco
+@@ -3833,9 +3852,11 @@ static int ieee80211_set_after_csa_beaco
  	return 0;
  }
  
@@ -237,10 +167,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_local *local = sdata->local;
 +	struct ieee80211_bss_conf *link_conf = link->conf;
- 	u32 changed = 0;
+ 	u64 changed = 0;
  	int err;
  
-@@ -3716,49 +3738,54 @@ static int __ieee80211_csa_finalize(stru
+@@ -3856,50 +3877,54 @@ static int __ieee80211_csa_finalize(stru
  	 * completed successfully
  	 */
  
@@ -273,8 +203,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (err)
  		return err;
  
--	ieee80211_link_info_change_notify(sdata, &sdata->deflink, changed);
-+	ieee80211_link_info_change_notify(sdata, link, changed);
+ 	ieee80211_link_info_change_notify(sdata, &sdata->deflink, changed);
  
 -	if (sdata->deflink.csa_block_tx) {
 +	if (link->csa_block_tx) {
@@ -289,9 +218,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	if (err)
  		return err;
  
--	cfg80211_ch_switch_notify(sdata->dev, &sdata->deflink.csa_chandef, 0);
-+	cfg80211_ch_switch_notify(sdata->dev, &link->csa_chandef,
-+				  link->link_id);
+-	cfg80211_ch_switch_notify(sdata->dev, &sdata->deflink.csa_chandef, 0,
++	cfg80211_ch_switch_notify(sdata->dev, &link->csa_chandef, link->link_id,
+ 				  sdata->vif.bss_conf.eht_puncturing);
  
  	return 0;
  }
@@ -309,7 +238,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		cfg80211_stop_iface(sdata->local->hw.wiphy, &sdata->wdev,
  				    GFP_KERNEL);
  	}
-@@ -3766,23 +3793,32 @@ static void ieee80211_csa_finalize(struc
+@@ -3907,23 +3932,32 @@ static void ieee80211_csa_finalize(struc
  
  void ieee80211_csa_finalize_work(struct work_struct *work)
  {
@@ -347,14 +276,14 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  unlock:
  	mutex_unlock(&local->chanctx_mtx);
-@@ -3790,18 +3826,19 @@ unlock:
+@@ -3931,18 +3965,19 @@ unlock:
  	sdata_unlock(sdata);
  }
  
 -static int ieee80211_set_csa_beacon(struct ieee80211_sub_if_data *sdata,
 +static int ieee80211_set_csa_beacon(struct ieee80211_link_data *link,
  				    struct cfg80211_csa_settings *params,
- 				    u32 *changed)
+ 				    u64 *changed)
  {
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_csa_settings csa = {};
@@ -370,7 +299,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			return -ENOMEM;
  
  		/*
-@@ -3827,7 +3864,7 @@ static int ieee80211_set_csa_beacon(stru
+@@ -3968,7 +4003,7 @@ static int ieee80211_set_csa_beacon(stru
  		     IEEE80211_MAX_CNTDWN_COUNTERS_NUM) ||
  		    (params->n_counter_offsets_presp >
  		     IEEE80211_MAX_CNTDWN_COUNTERS_NUM)) {
@@ -379,24 +308,21 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  			return -EINVAL;
  		}
  
-@@ -3837,13 +3874,14 @@ static int ieee80211_set_csa_beacon(stru
+@@ -3978,11 +4013,11 @@ static int ieee80211_set_csa_beacon(stru
  		csa.n_counter_offsets_presp = params->n_counter_offsets_presp;
  		csa.count = params->count;
  
 -		err = ieee80211_assign_beacon(sdata, &sdata->deflink,
 +		err = ieee80211_assign_beacon(sdata, link,
  					      &params->beacon_csa, &csa,
- 					      NULL);
+ 					      NULL, changed);
  		if (err < 0) {
 -			ieee80211_free_next_beacon(&sdata->deflink);
 +			ieee80211_free_next_beacon(link);
  			return err;
  		}
-+
- 		*changed |= err;
  
- 		break;
-@@ -3936,13 +3974,16 @@ static void ieee80211_color_change_abort
+@@ -4074,13 +4109,16 @@ static void ieee80211_color_change_abort
  
  static int
  __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
@@ -411,10 +337,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	struct ieee80211_chanctx *chanctx;
 +	struct ieee80211_bss_conf *link_conf;
 +	struct ieee80211_link_data *link;
- 	u32 changed = 0;
+ 	u64 changed = 0;
  	int err;
  
-@@ -3955,16 +3996,21 @@ __ieee80211_channel_switch(struct wiphy
+@@ -4093,16 +4131,21 @@ __ieee80211_channel_switch(struct wiphy
  	if (sdata->wdev.cac_started)
  		return -EBUSY;
  
@@ -440,7 +366,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  					 lockdep_is_held(&local->chanctx_mtx));
  	if (!conf) {
  		err = -EBUSY;
-@@ -3985,11 +4031,12 @@ __ieee80211_channel_switch(struct wiphy
+@@ -4123,11 +4166,12 @@ __ieee80211_channel_switch(struct wiphy
  	ch_switch.chandef = params->chandef;
  	ch_switch.count = params->count;
  
@@ -454,7 +380,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  					     chanctx->mode,
  					     params->radar_required);
  	if (err)
-@@ -3998,39 +4045,40 @@ __ieee80211_channel_switch(struct wiphy
+@@ -4136,44 +4180,45 @@ __ieee80211_channel_switch(struct wiphy
  	/* if reservation is invalid then this will fail */
  	err = ieee80211_check_combinations(sdata, NULL, chanctx->mode, 0);
  	if (err) {
@@ -476,12 +402,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		goto out;
  	}
  
+ 	if (params->punct_bitmap && !sdata->vif.bss_conf.eht_support)
+ 		goto out;
+ 
 -	sdata->deflink.csa_chandef = params->chandef;
 -	sdata->deflink.csa_block_tx = params->block_tx;
 -	sdata->vif.bss_conf.csa_active = true;
 +	link->csa_chandef = params->chandef;
 +	link->csa_block_tx = params->block_tx;
 +	link_conf->csa_active = true;
+ 	sdata->vif.bss_conf.csa_punct_bitmap = params->punct_bitmap;
  
 -	if (sdata->deflink.csa_block_tx)
 +	if (link->csa_block_tx)
@@ -491,7 +421,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	cfg80211_ch_switch_started_notify(sdata->dev,
 -					  &sdata->deflink.csa_chandef, 0,
 +					  &link->csa_chandef, link_id,
- 					  params->count, params->block_tx);
+ 					  params->count, params->block_tx,
+ 					  sdata->vif.bss_conf.csa_punct_bitmap);
  
  	if (changed) {
 -		ieee80211_link_info_change_notify(sdata, &sdata->deflink,
@@ -506,7 +437,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  out:
-@@ -4039,14 +4087,15 @@ out:
+@@ -4182,14 +4227,15 @@ out:
  }
  
  int ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
@@ -526,7 +457,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	return err;
 --- a/net/mac80211/ibss.c
 +++ b/net/mac80211/ibss.c
-@@ -882,7 +882,7 @@ ieee80211_ibss_process_chanswitch(struct
+@@ -890,7 +890,7 @@ ieee80211_ibss_process_chanswitch(struct
  	params.block_tx = !!csa_ie.mode;
  
  	if (ieee80211_channel_switch(sdata->local->hw.wiphy, sdata->dev,
@@ -537,7 +468,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	ieee80211_ibss_csa_mark_radar(sdata);
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1944,7 +1944,8 @@ int ieee80211_mgmt_tx_cancel_wait(struct
+@@ -2024,7 +2024,8 @@ int ieee80211_mgmt_tx_cancel_wait(struct
  /* channel switch handling */
  void ieee80211_csa_finalize_work(struct work_struct *work);
  int ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
@@ -549,7 +480,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/net/mac80211/mesh.c
 +++ b/net/mac80211/mesh.c
-@@ -1337,7 +1337,7 @@ ieee80211_mesh_process_chnswitch(struct
+@@ -1407,7 +1407,7 @@ ieee80211_mesh_process_chnswitch(struct
  	ifmsh->csa_role = IEEE80211_MESH_CSA_ROLE_REPEATER;
  
  	if (ieee80211_channel_switch(sdata->local->hw.wiphy, sdata->dev,
@@ -560,17 +491,16 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	return true;
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -6586,6 +6586,8 @@ static int nl80211_start_ap(struct sk_bu
- 
+@@ -6701,6 +6701,7 @@ static int nl80211_start_ap(struct sk_bu
  		if (info->attrs[NL80211_ATTR_SOCKET_OWNER])
  			wdev->conn_owner_nlportid = info->snd_portid;
-+
+ 
 +		wdev->links[link_id].ap.is_going_down = false;
+ 		nl80211_send_ap_started(wdev, link_id);
  	}
  out_unlock:
- 	wdev_unlock(wdev);
-@@ -10699,7 +10701,7 @@ skip_beacons:
- 		params.block_tx = true;
+@@ -10870,7 +10871,7 @@ skip_beacons:
+ 	}
  
  	wdev_lock(wdev);
 -	err = rdev_channel_switch(rdev, dev, &params);
@@ -580,7 +510,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  free:
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -1087,12 +1087,13 @@ static inline void rdev_crit_proto_stop(
+@@ -1100,12 +1100,13 @@ static inline void rdev_crit_proto_stop(
  
  static inline int rdev_channel_switch(struct cfg80211_registered_device *rdev,
  				      struct net_device *dev,
@@ -599,7 +529,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  }
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -2302,8 +2302,9 @@ TRACE_EVENT(rdev_crit_proto_stop,
+@@ -2318,8 +2318,9 @@ TRACE_EVENT(rdev_crit_proto_stop,
  
  TRACE_EVENT(rdev_channel_switch,
  	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev,
@@ -611,7 +541,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	TP_STRUCT__entry(
  		WIPHY_ENTRY
  		NETDEV_ENTRY
-@@ -2313,6 +2314,7 @@ TRACE_EVENT(rdev_channel_switch,
+@@ -2329,6 +2330,7 @@ TRACE_EVENT(rdev_channel_switch,
  		__field(u8, count)
  		__dynamic_array(u16, bcn_ofs, params->n_counter_offsets_beacon)
  		__dynamic_array(u16, pres_ofs, params->n_counter_offsets_presp)
@@ -619,7 +549,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	),
  	TP_fast_assign(
  		WIPHY_ASSIGN;
-@@ -2330,11 +2332,13 @@ TRACE_EVENT(rdev_channel_switch,
+@@ -2346,11 +2348,13 @@ TRACE_EVENT(rdev_channel_switch,
  			memcpy(__get_dynamic_array(pres_ofs),
  			       params->counter_offsets_presp,
  			       params->n_counter_offsets_presp * sizeof(u16));
