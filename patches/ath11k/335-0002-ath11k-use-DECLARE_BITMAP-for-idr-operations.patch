@@ -33,10 +33,10 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  	struct hal_srng *srng;
 -	int i, ret;
 +	int i, ret, j;
+ 	u8 tcl_num, wbm_num;
  
  	ath11k_dp_init_reo_status_timer(ab);
- 
-@@ -517,6 +519,18 @@ static int ath11k_dp_srng_common_setup(s
+@@ -521,6 +523,18 @@ static int ath11k_dp_srng_common_setup(s
  		ath11k_dp_shadow_init_timer(ab, &dp->tx_ring_timer[i],
  					    ATH11K_SHADOW_DP_TIMER_INTERVAL,
  					    dp->tx_ring[i].tcl_data_ring.ring_id);
@@ -55,7 +55,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  	}
  
  	ret = ath11k_dp_srng_setup(ab, &dp->reo_reinject_ring, HAL_REO_REINJECT,
-@@ -1107,9 +1121,8 @@ void ath11k_dp_vdev_tx_attach(struct ath
+@@ -1109,9 +1123,8 @@ void ath11k_dp_vdev_tx_attach(struct ath
  	ath11k_dp_update_vdev_search(arvif);
  }
  
@@ -66,7 +66,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  	struct sk_buff *msdu = skb;
  
  	dma_unmap_single(ab->dev, ATH11K_SKB_CB(msdu)->paddr, msdu->len,
-@@ -1124,23 +1137,30 @@ void ath11k_dp_free(struct ath11k_base *
+@@ -1126,23 +1139,30 @@ void ath11k_dp_free(struct ath11k_base *
  {
  	struct ath11k_dp *dp = &ab->dp;
  	size_t size = 0;
@@ -105,7 +105,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  	}
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -7,6 +7,7 @@
+@@ -8,6 +8,7 @@
  #define ATH11K_DP_H
  
  #include "hal_rx.h"
@@ -113,7 +113,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  
  #define MAX_RXDMA_PER_PDEV     2
  
-@@ -79,6 +80,13 @@ struct dp_rxdma_ring {
+@@ -80,6 +81,13 @@ struct dp_rxdma_ring {
  
  #define ATH11K_TX_COMPL_NEXT(x)	(((x) + 1) % DP_TX_COMP_RING_SIZE)
  
@@ -127,7 +127,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  struct dp_tx_ring {
  	u8 tcl_data_ring_id;
  	struct dp_srng tcl_data_ring;
-@@ -89,6 +97,8 @@ struct dp_tx_ring {
+@@ -90,6 +98,8 @@ struct dp_tx_ring {
  	struct hal_wbm_release_ring *tx_status;
  	int tx_status_head;
  	int tx_status_tail;
@@ -135,26 +135,26 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
 +	struct idr_entry *idr_pool;
  };
  
- enum dp_mon_reap_status {
-@@ -215,7 +225,6 @@ struct ath11k_pdev_dp {
- #define DP_WBM_RELEASE_RING_SIZE	64
+ enum dp_mon_status_buf_state {
+@@ -209,7 +219,6 @@ struct ath11k_pdev_dp {
  #define DP_TCL_DATA_RING_SIZE		512
+ #define DP_TCL_DATA_RING_SIZE_WCN6750	2048
  #define DP_TX_COMP_RING_SIZE		ATH11K_DP_TX_COMP_RING_SIZE
 -#define DP_TX_IDR_SIZE			DP_TX_COMP_RING_SIZE
- #define DP_TX_COMP_MAX_ALLOWED		DP_TX_COMP_RING_SIZE
+ #define DP_TX_COMP_MAX_ALLOWED         DP_TX_COMP_RING_SIZE
  #define DP_TCL_CMD_RING_SIZE		32
  #define DP_TCL_STATUS_RING_SIZE		32
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -124,6 +124,7 @@ int ath11k_dp_tx(struct ath11k *ar, stru
- 	u8 ring_selector = 0, ring_map = 0;
+@@ -135,6 +135,7 @@ int ath11k_dp_tx(struct ath11k *ar, stru
+ 	u8 ring_map = 0;
  	bool tcl_ring_retry, is_diff_encap = false;
  	u8 align_pad, htt_meta_size = 0, max_tx_ring, tcl_ring_id, ring_id;
 +	u32 idr;
  
  	if (unlikely(test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return -ESHUTDOWN;
-@@ -163,23 +164,27 @@ tcl_ring_sel:
+@@ -169,24 +170,28 @@ tcl_ring_sel:
  	tx_ring = &dp->tx_ring[tcl_ring_id];
  
  	spin_lock_bh(&tx_ring->tx_idr_lock);
@@ -165,7 +165,8 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
 -	if (unlikely(ret < 0)) {
 +	idr = find_first_zero_bit(tx_ring->idrs, DP_TX_IDR_SIZE);
 +	if (unlikely(idr >= DP_TX_IDR_SIZE)) {
- 		if (ring_map == (BIT(max_tx_ring) - 1)) {
+ 		if (ring_map == (BIT(max_tx_ring) - 1) ||
+ 		    !ab->hw_params.tcl_ring_retry) {
 +			spin_unlock_bh(&tx_ring->tx_idr_lock);
  			ab->soc_stats.tx_err.idr_na[tcl_ring_id]++;
  			return -ENOSPC;
@@ -188,7 +189,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  		     FIELD_PREP(DP_TX_DESC_ID_POOL_ID, pool_id);
  	ti.encap_type = ath11k_dp_tx_get_encap_type(arvif, skb);
  
-@@ -356,10 +361,9 @@ fail_unmap_dma:
+@@ -360,10 +365,9 @@ fail_unmap_dma:
  fail_remove_idr:
  	if (ti.pkt_offset)
  		skb_pull(skb, ti.pkt_offset);
@@ -202,7 +203,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  
  	if (tcl_ring_retry)
  		goto tcl_ring_sel;
-@@ -368,16 +372,19 @@ fail_remove_idr:
+@@ -372,16 +376,19 @@ fail_remove_idr:
  }
  
  static void ath11k_dp_tx_free_txbuf(struct ath11k_base *ab, u8 mac_id,
@@ -227,18 +228,19 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  
  	if (unlikely(!msdu)) {
  		ath11k_warn(ab, "tx completion for unknown msdu_id %d\n",
-@@ -400,16 +407,20 @@ ath11k_dp_tx_htt_tx_complete_buf(struct
- 				 struct dp_tx_ring *tx_ring,
+@@ -405,17 +412,21 @@ ath11k_dp_tx_htt_tx_complete_buf(struct
  				 struct ath11k_dp_htt_wbm_tx_status *ts)
  {
+ 	struct ieee80211_tx_status status = { 0 };
 -	struct sk_buff *msdu;
 +	struct sk_buff *msdu = NULL;
  	struct ieee80211_tx_info *info;
  	struct ath11k_skb_cb *skb_cb;
  	struct ath11k *ar;
+ 	struct ath11k_peer *peer;
  	struct ieee80211_vif *vif;
- 	u8 flags = 0;
 +	u32 msdu_id = ts->msdu_id;
+ 	u8 flags = 0;
  
 -	spin_lock(&tx_ring->tx_idr_lock);
 -	msdu = idr_remove(&tx_ring->txbuf_idr, ts->msdu_id);
@@ -252,7 +254,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  
  	if (unlikely(!msdu)) {
  		ath11k_warn(ab, "htt tx completion for unknown msdu_id %d\n",
-@@ -779,6 +790,7 @@ void ath11k_dp_tx_completion_handler(str
+@@ -915,6 +926,7 @@ void ath11k_dp_tx_completion_handler(str
  	}
  
  	while (count--) {
@@ -260,7 +262,7 @@ Signed-off-by: Venkateswara Naralasetty <quic_vnaralas@quicinc.com>
  		tx_status = &tx_ring->tx_status[i++];
  
  		desc_id = FIELD_GET(BUFFER_ADDR_INFO1_SW_COOKIE,
-@@ -797,17 +809,19 @@ void ath11k_dp_tx_completion_handler(str
+@@ -933,17 +945,19 @@ void ath11k_dp_tx_completion_handler(str
  			continue;
  		}
  

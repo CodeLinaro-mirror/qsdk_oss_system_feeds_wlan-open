@@ -5,7 +5,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
 ---
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2715,6 +2715,7 @@ static void ath11k_dp_rx_h_ppdu(struct a
+@@ -2716,6 +2716,7 @@ static void ath11k_dp_rx_h_ppdu(struct a
  	u8 channel_num;
  	u32 center_freq, meta_data;
  	struct ieee80211_channel *channel;
@@ -13,7 +13,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
  	rx_status->freq = 0;
  	rx_status->rate_idx = 0;
-@@ -2732,20 +2733,40 @@ static void ath11k_dp_rx_h_ppdu(struct a
+@@ -2733,20 +2734,40 @@ static void ath11k_dp_rx_h_ppdu(struct a
  	    center_freq <= ATH11K_MAX_6G_FREQ) {
  		rx_status->band = NL80211_BAND_6GHZ;
  		rx_status->freq = center_freq;
@@ -55,7 +55,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  				rx_desc, sizeof(struct hal_rx_desc));
  	}
  
-@@ -3587,6 +3608,12 @@ static int ath11k_dp_rx_reap_mon_status_
+@@ -3591,6 +3612,12 @@ static int ath11k_dp_rx_reap_mon_status_
  						&cookie, &rbm);
  		if (paddr) {
  			buf_id = FIELD_GET(DP_RXDMA_BUF_COOKIE_BUF_ID, cookie);
@@ -68,7 +68,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
  			spin_lock_bh(&rx_ring->idr_lock);
  			skb = idr_find(&rx_ring->bufs_idr, buf_id);
-@@ -5765,6 +5792,11 @@ void ath11k_dp_rx_mon_dest_process(struc
+@@ -5794,6 +5821,11 @@ void ath11k_dp_rx_mon_dest_process(struc
  	spin_unlock_bh(&pmon->mon_lock);
  
  	if (rx_bufs_used) {
@@ -82,7 +82,7 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -3926,7 +3926,8 @@ static int ath11k_mac_op_hw_scan(struct
+@@ -4155,7 +4155,8 @@ static int ath11k_mac_op_hw_scan(struct
  
  	ret = ath11k_start_scan(ar, arg);
  	if (ret) {
@@ -92,85 +92,25 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  		spin_lock_bh(&ar->data_lock);
  		ar->scan.state = ATH11K_SCAN_IDLE;
  		spin_unlock_bh(&ar->data_lock);
-@@ -7292,7 +7293,7 @@ static void ath11k_mac_op_remove_chanctx
+@@ -7660,7 +7661,7 @@ static void ath11k_mac_op_remove_chanctx
  	struct ath11k *ar = hw->priv;
  	struct ath11k_base *ab = ar->ab;
  
 -	ath11k_dbg(ab, ATH11K_DBG_MAC,
 +	ath11k_dbg(ab, ATH11K_DBG_TEST,
- 		   "mac chanctx remove freq %u width %d ptr %pK\n",
+ 		   "chanctx remove freq %u width %d ptr %p\n",
  		   ctx->def.chan->center_freq, ctx->def.width, ctx);
- 
---- a/net/mac80211/rx.c
-+++ b/net/mac80211/rx.c
-@@ -5139,12 +5139,16 @@ void ieee80211_rx_list(struct ieee80211_
- 		}
- 	}
- 
--	if (WARN_ON(status->band >= NUM_NL80211_BANDS))
-+	if (WARN_ON(status->band >= NUM_NL80211_BANDS)) {
-+		printk("invalid status band %d freq %d\n", status->band, status->freq);
- 		goto drop;
-+	}
- 
- 	sband = local->hw.wiphy->bands[status->band];
--	if (WARN_ON(!sband))
-+	if (WARN_ON(!sband)) {
-+		printk("NULL sband status band %d freq %d\n", status->band, status->freq);
- 		goto drop;
-+	}
- 
- 	/*
- 	 * If we're suspending, it is possible although not too likely
---- a/net/mac80211/scan.c
-+++ b/net/mac80211/scan.c
-@@ -661,9 +661,15 @@ static void ieee80211_scan_state_send_pr
- 	int i;
- 	struct ieee80211_sub_if_data *sdata;
- 	struct cfg80211_scan_request *scan_req;
--	enum nl80211_band band = local->hw.conf.chandef.chan->band;
-+	enum nl80211_band band;
- 	u32 flags = 0, tx_flags;
- 
-+	if (!local->hw.conf.chandef.chan) {
-+		printk("channel NULL\n");
-+		WARN_ON(1);
-+	}
-+
-+	band = local->hw.conf.chandef.chan->band;
- 	scan_req = rcu_dereference_protected(local->scan_req,
- 					     lockdep_is_held(&local->mtx));
  
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -842,6 +842,7 @@ struct ath11k {
- 	u8 ftm_msgref;
- 	int ap_ps_enabled;
- 	enum ath11k_ap_ps_state ap_ps_state;
+@@ -863,6 +863,7 @@ struct ath11k {
+ 	bool ps_state_enable;
+ 	bool ps_timekeeper_enable;
+ 	bool ce_latency_stats_enable;
 +	int cookie_pdev_id;
- 	/* protected by conf_mutex */
- 	u8 ps_state_enable;
- 	u8 ps_timekeeper_enable;
---- a/net/mac80211/cfg.c
-+++ b/net/mac80211/cfg.c
-@@ -3832,6 +3832,7 @@ int ieee80211_attach_ack_skb(struct ieee
+ };
  
- 	if (id < 0) {
- 		kfree_skb(ack_skb);
-+		printk(KERN_ERR "attach ack fail %d\n", id);
- 		return -ENOMEM;
- 	}
- 
---- a/net/mac80211/tx.c
-+++ b/net/mac80211/tx.c
-@@ -2546,6 +2546,7 @@ static u16 ieee80211_store_ack_skb(struc
- 			}
- 		} else {
- 			kfree_skb(ack_skb);
-+			printk(KERN_ERR "store ack fail %d\n", id);
- 		}
- 	}
- 
+ struct ath11k_band_cap {
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
 @@ -25,7 +25,7 @@ module_param_named(nss_offload, nss_offl
@@ -184,11 +124,11 @@ Signed-off-by: Karthikeyan Periyasamy <periyasa@codeaurora.org>
  MODULE_PARM_DESC(debug_mask, "Debugging mask");
 --- a/drivers/net/wireless/ath/ath11k/debug.h
 +++ b/drivers/net/wireless/ath/ath11k/debug.h
-@@ -25,6 +25,7 @@ enum ath11k_debug_mask {
- 	ATH11K_DBG_PCI		= 0x00001000,
+@@ -27,6 +27,7 @@ enum ath11k_debug_mask {
  	ATH11K_DBG_DP_TX	= 0x00002000,
  	ATH11K_DBG_DP_RX	= 0x00004000,
+ 	ATH11K_DBG_CE		= 0x00008000,
 +	ATH11K_DBG_TEST         = 0x00080000,
- 	ATH11K_DBG_ANY		= 0xffffffff,
  };
  
+ static inline const char *ath11k_dbg_str(enum ath11k_debug_mask mask)

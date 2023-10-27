@@ -1,9 +1,9 @@
 --- a/drivers/net/wireless/ath/ath11k/Kconfig
 +++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -60,3 +60,12 @@ config ATH11K_SPECTRAL
- 	  Enable ath11k spectral scan support
- 
- 	  Say Y to enable access to the FFT/spectral data via debugfs.
+@@ -68,3 +68,12 @@ config ATH11K_THERMAL
+ 	depends on THERMAL
+ 	help
+ 	  Enable ath11k thermal sensors and throttling support.
 +
 +config ATH11K_PKTLOG
 +	bool "ath11k packet logging support"
@@ -16,7 +16,7 @@
 --- a/drivers/net/wireless/ath/ath11k/Makefile
 +++ b/drivers/net/wireless/ath/ath11k/Makefile
 @@ -25,6 +25,7 @@ ath11k-$(CPTCFG_ATH11K_TRACING) += trace
- ath11k-$(CONFIG_THERMAL) += thermal.o
+ ath11k-$(CPTCFG_ATH11K_THERMAL) += thermal.o
  ath11k-$(CPTCFG_ATH11K_SPECTRAL) += spectral.o
  ath11k-$(CONFIG_PM) += wow.o
 +ath11k-$(CPTCFG_ATH11K_PKTLOG) += pktlog.o
@@ -33,7 +33,7 @@
  #include "wmi.h"
  #include "hal.h"
  #include "dp.h"
-@@ -553,6 +554,11 @@ struct ath11k_debug {
+@@ -571,6 +572,11 @@ struct ath11k_debug {
  	u32 pktlog_mode;
  	u32 pktlog_peer_valid;
  	u8 pktlog_peer_addr[ETH_ALEN];
@@ -47,15 +47,15 @@
  	u32 module_id_bitmap[MAX_MODULE_ID_BITMAP_WORDS];
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -14,6 +14,7 @@
- #include "dp_tx.h"
+@@ -15,6 +15,7 @@
  #include "debugfs_htt_stats.h"
  #include "peer.h"
+ #include "hif.h"
 +#include "pktlog.h"
  
  static const char *htt_bp_umac_ring[HTT_SW_UMAC_RING_IDX_MAX] = {
  	"REO2SW1_RING",
-@@ -1401,6 +1402,7 @@ int ath11k_debugfs_register(struct ath11
+@@ -1607,6 +1608,7 @@ int ath11k_debugfs_register(struct ath11
  	ath11k_debugfs_htt_stats_init(ar);
  
  	ath11k_debugfs_fw_stats_init(ar);
@@ -63,7 +63,7 @@
  
  	debugfs_create_file("ext_tx_stats", 0644,
  			    ar->debug.debugfs_pdev, ar,
-@@ -1448,6 +1450,8 @@ void ath11k_debugfs_unregister(struct at
+@@ -1668,6 +1670,8 @@ void ath11k_debugfs_unregister(struct at
  		kfree(dbr_debug);
  		ar->debug.dbr_debug[i] = NULL;
  	}
@@ -74,7 +74,7 @@
  static ssize_t ath11k_write_twt_add_dialog(struct file *file,
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
-@@ -404,4 +404,38 @@ ath11k_debugfs_add_dbring_entry(struct a
+@@ -403,4 +403,38 @@ ath11k_debugfs_add_dbring_entry(struct a
  }
  #endif /* CPTCFG_ATH11K_DEBUGFS*/
  
@@ -115,8 +115,8 @@
  #endif /* _ATH11K_DEBUGFS_H_ */
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -1589,8 +1589,10 @@ static int ath11k_htt_pull_ppdu_stats(st
- 		goto exit;
+@@ -1585,8 +1585,10 @@ static int ath11k_htt_pull_ppdu_stats(st
+ 		goto out;
  	}
  
 -	if (ath11k_debugfs_is_pktlog_lite_mode_enabled(ar))
@@ -125,8 +125,8 @@
 +		ath11k_htt_ppdu_pktlog_process(ar, (u8 *)skb->data, DP_RX_BUFFER_SIZE);
 +	}
  
+ 	spin_lock_bh(&ar->data_lock);
  	ppdu_info = ath11k_dp_htt_get_ppdu_desc(ar, ppdu_id);
- 	if (!ppdu_info) {
 @@ -1629,6 +1631,7 @@ static void ath11k_htt_pktlog(struct ath
  
  	trace_ath11k_htt_pktlog(ar, data->payload, hdr->size,
@@ -135,7 +135,7 @@
  }
  
  static void ath11k_htt_backpressure_event_handler(struct ath11k_base *ab,
-@@ -5189,6 +5192,8 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -5217,6 +5220,8 @@ int ath11k_dp_rx_process_mon_status(stru
  		} else if (ath11k_debugfs_is_pktlog_rx_stats_enabled(ar)) {
  			log_type = ATH11K_PKTLOG_TYPE_RX_STATBUF;
  			rx_buf_sz = DP_RX_BUFFER_SIZE;
@@ -144,7 +144,7 @@
  		} else {
  			log_type = ATH11K_PKTLOG_TYPE_INVALID;
  			rx_buf_sz = 0;
-@@ -5229,8 +5234,11 @@ int ath11k_dp_rx_process_mon_status(stru
+@@ -5258,8 +5263,11 @@ int ath11k_dp_rx_process_mon_status(stru
  		arsta = (struct ath11k_sta *)peer->sta->drv_priv;
  		ath11k_dp_rx_update_peer_stats(arsta, ppdu_info);
  
@@ -756,13 +756,3 @@
 +#endif /* CONFIG_ATH10K_PKTLOG */
 +
 +#endif /* _PKTLOG_H_ */
---- a/local-symbols
-+++ b/local-symbols
-@@ -129,6 +129,7 @@ ATH11K_DEBUG=
- ATH11K_DEBUGFS=
- ATH11K_TRACING=
- ATH11K_SPECTRAL=
-+ATH11K_PKTLOG=
- ATH12K=
- ATH12K_DEBUG=
- ATH12K_TRACING=

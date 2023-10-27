@@ -29,21 +29,23 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -579,8 +579,13 @@
+@@ -561,9 +561,13 @@ static int ath11k_ahb_config_ext_irq(str
  		irq_grp->ab = ab;
  		irq_grp->grp_id = i;
  		init_dummy_netdev(&irq_grp->napi_ndev);
 +#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
  		netif_napi_add(&irq_grp->napi_ndev, &irq_grp->napi,
- 			       ath11k_ahb_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
+-			       ath11k_ahb_ext_grp_napi_poll);
+-
++			       ath11k_ahb_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
 +#else
 +		netif_napi_add_weight(&irq_grp->napi_ndev, &irq_grp->napi,
 +			       ath11k_ahb_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
 +#endif
- 
  		for (j = 0; j < ATH11K_EXT_IRQ_NUM_MAX; j++) {
  			if (!nss_offload && ab->hw_params.ring_mask->tx[i] & BIT(j)) {
-@@ -733,9 +738,13 @@
+ 				irq_grp->irqs[num_irq++] =
+@@ -793,9 +797,13 @@ static void ath11k_ahb_ssr_notifier_reg(
  #if LINUX_VERSION_IS_LESS(5, 4, 0)
  	qcom_register_ssr_notifier(&ab->qmi.ssr_nb);
  #else
@@ -57,7 +59,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  #endif
  }
  
-@@ -744,10 +753,15 @@
+@@ -804,10 +812,15 @@ static void ath11k_ahb_ssr_notifier_unre
  #if LINUX_VERSION_IS_LESS(5, 4, 0)
  	qcom_unregister_ssr_notifier(&ab->qmi.ssr_nb);
  #else
@@ -73,22 +75,9 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  #endif
  }
  #endif
-@@ -1224,7 +1238,12 @@
- 		 * and the space is not contiguous, hence remapping the CE registers
- 		 * to a new space for accessing them.
- 		 */
-+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
- 		ab->mem_ce = ioremap_nocache(HAL_IPQ5018_CE_WFSS_REG_BASE, HAL_IPQ5018_CE_SIZE);
-+#else
-+		ab->mem_ce = ioremap(HAL_IPQ5018_CE_WFSS_REG_BASE, HAL_IPQ5018_CE_SIZE);
-+#endif
-+
- 		if (IS_ERR(ab->mem_ce)) {
- 			dev_err(&pdev->dev, "ce ioremap error\n");
- 			return -ENOMEM;
 --- a/drivers/net/wireless/ath/ath11k/cfr.c
 +++ b/drivers/net/wireless/ath/ath11k/cfr.c
-@@ -90,7 +90,7 @@
+@@ -90,7 +90,7 @@ static int cfr_calculate_tones_form_dma_
  		case 3: /* DUP160/VHT160 */
  			return TONES_IN_160MHZ;
  		}
@@ -99,27 +88,27 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  		case 0:
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -1901,13 +1901,13 @@
+@@ -2036,13 +2036,13 @@ int ath11k_core_ssr_notifier_cb(struct n
  	}
  
  #if LINUX_VERSION_IS_GEQ(5,4,0)
--	if (ath11k_collect_dump && event == SUBSYS_AFTER_POWERUP) {
+-	if (ath11k_collect_dump && event == QCOM_SSR_AFTER_POWERUP) {
 +	if (ath11k_collect_dump && event == ATH11K_SSR_POWERUP) {
  		ath11k_collect_dump = false;
  		wake_up(&ath11k_ssr_dump_wq);
  		return 0;
  	}
  
--	if (event != SUBSYS_PREPARE_FOR_FATAL_SHUTDOWN)
+-	if (event != QCOM_SSR_NOTIFY_CRASH)
 +	if (event != ATH11K_SSR_PREPARE_SHUTDOWN)
  		return 0;
  	ath11k_collect_dump = true;
  #else
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -97,6 +97,14 @@
- #define HAL_REO_DEST_RING_CTRL_HASH_RING_SHIFT			8
- #define HAL_IPQ5018_REO_DEST_RING_CTRL_HASH_RING_SHIFT		0
+@@ -94,6 +94,14 @@ extern bool ath11k_ftm_mode;
+ 
+ #define ATH11K_AHB_PROBE_SEQ_TIMEOUT   (2 * HZ)
  
 +#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 +#define ATH11K_SSR_POWERUP SUBSYS_AFTER_POWERUP
@@ -132,7 +121,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  enum ath11k_supported_bw {
  	ATH11K_BW_20	= 0,
  	ATH11K_BW_40	= 1,
-@@ -1639,8 +1647,10 @@
+@@ -1651,8 +1659,10 @@ void ath11k_core_pre_reconfigure_recover
  void ath11k_core_dump_bp_stats(struct ath11k_base *ab);
  void ath11k_coredump_qdss_dump(struct ath11k_base *ab,
  			       struct ath11k_qmi_event_qdss_trace_save_data *event_data);
@@ -145,7 +134,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  void ath11k_core_wait_dump_collect(struct ath11k_base *ab);
 --- a/drivers/net/wireless/ath/ath11k/coredump.c
 +++ b/drivers/net/wireless/ath/ath11k/coredump.c
-@@ -374,6 +374,7 @@
+@@ -374,6 +374,7 @@ out:
  	vfree(dump);
  }
  
@@ -153,14 +142,14 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  int ath11k_coredump_mhi_update_bhie_table(struct ath11k_base *ab, void *va,
  					  phys_addr_t pa, size_t size)
  {
-@@ -392,3 +393,4 @@
+@@ -392,3 +393,4 @@ int ath11k_coredump_mhi_update_bhie_tabl
  
  	return ret;
  }
 +#endif
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -1022,7 +1022,7 @@
+@@ -1049,7 +1049,7 @@ void ath11k_update_latency_stats(struct
  	now = ieee80211_txdelay_get_time();
  	bin = txdelay_ms_to_bin(txdelay_time_to_ms(now - enqueue_time));
  
@@ -171,25 +160,34 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	}
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -2066,7 +2066,7 @@
+@@ -2224,7 +2224,7 @@ static void ath11k_peer_assoc_h_rates(st
  }
  
  static bool
--ath11k_peer_assoc_h_ht_masked(const u8 ht_mcs_mask[IEEE80211_HT_MCS_MASK_LEN])
-+ath11k_peer_assoc_h_ht_masked(const u8 ht_mcs_mask[])
+-ath11k_peer_assoc_h_ht_masked(const u8 *ht_mcs_mask)
++ath11k_peer_assoc_h_ht_masked(const u8 *ht_mcs_mask[])
  {
  	int nss;
  
-@@ -2473,7 +2473,7 @@
+@@ -2236,7 +2236,7 @@ ath11k_peer_assoc_h_ht_masked(const u8 *
  }
  
  static bool
--ath11k_peer_assoc_h_he_masked(const u16 he_mcs_mask[NL80211_HE_NSS_MAX])
+-ath11k_peer_assoc_h_vht_masked(const u16 *vht_mcs_mask)
++ath11k_peer_assoc_h_vht_masked(const u16 *vht_mcs_mask[])
+ {
+ 	int nss;
+ 
+@@ -2631,7 +2631,7 @@ static u16 ath11k_peer_assoc_h_he_limit(
+ }
+ 
+ static bool
+-ath11k_peer_assoc_h_he_masked(const u16 *he_mcs_mask)
 +ath11k_peer_assoc_h_he_masked(const u16 *he_mcs_mask[])
  {
  	int nss;
  
-@@ -3112,8 +3112,8 @@
+@@ -3271,8 +3271,8 @@ static bool ath11k_peer_assoc_prepare(st
  		vif_mask = &arvif->bitrate_mask;
  		ath11k_warn(ar->ab, "arvif bit rate masked: he %d vht %d ht %d",
  			    ath11k_peer_assoc_h_he_masked(vif_mask->control[band].he_mcs),
@@ -200,18 +198,9 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  		WARN_ON_ONCE(1);
  		return true;
  	}
-@@ -4274,7 +4274,7 @@
- 
- 	arg->chan_list.num_chan = req->n_channels;
- 	for (i = 0; i < arg->chan_list.num_chan; i++) {
--		if (req->channels)
-+		if (req->channels[i])
- 			chan[i].freq = req->channels[i]->center_freq;
- 		if (req->chandef)
- 			chan[i].phymode = ath11k_phymodes[band][width];
 --- a/drivers/net/wireless/ath/ath11k/mhi.c
 +++ b/drivers/net/wireless/ath/ath11k/mhi.c
-@@ -38,7 +38,9 @@
+@@ -38,7 +38,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -221,7 +210,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 1,
-@@ -53,7 +55,9 @@
+@@ -53,7 +55,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -231,7 +220,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 20,
-@@ -68,7 +72,9 @@
+@@ -68,7 +72,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -241,7 +230,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 21,
-@@ -83,7 +89,9 @@
+@@ -83,7 +89,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = true,
@@ -251,7 +240,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  };
  
-@@ -135,7 +143,9 @@
+@@ -135,7 +143,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -261,7 +250,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 1,
-@@ -150,7 +160,9 @@
+@@ -150,7 +160,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -271,7 +260,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 20,
-@@ -165,7 +177,9 @@
+@@ -165,7 +177,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = false,
@@ -281,7 +270,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	},
  	{
  		.num = 21,
-@@ -180,7 +194,9 @@
+@@ -180,7 +194,9 @@ static struct mhi_channel_config ath11k_
  		.offload_channel = false,
  		.doorbell_mode_switch = false,
  		.auto_queue = true,
@@ -293,21 +282,23 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath11k/pcic.c
 +++ b/drivers/net/wireless/ath/ath11k/pcic.c
-@@ -531,8 +531,13 @@
+@@ -584,9 +584,13 @@ static int ath11k_pcic_ext_irq_config(st
  		irq_grp->ab = ab;
  		irq_grp->grp_id = i;
  		init_dummy_netdev(&irq_grp->napi_ndev);
 +#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
  		netif_napi_add(&irq_grp->napi_ndev, &irq_grp->napi,
- 			       ath11k_pcic_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
+-			       ath11k_pcic_ext_grp_napi_poll);
+-
++			       ath11k_pcic_ext_grp_napi_poll,NAPI_POLL_WEIGHT);
 +#else
 +		 netif_napi_add_weight(&irq_grp->napi_ndev, &irq_grp->napi,
 +                               ath11k_pcic_ext_grp_napi_poll, NAPI_POLL_WEIGHT);
 +#endif
- 
  		/* tcl, reo, rx_err, wbm release, rxdma rings are offloaded to nss. */
  		if (ab->nss.enabled &&
-@@ -797,8 +802,13 @@
+ 		    !(ab->hw_params.ring_mask->reo_status[i] ||
+@@ -884,8 +888,13 @@ int ath11k_pcic_ext_config_gic_msi_irq(s
  	irq_grp->ab = ab;
  	irq_grp->grp_id = i;
  	init_dummy_netdev(&irq_grp->napi_ndev);
@@ -321,7 +312,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  
  	if (ab->hw_params.ring_mask->tx[i] ||
  	    ab->hw_params.ring_mask->rx[i] ||
-@@ -894,8 +904,11 @@
+@@ -981,8 +990,11 @@ int ath11k_pcic_ipci_config_irq(struct a
  		ath11k_warn(ab, "failed to alloc irqs %d ab %pM\n", ret, ab);
  		return ret;
  	}
@@ -334,7 +325,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  		if (!ce_done && i == ab->hw_params.ce_count) {
  			i = 0;
  			ce_done = true;
-@@ -926,7 +939,11 @@
+@@ -1013,7 +1025,11 @@ int ath11k_pcic_ipci_config_irq(struct a
  			ab->pci.msi.ep_base_data = msi_desc->msg.data;
  	}
  
@@ -348,7 +339,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath11k/qmi.c
 +++ b/drivers/net/wireless/ath/ath11k/qmi.c
-@@ -3037,7 +3037,7 @@
+@@ -3057,7 +3057,7 @@ static int ath11k_qmi_assign_target_mem_
  							ab->qmi.target_mem[i].size);
  			ab->qmi.target_mem[idx].size = ab->qmi.target_mem[i].size;
  			ab->qmi.target_mem[idx].type = ab->qmi.target_mem[i].type;
@@ -357,7 +348,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  			ret = ath11k_coredump_mhi_update_bhie_table(ab,
  						ab->qmi.target_mem[idx].vaddr,
  						ab->qmi.target_mem[idx].paddr,
-@@ -3045,7 +3045,7 @@
+@@ -3065,7 +3065,7 @@ static int ath11k_qmi_assign_target_mem_
  			if (ret < 0)
  				ath11k_warn(ab, "qmi fail to update BHI table %d\n",
  					    ret);
@@ -368,7 +359,7 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  		default:
 --- a/drivers/net/wireless/ath/ath11k/qmi.h
 +++ b/drivers/net/wireless/ath/ath11k/qmi.h
-@@ -201,6 +201,7 @@
+@@ -202,6 +202,7 @@ struct ath11k_qmi {
  	struct list_head event_list;
  	spinlock_t event_lock; /* spinlock for qmi event list */
  	struct notifier_block ssr_nb;
@@ -378,20 +369,19 @@ Signed-off-by: Bhagavathi Perumal S <quic_bperumal@quicinc.com>
  	u32 mem_seg_count;
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -53,7 +53,11 @@
+@@ -54,7 +54,11 @@ struct wmi_tlv {
  
  #define WMI_TLV_LEN	GENMASK(15, 0)
  #define WMI_TLV_TAG	GENMASK(31, 16)
--#define TLV_HDR_SIZE	FIELD_SIZEOF(struct wmi_tlv, header)
 +#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 +#define TLV_HDR_SIZE    FIELD_SIZEOF(struct wmi_tlv, header)
 +#else
-+#define TLV_HDR_SIZE	sizeof_field(struct wmi_tlv, header)
+ #define TLV_HDR_SIZE	sizeof_field(struct wmi_tlv, header)
 +#endif
  
  #define WMI_CMD_HDR_CMD_ID      GENMASK(23, 0)
  #define WMI_MAX_MEM_REQS        32
-@@ -7706,11 +7710,11 @@
+@@ -7836,11 +7840,11 @@ int ath11k_wmi_peer_set_smart_tx_ant(str
  				     const u8 *macaddr, const u32 *tx_antenna);
  int ath11k_wmi_pdev_set_rx_ant(struct ath11k *ar, u32 antenna);
  int

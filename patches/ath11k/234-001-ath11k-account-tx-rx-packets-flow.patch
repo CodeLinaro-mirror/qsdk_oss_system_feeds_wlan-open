@@ -79,7 +79,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -526,6 +526,17 @@ struct ath11k_per_ppdu_tx_stats {
+@@ -532,6 +532,17 @@ struct ath11k_per_ppdu_tx_stats {
  
  DECLARE_EWMA(avg_rssi, 10, 8)
  
@@ -97,15 +97,15 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  struct ath11k_sta {
  	struct ath11k_vif *arvif;
  
-@@ -559,6 +570,8 @@ struct ath11k_sta {
+@@ -565,6 +576,8 @@ struct ath11k_sta {
  #ifdef CPTCFG_ATH11K_NSS_SUPPORT
  	struct ath11k_nss_sta_stats *nss_stats;
  #endif
 +	struct ath11k_driver_tx_pkts_flow drv_tx_pkts;
 +	struct ath11k_driver_rx_pkts_flow drv_rx_pkts;
  	u16 tcl_metadata;
+ 
  	/* Protected with ar->data_lock */
- 	u32 peer_ps_state;
 --- a/drivers/net/wireless/ath/ath11k/debugfs.h
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.h
 @@ -102,6 +102,8 @@ struct ath11k_debug_dbr {
@@ -154,7 +154,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  }
  
  static const struct file_operations fops_tx_stats = {
-@@ -992,6 +1000,9 @@ static ssize_t ath11k_dbg_sta_reset_rx_s
+@@ -1088,6 +1096,9 @@ static ssize_t ath11k_dbg_sta_reset_rx_s
  
  	spin_lock_bh(&ar->ab->base_lock);
  	memset(arsta->rx_stats, 0, sizeof(*arsta->rx_stats));
@@ -164,7 +164,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	spin_unlock_bh(&ar->ab->base_lock);
  
  	ret = count;
-@@ -1101,6 +1112,153 @@ static const struct file_operations fops
+@@ -1101,19 +1112,173 @@ static const struct file_operations fops
  	.llseek = default_llseek,
  };
  
@@ -318,10 +318,8 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  void ath11k_debugfs_sta_op_add(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
  			       struct ieee80211_sta *sta, struct dentry *dir)
  {
-@@ -1116,14 +1274,21 @@ void ath11k_debugfs_sta_op_add(struct ie
- 		debugfs_create_file("total_ps_duration", 0440, dir, sta,
- 				    &fops_total_ps_duration);
- 	}
+ 	struct ath11k *ar = hw->priv;
+ 
 -	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar))
 +	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar)) {
  		debugfs_create_file("tx_stats", 0400, dir, sta,
@@ -343,7 +341,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	debugfs_create_file("htt_peer_stats", 0400, dir, sta,
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -2573,6 +2573,7 @@ static void ath11k_dp_rx_h_mpdu(struct a
+@@ -2574,6 +2574,7 @@ static void ath11k_dp_rx_h_mpdu(struct a
  	struct rx_attention *rx_attention;
  	u32 err_bitmap;
  
@@ -351,7 +349,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	/* PN for multicast packets will be checked in mac80211 */
  	rxcb = ATH11K_SKB_RXCB(msdu);
  	fill_crypto_hdr = ath11k_dp_rx_h_attn_is_mcbc(ar->ab, rx_desc);
-@@ -2766,6 +2767,7 @@ static void ath11k_dp_rx_deliver_msdu(st
+@@ -2767,6 +2768,7 @@ static void ath11k_dp_rx_deliver_msdu(st
  	struct ieee80211_rx_status *rx_status;
  	struct ieee80211_radiotap_he *he = NULL;
  	struct ieee80211_sta *pubsta = NULL;
@@ -359,7 +357,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	struct ath11k_peer *peer;
  	struct ath11k_skb_rxcb *rxcb = ATH11K_SKB_RXCB(msdu);
  	u8 decap = DP_RX_DECAP_TYPE_RAW;
-@@ -2831,6 +2833,18 @@ static void ath11k_dp_rx_deliver_msdu(st
+@@ -2832,6 +2834,18 @@ static void ath11k_dp_rx_deliver_msdu(st
  		rx_status->flag |= RX_FLAG_8023;
  
  	ieee80211_rx_napi(ar->hw, pubsta, msdu, napi);
@@ -378,7 +376,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  }
  
  static int ath11k_dp_rx_process_msdu(struct ath11k *ar,
-@@ -2977,6 +2991,8 @@ int ath11k_dp_process_rx(struct ath11k_b
+@@ -2978,6 +2992,8 @@ int ath11k_dp_process_rx(struct ath11k_b
  	int total_msdu_reaped = 0;
  	struct hal_srng *srng;
  	struct sk_buff *msdu;
@@ -387,7 +385,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	bool done = false;
  	int buf_id, mac_id;
  	struct ath11k *ar;
-@@ -3047,6 +3063,19 @@ try_again:
+@@ -3051,6 +3067,19 @@ try_again:
  		rxcb->tid = FIELD_GET(HAL_REO_DEST_RING_INFO0_RX_QUEUE_NUM,
  				      desc->info0);
  
@@ -407,7 +405,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  		rxcb->mac_id = mac_id;
  		__skb_queue_tail(&msdu_list[mac_id], msdu);
  
-@@ -4406,7 +4435,10 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -4434,7 +4463,10 @@ static int ath11k_dp_rx_h_null_q_desc(st
  	struct rx_attention *rx_attention;
  	u8 l3pad_bytes;
  	struct ath11k_skb_rxcb *rxcb = ATH11K_SKB_RXCB(msdu);
@@ -418,7 +416,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  
  	msdu_len = ath11k_dp_rx_h_msdu_start_msdu_len(ar->ab, desc);
  
-@@ -4458,6 +4490,18 @@ static int ath11k_dp_rx_h_null_q_desc(st
+@@ -4486,6 +4518,18 @@ static int ath11k_dp_rx_h_null_q_desc(st
  	 * rx with mac80211. Need not worry about cleaning up amsdu_list.
  	 */
  
@@ -439,7 +437,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -6076,6 +6076,7 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -6356,6 +6356,7 @@ static void ath11k_mac_op_tx(struct ieee
  	struct ath11k_mgmt_frame_stats *mgmt_stats = &arvif->mgmt_stats;
  	struct ath11k_sta *arsta = NULL;
  	u32 info_flags = info->flags;
@@ -447,7 +445,7 @@ Signed-off-by: Maharaja Kennadyrajan <mkenna@codeaurora.org>
  	bool is_prb_rsp;
  	u16 frm_type = 0;
  	int ret;
-@@ -6136,6 +6137,15 @@ static void ath11k_mac_op_tx(struct ieee
+@@ -6416,6 +6417,15 @@ static void ath11k_mac_op_tx(struct ieee
  		ieee80211_free_txskb(ar->hw, skb);
  		return;
  	}

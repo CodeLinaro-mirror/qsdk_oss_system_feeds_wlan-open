@@ -22,7 +22,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/Kconfig
 +++ b/drivers/net/wireless/ath/ath11k/Kconfig
-@@ -79,3 +79,10 @@ config ATH11K_PKTLOG
+@@ -87,3 +87,10 @@ config ATH11K_PKTLOG
  	and reception, rate information and ani state. The packet
  	log uses ring buffer to dump the data. The buffer size,
  	frame filters can be alterted by debugfs entries.
@@ -79,7 +79,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
 --- a/drivers/net/wireless/ath/ath11k/qmi.h
 +++ b/drivers/net/wireless/ath/ath11k/qmi.h
 @@ -32,8 +32,15 @@
- #define ATH11K_QMI_FW_MEM_REQ_SEGMENT_CNT	3
+ #define ATH11K_QMI_FW_MEM_REQ_SEGMENT_CNT	5
  #define ATH11K_QMI_MAX_QDSS_CONFIG_FILE_NAME_SIZE 64
  #define ATH11K_QMI_DEFAULT_QDSS_CONFIG_FILE_NAME "qdss_trace_config.bin"
 +
@@ -91,12 +91,12 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  #define ATH11K_QMI_IPQ6018_M3_DUMP_ADDRESS     0x50100000
 +#endif
 +
- #define ATH11K_QMI_IPQ5018_M3_DUMP_ADDRESS     0x4C800000
- #define ATH11K_QMI_M3_DUMP_SIZE		       0x100000
+ #define ATH11K_QMI_M3_DUMP_SIZE                       0x100000
  
+ #define QMI_WLFW_REQUEST_MEM_IND_V01		0x0035
 --- a/local-symbols
 +++ b/local-symbols
-@@ -127,6 +127,7 @@ ATH11K=
+@@ -167,6 +167,7 @@ ATH11K=
  ATH11K_AHB=
  ATH11K_PCI=
  ATH11K_NSS_SUPPORT=
@@ -106,28 +106,28 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  ATH11K_TRACING=
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -1080,6 +1080,7 @@ struct ath11k_base {
+@@ -1094,6 +1094,7 @@ struct ath11k_base {
+ #endif
+ 
  	bool fw_recovery_support;
- 	bool ce_remap;
- 	u32 ce_remap_base_addr;
 +	atomic_t num_max_allowed;
  
  	/* must be last */
  	u8 drv_priv[] __aligned(sizeof(void *));
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -204,8 +204,9 @@ struct ath11k_pdev_dp {
- 
+@@ -206,8 +206,9 @@ struct ath11k_pdev_dp {
  #define DP_WBM_RELEASE_RING_SIZE	64
  #define DP_TCL_DATA_RING_SIZE		512
+ #define DP_TCL_DATA_RING_SIZE_WCN6750	2048
 -#define DP_TX_COMP_RING_SIZE		32768
 +#define DP_TX_COMP_RING_SIZE		ATH11K_DP_TX_COMP_RING_SIZE
  #define DP_TX_IDR_SIZE			DP_TX_COMP_RING_SIZE
-+#define DP_TX_COMP_MAX_ALLOWED		DP_TX_COMP_RING_SIZE
++#define DP_TX_COMP_MAX_ALLOWED         DP_TX_COMP_RING_SIZE
  #define DP_TCL_CMD_RING_SIZE		32
  #define DP_TCL_STATUS_RING_SIZE		32
  #define DP_REO_DST_RING_MAX		4
-@@ -218,9 +219,9 @@ struct ath11k_pdev_dp {
+@@ -220,9 +221,9 @@ struct ath11k_pdev_dp {
  #define DP_RXDMA_BUF_RING_SIZE		4096
  #define DP_RXDMA_REFILL_RING_SIZE	2048
  #define DP_RXDMA_ERR_DST_RING_SIZE	1024
@@ -139,10 +139,10 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
 +#define DP_RXDMA_MONITOR_DST_RING_SIZE	ATH11K_DP_RXDMA_MONITOR_BUF_RING_SIZE
  #define DP_RXDMA_MONITOR_DESC_RING_SIZE	4096
  
- #define DP_RX_BUFFER_SIZE	2048
+ #define DP_RX_RELEASE_RING_NUM	3
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -331,6 +331,7 @@ tcl_ring_sel:
+@@ -334,6 +334,7 @@ tcl_ring_sel:
  			skb->data, skb->len);
  
  	atomic_inc(&ar->dp.num_tx_pending);
@@ -150,7 +150,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  
  	return 0;
  
-@@ -377,6 +378,7 @@ static void ath11k_dp_tx_free_txbuf(stru
+@@ -380,6 +381,7 @@ static void ath11k_dp_tx_free_txbuf(stru
  	ar = ab->pdevs[mac_id].ar;
  	if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  		wake_up(&ar->dp.tx_empty_waitq);
@@ -158,7 +158,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  }
  
  static void
-@@ -408,6 +410,7 @@ ath11k_dp_tx_htt_tx_complete_buf(struct
+@@ -411,6 +413,7 @@ ath11k_dp_tx_htt_tx_complete_buf(struct
  
  	if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  		wake_up(&ar->dp.tx_empty_waitq);
@@ -166,7 +166,7 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  
  	dma_unmap_single(ab->dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
  
-@@ -808,6 +811,7 @@ void ath11k_dp_tx_completion_handler(str
+@@ -825,6 +828,7 @@ void ath11k_dp_tx_completion_handler(str
  			wake_up(&ar->dp.tx_empty_waitq);
  
  		ath11k_dp_tx_complete_msdu(ar, msdu, &ts);
@@ -176,57 +176,66 @@ Signed-off-by: Ramya Gnanasekar <rgnanase@codeaurora.org>
  
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -101,7 +101,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = false,
+@@ -189,7 +189,7 @@ static struct ath11k_hw_params ath11k_hw
  		.supports_sta_ps = false,
  		.cold_boot_calib = true,
+ 		.cbcal_restart_fw = true,
 -		.fw_mem_mode = 0,
 +		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
  		.num_vdevs = 16 + 1,
  		.num_peers = 512,
  		.supports_suspend = false,
-@@ -175,7 +175,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = false,
- 		.supports_sta_ps = false,
- 		.cold_boot_calib = true,
--		.fw_mem_mode = 0,
-+		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
- 		.num_vdevs = 16 + 1,
- 		.num_peers = 512,
- 		.supports_suspend = false,
-@@ -247,7 +247,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = true,
+@@ -270,7 +270,7 @@ static struct ath11k_hw_params ath11k_hw
  		.supports_sta_ps = true,
  		.cold_boot_calib = false,
+ 		.cbcal_restart_fw = false,
 -		.fw_mem_mode = 0,
 +		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
  		.num_vdevs = 16 + 1,
  		.num_peers = 512,
  		.supports_suspend = true,
-@@ -319,7 +319,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = false,
+@@ -354,7 +354,7 @@ static struct ath11k_hw_params ath11k_hw
  		.supports_sta_ps = false,
  		.cold_boot_calib = true,
+ 		.cbcal_restart_fw = false,
 -		.fw_mem_mode = 2,
 +		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE_256M,
  		.num_vdevs = 8,
  		.num_peers = 128,
  		.supports_suspend = false,
-@@ -391,7 +391,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = true,
+@@ -435,7 +435,7 @@ static struct ath11k_hw_params ath11k_hw
  		.supports_sta_ps = true,
  		.cold_boot_calib = false,
+ 		.cbcal_restart_fw = false,
 -		.fw_mem_mode = 0,
 +		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
  		.num_vdevs = 16 + 1,
  		.num_peers = 512,
  		.supports_suspend = true,
-@@ -462,7 +462,7 @@ static const struct ath11k_hw_params ath
- 		.idle_ps = true,
+@@ -517,7 +517,7 @@ static struct ath11k_hw_params ath11k_hw
  		.supports_sta_ps = true,
  		.cold_boot_calib = false,
+ 		.cbcal_restart_fw = false,
 -		.fw_mem_mode = 0,
 +		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
  		.num_vdevs = 16 + 1,
  		.num_peers = 512,
  		.supports_suspend = true,
+@@ -600,7 +600,7 @@ static struct ath11k_hw_params ath11k_hw
+ 		.supports_sta_ps = true,
+ 		.cold_boot_calib = true,
+ 		.cbcal_restart_fw = false,
+-		.fw_mem_mode = 0,
++		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
+ 		.num_vdevs = 16 + 1,
+ 		.num_peers = 512,
+ 		.supports_suspend = false,
+@@ -679,7 +679,7 @@ static struct ath11k_hw_params ath11k_hw
+ 		.supports_monitor = false,
+ 		.supports_sta_ps = false,
+ 		.supports_shadow_regs = false,
+-		.fw_mem_mode = 0,
++		.fw_mem_mode = ATH11K_QMI_TARGET_MEM_MODE,
+ 		.num_vdevs = 16 + 1,
+ 		.num_peers = 512,
+ 		.supports_regdb = false,

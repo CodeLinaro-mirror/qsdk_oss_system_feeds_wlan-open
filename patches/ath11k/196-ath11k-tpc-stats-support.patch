@@ -44,10 +44,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -780,6 +780,11 @@ struct ath11k {
- 
- 	struct ath11k_coex_info coex;
- 	int monitor_vdev_id;
+@@ -793,6 +793,11 @@ struct ath11k {
+ 	u8 ftm_msgref;
+ 	int ap_ps_enabled;
+ 	enum ath11k_ap_ps_state ap_ps_state;
 +	u8 tpc_stats_type;
 +	/* tpc_stats ptr is protected by data lock */
 +	struct wmi_tpc_stats_event *tpc_stats;
@@ -58,7 +58,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  #endif
 --- a/drivers/net/wireless/ath/ath11k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath11k/debugfs.c
-@@ -2079,6 +2079,588 @@ static const struct file_operations fops
+@@ -2068,6 +2068,588 @@ static const struct file_operations fops
  	.open = simple_open
  };
  
@@ -647,7 +647,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  int ath11k_debugfs_register(struct ath11k *ar)
  {
  	struct ath11k_base *ab = ar->ab;
-@@ -2102,6 +2684,7 @@ int ath11k_debugfs_register(struct ath11
+@@ -2091,6 +2673,7 @@ int ath11k_debugfs_register(struct ath11
  
  	ath11k_debugfs_fw_stats_init(ar);
  	ath11k_init_pktlog(ar);
@@ -655,7 +655,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  
  	debugfs_create_file("ext_tx_stats", 0644,
  			    ar->debug.debugfs_pdev, ar,
-@@ -2144,6 +2727,10 @@ int ath11k_debugfs_register(struct ath11
+@@ -2147,6 +2730,10 @@ int ath11k_debugfs_register(struct ath11
  	debugfs_create_file("enable_m3_dump", 0644,
  			    ar->debug.debugfs_pdev, ar,
  			    &fops_enable_m3_dump);
@@ -714,7 +714,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	u8 pdev_id;
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -88,6 +88,10 @@ static const struct wmi_tlv_policy wmi_t
+@@ -94,6 +94,10 @@ static const struct wmi_tlv_policy wmi_t
  		= { .min_len = 0 },
  	[WMI_TAG_ARRAY_UINT32]
  		= { .min_len = 0 },
@@ -725,16 +725,16 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	[WMI_TAG_SERVICE_READY_EVENT]
  		= { .min_len = sizeof(struct wmi_service_ready_event) },
  	[WMI_TAG_SERVICE_READY_EXT_EVENT]
-@@ -142,6 +146,8 @@ static const struct wmi_tlv_policy wmi_t
-		.min_len = sizeof(struct wmi_per_chain_rssi_stats) },
-	[WMI_TAG_TWT_ADD_DIALOG_COMPLETE_EVENT] = {
-		.min_len = sizeof(struct wmi_twt_add_dialog_event) },
+@@ -154,6 +158,8 @@ static const struct wmi_tlv_policy wmi_t
+ 		.min_len = sizeof(struct wmi_per_chain_rssi_stats) },
+ 	[WMI_TAG_TWT_ADD_DIALOG_COMPLETE_EVENT] = {
+ 		.min_len = sizeof(struct wmi_twt_add_dialog_event) },
 +	[WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM]
 +		= { .min_len = sizeof(struct wmi_tpc_stats_event_fixed_param) },
  };
-
+ 
  #define PRIMAP(_hw_mode_) \
-@@ -8326,6 +8332,444 @@ static void ath11k_wmi_gtk_offload_statu
+@@ -8971,6 +8977,444 @@ static void ath11k_wmi_gtk_offload_statu
  	kfree(tb);
  }
  
@@ -1178,20 +1178,20 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
 +
  static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  {
-	struct wmi_cmd_hdr *cmd_hdr;
-@@ -8491,6 +8935,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	struct wmi_cmd_hdr *cmd_hdr;
+@@ -9098,6 +9542,9 @@ static void ath11k_wmi_tlv_op_rx(struct
  	case WMI_GTK_OFFLOAD_STATUS_EVENTID:
  		ath11k_wmi_gtk_offload_status_event(ab, skb);
  		break;
 +	case WMI_PDEV_GET_TPC_STATS_EVENTID:
 +		ath11k_process_tpc_stats(ab, skb);
 +		break;
- 	/* TODO: Add remaining events */
  	default:
- 		ath11k_dbg(ab, ATH11K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
+ 		ath11k_dbg(ab, ATH11K_DBG_WMI, "unsupported event id 0x%x\n", id);
+ 		break;
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -637,6 +637,8 @@ enum wmi_tlv_event_id {
+@@ -647,6 +647,8 @@ enum wmi_tlv_event_id {
  	WMI_PDEV_RAP_INFO_EVENTID,
  	WMI_CHAN_RF_CHARACTERIZATION_INFO_EVENTID,
  	WMI_SERVICE_READY_EXT2_EVENTID,
@@ -1200,7 +1200,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	WMI_VDEV_START_RESP_EVENTID = WMI_TLV_CMD(WMI_GRP_VDEV),
  	WMI_VDEV_STOPPED_EVENTID,
  	WMI_VDEV_INSTALL_KEY_COMPLETE_EVENTID,
-@@ -1111,6 +1113,7 @@ enum wmi_tlv_tag {
+@@ -1123,6 +1125,7 @@ enum wmi_tlv_tag {
  	WMI_TAG_ARRAY_BYTE,
  	WMI_TAG_ARRAY_STRUCT,
  	WMI_TAG_ARRAY_FIXED_STRUCT,
@@ -1208,10 +1208,10 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	WMI_TAG_LAST_ARRAY_ENUM = 31,
  	WMI_TAG_SERVICE_READY_EVENT,
  	WMI_TAG_HAL_REG_CAPABILITIES,
-@@ -1862,6 +1865,12 @@ enum wmi_tlv_tag {
- 	WMI_TAG_PDEV_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
- 	WMI_TAG_PDEV_NON_SRG_OBSS_COLOR_ENABLE_BITMAP_CMD,
+@@ -1876,6 +1879,12 @@ enum wmi_tlv_tag {
  	WMI_TAG_PDEV_NON_SRG_OBSS_BSSID_ENABLE_BITMAP_CMD,
+ 	WMI_TAG_REGULATORY_RULE_EXT_STRUCT = 0x3A9,
+ 	WMI_TAG_REG_CHAN_LIST_CC_EXT_EVENT,
 +	WMI_TAG_TPC_STATS_GET_CMD = 0x38B,
 +	WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM,
 +	WMI_TAG_TPC_STATS_CONFIG_EVENT,
@@ -1221,7 +1221,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  	WMI_TAG_PDEV_SET_BIOS_SAR_TABLE_CMD = 0x3D8,
  	WMI_TAG_PDEV_SET_BIOS_GEO_TABLE_CMD,
  	WMI_TAG_MAX
-@@ -5597,6 +5606,183 @@ struct wmi_debug_log_config_cmd_fixed_pa
+@@ -5859,6 +5868,183 @@ struct wmi_debug_log_config_cmd_fixed_pa
  	u32 value;
  } __packed;
  
@@ -1405,7 +1405,7 @@ Signed-off-by: Sriram R <srirrama@codeaurora.org>
  #define WMI_MAX_MEM_REQS 32
  
  #define MAX_RADIOS 3
-@@ -6368,5 +6554,7 @@ int ath11k_wmi_pdev_set_bios_sar_table_p
+@@ -6652,5 +6838,7 @@ int ath11k_wmi_pdev_set_bios_sar_table_p
  int ath11k_wmi_pdev_set_bios_geo_table_param(struct ath11k *ar);
  int ath11k_wmi_sta_keepalive(struct ath11k *ar,
  			     const struct wmi_sta_keepalive_arg *arg);

@@ -26,7 +26,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/core.h
 +++ b/drivers/net/wireless/ath/ath11k/core.h
-@@ -679,6 +679,7 @@ struct ath11k {
+@@ -685,6 +685,7 @@ struct ath11k {
  	struct ath11k_pdev_wmi *wmi;
  #ifdef CPTCFG_ATH11K_NSS_SUPPORT
  	struct ath11k_nss nss;
@@ -34,22 +34,18 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  #endif
  	struct ath11k_pdev_dp dp;
  	u8 mac_addr[ETH_ALEN];
-@@ -1041,8 +1042,12 @@ struct ath11k_base {
- 		u32 fw_crash_counter;
- 	} stats;
- 	struct ath11k_ftm_event_obj ftm_event_obj;
-+
+@@ -1095,6 +1096,8 @@ struct ath11k_base {
+ 
+ 	bool fw_recovery_support;
+ 	atomic_t num_max_allowed;
 +	u32 max_ast_index;
- 	u32 pktlog_defs_checksum;
- 
 +	u32 num_ast_entries;
-+
- 	struct ath11k_dbring_cap *db_caps;
- 	u32 num_db_cap;
  
+ 	/* must be last */
+ 	u8 drv_priv[] __aligned(sizeof(void *));
 --- a/drivers/net/wireless/ath/ath11k/dp.h
 +++ b/drivers/net/wireless/ath/ath11k/dp.h
-@@ -1098,13 +1098,16 @@ struct htt_t2h_peer_map_event {
+@@ -1105,13 +1105,16 @@ struct htt_t2h_peer_map_event {
  #define HTT_T2H_PEER_UNMAP_INFO_PEER_ID	HTT_T2H_PEER_MAP_INFO_PEER_ID
  #define HTT_T2H_PEER_UNMAP_INFO1_MAC_ADDR_H16 \
  					HTT_T2H_PEER_MAP_INFO1_MAC_ADDR_H16
@@ -70,7 +66,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  struct htt_resp_msg {
 --- a/drivers/net/wireless/ath/ath11k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
-@@ -1856,6 +1856,8 @@ void ath11k_dp_htt_htc_t2h_msg_handler(s
+@@ -1816,6 +1816,8 @@ void ath11k_dp_htt_htc_t2h_msg_handler(s
  	u16 peer_mac_h16;
  	u16 ast_hash;
  	u16 hw_peer_id;
@@ -79,7 +75,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "dp_htt rx msg type :0x%0x\n", type);
  
-@@ -1891,15 +1893,29 @@ void ath11k_dp_htt_htc_t2h_msg_handler(s
+@@ -1851,15 +1853,29 @@ void ath11k_dp_htt_htc_t2h_msg_handler(s
  				     resp->peer_map_ev.info2);
  		hw_peer_id = FIELD_GET(HTT_T2H_PEER_MAP_INFO1_HW_PEER_ID,
  				       resp->peer_map_ev.info1);
@@ -114,7 +110,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		break;
 --- a/drivers/net/wireless/ath/ath11k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
-@@ -479,7 +479,7 @@ ath11k_dp_tx_process_htt_tx_complete(str
+@@ -495,7 +495,7 @@ ath11k_dp_tx_process_htt_tx_complete(str
  		break;
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_MEC_NOTIFY:
  		/* This event is to be handled only when the driver decides to
@@ -491,7 +487,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
 +			ath11k_nss_peer_create(ar, peer);
  	}
  
- 	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "htt peer map vdev %d peer %pM id %d\n",
+ 	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "peer map vdev %d peer %pM id %d\n",
 @@ -160,6 +497,69 @@ void ath11k_peer_map_event(struct ath11k
  
  exit:
@@ -599,7 +595,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ath11k_peer_rhash_delete(ab, peer);
  		list_del(&peer->list);
  		kfree(peer);
-@@ -336,7 +750,7 @@ static int __ath11k_peer_delete(struct a
+@@ -349,7 +763,7 @@ static int __ath11k_peer_delete(struct a
  
  	reinit_completion(&ar->peer_delete_done);
  
@@ -608,7 +604,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  
  	ret = ath11k_wmi_send_peer_delete_cmd(ar, addr, vdev_id);
  	if (ret) {
-@@ -377,6 +791,7 @@ int ath11k_peer_create(struct ath11k *ar
+@@ -390,6 +804,7 @@ int ath11k_peer_create(struct ath11k *ar
  		       struct ieee80211_sta *sta, struct peer_create_params *param)
  {
  	struct ath11k_peer *peer;
@@ -616,7 +612,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  	struct ath11k_sta *arsta;
  	int ret, fbret;
  
-@@ -440,7 +855,14 @@ int ath11k_peer_create(struct ath11k *ar
+@@ -463,7 +878,14 @@ int ath11k_peer_create(struct ath11k *ar
  
  	peer->sec_type = HAL_ENCRYPT_TYPE_OPEN;
  	peer->sec_type_grp = HAL_ENCRYPT_TYPE_OPEN;
@@ -781,16 +777,16 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  #endif /* _PEER_H_ */
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -154,6 +154,8 @@ static const struct wmi_tlv_policy wmi_t
+@@ -160,6 +160,8 @@ static const struct wmi_tlv_policy wmi_t
+ 		.min_len = sizeof(struct wmi_twt_add_dialog_event) },
+ 	[WMI_TAG_TPC_STATS_EVENT_FIXED_PARAM]
  		= { .min_len = sizeof(struct wmi_tpc_stats_event_fixed_param) },
- 	[WMI_TAG_MUEDCA_PARAMS_CONFIG_EVENT]
- 		= { .min_len = sizeof(struct wmi_pdev_update_muedca_event) },
 +	[WMI_TAG_WDS_ADDR_EVENT]
 +		= { .min_len = sizeof(struct wmi_wds_addr_event) },
  };
  
  #define PRIMAP(_hw_mode_) \
-@@ -1096,6 +1098,51 @@ int ath11k_wmi_send_peer_delete_cmd(stru
+@@ -1132,6 +1134,51 @@ int ath11k_wmi_send_peer_delete_cmd(stru
  	return ret;
  }
  
@@ -842,7 +838,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  int ath11k_wmi_send_pdev_set_regdomain(struct ath11k *ar,
  				       struct pdev_set_regdomain_params *param)
  {
-@@ -6006,6 +6053,36 @@ static int ath11k_pull_peer_assoc_conf_e
+@@ -6636,6 +6683,36 @@ static int ath11k_pull_peer_assoc_conf_e
  	return 0;
  }
  
@@ -879,7 +875,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static void ath11k_wmi_pull_pdev_stats_base(const struct wmi_pdev_stats_base *src,
  					    struct ath11k_fw_stats_pdev *dst)
  {
-@@ -6950,6 +7027,7 @@ static int ath11k_wmi_tlv_rdy_parse(stru
+@@ -7552,6 +7629,7 @@ static int ath11k_wmi_tlv_rdy_parse(stru
  
  		ether_addr_copy(ab->mac_addr,
  				fixed_param.ready_event_min.mac_addr.addr);
@@ -887,8 +883,8 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  		ab->pktlog_defs_checksum = fixed_param.pktlog_defs_checksum;
  		ab->wmi_ready = true;
  		break;
-@@ -8721,6 +8799,22 @@ exit:
- 	kfree(tb);
+@@ -9431,6 +9509,22 @@ int ath11k_wmi_pdev_get_tpc_table_cmdid(
+ 	return ret;
  }
  
 +static void ath11k_wmi_wds_peer_event(struct ath11k_base *ab,
@@ -910,19 +906,20 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -8824,6 +8918,9 @@ static void ath11k_wmi_tlv_op_rx(struct
- 	case WMI_PDEV_UTF_EVENTID:
- 		ath11k_tm_event_wmi(ab, id, skb);
+@@ -9561,6 +9655,10 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	case WMI_PDEV_GET_TPC_STATS_EVENTID:
+ 		ath11k_process_tpc_stats(ab, skb);
  		break;
 +	case WMI_WDS_PEER_EVENTID:
 +		ath11k_wmi_wds_peer_event(ab, skb);
 +		break;
- 	/* add Unsupported events here */
- 	case WMI_TBTTOFFSET_EXT_UPDATE_EVENTID:
- 	case WMI_PEER_OPER_MODE_CHANGE_EVENTID:
++
+ 	default:
+ 		ath11k_dbg(ab, ATH11K_DBG_WMI, "unsupported event id 0x%x\n", id);
+ 		break;
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -2977,6 +2977,21 @@ struct wmi_peer_delete_cmd {
+@@ -3022,6 +3022,21 @@ struct wmi_peer_delete_cmd {
  	struct wmi_mac_addr peer_macaddr;
  } __packed;
  
@@ -944,7 +941,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  struct wmi_peer_reorder_queue_setup_cmd {
  	u32 tlv_header;
  	u32 vdev_id;
-@@ -4325,6 +4340,21 @@ struct wmi_probe_resp_tx_status_event {
+@@ -4671,6 +4686,21 @@ struct wmi_probe_resp_tx_status_event {
  	u32 tx_status;
  } __packed;
  
@@ -966,7 +963,7 @@ Signed-off-by: Sathishkumar Muruganandam <murugana@codeaurora.org>
  /*
   * PDEV statistics
   */
-@@ -6350,6 +6380,9 @@ int ath11k_wmi_set_sta_ps_param(struct a
+@@ -6731,6 +6761,9 @@ int ath11k_wmi_set_sta_ps_param(struct a
  int ath11k_wmi_force_fw_hang_cmd(struct ath11k *ar, u32 type, u32 delay_time_ms);
  int ath11k_wmi_send_peer_delete_cmd(struct ath11k *ar,
  				    const u8 *peer_addr, u8 vdev_id);

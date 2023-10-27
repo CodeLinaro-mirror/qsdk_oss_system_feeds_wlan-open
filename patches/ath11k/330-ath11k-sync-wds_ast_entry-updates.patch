@@ -46,17 +46,17 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
 
 --- a/drivers/net/wireless/ath/ath11k/ahb.c
 +++ b/drivers/net/wireless/ath/ath11k/ahb.c
-@@ -1319,6 +1319,7 @@ static int ath11k_ahb_remove(struct plat
- 
+@@ -1421,6 +1421,7 @@ static void ath11k_ahb_remove_prepare(st
  	set_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags);
  	cancel_work_sync(&ab->restart_work);
+ 	cancel_work_sync(&ab->qmi.event_work);
 +	cancel_work_sync(&ab->wmi_ast_work);
+ }
  
- 	ath11k_core_deinit(ab);
- qmi_fail:
+ static void ath11k_ahb_free_resources(struct ath11k_base *ab)
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -2386,6 +2386,7 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -2564,6 +2564,7 @@ struct ath11k_base *ath11k_core_alloc(st
  
  	mutex_init(&ab->core_lock);
  	mutex_init(&ab->tbl_mtx_lock);
@@ -64,7 +64,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  	spin_lock_init(&ab->base_lock);
  	mutex_init(&ab->vdev_id_11d_lock);
  	init_completion(&ab->reset_complete);
-@@ -2402,6 +2403,8 @@ struct ath11k_base *ath11k_core_alloc(st
+@@ -2580,6 +2581,8 @@ struct ath11k_base *ath11k_core_alloc(st
  	INIT_WORK(&ab->restart_work, ath11k_core_restart);
  	INIT_WORK(&ab->update_11d_work, ath11k_update_11d);
  	INIT_WORK(&ab->reset_work, ath11k_core_reset);
@@ -83,7 +83,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  
  #ifdef CONFIG_QCOM_QMI_HELPERS
  extern wait_queue_head_t ath11k_ssr_dump_wq;
-@@ -1279,6 +1280,9 @@ struct ath11k_base {
+@@ -1283,6 +1284,9 @@ struct ath11k_base {
  	int ani_cck_level;
  	struct completion ani_ofdm_event;
  	struct completion ani_cck_event;
@@ -183,7 +183,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  }
 --- a/drivers/net/wireless/ath/ath11k/pci.c
 +++ b/drivers/net/wireless/ath/ath11k/pci.c
-@@ -957,6 +957,7 @@ static void ath11k_pci_remove(struct pci
+@@ -970,6 +970,7 @@ static void ath11k_pci_remove(struct pci
  	}
  
  	set_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags);
@@ -408,7 +408,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  	ab->num_ast_entries--;
  }
  
-@@ -684,6 +723,10 @@ void ath11k_peer_cleanup(struct ath11k *
+@@ -685,6 +724,10 @@ void ath11k_peer_cleanup(struct ath11k *
  
  	lockdep_assert_held(&ar->conf_mutex);
  
@@ -419,7 +419,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  	mutex_lock(&ab->tbl_mtx_lock);
  	spin_lock_bh(&ab->base_lock);
  	list_for_each_entry_safe(peer, tmp_peer, &ab->peers, list) {
-@@ -712,6 +755,9 @@ void ath11k_peer_cleanup(struct ath11k *
+@@ -713,6 +756,9 @@ void ath11k_peer_cleanup(struct ath11k *
  
  	spin_unlock_bh(&ab->base_lock);
  	mutex_unlock(&ab->tbl_mtx_lock);
@@ -429,7 +429,7 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  }
  
  static int ath11k_wait_for_peer_deleted(struct ath11k *ar, int vdev_id, const u8 *addr)
-@@ -746,9 +792,18 @@ static int __ath11k_peer_delete(struct a
+@@ -747,20 +793,22 @@ static int __ath11k_peer_delete(struct a
  	int ret;
  	struct ath11k_peer *peer;
  	struct ath11k_base *ab = ar->ab;
@@ -448,11 +448,21 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
  	mutex_lock(&ab->tbl_mtx_lock);
  	spin_lock_bh(&ab->base_lock);
  
-@@ -763,14 +818,34 @@ static int __ath11k_peer_delete(struct a
+ 	peer = ath11k_peer_find_by_addr(ab, addr);
+-	/* Check if the found peer is what we want to remove.
+-	 * While the sta is transitioning to another band we may
+-	 * have 2 peer with the same addr assigned to different
+-	 * vdev_id. Make sure we are deleting the correct peer.
+-	 */
+-	if (peer && peer->vdev_id == vdev_id)
+-		ath11k_peer_rhash_delete(ab, peer);
+ 
+ 	/* Fallback to peer list search if the correct peer can't be found.
+ 	 * Skip the deletion of the peer from the rhash since it has already
+@@ -779,12 +827,35 @@ static int __ath11k_peer_delete(struct a
  		return -EINVAL;
  	}
  
--	ath11k_peer_rhash_delete(ab, peer);
 +	if (peer) {
 +#ifdef CPTCFG_ATH11K_NSS_SUPPORT
 +		peer->delete_in_progress = true;
@@ -475,10 +485,10 @@ Signed-off-by: Rameshkumar Sundaram <ramess@codeaurora.org>
 +#endif
 +		ath11k_peer_rhash_delete(ab, peer);
 +	}
- 
++
  	spin_unlock_bh(&ab->base_lock);
  	mutex_unlock(&ab->tbl_mtx_lock);
--
+ 
 -	reinit_completion(&ar->peer_delete_done);
 -
 -	ath11k_nss_peer_delete(ar->ab, vdev_id, addr);

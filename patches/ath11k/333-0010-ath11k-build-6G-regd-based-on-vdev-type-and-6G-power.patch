@@ -19,7 +19,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath11k/mac.c
 +++ b/drivers/net/wireless/ath/ath11k/mac.c
-@@ -539,6 +539,17 @@ struct ath11k *ath11k_mac_get_ar_by_vdev
+@@ -641,6 +641,17 @@ struct ath11k *ath11k_mac_get_ar_by_vdev
  	return NULL;
  }
  
@@ -39,7 +39,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	int i;
 --- a/drivers/net/wireless/ath/ath11k/mac.h
 +++ b/drivers/net/wireless/ath/ath11k/mac.h
-@@ -152,7 +152,7 @@ struct ath11k_vif *ath11k_mac_get_vif_up
+@@ -161,7 +161,7 @@ struct ath11k_vif *ath11k_mac_get_vif_up
  
  struct ath11k *ath11k_mac_get_ar_by_vdev_id(struct ath11k_base *ab, u32 vdev_id);
  struct ath11k *ath11k_mac_get_ar_by_pdev_id(struct ath11k_base *ab, u32 pdev_id);
@@ -50,21 +50,21 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  int ath11k_mac_tx_mgmt_pending_free(int buf_id, void *skb, void *ctx);
 --- a/drivers/net/wireless/ath/ath11k/wmi.c
 +++ b/drivers/net/wireless/ath/ath11k/wmi.c
-@@ -7430,29 +7430,15 @@ static bool ath11k_reg_is_world_alpha(ch
- 	return false;
+@@ -8019,30 +8019,14 @@ static void ath11k_wmi_htc_tx_complete(s
+ 		wake_up(&wmi->tx_ce_desc_wq);
  }
  
--static int ath11k_reg_chan_list_event(struct ath11k_base *ab, struct sk_buff *skb, enum wmi_reg_chan_list_cmd_type id)
+-static int ath11k_reg_chan_list_event(struct ath11k_base *ab,
+-				      struct sk_buff *skb,
+-				      enum wmi_reg_chan_list_cmd_type id)
 +static int ath11k_reg_handle_chan_list(struct ath11k_base *ab,
 +				       struct cur_regulatory_info *reg_info,
-+				       enum ieee80211_ap_reg_power power_type)
++				      enum ieee80211_ap_reg_power power_type)
  {
 -	struct cur_regulatory_info *reg_info = NULL;
 -	struct ieee80211_regdomain *regd = NULL;
-+	struct ieee80211_regdomain *regd;
- 	bool intersect = false;
 -	int ret = 0, pdev_idx, i, j;
-+	int pdev_idx;
++	struct ieee80211_regdomain *regd;
  	struct ath11k *ar;
 -
 -	reg_info = kzalloc(sizeof(*reg_info), GFP_ATOMIC);
@@ -82,11 +82,12 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 -		ath11k_warn(ab, "failed to extract regulatory info from received event\n");
 -		goto fallback;
 -	}
++	int pdev_idx;
 +	enum wmi_vdev_type vdev_type;
  
- 	if (reg_info->status_code != REG_SET_CC_STATUS_PASS) {
- 		/* In case of failure to set the requested ctry,
-@@ -7460,7 +7446,7 @@ static int ath11k_reg_chan_list_event(st
+ 	ath11k_dbg(ab, ATH11K_DBG_WMI, "event reg chan list id %d", id);
+ 
+@@ -8052,7 +8036,7 @@ static int ath11k_reg_chan_list_event(st
  		 * and return from here.
  		 */
  		ath11k_warn(ab, "Failed to set the requested Country regulatory setting\n");
@@ -95,7 +96,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	pdev_idx = reg_info->phy_id;
-@@ -7472,7 +7458,7 @@ static int ath11k_reg_chan_list_event(st
+@@ -8064,7 +8048,7 @@ static int ath11k_reg_chan_list_event(st
  	if (test_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags) &&
  	    ab->default_regd[pdev_idx]) {
  		spin_unlock(&ab->base_lock);
@@ -104,7 +105,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  	spin_unlock(&ab->base_lock);
  
-@@ -7482,8 +7468,8 @@ static int ath11k_reg_chan_list_event(st
+@@ -8074,8 +8058,8 @@ static int ath11k_reg_chan_list_event(st
  		 * event. Otherwise, it goes to fallback.
  		 */
  		if (ab->hw_params.single_pdev_only &&
@@ -115,21 +116,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		else
  			goto fallback;
  	}
-@@ -7494,7 +7480,7 @@ static int ath11k_reg_chan_list_event(st
+@@ -8086,9 +8070,17 @@ static int ath11k_reg_chan_list_event(st
  	if (ab->default_regd[pdev_idx] && !ab->new_regd[pdev_idx] &&
  	    !memcmp((char *)ab->default_regd[pdev_idx]->alpha2,
  		    (char *)reg_info->alpha2, 2))
 -		goto mem_free;
 +		goto retfail;
- 
- 	/* Intersect new rules with default regd if a new country setting was
- 	 * requested, i.e a default regd was already set during initialization
-@@ -7506,8 +7492,14 @@ static int ath11k_reg_chan_list_event(st
- 	    !ath11k_reg_is_world_alpha((char *)reg_info->alpha2))
- 		intersect = true;
- 
--	regd = ath11k_reg_build_regd(ab, reg_info, intersect,
--				     WMI_VDEV_TYPE_AP, IEEE80211_REG_UNSET_AP);
++
 +	ar = ab->pdevs[pdev_idx].ar;
 +	vdev_type = ath11k_mac_get_ar_vdev_type(ar);
 +
@@ -138,10 +131,12 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +		   power_type, vdev_type, intersect);
 +
 +	regd = ath11k_reg_build_regd(ab, reg_info, intersect, vdev_type, power_type);
+ 
+-	regd = ath11k_reg_build_regd(ab, reg_info);
  	if (!regd) {
  		ath11k_warn(ab, "failed to build regd from reg_info\n");
  		goto fallback;
-@@ -7535,7 +7527,7 @@ static int ath11k_reg_chan_list_event(st
+@@ -8116,7 +8108,7 @@ static int ath11k_reg_chan_list_event(st
  	ab->dfs_region = reg_info->dfs_region;
  	spin_unlock(&ab->base_lock);
  
@@ -150,14 +145,13 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  fallback:
  	/* Fallback to older reg (by sending previous country setting
-@@ -7547,17 +7539,48 @@ fallback:
+@@ -8128,17 +8120,47 @@ fallback:
  	 */
  	/* TODO: This is rare, but still should also be handled */
  	WARN_ON(1);
 +retfail:
 +	return -EINVAL;
 +}
-+
 +
 +static int ath11k_reg_chan_list_event(struct ath11k_base *ab, struct sk_buff *skb,
 +				      enum wmi_reg_chan_list_cmd_type id)
@@ -187,16 +181,19 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
  mem_free:
  	if (reg_info) {
- 		kfree(reg_info->reg_rules_2g_ptr);
- 		kfree(reg_info->reg_rules_5g_ptr);
+-		kfree(reg_info->reg_rules_2ghz_ptr);
+-		kfree(reg_info->reg_rules_5ghz_ptr);
++		kfree(reg_info->reg_rules_2g_ptr);
++		kfree(reg_info->reg_rules_5g_ptr);
  		if (reg_info->is_ext_reg_event) {
 -			for (i = 0; i < WMI_REG_CURRENT_MAX_AP_TYPE; i++)
+-				kfree(reg_info->reg_rules_6ghz_ap_ptr[i]);
 +			for (i = 0; i < WMI_REG_CURRENT_MAX_AP_TYPE; i++) {
- 				kfree(reg_info->reg_rules_6g_ap_ptr[i]);
++				kfree(reg_info->reg_rules_6g_ap_ptr[i]);
  
 -			for (j = 0; j < WMI_REG_CURRENT_MAX_AP_TYPE; j++)
 -				for (i = 0; i < WMI_REG_MAX_CLIENT_TYPE; i++)
--					kfree(reg_info->reg_rules_6g_client_ptr[j][i]);
+-					kfree(reg_info->reg_rules_6ghz_client_ptr[j][i]);
 +				for (j = 0; j < WMI_REG_MAX_CLIENT_TYPE; j++)
 +					kfree(reg_info->reg_rules_6g_client_ptr[i][j]);
 +			}
@@ -205,7 +202,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
 --- a/drivers/net/wireless/ath/ath11k/wmi.h
 +++ b/drivers/net/wireless/ath/ath11k/wmi.h
-@@ -5109,6 +5109,7 @@ struct ath11k_targ_cap {
+@@ -5290,6 +5290,7 @@ struct ath11k_targ_cap {
  };
  
  enum wmi_vdev_type {
