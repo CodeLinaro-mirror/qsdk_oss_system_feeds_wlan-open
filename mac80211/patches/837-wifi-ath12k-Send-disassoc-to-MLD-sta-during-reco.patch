@@ -148,88 +148,76 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  {
  
  	struct ath12k_base *partner_ab;
-@@ -1085,32 +1085,57 @@ int ath12k_mac_partner_peer_cleanup(stru
- 				/* get arsta */
- 				sta = peer->sta;
- 				ahsta = (struct ath12k_sta *)sta->drv_priv;
--				arsta = ahsta->link[link_id];
--
--				/* get arvif */
--				vif = peer->vif;
--				ahvif = (struct ath12k_vif *)vif->drv_priv;
--				arvif = ahvif->link[link_id];
-+				if (!disassoc) {
-+					arsta = ahsta->link[link_id];
+@@ -1087,26 +1087,51 @@ int ath12k_mac_partner_peer_cleanup(stru
+ 			if (!ar)
+ 				continue;
  
--				mutex_lock(&ar->conf_mutex);
--				ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
--				if (ret) {
--					mutex_unlock(&ar->conf_mutex);
--					ath12k_warn(ar->ab,
--						    "failed to delete peer vdev_id %d addr %pM ret %d\n",
--						    arvif->vdev_id, arsta->addr, ret);
--					continue;
--				}
--				ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
--				if (ret) {
-+					/* get arvif */
-+					vif = peer->vif;
-+					ahvif = (struct ath12k_vif *)vif->drv_priv;
-+					arvif = ahvif->link[link_id];
-+
-+					mutex_lock(&ar->conf_mutex);
-+					ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
-+					if (ret) {
-+						mutex_unlock(&ar->conf_mutex);
-+						ath12k_warn(ar->ab,
-+							    "failed to delete peer vdev_id %d addr %pM ret %d\n",
-+							    arvif->vdev_id, arsta->addr, ret);
-+						continue;
-+					}
-+					ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
-+					if (ret) {
-+						mutex_unlock(&ar->conf_mutex);
-+						continue;
-+					}
-+					ar->num_peers--;
-+					arvif->num_stations--;
-+					ath12k_mac_dec_num_stations(arvif, arsta);
- 					mutex_unlock(&ar->conf_mutex);
--					continue;
-+					cancel_work_sync(&arsta->update_wk);
-+				} else {
-+					/* Send low ack to disassoc the MLD station
-+					 * Need to check on the sequence as FW has
-+					 * discarded the management packet at this
-+					 * sequence.
-+					 */
-+					if (sta->mlo && !ahsta->low_ack_sent) {
-+						ath12k_dbg(ar->ab, ATH12K_DBG_MODE1_RECOVERY,
-+							   "sending low ack for/disassoc:%pM\n",
-+							   sta->addr);
-+						/* set num of packets to maximum so
-+						 * that we distinguish in the hostapd
-+						 * to send disassoc irrespective of
-+						 * hostapd conf
-+						 */
-+						ieee80211_report_low_ack(sta, 0xFFFF);
-+						/* Using this flag to avoid certain
-+						 * known warnings which will be
-+						 * triggerred when umac reset is
-+						 * happening
-+						 */
-+						ahsta->low_ack_sent = true;
-+					}
- 				}
--				ar->num_peers--;
--				arvif->num_stations--;
--				ath12k_mac_dec_num_stations(arvif, arsta);
+-			cancel_work_sync(&arsta->update_wk);
++			if (!disassoc) {
++				cancel_work_sync(&arsta->update_wk);
+ 
+-			mutex_lock(&ar->conf_mutex);
+-			ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
+-			if (ret) {
 -				mutex_unlock(&ar->conf_mutex);
--				cancel_work_sync(&arsta->update_wk);
+-				ath12k_warn(ar->ab,
+-					    "failed to delete peer vdev_id %d addr %pM ret %d\n",
+-					    arvif->vdev_id, arsta->addr, ret);
+-				continue;
+-			}
+-			ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
+-			if (ret) {
++				mutex_lock(&ar->conf_mutex);
++				ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
++				if (ret) {
++					mutex_unlock(&ar->conf_mutex);
++					ath12k_warn(ar->ab,
++						    "failed to delete peer vdev_id %d addr %pM ret %d\n",
++						    arvif->vdev_id, arsta->addr, ret);
++					continue;
++				}
++				ret = ath12k_wait_for_peer_delete_done(ar, arvif->vdev_id, arsta->addr);
++				if (ret) {
++					mutex_unlock(&ar->conf_mutex);
++					continue;
++				}
++				ar->num_peers--;
++				arvif->num_stations--;
++				ath12k_mac_dec_num_stations(arvif, arsta);
+ 				mutex_unlock(&ar->conf_mutex);
+-				continue;
++			} else {
++				/* Send low ack to disassoc the MLD station
++				 * Need to check on the sequence as FW has
++				 * discarded the management packet at this
++				 * sequence.
++				 */
++				if (sta->mlo && !ahsta->low_ack_sent) {
++					ath12k_dbg(ar->ab, ATH12K_DBG_MODE1_RECOVERY,
++						   "sending low ack for/disassoc:%pM\n",
++						   sta->addr);
++					/* set num of packets to maximum so
++					 * that we distinguish in the hostapd
++					 * to send disassoc irrespective of
++					 * hostapd conf
++					 */
++					ieee80211_report_low_ack(sta, 0xFFFF);
++					/* Using this flag to avoid certain
++					 * known warnings which will be
++					 * triggerred when umac reset is
++					 * happening
++					 */
++					ahsta->low_ack_sent = true;
++				}
  			}
+-			ar->num_peers--;
+-			arvif->num_stations--;
+-			ath12k_mac_dec_num_stations(arvif, arsta);
+-			mutex_unlock(&ar->conf_mutex);
  		}
  	}
-@@ -7222,6 +7247,7 @@ static int ath12k_mac_handle_link_sta_st
+ 	return ret;
+@@ -7217,6 +7242,7 @@ static int ath12k_mac_handle_link_sta_st
  		if (ret)
  			ath12k_warn(ar->ab, "Failed to add station: %pM for VDEV: %d\n",
  				    arsta->addr, arvif->vdev_id);
@@ -237,7 +225,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	} else if ((old_state == IEEE80211_STA_NONE &&
  		    new_state == IEEE80211_STA_NOTEXIST)) {
  		ret = ath12k_mac_station_remove(ar, arvif, arsta);
-@@ -7461,8 +7487,9 @@ int ath12k_mac_update_sta_state(struct i
+@@ -7456,8 +7482,9 @@ int ath12k_mac_update_sta_state(struct i
  		ret = ath12k_mac_handle_link_sta_state(hw, arvif, arsta,
  						       old_state, new_state);
  		if (ret) {
@@ -249,7 +237,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  
  			/* If FW recovery is ongoing, no need to move down sta states
  			 * as FW will wake up with a clean slate. Hence we set the
-@@ -9156,6 +9183,16 @@ static u8 ath12k_mac_get_tx_link(struct
+@@ -9151,6 +9178,16 @@ static u8 ath12k_mac_get_tx_link(struct
  		link = ahsta->deflink.link_id;
  
  	if (ieee80211_is_mgmt(hdr->frame_control)) {
