@@ -24,7 +24,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -2691,46 +2691,50 @@ int ath12k_mode1_recovery_reconfig(struc
+@@ -2700,46 +2700,50 @@ int ath12k_mode1_recovery_reconfig(struc
  	}
  
  	/* sta state part */
@@ -106,7 +106,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	}
  
  	for (i = 0; i < ag->num_hw; i++) {
-@@ -2751,6 +2755,8 @@ int ath12k_mode1_recovery_reconfig(struc
+@@ -2760,6 +2764,8 @@ int ath12k_mode1_recovery_reconfig(struc
  		}
  	}
  
@@ -115,7 +115,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	ab->recovery_start = false;
  	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
  	return ret;
-@@ -3122,7 +3128,7 @@ static void ath12k_core_reset(struct wor
+@@ -3131,7 +3137,7 @@ static void ath12k_core_reset(struct wor
  
  	if (teardown) {
  		if (ath12k_core_trigger_umac_reset(ab) ||
@@ -126,7 +126,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  			ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -708,6 +708,10 @@ struct ath12k_sta {
+@@ -719,6 +719,10 @@ struct ath12k_sta {
  	u16 ml_peer_id;
  	u8 assoc_link_id;
  	u8 num_peer;
@@ -148,17 +148,16 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  {
  
  	struct ath12k_base *partner_ab;
-@@ -1085,32 +1085,59 @@ int ath12k_mac_partner_peer_cleanup(stru
+@@ -1085,32 +1085,57 @@ int ath12k_mac_partner_peer_cleanup(stru
  				/* get arsta */
  				sta = peer->sta;
  				ahsta = (struct ath12k_sta *)sta->drv_priv;
 -				arsta = ahsta->link[link_id];
- 
+-
 -				/* get arvif */
 -				vif = peer->vif;
 -				ahvif = (struct ath12k_vif *)vif->drv_priv;
 -				arvif = ahvif->link[link_id];
--				cancel_work_sync(&arsta->update_wk);
 +				if (!disassoc) {
 +					arsta = ahsta->link[link_id];
  
@@ -177,7 +176,6 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +					vif = peer->vif;
 +					ahvif = (struct ath12k_vif *)vif->drv_priv;
 +					arvif = ahvif->link[link_id];
-+					cancel_work_sync(&arsta->update_wk);
 +
 +					mutex_lock(&ar->conf_mutex);
 +					ret = ath12k_peer_delete_send(ar, arvif->vdev_id, arsta->addr);
@@ -193,12 +191,12 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +						mutex_unlock(&ar->conf_mutex);
 +						continue;
 +					}
-+
 +					ar->num_peers--;
 +					arvif->num_stations--;
 +					ath12k_mac_dec_num_stations(arvif, arsta);
  					mutex_unlock(&ar->conf_mutex);
 -					continue;
++					cancel_work_sync(&arsta->update_wk);
 +				} else {
 +					/* Send low ack to disassoc the MLD station
 +					 * Need to check on the sequence as FW has
@@ -227,10 +225,11 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 -				arvif->num_stations--;
 -				ath12k_mac_dec_num_stations(arvif, arsta);
 -				mutex_unlock(&ar->conf_mutex);
+-				cancel_work_sync(&arsta->update_wk);
  			}
  		}
  	}
-@@ -7215,6 +7242,7 @@ static int ath12k_mac_handle_link_sta_st
+@@ -7222,6 +7247,7 @@ static int ath12k_mac_handle_link_sta_st
  		if (ret)
  			ath12k_warn(ar->ab, "Failed to add station: %pM for VDEV: %d\n",
  				    arsta->addr, arvif->vdev_id);
@@ -238,7 +237,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	} else if ((old_state == IEEE80211_STA_NONE &&
  		    new_state == IEEE80211_STA_NOTEXIST)) {
  		ret = ath12k_mac_station_remove(ar, arvif, arsta);
-@@ -7422,8 +7450,9 @@ int ath12k_mac_update_sta_state(struct i
+@@ -7461,8 +7487,9 @@ int ath12k_mac_update_sta_state(struct i
  		ret = ath12k_mac_handle_link_sta_state(hw, arvif, arsta,
  						       old_state, new_state);
  		if (ret) {
@@ -250,7 +249,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  
  			/* If FW recovery is ongoing, no need to move down sta states
  			 * as FW will wake up with a clean slate. Hence we set the
-@@ -9108,6 +9137,16 @@ static u8 ath12k_mac_get_tx_link(struct
+@@ -9156,6 +9183,16 @@ static u8 ath12k_mac_get_tx_link(struct
  		link = ahsta->deflink.link_id;
  
  	if (ieee80211_is_mgmt(hdr->frame_control)) {
@@ -269,7 +268,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  		link_sta = rcu_dereference(sta->link[link]);
 --- a/drivers/net/wireless/ath/ath12k/mac.h
 +++ b/drivers/net/wireless/ath/ath12k/mac.h
-@@ -281,5 +281,5 @@ int ath12k_set_vdev_param_to_all_vifs(st
+@@ -258,5 +258,5 @@ int ath12k_set_vdev_param_to_all_vifs(st
  void ath12k_mac_reconfig_complete(struct ieee80211_hw *hw,
  				  enum ieee80211_reconfig_type reconfig_type,
  				  struct ath12k *asserted_radio);
