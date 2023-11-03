@@ -17,15 +17,15 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -49,6 +49,7 @@
- #define	ATH12K_RX_RATE_TABLE_11AX_NUM	576
-
-
+@@ -51,6 +51,7 @@
+ extern unsigned int ath12k_frame_mode;
+ 
+ 
 +extern bool ath12k_debug_critical;
  #define ATH12K_MON_TIMER_INTERVAL  10
  #define ATH12K_RESET_TIMEOUT_HZ			(180 * HZ)
  #define ATH12K_RESET_MAX_FAIL_COUNT_FIRST	3
-@@ -1185,6 +1186,7 @@ struct ath12k_soc_dp_stats {
+@@ -1170,6 +1171,7 @@ struct ath12k_soc_dp_stats {
  	u32 fw_tx_status[MAX_FW_TX_STATUS];
  	u32 tx_enqueued[MAX_TCL_RING];
  	u32 tx_completed[MAX_TCL_RING];
@@ -35,8 +35,8 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	u32 bond_tx_ucast_dropped[MAX_TCL_RING];
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -1724,6 +1724,13 @@ static ssize_t ath12k_debugfs_dump_soc_d
- 			soc_stats->tx_enqueued[3]);
+@@ -1727,6 +1727,13 @@ static ssize_t ath12k_debugfs_dump_soc_d
+ 			 soc_stats->tx_err.peers_not_present);
  
  	len += scnprintf(buf + len, size - len,
 +			"\nnull tx complete: 0:%u 1:%u 2:%u 3:%u\n",
@@ -51,13 +51,10 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  			soc_stats->tx_completed[1],
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -1556,10 +1556,31 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1572,10 +1572,24 @@ int ath12k_dp_tx_completion_handler(stru
  		recycler_fast_xmit = tx_desc->recycler_fast_xmit;
  		skb_ext_desc = tx_desc->skb_ext_desc;
  		timestamp = tx_desc->timestamp;
-+
-+		if (ath12k_debug_critical && msdu)
-+			tx_desc->last_tx_status = *tx_status;
 +
  		/* Release descriptor as soon as extracting necessary info
  		 * to reduce contention
@@ -69,14 +66,10 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +
 +			ath12k_err_dump(ab, "Null msdu\n", "Tx compl Desc: ", tx_status,
 +					sizeof(*tx_status), NULL);
-+			ath12k_err_dump(ab, "Null msdu\n", "Last Tx compl Desc: ",
-+					&tx_desc->last_tx_status,
-+					sizeof(tx_desc->last_tx_status), NULL);
 +
 +			if (ath12k_debug_critical)
 +				BUG_ON(1);
 +
-+			memset(&tx_desc->last_tx_status, 0, sizeof(tx_desc->last_tx_status));
 +			continue;
 +		}
 +
@@ -85,7 +78,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		ab->soc_stats.tx_wbm_rel_source[buf_rel_source]++;
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -68,6 +68,10 @@ bool ath12k_mgmt_rx_reordering = false;
+@@ -67,6 +67,10 @@ bool ath12k_mgmt_rx_reordering = false;
  module_param_named(mgmt_rx_reorder, ath12k_mgmt_rx_reordering, bool, 0644);
  MODULE_PARM_DESC(mgmt_rx_reorder, "Mgmt Rx Re-Ordering (0 - disable, 1 - enable)");
  
@@ -96,13 +89,3 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static DEFINE_MUTEX(ath12k_hw_lock);
  static struct list_head ath12k_hw_groups = LIST_HEAD_INIT(ath12k_hw_groups);
  
---- a/drivers/net/wireless/ath/ath12k/dp.h
-+++ b/drivers/net/wireless/ath/ath12k/dp.h
-@@ -321,6 +321,7 @@ struct ath12k_tx_desc_info {
- 	struct list_head list;
- 	struct sk_buff *skb;
- 	struct sk_buff *skb_ext_desc;
-+	struct hal_wbm_completion_ring_tx last_tx_status;
- 	u32 desc_id; /* Cookie */
- 	u8 mac_id;
- 	u8 pool_id;
