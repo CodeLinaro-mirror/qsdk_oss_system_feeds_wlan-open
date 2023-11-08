@@ -476,7 +476,6 @@ mac80211_hostapd_setup_base() {
 		HE*) enable_ax=1 ;;
 		EHT* )	enable_ax=1 ;
 			enable_be=1
-			append base_cfg "mlo=1" "$N"
 			[ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"
 	esac
 
@@ -698,6 +697,12 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "$fils_cfg" "$N"
 		fi
 	fi
+
+	config_get ht_mode $device htmode
+	if ([ -n "$ht_mode" ] && [[ $ht_mode == "EHT"* ]]); then
+		append hostapd_cfg "mld_ap=1" "$N"
+	fi
+
 	cat >> "$hostapd_conf_file"  <<EOF
 $hostapd_cfg
 bssid=$macaddr
