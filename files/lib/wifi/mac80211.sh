@@ -2,6 +2,58 @@
 
 append DRIVERS "mac80211"
 
+MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
+
+update_mld_vap_details() {
+	local _mlds
+	local _devices_up
+	local _ifaces
+	config_load wireless
+	mld_vaps_count=0
+	radio_up_count=0
+	mac80211_get_wifi_mlds() {
+		append _mlds $1
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+	if [ -z "$_mlds" ]; then
+		return
+	fi
+	mac80211_get_wifi_ifaces() {
+		config_get iface_mode $1 mode
+		if [ -n "$iface_mode" ] && [[ "$iface_mode" == "ap" ]]; then
+			append _ifaces $1
+		fi
+		}
+	config_foreach mac80211_get_wifi_ifaces wifi-iface
+	for _mld in $_mlds
+	do
+		for _ifname in $_ifaces
+		do
+			config_get mld_name $_ifname mld
+			config_get mldevice $_ifname device
+			config_get mlcaps  $mldevice mlo_capable
+			if ! [[ "$mldevices" =~ "$mldevice" ]]; then
+				append mldevices $mldevice
+			fi
+
+			if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+				[ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+				mld_vaps_count=$((mld_vaps_count+1))
+			fi
+		done
+	done
+
+	for mldev in $mldevices
+	do
+		config_get disabled "$mldev" disabled
+		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+			radio_up_count=$((radio_up_count+1))
+		fi
+	done
+	echo "radio_up_count=$radio_up_count mld_vaps_count=$mld_vaps_count" > $MLD_VAP_DETAILS
+}
+
+
 check_mac80211_device() {
 	local device="$1"
 	local path="$2"
@@ -60,6 +112,9 @@ BEGIN {
 		if (vht && band != "1:") mode="VHT80"
 		if (he) mode="HE80"
 		if (he && band == "1:") mode="HE20"
+		if (eht && band== "1:") mode="EHT20"
+		if (eht && band == "2:") mode="EHT80"
+		if (eht && band == "4:") mode="EHT160"
                 sub("\\[", "", channel)
                 sub("\\]", "", channel)
                 bands = bands band channel ":" mode " "
@@ -73,6 +128,7 @@ $1 == "Band" {
 	vht = ""
 	ht = ""
 	he = ""
+	eht = ""
 }
 
 $0 ~ "Capabilities:" {
@@ -85,6 +141,10 @@ $0 ~ "VHT Capabilities" {
 
 $0 ~ "HE Iftypes" {
 	he=1
+}
+
+$0 ~ "EHT Iftypes" {
+	eht=1
 }
 
 $1 == "*" && $3 == "MHz" && $0 !~ /disabled/ && band && !channel {
@@ -105,7 +165,6 @@ get_band_defaults() {
 		local chan="${c%%:*}"
 		c="${c#*:}"
 		local mode="${c%%:*}"
-
 		case "$band" in
 			1) band=2g;;
 			2) band=5g;;
@@ -115,11 +174,10 @@ get_band_defaults() {
 		esac
 
 		[ -n "$band" ] || continue
-		[ -n "$mode_band" -a "$band" = "6g" ] && return
 
-		mode_band="$band"
-		channel="$chan"
-		htmode="$mode"
+		append mode_band $band
+		append channel $chan
+		append htmode $mode
 	done
 }
 
@@ -146,6 +204,18 @@ check_board_phy() {
 	fi
 }
 
+pre_mac80211() {
+	local action=${1}
+	case "${action}" in
+		disable)
+			if [ -f "$MLD_VAP_DETAILS" ]; then
+				rm -rf $MLD_VAP_DETAILS
+			fi
+		;;
+	esac
+	return 0
+}
+
 detect_mac80211() {
 	devidx=0
 	config_load wireless
@@ -162,56 +232,73 @@ detect_mac80211() {
 		channel=""
 		htmode=""
 		ht_capab=""
+		bandidx=1
+		#Check the single wiphy support
+		total_bands=$(iw phy ${dev} info | grep -E 'Band ' | wc -l)
+		if [ $total_bands -gt 1 ]; then
+			is_swiphy=1
+		fi
 
 		get_band_defaults "$dev"
+		while [ $bandidx -le $total_bands ]
+		do
+			_mode_band=$(eval echo $mode_band | awk -v I=$bandidx '{print $I}')
+			_channel=$(eval echo $channel | awk -v I=$bandidx '{print $I}')
+			_htmode=$(eval echo $htmode | awk -v I=$bandidx '{print $I}')
 
-		path="$(iwinfo nl80211 path "$dev")"
-		macaddr="$(cat /sys/class/ieee80211/${dev}/macaddress)"
+			path="$(iwinfo nl80211 path "$dev")"
+			macaddr="$(cat /sys/class/ieee80211/${dev}/macaddress)"
 
-		# work around phy rename related race condition
-		[ -n "$path" -o -n "$macaddr" ] || continue
+			# work around phy rename related race condition
+			[ -n "$path" -o -n "$macaddr" ] || continue
 
-		board_dev=
-		fallback_board_dev=
-		json_for_each_item check_board_phy wlan
-		[ -n "$board_dev" ] || board_dev="$fallback_board_dev"
-		[ -n "$board_dev" ] && dev="$board_dev"
+			board_dev=
+			fallback_board_dev=
+			json_for_each_item check_board_phy wlan
+			[ -n "$board_dev" ] || board_dev="$fallback_board_dev"
+			[ -n "$board_dev" ] && dev="$board_dev"
 
-		found=
-		config_foreach check_mac80211_device wifi-device "$path" "$macaddr"
-		[ -n "$found" ] && continue
+			found=
+			config_foreach check_mac80211_device wifi-device "$path" "$macaddr"
+			[ -n "$found" ] && continue
+			if [ $is_swiphy ]; then
+				name="radio$devidx\_band$(($bandidx - 1))"
+			else
+				name="radio${devidx}"
+			fi
 
-		name="radio${devidx}"
+			case "$dev" in
+				phy*)
+					if [ -n "$path" ]; then
+						dev_id="set wireless.${name}.path='$path'"
+					else
+						dev_id="set wireless.${name}.macaddr='$macaddr'"
+					fi
+					;;
+				*)
+					dev_id="set wireless.${name}.phy='$dev'"
+					;;
+			esac
+
+			uci -q batch <<-EOF
+				set wireless.${name}=wifi-device
+				set wireless.${name}.type=mac80211
+				${dev_id}
+				set wireless.${name}.channel=${_channel}
+				set wireless.${name}.band=${_mode_band}
+				set wireless.${name}.htmode=$_htmode
+				set wireless.${name}.disabled=1
+
+				set wireless.default_${name}=wifi-iface
+				set wireless.default_${name}.device=${name}
+				set wireless.default_${name}.network=lan
+				set wireless.default_${name}.mode=ap
+				set wireless.default_${name}.ssid=OpenWrt
+				set wireless.default_${name}.encryption=none
+	EOF
+			uci -q commit wireless
+			bandidx=$(($bandidx + 1))
+		done
 		devidx=$(($devidx + 1))
-		case "$dev" in
-			phy*)
-				if [ -n "$path" ]; then
-					dev_id="set wireless.${name}.path='$path'"
-				else
-					dev_id="set wireless.${name}.macaddr='$macaddr'"
-				fi
-				;;
-			*)
-				dev_id="set wireless.${name}.phy='$dev'"
-				;;
-		esac
-
-		uci -q batch <<-EOF
-			set wireless.${name}=wifi-device
-			set wireless.${name}.type=mac80211
-			${dev_id}
-			set wireless.${name}.channel=${channel}
-			set wireless.${name}.band=${mode_band}
-			set wireless.${name}.htmode=$htmode
-			set wireless.${name}.disabled=1
-
-			set wireless.default_${name}=wifi-iface
-			set wireless.default_${name}.device=${name}
-			set wireless.default_${name}.network=lan
-			set wireless.default_${name}.mode=ap
-			set wireless.default_${name}.ssid=OpenWrt
-			set wireless.default_${name}.encryption=none
-EOF
-		uci -q commit wireless
 	done
 }
