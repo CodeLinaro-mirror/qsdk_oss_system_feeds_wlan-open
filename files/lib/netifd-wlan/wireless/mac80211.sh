@@ -1030,6 +1030,7 @@ mac80211_setup_supplicant_noctl() {
 	}
 
 	wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$noscan"
+	wpa_supplicant_run "$ifname"
 
 	NEWSPLIST="${NEWSPLIST}$ifname "
 	[ "$enable" = 0 ] && {
@@ -1140,14 +1141,50 @@ mac80211_setup_mesh() {
 		ip link set dev "$ifname" down
 		return 0
 	}
+	json_get_vars key
+	if [ -n "$key" ]; then
+		wireless_vif_parse_encryption
+		mac80211_setup_supplicant_noctl || failed=1
+	else
+		case "$htmode" in
+			VHT20|HT20|HE20) mesh_htmode=HT20;;
+			HT40*|VHT40|HE40)
+				case "$hwmode" in
+					a)
+						case "$(( ($channel / 4) % 2 ))" in
+							1) mesh_htmode="HT40+" ;;
+							0) mesh_htmode="HT40-";;
+						esac
+						;;
+					*)
+						case "$htmode" in
+							HT40+) mesh_htmode="HT40+";;
+							HT40-) mesh_htmode="HT40-";;
+					*)
+						if [ "$channel" -lt 7 ]; then
+							mesh_htmode="HT40+"
+						else
+							mesh_htmode="HT40-"
+						fi
+						;;
+						esac
+						;;
+				esac
+			;;
+			VHT80|HE80|EHT80)
+					mesh_htmode="80MHz"
+			;;
+			*) mesh_htmode="NOHT" ;;
+		esac
 
-	mcval=
-	[ -n "$mcast_rate" ] && wpa_supplicant_add_rate mcval "$mcast_rate"
-	[ -n "$mesh_id" ] && ssid="$mesh_id"
-
-	iw dev "$ifname" mesh join "$ssid" freq $freq $iw_htmode \
-		${mcval:+mcast-rate $mcval} \
-		beacon-interval $beacon_int
+		mcval=
+		[ -n "$mcast_rate" ] && wpa_supplicant_add_rate mcval "$mcast_rate"
+		[ -n "$mesh_id" ] && ssid="$mesh_id"
+		
+		iw dev "$ifname" mesh join "$ssid" freq $freq $mesh_htmode \
+			${mcval:+mcast-rate $mcval} \
+			beacon-interval $beacon_int
+	fi
 }
 
 mac80211_setup_vif() {
@@ -1177,11 +1214,17 @@ mac80211_setup_vif() {
 	case "$mode" in
 		mesh)
 			wireless_vif_parse_encryption
+			if [ $auto_channel -gt 0 ]; then
+				chan=$(echo ${channel_list} | cut -d '-' -f 1)
+				freq="$(get_freq "$phy" "$chan" "$band")"
+			else
+				freq="$(get_freq "$phy" "$channel" "$band")"
+			fi
 			[ -z "$htmode" ] && htmode="NOHT";
 			if wpa_supplicant -vmesh || [ "$wpa" -gt 0 -o "$auto_channel" -gt 0 ] || chan_is_dfs "$phy" "$channel"; then
 				mac80211_setup_supplicant $vif_enable || failed=1
 			else
-				mac80211_setup_mesh $vif_enable
+				mac80211_setup_mesh $vif_enable $freq
 			fi
 			for var in $MP_CONFIG_INT $MP_CONFIG_BOOL $MP_CONFIG_STRING; do
 				json_get_var mp_val "$var"
@@ -1282,6 +1325,7 @@ drv_mac80211_setup() {
 		phy macaddr path \
 		country chanbw distance \
 		txpower antenna_gain \
+		noscan \
 		rxantenna txantenna \
 		frag rts beacon_int:100 htmode \
 		ru_punct_bitmap \
@@ -1383,7 +1427,7 @@ drv_mac80211_setup() {
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy" "$device"
 
 	mac80211_prepare_iw_htmode
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
+	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
 	NEWAPLIST=
 	for_each_interface "ap" mac80211_prepare_vif ${device}
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum ${hostapd_conf_file})
