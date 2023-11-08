@@ -249,6 +249,10 @@ mac80211_hostapd_setup_base() {
 	eht_oper_chwidth=0
 	vht_center_seg0=
 	eht_center_seg0=
+	is_6ghz=0
+	if [ -n "$band" ] && [ "$band" = "6g" ]; then
+		is_6ghz=1
+	fi
 	idx="$channel"
 	case "$htmode" in
 		VHT20|HE20|EHT20) enable_ac=1;;
@@ -569,6 +573,19 @@ mac80211_hostapd_setup_base() {
 			append base_cfg "he_bss_color_disabled=1" "$N"
 		fi
 
+		if [ "$is_6ghz" == "1" ]; then
+			if [ -z $multiple_bssid ] && [ -z $ema ]; then
+				multiple_bssid=1
+				ema=1
+			fi
+		fi
+
+		if [ -z $mlo_capable ] || [ $mlo_capable -eq 0 ] || [ "$is_6ghz" == "1" ]; then
+			if [ "$has_ap" -gt 1 ]; then
+				[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && ([ -z $ema ] || ([ -n $ema ] && [ $ema -eq 0 ])) && append base_cfg "mbssid=1" "$N"
+				[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "mbssid=2" "$N" && append base_cfg "ema=1" "$N"
+			fi
+		fi
 
 		append base_cfg "he_default_pe_duration=4" "$N"
 		append base_cfg "he_rts_threshold=1023" "$N"
@@ -632,6 +649,22 @@ mac80211_hostapd_setup_bss() {
 	}
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
+	if [ "$is_6ghz" == "1" ]; then
+		fils_cfg=
+		if [ "$unsol_bcast_presp" -gt 0 ] && [ "$unsol_bcast_presp" -le 20 ]; then
+			append fils_cfg "unsol_bcast_probe_resp_interval=$unsol_bcast_presp" "$N"
+		elif [ "$fils_discovery" -gt 0 ] && [ "$fils_discovery" -le 20 ]; then
+			append fils_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
+		else
+			append fils_cfg "fils_discovery_max_interval=20" "$N"
+		fi
+
+		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -eq 1 ] && [ "$type" == "interface" ]; then
+			append hostapd_cfg "$fils_cfg" "$N"
+		elif [ -z "$multiple_bssid" ] || [ "$multiple_bssid" -eq 0 ]; then
+			append hostapd_cfg "$fils_cfg" "$N"
+		fi
+	fi
 	cat >> "$hostapd_conf_file"  <<EOF
 $hostapd_cfg
 bssid=$macaddr
@@ -682,6 +715,16 @@ mac80211_generate_mac() {
 	local oIFS="$IFS"; IFS=":"; set -- $ref; IFS="$oIFS"
 
 	macidx=$(($id + 1))
+
+	if [ "$mode" == "ap" ] && [ $multiple_bssid -eq 1 ] && [ $id -gt 0 ]; then
+		local ref_dec=$( printf '%d\n' $( echo "0x$ref" | tr -d ':' ) )
+		local bssid_l_mask=$(((1 << $max_bssid_ind) - 1))
+		local bssid_l=$(((($ref_dec & $bssid_l_mask) + $id) % $max_bssid))
+		local bssid_h=$((($bssid_l_mask ^ 0xFFFFFFFFFFFF) & $ref_dec))
+		printf $( echo $( printf '%012x\n' $((bssid_h | bssid_l))) | sed 's!\(..\)!\1:!g;s!:$!!' )
+		return
+	fi
+
 	[ "$((0x$mask1))" -gt 0 ] && {
 		b1="0x$1"
 		[ "$id" -gt 0 ] && \
@@ -779,7 +822,7 @@ find_phy() {
 }
 
 mac80211_check_ap() {
-	has_ap=1
+	has_ap=$((has_ap+1))
 }
 
 mac80211_iw_interface_add() {
@@ -1325,7 +1368,7 @@ drv_mac80211_setup() {
 		phy macaddr path \
 		country chanbw distance \
 		txpower antenna_gain \
-		noscan \
+		multiple_bssid noscan \
 		rxantenna txantenna \
 		frag rts beacon_int:100 htmode \
 		ru_punct_bitmap \
@@ -1415,7 +1458,7 @@ drv_mac80211_setup() {
 	[ -n "$frag" ] && iw phy "$phy" set frag "${frag%%.*}"
 	[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 
-	has_ap=
+	has_ap=0
 	hostapd_ctrl=
 	ap_ifname=
 	hostapd_noscan=
@@ -1426,10 +1469,22 @@ drv_mac80211_setup() {
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy" "$device"
 
+	if [ $multiple_bssid -eq 1 ] && [ "$has_ap" -gt 1 ]; then
+		max_bssid_ind=0
+		local iter=$((has_ap-1))
+		while [ "$iter" -gt 0 ]
+		do
+			max_bssid_ind=$((max_bssid_ind+1))
+			iter=$((iter >> 1))
+		done
+
+		max_bssid=$((1 << max_bssid_ind))
+	fi
+
 	mac80211_prepare_iw_htmode
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
 	NEWAPLIST=
-	for_each_interface "ap" mac80211_prepare_vif ${device}
+	for_each_interface "ap" mac80211_prepare_vif ${device} ${multiple_bssid}
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum ${hostapd_conf_file})
 	OLD_MD5=$(uci -q -P /var/state get wireless._${phy}.md5)
 	if [ "${NEWAPLIST}" != "${OLDAPLIST}" ]; then
