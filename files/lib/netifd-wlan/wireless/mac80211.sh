@@ -1023,6 +1023,7 @@ mac80211_prepare_vif() {
 		;;
 		monitor)
 			mac80211_iw_interface_add "$phy" "$ifname" monitor || return
+			NEWUMLIST="${NEWUMLIST}$ifname"
 		;;
 		sta)
 			local wdsflag=
@@ -1095,13 +1096,13 @@ mac80211_setup_supplicant() {
 	[ -z "$spobj" ] && add_sp=1
 
 	NEW_MD5_SP=$(test -e "${_config}" && md5sum ${_config})
-	OLD_MD5_SP=$(uci -q -P /var/state get wireless._${phy}.md5_${ifname})
+	OLD_MD5_SP=$(uci -q -P /var/state get wireless.${device}.md5_${ifname})
 	if [ "$add_sp" = "1" ]; then
 		wpa_supplicant_run "$ifname" "$hostapd_ctrl"
 	else
 		[ "${NEW_MD5_SP}" == "${OLD_MD5_SP}" ] || ubus call $spobj reload
 	fi
-	uci -q -P /var/state set wireless._${phy}.md5_${ifname}="${NEW_MD5_SP}"
+	uci -q -P /var/state set wireless.${device}.md5_${ifname}="${NEW_MD5_SP}"
 	return 0
 }
 
@@ -1402,9 +1403,44 @@ chan_is_dfs() {
 mac80211_vap_cleanup() {
 	local service="$1"
 	local vaps="$2"
+	local phy=$3
+	local device=$5
 
 	for wdev in $vaps; do
-		[ "$service" != "none" ] && ubus call ${service} config_remove "{\"iface\":\"$wdev\"}"
+		phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+		if [ -n "$phy_name" && "$phy_name" != "$phy" ]; then
+			continue;
+		fi
+
+		case $service in
+			"hostapd")
+				if ( [ -f "/var/run/hostapd-${wdev}.lock" ] || \
+					[ -f "/var/run/hostapd-${4}.lock" ] ); then
+					hostapd_cli -iglobal raw REMOVE ${wdev}
+					rm /var/run/hostapd-${wdev}.lock
+					rm /var/run/hostapd/${wdev}
+				fi
+
+				if [ -f "/var/run/wifi-$device.pid" ]; then
+					pid=$(cat /var/run/wifi-$device.pid)
+					kill -9 $pid
+					rm -rf  /var/run/wifi-$device.pid
+					rm /var/run/hostapd/w*
+				fi
+			;;
+			"wpa_supplicant")
+				[ -f "/var/run/wpa_supplicant-${wdev}.lock" ] && { \
+					wpa_cli -g /var/run/wpa_supplicantglobal interface_remove ${wdev}
+					rm /var/run/wpa_supplicant-${wdev}.lock
+				}
+
+				[ -f "/var/run/wpa_supplicant-${wdev}.pid" ] && { \
+					kill -9 $(cat /var/run/wpa_supplicant-${wdev}.pid)
+					rm -rf /var/run/wpa_supplicant-${wdev}.pid
+					rm /var/run/wpa_supplicant-${wdev}.lock
+				}
+			;;
+		esac
 		ip link set dev "$wdev" down 2>/dev/null
 		iw dev "$wdev" del
 	done
@@ -1412,12 +1448,23 @@ mac80211_vap_cleanup() {
 
 mac80211_interface_cleanup() {
 	local phy="$1"
-	local primary_ap=$(uci -q -P /var/state get wireless._${phy}.aplist)
+	local primary_ap=$(uci -q -P /var/state get wireless.${device}.aplist)
+	local device="$2"
 	primary_ap=${primary_ap%% *}
 
-	mac80211_vap_cleanup hostapd "${primary_ap}"
-	mac80211_vap_cleanup wpa_supplicant "$(uci -q -P /var/state get wireless._${phy}.splist)"
-	mac80211_vap_cleanup none "$(uci -q -P /var/state get wireless._${phy}.umlist)"
+	if [ ${#device} -eq 12 ]; then
+		local dev_wlan=wlan$((${2:5:1} + ${2:11:1}))
+		local ap_ifnames="$(uci -q -P /var/state get wireless.${device}.aplist)"
+		local sta_ifnames="$(uci -q -P /var/state get wireless.${device}.splist)"
+		local adhoc_ifnames="$(uci -q -P /var/state get wireless.${device}.umlist)"
+		mac80211_vap_cleanup hostapd "$ap_ifnames" $phy $dev_wlan $2
+		mac80211_vap_cleanup wpa_supplicant "$sta_ifnames" $phy
+		mac80211_vap_cleanup none "$adhoc_ifnames" $phy
+	else
+		mac80211_vap_cleanup hostapd "${primary_ap}"
+		mac80211_vap_cleanup wpa_supplicant "$(uci -q -P /var/state get wireless.${device}.splist)"
+		mac80211_vap_cleanup none "$(uci -q -P /var/state get wireless.${device}.umlist)"
+	fi
 }
 
 mac80211_set_noscan() {
@@ -1465,9 +1512,9 @@ drv_mac80211_setup() {
 	wireless_set_data phy="$phy"
 	[ -z "$(uci -q -P /var/state show wireless._${phy})" ] && uci -q -P /var/state set wireless._${phy}=phy
 
-	OLDAPLIST=$(uci -q -P /var/state get wireless._${phy}.aplist)
-	OLDSPLIST=$(uci -q -P /var/state get wireless._${phy}.splist)
-	OLDUMLIST=$(uci -q -P /var/state get wireless._${phy}.umlist)
+	OLDAPLIST=$(uci -q -P /var/state get wireless.${device}.aplist)
+	OLDSPLIST=$(uci -q -P /var/state get wireless.${device}.splist)
+	OLDUMLIST=$(uci -q -P /var/state get wireless.${device}.umlist)
 
 	local wdev
 	local cwdev
@@ -1557,14 +1604,22 @@ drv_mac80211_setup() {
 	fi
 
 	mac80211_prepare_iw_htmode
+
+
 	NEWAPLIST=
 	for_each_interface "ap" mac80211_prepare_vif ${device} ${multiple_bssid}
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
+	uci -q -P /var/state set wireless.${device}.aplist="${NEWAPLIST}"
+
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum ${hostapd_conf_file})
 	OLD_MD5=$(uci -q -P /var/state get wireless._${phy}.md5)
 	if [ "${NEWAPLIST}" != "${OLDAPLIST}" ]; then
 		mac80211_vap_cleanup hostapd "${OLDAPLIST}"
 	fi
+
+	NEWSTALIST=
+	NEWUMLIST=
+	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
+
 	[ -n "${NEWAPLIST}" ] && mac80211_iw_interface_add "$phy" "${NEWAPLIST%% *}" __ap
 	local add_ap=0
 	local primary_ap=${NEWAPLIST%% *}
@@ -1584,8 +1639,8 @@ drv_mac80211_setup() {
 				no_reload=$?
 				if [ "$no_reload" != "0" ]; then
 					mac80211_vap_cleanup hostapd "${OLDAPLIST}"
-					mac80211_vap_cleanup wpa_supplicant "$(uci -q -P /var/state get wireless._${phy}.splist)"
-					mac80211_vap_cleanup none "$(uci -q -P /var/state get wireless._${phy}.umlist)"
+					mac80211_vap_cleanup wpa_supplicant "$(uci -q -P /var/state get wireless.${device}.splist)"
+					mac80211_vap_cleanup none "$(uci -q -P /var/state get wireless.${device}.umlist)"
 					sleep 2
 					mac80211_iw_interface_add "$phy" "${NEWAPLIST%% *}" __ap
 					for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
@@ -1619,19 +1674,16 @@ drv_mac80211_setup() {
 			/usr/sbin/hostapd -B -P /var/run/wifi-$device.pid $hostapd_conf_file
 		fi
 	}
-	uci -q -P /var/state set wireless._${phy}.aplist="${NEWAPLIST}"
-	uci -q -P /var/state set wireless._${phy}.md5="${NEW_MD5}"
+	uci -q -P /var/state set wireless.${device}.aplist="${NEWAPLIST}"
+	uci -q -P /var/state set wireless.${device}.md5="${NEW_MD5}"
 
 	[ "${add_ap}" = 1 ] && sleep 1
 	for_each_interface "ap" mac80211_setup_vif
 
-	NEWSPLIST=
-	NEWUMLIST=
-
 	for_each_interface "sta adhoc mesh monitor" mac80211_setup_vif
 
-	uci -q -P /var/state set wireless._${phy}.splist="${NEWSPLIST}"
-	uci -q -P /var/state set wireless._${phy}.umlist="${NEWUMLIST}"
+	uci -q -P /var/state set wireless.${device}.splist="${NEWSPLIST}"
+	uci -q -P /var/state set wireless.${device}.umlist="${NEWUMLIST}"
 
 	local foundvap
 	local dropvap=""
@@ -1709,9 +1761,9 @@ drv_mac80211_teardown() {
 		echo "Bug: PHY is undefined for device '$1'"
 		return 1
 	}
-
-	mac80211_interface_cleanup "$phy"
-	uci -q -P /var/state revert wireless._${phy}
+	device=$1
+	mac80211_interface_cleanup "$phy" "$1"
+	uci -q -P /var/state revert wireless.${device}
 }
 
 mac80211_update_mld_iface_config() {

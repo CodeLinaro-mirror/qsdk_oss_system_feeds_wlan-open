@@ -245,6 +245,11 @@ pre_mac80211() {
 	local action=${1}
 	case "${action}" in
 		disable)
+                        has_updated_cfg=$(ls /var/run/hostapd-*-updated-cfg 2>/dev/null | wc -l)
+                        if [ "$has_updated_cfg" -gt 0 ]; then
+                                rm -rf /var/run/hostapd-*updated-cfg
+                        fi
+                        rm -rf /var/run/wpa_supplicant-*-updated-cfg  2>/dev/null
 			if [ -f "$MLD_VAP_DETAILS" ]; then
 				rm -rf $MLD_VAP_DETAILS
 			fi
