@@ -1641,7 +1641,6 @@ drv_mac80211_setup() {
 					mac80211_vap_cleanup hostapd "${OLDAPLIST}"
 					mac80211_vap_cleanup wpa_supplicant "$(uci -q -P /var/state get wireless.${device}.splist)"
 					mac80211_vap_cleanup none "$(uci -q -P /var/state get wireless.${device}.umlist)"
-					sleep 2
 					mac80211_iw_interface_add "$phy" "${NEWAPLIST%% *}" __ap
 					for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 				fi
@@ -1677,7 +1676,6 @@ drv_mac80211_setup() {
 	uci -q -P /var/state set wireless.${device}.aplist="${NEWAPLIST}"
 	uci -q -P /var/state set wireless.${device}.md5="${NEW_MD5}"
 
-	[ "${add_ap}" = 1 ] && sleep 1
 	for_each_interface "ap" mac80211_setup_vif
 
 	for_each_interface "sta adhoc mesh monitor" mac80211_setup_vif
