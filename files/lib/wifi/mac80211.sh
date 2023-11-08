@@ -100,7 +100,6 @@ check_mac80211_device() {
 
 	phy_path=
 	config_get phy "$device" phy
-	json_select wlan
 	[ -n "$phy" ] && case "$phy" in
 		phy*)
 			[ -d /sys/class/ieee80211/$phy ] && \
@@ -149,7 +148,7 @@ BEGIN {
 		if (vht && band != "1:") mode="VHT80"
 		if (he) mode="HE80"
 		if (he && band == "1:") mode="HE20"
-		if (eht && band== "1:") mode="EHT20"
+		if (eht && band == "1:") mode="EHT20"
 		if (eht && band == "2:") mode="EHT80"
 		if (eht && band == "4:") mode="EHT160"
                 sub("\\[", "", channel)
@@ -183,6 +182,11 @@ $0 ~ "HE Iftypes" {
 $0 ~ "EHT Iftypes" {
 	eht=1
 }
+
+$0 ~ "EHT MAC Capabilities (0x0000" {
+	eht=0
+}
+
 
 $1 == "*" && $3 == "MHz" && $0 !~ /disabled/ && band && !channel {
         channel = $4
@@ -225,20 +229,6 @@ check_devidx() {
 		[ "$devidx" -ge "${1#radio}" ] && devidx=$((idx + 1))
 		;;
 	esac
-}
-
-check_board_phy() {
-	local name="$2"
-
-	json_select "$name"
-	json_get_var phy_path path
-	json_select ..
-
-	if [ "$path" = "$phy_path" ]; then
-		board_dev="$name"
-	elif [ "${path%+*}" = "$phy_path" ]; then
-		fallback_board_dev="$name.${path#*+}"
-	fi
 }
 
 pre_mac80211() {
@@ -294,17 +284,14 @@ detect_mac80211() {
 			# work around phy rename related race condition
 			[ -n "$path" -o -n "$macaddr" ] || continue
 
-			board_dev=
-			fallback_board_dev=
-			json_for_each_item check_board_phy wlan
-			[ -n "$board_dev" ] || board_dev="$fallback_board_dev"
-			[ -n "$board_dev" ] && dev="$board_dev"
-
 			found=
 			config_foreach check_mac80211_device wifi-device "$path" "$macaddr"
-			[ -n "$found" ] && continue
+			if [ -n "$found" ]; then
+				bandidx=$(($bandidx + 1))
+				continue
+			fi
 			if [ $is_swiphy ]; then
-				name="radio$devidx\_band$(($bandidx - 1))"
+				name=""radio$devidx\_band$(($bandidx - 1))""
 			else
 				name="radio${devidx}"
 			fi
@@ -336,8 +323,16 @@ detect_mac80211() {
 				set wireless.default_${name}.network=lan
 				set wireless.default_${name}.mode=ap
 				set wireless.default_${name}.ssid=OpenWrt
-				set wireless.default_${name}.encryption=none
-	EOF
+		EOF
+				if [ ${_mode_band} == '6g'  ]; then
+					uci -q batch <<-EOF
+						set wireless.default_${name}.encryption=sae
+						set wireless.default_${name}.sae_pwe=1
+						set wireless.default_${name}.key=0123456789
+				EOF
+				else
+					uci -q set wireless.default_${name}.encryption=none
+				fi
 			uci -q commit wireless
 			bandidx=$(($bandidx + 1))
 		done
