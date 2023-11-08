@@ -11,6 +11,9 @@ update_mld_vap_details() {
 	config_load wireless
 	mld_vaps_count=0
 	radio_up_count=0
+	sta_vaps_count=0
+	sta_radio=0
+
 	mac80211_get_wifi_mlds() {
 		append _mlds $1
 	}
@@ -20,10 +23,13 @@ update_mld_vap_details() {
 	fi
 	mac80211_get_wifi_ifaces() {
 		config_get iface_mode $1 mode
-		if [ -n "$iface_mode" ] && [[ "$iface_mode" == "ap" ]]; then
-			append _ifaces $1
+		if [ -n "$iface_mode" ]; then
+			case "$iface_mode" in
+			ap) append _ifaces $1 ;;
+			sta) append _staifaces $1  ;;
+			esac
 		fi
-		}
+	}
 	config_foreach mac80211_get_wifi_ifaces wifi-iface
 	for _mld in $_mlds
 	do
@@ -41,18 +47,49 @@ update_mld_vap_details() {
 				mld_vaps_count=$((mld_vaps_count+1))
 			fi
 		done
+
+		for _staifname in $_staifaces
+		do
+			config_get mld_name $_staifname mld
+			config_get mldevice $_staifname device
+			if ! [[ "$sta_mldevices" =~ "$mldevice" ]]; then
+				append sta_mldevices $mldevice
+			fi
+			if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+				sta_vaps_count=$((sta_vaps_count+1))
+			fi
+		done
 	done
 
 	for mldev in $mldevices
 	do
+		# Length of radio name should be 12 in order to ensure only single wiphy wifi-devices are taken into account
+		if [ ${#mldev} -ne 12 ]; then
+			continue;
+		fi
+
 		config_get disabled "$mldev" disabled
 		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
 			radio_up_count=$((radio_up_count+1))
 		fi
 	done
-	echo "radio_up_count=$radio_up_count mld_vaps_count=$mld_vaps_count" > $MLD_VAP_DETAILS
-}
 
+	for sta_mld in $sta_mldevices
+	do
+		if [ ${#sta_mld} -ne 12 ]; then
+			continue;
+		fi
+
+		config_get disabled "$sta_mld" disabled
+
+		if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+			sta_radio=$((sta_radio+1))
+		fi
+	done
+
+	echo "radio_up_count=$radio_up_count mld_vaps_count=$mld_vaps_count" > $MLD_VAP_DETAILS
+	echo "sta_radio=$sta_radio sta_vaps_count=$sta_vaps_count" >> $MLD_VAP_DETAILS
+}
 
 check_mac80211_device() {
 	local device="$1"

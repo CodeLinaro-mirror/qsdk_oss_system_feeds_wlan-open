@@ -628,6 +628,32 @@ EOF
 	radio_md5sum=$(md5sum $hostapd_conf_file | cut -d" " -f1)
 }
 
+mac80211_wds_support_check() {
+	local phy="$1"
+
+	local platform=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $1}')
+	case "$platform" in
+		"IPQ8074" | "IPQ6018" | "IPQ5018")
+			frame_mode=$(cat /sys/module/ath11k/parameters/frame_mode)
+			;;
+		"IPQ9574")
+			local freq="$(get_freq "$phy" "$channel" "$band")"
+			local board_type=$(grep -o "IPQ.*" /proc/device-tree/model | awk -F/ '{print $2}' | awk -F- '{print $3}')
+
+			if [ $board_type == "C6" ] && [ $freq -gt 2000 ] && [ $freq -lt 3000]; then
+				frame_mode=$(cat /sys/module/ath11k/parameters/frame_mode)
+			else
+				frame_mode=$(cat /sys/module/ath12k/parameters/frame_mode)
+			fi
+			;;
+		 "IPQ5332")
+			frame_mode=$(cat /sys/module/ath12k/parameters/frame_mode)
+			;;
+	esac
+
+	echo "$frame_mode"
+}
+
 mac80211_hostapd_setup_bss() {
 	local phy="$1"
 	local ifname="$2"
@@ -643,10 +669,17 @@ mac80211_hostapd_setup_bss() {
 	set_default wds 0
 	set_default start_disabled 0
 
-	[ "$wds" -gt 0 ] && {
+	if [ "$wds" -gt 0 ]; then
+		frame_mode=$(mac80211_wds_support_check "$phy")
+
+		if [ $frame_mode -ne 1 ]; then
+			echo WDS is supported only in native wifi mode. Kindly update the config > /dev/ttyMSM0
+			return
+		fi
 		append hostapd_cfg "wds_sta=1" "$N"
 		[ -n "$wds_bridge" ] && append hostapd_cfg "wds_bridge=$wds_bridge" "$N"
-	}
+	fi
+
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
 	if [ "$is_6ghz" == "1" ]; then
@@ -916,7 +949,7 @@ mac80211_prepare_vif() {
 			fi
 			[ -n "$ifname" ] || [ -n "$if_idx" ] || if_idx=1
 		else
-			if [ $mld_vaps_count -gt 0 ]; then
+			if [ $sta_vaps_count -gt 0 -o $mld_vaps_count -gt 0 ]; then
 				[ -n "$if_idx" ] || if_idx=1
 			fi
 		fi
@@ -994,7 +1027,14 @@ mac80211_prepare_vif() {
 		sta)
 			local wdsflag=
 			[ "$enable" = 0 ] || staidx="$(($staidx + 1))"
-			[ "$wds" -gt 0 ] && wdsflag="4addr on"
+			if [ "$wds" -gt 0 ]; then
+				frame_mode=$(mac80211_wds_support_check "$phy")
+				if [ $frame_mode -ne 1 ]; then
+					echo WDS is supported only in native wifi mode. Kindly update the config > /dev/ttyMSM0
+					return
+				fi
+				wdsflag="4addr on"
+			fi
 			mac80211_iw_interface_add "$phy" "$ifname" managed "$wdsflag" || return
 			if [ "$wds" -gt 0 ]; then
 				iw "$ifname" set 4addr on
@@ -1003,6 +1043,7 @@ mac80211_prepare_vif() {
 			fi
 			[ "$powersave" -gt 0 ] && powersave="on" || powersave="off"
 			iw "$ifname" set power_save "$powersave"
+			sta_ifname=$ifname
 		;;
 	esac
 
@@ -1240,7 +1281,7 @@ mac80211_setup_vif() {
 	json_select ..
 
 	json_select config
-	json_get_vars mode
+	json_get_vars mode mld
 	json_get_var vif_txpower
 	json_get_var vif_enable enable 1
 
@@ -1283,7 +1324,41 @@ mac80211_setup_vif() {
 			fi
 		;;
 		sta)
-			mac80211_setup_supplicant $vif_enable || failed=1
+			if [ $auto_channel -gt 0 ]; then
+                                chan=$(echo ${channel_list} | cut -d '-' -f 1)
+                                freq="$(get_freq "$phy" "$chan" "$band")"
+                        else
+                                freq="$(get_freq "$phy" "$channel" "$band")"
+                        fi
+                        freq_list=$(get_sta_freq_list $phy $freq)
+                        sta_started=0
+                        if ([ "$is_sphy_mband" -eq 1 ] &&
+                            [ "$sta_vaps_count" -gt 1 ] && [ "$sta_radio" -gt 1 ]); then
+                                #Keep count of the links to be supported before the supplicant is started
+                                touch /var/run/wpa_supplicant-$device-updated-cfg
+                                sta_cfg_updated=$(ls /var/run/wpa_supplicant-*-updated-cfg | wc -l)
+                                if [ -n "$freq_list" ]; then
+                                        if [ -f  "/tmp/${mld}_freq_list" ]; then
+                                                tmp_freq="$(cat /tmp/${mld}_freq_list)"
+                                                if ! [[ "$tmp_freq" =~ "$freq_list" ]]; then
+                                                        echo -n "$freq_list " >> /tmp/${mld}_freq_list
+                                                fi
+                                        else
+                                                echo -n "$freq_list " >> /tmp/${mld}_freq_list
+                                        fi
+                                        freq_list=$(cat /tmp/${mld}_freq_list)
+                                fi
+
+                                if [ "$sta_cfg_updated" = "$sta_radio" ]; then
+                                        mac80211_setup_supplicant || failed=1
+                                        sta_started=1
+					rm -rf /var/run/wpa_supplicant-*-updated-cfg
+					rm -rf /tmp/*_freq_list
+                                fi
+                        else
+                                mac80211_setup_supplicant || failed=1
+                                sta_started=1
+                        fi
 		;;
 	esac
 
@@ -1383,7 +1458,7 @@ drv_mac80211_setup() {
 
 	find_phy || {
 		echo "Could not find PHY for device '$1'"
-		wireless_set_retry 0
+		wireless_set_retry 1
 		return 1
 	}
 
@@ -1467,7 +1542,7 @@ drv_mac80211_setup() {
 	rm -f "$hostapd_conf_file"
 
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
-	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy" "$device"
+	[ "$has_ap" -gt 0 ] && mac80211_hostapd_setup_base "$phy" "$device"
 
 	if [ $multiple_bssid -eq 1 ] && [ "$has_ap" -gt 1 ]; then
 		max_bssid_ind=0
@@ -1482,9 +1557,9 @@ drv_mac80211_setup() {
 	fi
 
 	mac80211_prepare_iw_htmode
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
 	NEWAPLIST=
 	for_each_interface "ap" mac80211_prepare_vif ${device} ${multiple_bssid}
+	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif ${device}
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum ${hostapd_conf_file})
 	OLD_MD5=$(uci -q -P /var/state get wireless._${phy}.md5)
 	if [ "${NEWAPLIST}" != "${OLDAPLIST}" ]; then
@@ -1530,15 +1605,18 @@ drv_mac80211_setup() {
 			#wireless_add_process "$(jsonfilter -s "$hostapd_res" -l 1 -e @.pid)" "/usr/sbin/hostapd" 1 1
 		fi
 		hostapd_cfg_updated=$(ls /var/run/hostapd-*-updated-cfg | wc -l)
-		bands_info=$(ls /var/run/hostapd*updated-cfg | grep -o band.)
-		for __band in $bands_info
-		do
-			append  config_files /var/run/hostapd-phy${phy#phy}_${__band}.conf
-		done
+		if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
+			bands_info=$(ls /var/run/hostapd*updated-cfg | grep -o band.)
+			for __band in $bands_info
+			do
+				append  config_files /var/run/hostapd-phy${phy#phy}_${__band}.conf
+			done
+			#MLO vaps, single instance of hostapd is started
+			/usr/sbin/hostapd -B -P /var/run/wifi-$device.pid $config_files
+		fi
+
 		if [ -z "$is_sphy_mband" ] || [ "$hostapd_add_bss" -eq 1 ]; then
 			/usr/sbin/hostapd -B -P /var/run/wifi-$device.pid $hostapd_conf_file
-		else
-			/usr/sbin/hostapd -B -P /var/run/wifi-$device.pid $config_files
 		fi
 	}
 	uci -q -P /var/state set wireless._${phy}.aplist="${NEWAPLIST}"
@@ -1566,6 +1644,43 @@ drv_mac80211_setup() {
 	done
 	[ -n "$dropvap" ] && mac80211_vap_cleanup wpa_supplicant "$dropvap"
 	wireless_set_up
+
+	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
+
+        if [ "$enable_smp_affinity" -eq 1 ]; then
+                [ -f "/lib/smp_affinity_settings.sh" ] && {
+                        . /lib/smp_affinity_settings.sh
+                        enable_smp_affinity_wifi
+                }
+                [ -f "/lib/update_smp_affinity.sh" ] && {
+                        . /lib/update_smp_affinity.sh
+                        enable_smp_affinity_wigig
+                }
+        fi
+
+	if [[ ! -z "$ap_ifname" && ! -z "$sta_ifname" && ! -z "$hostapd_conf_file" ]]; then
+                [ -f "/lib/apsta_mode.sh" ] && {
+                       if [ $sta_started -eq 1 ]; then
+                               if ([ $sta_vaps_count -gt 0 ] && [ $sta_radio -gt 0 ]); then
+                                       sta_radio_band_idx=$(ls /var/run/wpa_supplicant-*-updated-cfg | awk '{ print $1 }' | cut -f2 -d"-" | awk '{print substr($0,length,1)}')
+                                       for i in $sta_radio_band_idx
+                                       do
+                                               if [ -e "/var/run/hostapd-${phy}_band${i}.conf" ]; then
+                                                       intf_name=$(cat /var/run/hostapd-${phy}_band${i}.conf | grep -w "interface" | cut -f2 -d "=")
+                                                       if ! [[ "$apifs" =~ "$intf_name" ]]; then
+                                                               append apifs $intf_name
+                                                       fi
+                                               fi
+                                       done
+                                       if [ -n "$apifs" ]; then
+                                               ap_ifname="$apifs"
+                                       fi
+                               fi
+                                . /lib/apsta_mode.sh "$sta_ifname" "$ap_ifname" "$hostapd_conf_file" "$phy"
+                                echo "$!" >> /tmp/apsta_mode.pid
+                       fi
+                }
+        fi
 }
 
 _list_phy_interfaces() {
@@ -1663,11 +1778,101 @@ mac80211_update_mld_configs() {
 	done
 }
 
+mac80211_derive_ml_info() {
+        local _mlds
+        local _devices_up
+        local _ifaces
+        config_load wireless
+        mld_vaps_count=0
+        radio_up_count=0
+
+        mac80211_get_wifi_mlds() {
+                append _mlds $1
+        }
+        config_foreach mac80211_get_wifi_mlds wifi-mld
+
+        if [ -z "$_mlds" ]; then
+                return
+        fi
+
+        mac80211_get_wifi_ifaces() {
+                config_get iface_mode $1 mode
+                if [ -n "$iface_mode" ]; then
+                        case "$iface_mode" in
+                                ap) append _ifaces $1 ;;
+                                sta) append _staifaces $1  ;;
+                        esac
+                fi
+        }
+        config_foreach mac80211_get_wifi_ifaces wifi-iface
+
+        for _mld in $_mlds
+        do
+                for _ifname in $_ifaces
+                do
+                        config_get mld_name $_ifname mld
+                        config_get mldevice $_ifname device
+                        config_get mlcaps  $mldevice mlo_capable
+
+                        if ! [[ "$mldevices" =~ "$mldevice" ]]; then
+                                append mldevices $mldevice
+                        fi
+
+                        if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+                           [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+                                mld_vaps_count=$((mld_vaps_count+1))
+                        fi
+                done
+                for _staifname in $_staifaces
+                do
+                        config_get mld_name $_staifname mld
+                        config_get mldevice $_staifname device
+                        if ! [[ "$sta_mldevices" =~ "$mldevice" ]]; then
+                                append sta_mldevices $mldevice
+                        fi
+                        if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+                                sta_vaps_count=$((sta_vaps_count+1))
+                        fi
+                done
+        done
+
+        for mldev in $mldevices
+        do
+                # Length of radio name should be 12 in order to ensure only single wiphy wifi-devices are taken into account
+                if [ ${#mldev} -ne 12 ]; then
+                        continue;
+                fi
+
+                config_get disabled "$mldev" disabled
+
+                if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+                        radio_up_count=$((radio_up_count+1))
+                fi
+        done
+
+        for sta_mld in $sta_mldevices
+        do
+                if [ ${#sta_mld} -ne 12 ]; then
+                        continue;
+                fi
+                config_get disabled "$sta_mld" disabled
+
+                if [ -z "$disabled" ] || [ "$disabled" -eq 0 ]; then
+                        sta_radio=$((sta_radio+1))
+                fi
+        done
+
+}
+
 mac80211_export_mld_info() {
 	if [ -f $MLD_VAP_DETAILS ]; then
 		source $MLD_VAP_DETAILS
 		radio_up_count=$radio_up_count
 		mld_vaps_count=$mld_vaps_count
+		sta_radio=$sta_radio
+		sta_vaps_count=$sta_vaps_count
+	else
+		mac80211_derive_ml_info
 	fi
 	mac80211_update_mld_configs
 }
@@ -1695,6 +1900,62 @@ mac80211_get_mld_idx() {
 		fi
 	done
 	return
+}
+
+get_sta_freq_list() {
+
+	phy=$1
+	sta_freq=$2
+
+	hw_indices=$(iw phy ${phy} info | grep -e "channel list" | cut -d' ' -f 2)
+
+	if [ -z $hw_indices ]; then
+		#non-single wiphy arch doesn't need freq list
+		return
+	fi
+
+	for i in $hw_indices
+	do
+		#fetch hw idx channels from phy info
+		hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+
+		for _b in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
+			expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
+			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
+			band_freq=$(eval ${expr_freq} | awk '{ print $2 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
+
+			# band_freq list has the sta freq in it
+			if [[ "$band_freq" =~ "${sta_freq}" ]]; then
+				sta_chan=$(eval $expr_freq | grep -E -m1 "(\* ${sta_freq:-....} MHz${sta_freq:+|\\[$sta_freq\\]})" | grep MHz | awk '{print $4}' | sed -e "s/\[//g" | sed -e "s/\]//g")
+
+				#fetch band channels from phy info
+				band_nchans=$(echo $(eval ${expr_freq} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g") | tr -d ' ')
+				hw_chans=$(echo $hw_nchans | tr -d ' ')
+
+				#check if the list is present in band info
+				if echo "$band_nchans" | grep -q "${hw_chans}";
+				then
+					found=false
+					for chan in $hw_nchans
+					do
+						if [[ "$chan" == "$sta_chan" ]]; then
+							found=true
+						fi
+					done
+					if [[ "$found" == "true" ]]; then
+						sta_freq_list=""
+						for chidx in ${hw_nchans}; do
+							frqs=$(eval $expr_freq | grep -E -m1 "(\* ${chidx:-....} MHz${chidx:+|\\[$chidx\\]})" | grep MHz | awk '{print $2}')
+							sta_freq_list="${sta_freq_list}${frqs} "
+							done
+							echo $sta_freq_list
+					fi
+				fi
+			else
+				continue;
+			fi
+		done
+	done
 }
 
 add_driver mac80211
