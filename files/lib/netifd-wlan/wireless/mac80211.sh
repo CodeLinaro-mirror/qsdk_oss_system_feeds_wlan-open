@@ -580,7 +580,7 @@ mac80211_hostapd_setup_base() {
 			fi
 		fi
 
-		if [ -z $mlo_capable ] || [ $mlo_capable -eq 0 ] || [ "$is_6ghz" == "1" ]; then
+		if [[ $htmode == "EHT"* ]] || [ "$is_6ghz" == "1" ]; then
 			if [ "$has_ap" -gt 1 ]; then
 				[ -n $multiple_bssid ] && [ $multiple_bssid -gt 0 ] && ([ -z $ema ] || ([ -n $ema ] && [ $ema -eq 0 ])) && append base_cfg "mbssid=1" "$N"
 				[ -n $ema ] && [ $ema -gt 0 ] && append base_cfg "mbssid=2" "$N" && append base_cfg "ema=1" "$N"
@@ -938,8 +938,8 @@ mac80211_prepare_vif() {
 	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file mld
 	if [ $is_sphy_mband -eq 1 ]; then
 		wdev=$((${1:5:1} + ${1:11:1}))
-		config_get mlo_caps $device mlo_capable
-		if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ] && [ -n "$mld" ]); then
+		config_get ht_mode $device htmode
+		if ([ -n "$ht_mode" ] && [[ $ht_mode == "EHT"* ]] && [ -n "$mld" ]); then
 			config_get mld_ifname "$mld" ifname
 			if [ -z "$mld_ifname" ]; then
 				ml_idx=$(mac80211_get_mld_idx $mld)
@@ -954,7 +954,7 @@ mac80211_prepare_vif() {
 			fi
 		fi
 		[ -n "$ifname" ] || ifname="wlan${wdev#wlan}${if_idx:+-$if_idx}"
-			if ([ -n "$mlo_caps" ] && [ $mlo_caps -eq 1 ]) && [ -n "$mld" ]; then
+			if ([ -n "$ht_mode" ] && [[ $ht_mode == "EHT"* ]] && [ -n "$mld" ]); then
 				uci_set wireless "$mld" ifname "$ifname"
 				uci commit wireless
 			fi
@@ -1820,9 +1820,8 @@ mac80211_update_mld_configs() {
 	do
 		config_get mld_name $name mld
 		config_get ml_device $name device
-		config_get mlcaps $ml_device mlo_capable
-
-		if ([ -n "$mlcaps" ] && [ "$mlcaps" -eq 1 ] && [ -n "$mld_name" ]); then
+		config_get ht_mode $ml_device htmode
+		if ([ -n "$ht_mode" ] && [[ $ht_mode == "EHT"* ]]  && [ -n "$mld_name" ]); then
 			mac80211_update_mld_iface_config $name $mld_name
 		fi
 	done
@@ -1862,13 +1861,13 @@ mac80211_derive_ml_info() {
                 do
                         config_get mld_name $_ifname mld
                         config_get mldevice $_ifname device
-                        config_get mlcaps  $mldevice mlo_capable
+                        config_get ht_mode  $mldevice htmode
 
                         if ! [[ "$mldevices" =~ "$mldevice" ]]; then
                                 append mldevices $mldevice
                         fi
 
-                        if [ -n "$mlcaps" ] && [ $mlcaps -eq 1 ] && \
+                        if [ -n "$ht_mode" ] && [[ $ht_mode == "EHT"* ]] && \
                            [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
                                 mld_vaps_count=$((mld_vaps_count+1))
                         fi
