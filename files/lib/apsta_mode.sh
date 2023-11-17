@@ -359,10 +359,14 @@ get_link_id() {
 
 		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
 		if [ -n "$ctrl_iface" ]; then
-			link=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}' | head -n 1 )
-			if [ -n "$link" ]; then
-				echo "$link"
-				return
+			def_ctrl_iface_path=$(ls /var/run/hostapd/$ifname* | head -n 1)
+			#Try to return link only if has link control interface
+			if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
+				link=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}' | head -n 1 )
+				if [ -n "$link" ]; then
+					echo "$link"
+					return
+				fi
 			fi
 		fi
 	fi
