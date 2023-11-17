@@ -346,6 +346,33 @@ hostapd_adjust_config() {
 	fi
 }
 
+get_link_ids() {
+	ifname=$1
+	link=$(iw dev $ifname info | grep link | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+
+	if [ -n "$link" ]; then
+		echo "$link"
+		return
+	else
+		#when interface is in disable state, we might not find link from iw, hence, use control
+		#interface file names to find the link id
+
+		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
+		if [ -n "$ctrl_iface" ]; then
+			def_ctrl_iface_path=$(ls /var/run/hostapd/$ifname* | head -n 1)
+			#Try to return links only if has link control interface
+			if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
+				links=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}')
+				if [ -n "$links" ]; then
+					echo "$links"
+					return
+				fi
+			fi
+		fi
+	fi
+	echo ""
+}
+
 get_link_id() {
 	ifname=$1
 	link=$(iw dev $ifname info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
@@ -416,13 +443,13 @@ get_link_info() {
 		return
 	fi
 
-	num_links=$(hostapd_cli -i $ifname -l $link_id status | grep num_links | cut -d'=' -f 2)
+	num_links=$(hostapd_cli -i $ifname -l $link_id status | grep -w num_links | cut -d'=' -f 2)
 	if [ -z "$num_links" ] || [ $num_links -eq 0 ]; then
 		echo ""
 		return
 	fi
 
-	links=$(hostapd_cli -i $ifname -l $link_id status | grep link_id | cut -d'=' -f 2)
+	links=$(hostapd_cli -i $ifname -l $link_id status | grep -w link_id | cut -d'=' -f 2)
 	for i in $links
 	do
 		ap_freq=$(hostapd_cli -i $ifname -l $i status | grep -w freq | cut -d'=' -f 2)
@@ -502,9 +529,12 @@ do
 			if [ "$ap_status" = "ENABLED" ]; then
 				echo "wpa_s state: $wpa_status, stopping AP $ap_intf" > /dev/ttyMSM0
 
-				ap_link=$(iw dev $ap_intf info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
-				if [ -n "$ap_link" ]; then
-					hostapd_cli -i $ap_intf -l $ap_link disable
+				ap_links=$(iw dev $ap_intf info | grep link | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+				if [ -n "$ap_links" ]; then
+					for i in $ap_links
+					do
+						hostapd_cli -i $ap_intf -l $i disable
+					done
 				else
 					hostapd_cli -i $ap_intf disable
 				fi
@@ -563,9 +593,12 @@ do
 		if [ "$ap_status" = "DISABLED" ]; then
 			for ap_intf in $ap_intfs
 			do
-				ap_link=$(get_link_id $ap_intf)
-				if [ -n "$ap_link" ]; then
-					hostapd_cli -i $ap_intf -l $ap_link enable
+				ap_links=$(get_link_ids $ap_intf)
+				if [ -n "$ap_links" ]; then
+					for i in $ap_links
+					do
+						hostapd_cli -i $ap_intf -l $i enable
+					done
 				else
 					hostapd_cli -i $ap_intf enable
 				fi
@@ -573,11 +606,14 @@ do
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
 				if [ $ap_status = "DISABLED" ]; then
-					if [ -n "$ap_link" ]; then
-						hostapd_cli -i $ap_intf -l $ap_link disable
-						sleep 1
-						hostapd_cli -i $ap_intf -l $ap_link enable
-						sleep 4
+					if [ -n "$ap_links" ]; then
+						for i in $ap_links
+						do
+							hostapd_cli -i $ap_intf -l $i disable
+							sleep 1
+							hostapd_cli -i $ap_intf -l $i enable
+							sleep 4
+						done
 					else
 						hostapd_cli -i $ap_intf disable
 						sleep 1
@@ -593,9 +629,10 @@ do
 					echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
 					echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 					date >> /tmp/apsta_debug.log
+					ap_link=$(get_link_id $ap_intf)
 					if [ -n "$ap_link" ]; then
 						#print all link status
-						num_links=$(hostapd_cli -i $ifname -l $ap_link status | grep link_id | cut -d'=' -f 2)
+						num_links=$(hostapd_cli -i $ifname -l $ap_link status | grep -w link_id | cut -d'=' -f 2)
 						if [ -z "$num_links" ] || [ $num_links -eq 0 ]; then
 							hostapd_cli -i $ap_intf status>> /tmp/apsta_debug.log
 						fi
