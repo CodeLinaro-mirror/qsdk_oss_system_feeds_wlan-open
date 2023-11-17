@@ -292,6 +292,38 @@ mac80211_validate_num_channels() {
 	fi
 }
 
+mac80211_get_channel_list() {
+	dev=$1
+	n_hw_idx=$2
+	chan=$3
+	i=0
+	match_found=0
+
+	while [ $i -lt $n_hw_idx ]; do
+		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
+		first_chan=$(echo $hw_nchans | awk '{print $1}')
+		higest_chan=$first_chan
+		for chidx in $hw_nchans; do
+			if [ $chidx -gt $higest_chan ]; then
+				higest_chan=$chidx;
+			fi
+			if [ "$chidx" == "$chan" ]; then
+				match_found=1
+			fi
+		done
+		if [ $match_found -eq 1 ]; then
+			break;
+		fi
+		i=$((i+1))
+	done
+
+	if [ $match_found -eq 1 ]; then
+		echo "$first_chan-$higest_chan";
+	else
+		echo ""
+	fi
+}
+
 detect_mac80211() {
 	devidx=0
 	config_load wireless
@@ -380,11 +412,13 @@ detect_mac80211() {
 					if [ $chan -eq 100 ]; then
 						chan=149
 					fi
+					chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $chan)
 					uci -q batch <<-EOF
 						set wireless.${name}=wifi-device
 						set wireless.${name}.type=mac80211
 						${dev_id}
 						set wireless.${name}.channel=${chan}
+						set wireless.${name}.channels=${chan_list}
 						set wireless.${name}.band=${_mode_band}
 						set wireless.${name}.htmode=$_htmode
 						set wireless.${name}.disabled=1
@@ -418,11 +452,13 @@ detect_mac80211() {
 					uci -q commit wireless
 				done
 			else
+				chan_list=$(mac80211_get_channel_list $dev $no_hw_idx $_channel)
 				uci -q batch <<-EOF
 					set wireless.${name}=wifi-device
 					set wireless.${name}.type=mac80211
 					${dev_id}
 					set wireless.${name}.channel=${_channel}
+					set wireless.${name}.channels=${chan_list}
 					set wireless.${name}.band=${_mode_band}
 					set wireless.${name}.htmode=$_htmode
 					set wireless.${name}.disabled=1
