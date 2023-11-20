@@ -208,6 +208,13 @@ mac80211_get_seg0() {
 					1) seg0=$(($channel - 2));;
 					0) seg0=$(($channel + 2));;
 				esac
+			elif [ $freq -lt 2484 ]; then
+				if [ "$channel" -lt 7 ]; then
+					seg0=$(($channel + 2))
+				else
+					seg0=$(($channel - 2))
+				fi
+
 			elif [ $freq != 5935 ]; then
 				case "$(( ($channel / 4) % 2 ))" in
 					1) seg0=$(($channel + 2));;
@@ -561,6 +568,11 @@ mac80211_hostapd_setup_base() {
 				fi
 				append base_cfg "he_oper_chwidth=0" "$N"
 				append base_cfg "he_oper_centr_freq_seg0_idx=$idx" "$N"
+				if [ $htmode == "EHT40" ]; then
+					append base_cfg "eht_oper_chwidth=0" "$N"
+					append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
+				fi
+			elif [ $hwmode == "g" ]; then
 				if [ $htmode == "EHT40" ]; then
 					append base_cfg "eht_oper_chwidth=0" "$N"
 					append base_cfg "eht_oper_centr_freq_seg0_idx=$idx" "$N"
