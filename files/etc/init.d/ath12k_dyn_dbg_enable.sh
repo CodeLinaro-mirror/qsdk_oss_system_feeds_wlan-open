@@ -33,11 +33,4 @@ boot()
 			sed -i '1s/ath12k/ath12k dyndbg=+p/' $ath12k
 		fi
 	fi
-
-        ecm="/etc/modules.d/ecm_wifi_plugin"
-        if [ ! -f $ecm ];
-        then
-                touch $ecm
-                echo "ecm_wifi_plugin" > $ecm
-        fi
 }
