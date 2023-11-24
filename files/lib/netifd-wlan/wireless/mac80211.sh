@@ -987,20 +987,18 @@ mac80211_prepare_vif() {
 				uci_set wireless "$mld" ifname "$ifname"
 				uci commit wireless
 			fi
-		if_idx=$((${if_idx:-0} + 1))
 	else
-		[ -n "$ifname" ] || {
-			local prefix;
-
-			case "$mode" in
-			ap|sta|mesh) prefix=$mode;;
-			adhoc) prefix=ibss;;
-			monitor) prefix=mon;;
-			esac
-
-			mac80211_set_ifname "$phy" "$prefix"
-		}
+		for wdev in $(list_phy_interfaces "$phy"); do
+			phy_name="$(cat /sys/class/ieee80211/${phy}/device/net/${wdev}/phy80211/name)"
+			if [ "$phy_name" == "$phy" ]; then
+				if_name = $wdev
+				break;
+			fi
+		done
+		[ -n "$ifname" ] || ifname="wlan${phy#phy}${if_idx:+-$if_idx}"
 	fi
+
+	if_idx=$((${if_idx:-0} + 1))
 
 	set_default wds 0
 	set_default powersave 0
