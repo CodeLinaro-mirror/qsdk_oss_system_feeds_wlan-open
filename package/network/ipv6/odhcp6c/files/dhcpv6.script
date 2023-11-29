@@ -3,6 +3,52 @@
 . /lib/functions.sh
 . /lib/netifd/netifd-proto.sh
 
+uncompress_ipv6_addr () {
+	local addr=$1
+
+	quads=$(echo $addr | grep -oE "[a-fA-F0-9]{1,4}" | wc -l)
+	missquads=$((8-$quads));
+	estring=""
+	while [ $missquads -gt 0 ]
+	do
+		estring=$estring"0:"
+		missquads=$(($missquads - 1))
+	done;
+	[ $quads -lt 8 ] && addr=$(echo "${addr}" | sed s/::/:${estring}/)
+	if echo "$addr" |grep -q "^:";then
+		addr=${addr#*:}
+	fi
+
+	if echo "$addr" |grep -q ":$";then
+		addr=${addr%:*}
+	fi
+
+	eval "$2=$addr"
+}
+
+get_prefix () {
+	local ip_full;
+	local ip6_addr=${1%%/*}
+	local mask=${1##*/}
+	uncompress_ipv6_addr $ip6_addr ip_full
+	quads=$(((128-$mask)/16))
+	rem_quads=$(((128-$mask)%16))
+	[ $rem_quads -ne 0 ] && eval "$2=$ip6_addr" && return
+	while [ $quads -gt 0 ];
+	do
+		ip_full=${ip_full%:*}
+		quads=$((quads-1))
+	done;
+	last_quads=${ip_full##*:}
+	while [ "$last_quads" = "0" ];
+	do
+		ip_full=${ip_full%:*}
+		last_quads=${ip_full##*:}
+	done
+	[ $mask -ne 128 ] && ip_full="$ip_full::"
+	eval "$2=$ip_full"
+}
+
 setup_interface () {
 	local device="$1"
 	local prefsig=""
@@ -43,9 +89,13 @@ setup_interface () {
 	done
 
 	for prefix in $PREFIXES; do
-		proto_add_ipv6_prefix "$prefix"
 		prefsig="$prefsig ${prefix%%,*}"
+		local addr=${prefix%%/*}
 		local entry="${prefix#*/}"
+		local mask="${entry%%,*}"
+		get_prefix "$addr/$mask" addr
+
+		proto_add_ipv6_prefix "$addr/${prefix#*/}"
 		entry="${entry#*,}"
 		entry="${entry#*,}"
 		local valid="${entry%%,*}"
