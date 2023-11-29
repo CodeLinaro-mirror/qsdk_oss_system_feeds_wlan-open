@@ -439,18 +439,18 @@ enable_affinity_al02_c4() {
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 
-		############## affinity for 5G band - pci4 ########################
-		irq_num=`grep pci4_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		############## affinity for 5G band - pci1 ########################
+		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci4_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci4_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci4_reo2ppe_ /proc/interrupts | sed -n 's/.*pci4_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci4_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -951,6 +951,51 @@ enable_affinity_mi01_3() {
         # lmac,reo err,release interrupts are mapped to core 3
         irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+
+	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+		echo "Configure Affinity for PPE DS for mi01_3" > /dev/ttyMSM0
+
+		#Assign 5G band to core 2 and
+		#6G alone to core 1 to support upto 320MHz BW
+		############## affinity for 5G band - pci1 ########################
+		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
+		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
+		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+
+		############## affinity for 6G band - pci2 ########################
+		irq_num=`grep pci2_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep pci2_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep pci2_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
+		ppeds_node=`grep pci2_reo2ppe_ /proc/interrupts | sed -n 's/.*pci2_reo2ppe_\([0-9]*\).*/\1/p'`
+		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+		irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+	fi
 }
 enable_affinity_mi01_9() {
 	#pci 0
