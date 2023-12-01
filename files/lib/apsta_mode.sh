@@ -22,6 +22,7 @@ dfs_log=1
 phy="$4"
 ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
+ap_link_file="/tmp/ap_interface_link.txt"
 
 get_sta_freq_list() {
 	phy=$1
@@ -496,6 +497,9 @@ EOF
 chmod 777 /lib/repeater_6g_ch_sw.sh
 wpa_cli -i $sta_intf -a /lib/repeater_6g_ch_sw.sh &
 
+if [ -f $ap_link_file]; then
+	rm $ap_link_file
+fi
 #echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
 while true;
@@ -538,6 +542,8 @@ do
 				else
 					hostapd_cli -i $ap_intf disable
 				fi
+				#echo "Last link disabled: $i" > /dev/ttyMSM0
+				echo "$ap_intf=$i" >> $ap_link_file
 			fi
 		done
 	fi
@@ -595,8 +601,25 @@ do
 			do
 				ap_links=$(get_link_ids $ap_intf)
 				if [ -n "$ap_links" ]; then
+
+					if [ -f $ap_link_file ]; then
+						#This is needed temporarily as hostapd needs to disable order
+						#to be restored atleast for the last disabled link
+						while read link_file; do
+							last_ap_intf=`echo $link_file | cut -d'=' -f1`
+							if [ $last_ap_intf = $ap_intf ];then
+								mld_disable_last_link=`echo $link_file | cut -d'=' -f2`
+								break;
+							fi
+						done < $ap_link_file
+					fi
+					#echo "Last link going to enable: $mld_disable_last_link" > /dev/ttyMSM0
+					hostapd_cli -i $ap_intf -l $mld_disable_last_link enable
 					for i in $ap_links
 					do
+						if [ $i = $mld_disable_last_link ];then
+							continue;
+						fi
 						hostapd_cli -i $ap_intf -l $i enable
 					done
 				else
@@ -606,11 +629,26 @@ do
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
 				if [ $ap_status = "DISABLED" ]; then
+
 					if [ -n "$ap_links" ]; then
 						for i in $ap_links
 						do
 							hostapd_cli -i $ap_intf -l $i disable
-							sleep 1
+							sleep 5
+						done
+
+						#This is needed temporarily as hostapd needs to disable order
+						#to be restored atleast for the last disabled link
+
+						mld_disable_last_link=$i
+						#echo "Last link going to enable: $mld_disable_last_link" > /dev/ttyMSM0
+						hostapd_cli -i $ap_intf -l $mld_disable_last_link enable
+
+						for i in $ap_links
+						do
+							if [ $i = $mld_disable_last_link ];then
+								continue;
+							fi
 							hostapd_cli -i $ap_intf -l $i enable
 							sleep 4
 						done
@@ -620,6 +658,10 @@ do
 						hostapd_cli -i $ap_intf enable
 						sleep 4
 					fi
+				fi
+
+				if [ -f $ap_link_file ]; then
+					rm $ap_link_file
 				fi
 
 				ap_status=$(hostapd_get_ap_status $ap_intf)
