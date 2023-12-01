@@ -488,6 +488,63 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
+			ap-mi01.3 | \
+			ap-mi04.1)
+				#case for RDP442, RDP446 (IPQ5332(2.4GHz) + QCN6432(5/6 GHz)))
+                                tc qdisc replace dev eth0 root noqueue
+                                tc qdisc replace dev eth1 root noqueue
+
+                                ethtool -K eth0 gro off
+                                ethtool -K eth0 gso off
+                                ethtool -K eth1 gro off
+                                ethtool -K eth1 gso off
+
+                                ssdk_sh fdb learnCtrl set disable
+                                ssdk_sh fdb entry flush 1
+
+                                sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+                                sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+                                echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+
+                                /etc/init.d/firewall stop
+
+                                echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+                                echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+                                #For 6GHz reo queues
+                                echo 0x21212121 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix3
+
+                                #For 5GHz reo queues
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+                                #For 2GHz reo queues
+                                echo 0x21212121 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+                                echo 0 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/stats_disable
+                                echo 1 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/stats_disable
+
+                                echo 0 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/stats_disable
+                                echo 1 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/stats_disable
+
+                                echo 0 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+                                echo 1 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+
+                                echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+                                echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+                                echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+
+                                tc qdisc replace dev wlan0 root noqueue
+                                tc qdisc replace dev wlan1 root noqueue
+                                tc qdisc replace dev wlan2 root noqueue
+                                echo "16384" > /proc/net/skb_recycler/max_skbs
+                                #nosettings
+                                ;;
 			ap-mi01.6)
                                 tc qdisc replace dev eth0 root noqueue
                                 tc qdisc replace dev eth1 root noqueue
