@@ -418,7 +418,7 @@ boost_performance() {
 
 				;;
 			ap-mi01.2 | \
-			mi01.2-c2)
+			ap-mi01.2-c2)
 				tc qdisc replace dev eth0 root noqueue
 				tc qdisc replace dev eth1 root noqueue
 

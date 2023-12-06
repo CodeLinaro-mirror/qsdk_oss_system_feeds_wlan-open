@@ -1104,7 +1104,7 @@ enable_smp_affinity_wifi() {
 					enable_affinity_al02_c9
 					;;
 			ap-mi01.2 | \
-			mi01.2-c2)
+			ap-mi01.2-c2)
 					#for RDP441 (IPQ5332(2.4GHz) + QCN9274(5 and 6 GHz))
 					enable_affinity_mi01_2
 					;;
