@@ -91,6 +91,14 @@ update_mld_vap_details() {
 	echo "sta_radio=$sta_radio sta_vaps_count=$sta_vaps_count" >> $MLD_VAP_DETAILS
 }
 
+pre_wifi_updown() {
+	:
+}
+
+post_wifi_updown() {
+	:
+}
+
 check_mac80211_device() {
 	local device="$1"
 	local path="$2"
