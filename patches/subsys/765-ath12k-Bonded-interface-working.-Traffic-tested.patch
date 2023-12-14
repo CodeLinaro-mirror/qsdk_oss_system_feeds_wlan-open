@@ -96,7 +96,18 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	int ppe_vp_num;
  	unsigned long ppe_vp_type;
-@@ -4830,6 +4834,10 @@ struct ieee80211_hw *ieee80211_alloc_hw(
+@@ -4787,6 +4791,10 @@ struct ieee80211_ops {
+ 	int (*ppeds_detach_vdev)(struct ieee80211_hw *hw,
+ 				 struct ieee80211_vif *vif,
+ 				 struct ieee80211_ppe_vp_ds_params *vp_params);
++	int (*set_multicast_to_unicast)(struct ieee80211_hw *hw,
++					struct net_device *dev,
++					const bool enabled);
++
+ };
+ 
+ /**
+@@ -4830,6 +4838,10 @@ struct ieee80211_hw *ieee80211_alloc_hw(
  	return ieee80211_alloc_hw_nm(priv_data_len, ops, NULL);
  }
  
@@ -107,7 +118,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /**
   * ieee80211_register_hw - Register hardware device
   *
-@@ -5047,6 +5055,11 @@ void ieee80211_restart_hw(struct ieee802
+@@ -5047,6 +5059,11 @@ void ieee80211_restart_hw(struct ieee802
  void ieee80211_rx_list(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
  		       struct sk_buff *skb, struct list_head *list);
  
@@ -119,7 +130,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /**
   * ieee80211_rx_napi - receive frame from NAPI context
   *
-@@ -5418,6 +5431,32 @@ void ieee80211_report_low_ack(struct iee
+@@ -5418,6 +5435,32 @@ void ieee80211_report_low_ack(struct iee
  
  #define IEEE80211_MAX_CNTDWN_COUNTERS_NUM 2
  
@@ -152,6 +163,22 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /**
   * struct ieee80211_mutable_offsets - mutable beacon offsets
   * @tim_offset: position of TIM element
+@@ -6384,6 +6427,15 @@ struct ieee80211_sta *ieee80211_find_sta
+ 					       const u8 *localaddr);
+ 
+ /**
++ * ieee80211_sta_get_dvlan_iface - get dynamic vlan interface
++ *
++ * @pubsta: the station
++ *
++ * Return: The interface if found. %NULL otherwire.
++ */
++struct net_device *ieee80211_sta_get_dvlan_iface(struct ieee80211_sta *pubsta);
++
++/**
+  * ieee80211_find_sta_by_link_addrs - find STA by link addresses
+  * @hw: pointer as obtained from ieee80211_alloc_hw()
+  * @addr: remote station's link address
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
 @@ -3555,6 +3555,9 @@ enum nl80211_iftype {
@@ -268,6 +295,16 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	netif_carrier_off(dev);
  
  	/* remove beacon and probe response */
+@@ -4965,6 +5007,9 @@ static int ieee80211_set_multicast_to_un
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 
+ 	sdata->u.ap.multicast_to_unicast = enabled;
++#ifdef CPTCFG_MAC80211_PPE_SUPPORT
++	drv_set_multicast_to_unicast(sdata->local, sdata, dev, enabled);
++#endif
+ 
+ 	return 0;
+ }
 --- a/net/mac80211/chan.c
 +++ b/net/mac80211/chan.c
 @@ -296,6 +296,10 @@ ieee80211_get_chanctx_vif_max_required_b
@@ -594,7 +631,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	/* deliver to local stack */
  	skb->protocol = eth_type_trans(skb, fast_rx->dev);
 +#ifdef CPTCFG_MAC80211_BONDED_SUPPORT
-+	if (wdev->bond_netdev)
++	if (wdev->bond_netdev && fast_rx->vif_type == NL80211_IFTYPE_AP)
 +		skb->dev = wdev->bond_netdev;
 +#endif
  	ieee80211_deliver_skb_to_local_stack(skb, rx);
@@ -1030,3 +1067,54 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	wiphy_unlock(&rdev->wiphy);
 +	rtnl_unlock();
  }
+--- a/net/mac80211/sta_info.c
++++ b/net/mac80211/sta_info.c
+@@ -215,6 +215,20 @@ struct sta_info *sta_info_get(struct iee
+ 	return NULL;
+ }
+ 
++struct net_device *ieee80211_sta_get_dvlan_iface(struct ieee80211_sta *pubsta)
++{
++	struct sta_info *sta = container_of(pubsta, struct sta_info, sta);
++
++	if (!sta)
++		return NULL;
++
++	if (sta->sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
++		return  sta->sdata->dev;
++	else
++		return NULL;
++}
++EXPORT_SYMBOL(ieee80211_sta_get_dvlan_iface);
++
+ /*
+  * Get sta info either from the specified interface
+  * or from one of its vlans
+--- a/net/mac80211/driver-ops.h
++++ b/net/mac80211/driver-ops.h
+@@ -1545,6 +1545,25 @@ static inline int drv_net_setup_tc(struc
+ 
+ 	return ret;
+ }
++#ifdef CPTCFG_MAC80211_PPE_SUPPORT
++static inline int drv_set_multicast_to_unicast(struct ieee80211_local *local,
++						struct ieee80211_sub_if_data *sdata,
++						struct net_device *dev,
++						const bool enabled)
++{
++	struct ieee80211_vif *vif = sdata ? &sdata->vif : NULL;
++
++	might_sleep();
++
++	if (!check_sdata_in_driver(sdata))
++		return -EIO;
++
++	if (!local->ops->set_multicast_to_unicast)
++		return -ENOTSUPP;
++
++	return local->ops->set_multicast_to_unicast(&local->hw, vif, enabled);
++}
++#endif
+ 
+ static inline int drv_ppeds_attach_vdev(struct ieee80211_sub_if_data *sdata,
+ 					struct ieee80211_vif *vif, void *vp_arg,
