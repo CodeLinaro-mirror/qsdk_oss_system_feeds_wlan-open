@@ -374,33 +374,6 @@ get_link_ids() {
 	echo ""
 }
 
-get_link_id() {
-	ifname=$1
-	link=$(iw dev $ifname info | grep link | head -n 1 | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
-
-	if [ -n "$link" ]; then
-		echo "$link"
-		return
-	else
-		#when interface is in disable state, we might not find link from iw, hence, use control
-		#interface file names to find the link id
-
-		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
-		if [ -n "$ctrl_iface" ]; then
-			def_ctrl_iface_path=$(ls /var/run/hostapd/$ifname* | head -n 1)
-			#Try to return link only if has link control interface
-			if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
-				link=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}' | head -n 1 )
-				if [ -n "$link" ]; then
-					echo "$link"
-					return
-				fi
-			fi
-		fi
-	fi
-	echo ""
-}
-
 hostapd_is_6ghz_band() {
 	local freq=$1
 	if [ $freq -gt 5950 ] && [ $freq -le 7115 ]; then
@@ -437,21 +410,14 @@ get_link_info() {
 	freq=$2
 	ap_freq=
 	ml_link=""
-	link_id=$(get_link_id $ifname)
+	link_ids=$(get_link_ids $ifname)
 
-	if [ -z "$link_id" ]; then
+	if [ -z "$link_ids" ]; then
 		echo ""
 		return
 	fi
 
-	num_links=$(hostapd_cli -i $ifname -l $link_id status | grep -w num_links | cut -d'=' -f 2)
-	if [ -z "$num_links" ] || [ $num_links -eq 0 ]; then
-		echo ""
-		return
-	fi
-
-	links=$(hostapd_cli -i $ifname -l $link_id status | grep -w link_id | cut -d'=' -f 2)
-	for i in $links
+	for i in $link_ids
 	do
 		ap_freq=$(hostapd_cli -i $ifname -l $i status | grep -w freq | cut -d'=' -f 2)
 		sta_freq_list="$(get_sta_freq_list $phy $freq)"
@@ -467,14 +433,20 @@ get_link_info() {
 
 hostapd_get_ap_status() {
 	local ap_intf=$1
-	res=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2)
+	link_ids=$(get_link_ids $ap_intf)
+	is_eht=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep ieee80211be | cut -d'=' -f 2)
 
-	if [ -z "$res" ]; then
-		#This could occur when the control socket is not in link0
-		link_id=$(get_link_id $ap_intf)
-		if [ -n "$link_id" ]; then
-			ap_status=$(hostapd_cli -i $ap_intf -l $link_id status 2> /dev/null | grep state | cut -d'=' -f 2)
-
+	if [ $is_eht -eq 1 ]; then
+		if [ -n "$link_ids" ]; then
+			for i in $link_ids
+			do
+				res=$(hostapd_cli -i $ap_intf -l $i status 2> /dev/null | grep state | cut -d'=' -f 2)
+				if [ "$res" != "ENABLED" ]; then
+					echo $res
+					return
+				fi
+			done
+			ap_status=$res
 		else
 			echo "FAIL"
 			return
@@ -482,6 +454,7 @@ hostapd_get_ap_status() {
 	else
 		ap_status=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2)
 	fi
+
 	echo $ap_status
 }
 
@@ -671,15 +644,9 @@ do
 					echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
 					echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 					date >> /tmp/apsta_debug.log
-					ap_link=$(get_link_id $ap_intf)
+					ap_link=$(get_link_ids $ap_intf)
 					if [ -n "$ap_link" ]; then
-						#print all link status
-						num_links=$(hostapd_cli -i $ifname -l $ap_link status | grep -w link_id | cut -d'=' -f 2)
-						if [ -z "$num_links" ] || [ $num_links -eq 0 ]; then
-							hostapd_cli -i $ap_intf status>> /tmp/apsta_debug.log
-						fi
-
-						for i in $num_links
+						for i in $ap_link
 						do
 							hostapd_cli -i $ap_intf -l $i status>> /tmp/apsta_debug.log
 						done
