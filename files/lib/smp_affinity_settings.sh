@@ -547,78 +547,78 @@ enable_affinity_al02_c9() {
 	#pci 1
 
 	#assign 4 rx interrupts to each cores
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 3 tcl completions to last 3 CPUs
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	# assign 4th tcl completion ring and
 	# lmac,reo err,release interrupts are mapped to one core alone
-        irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+        irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#For monitor interrupts
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	# Enable smp affinity for PCIE attach
 	#pci 3
 
 	#assign 4 rx interrupts to each cores
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 3 tcl completions to last 3 CPUs
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	# assign 4th tcl completion ring and
 	# lmac,reo err,release interrupts are mapped to one core alone
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for al02_c9" > /dev/ttyMSM0
 
-		#For split wifi (RDP 454)  - Assign pci1 to core 2 and
-		#                            Assign pci3 to core 1
-		############## affinity for pci1 ########################
-		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		#For split wifi (RDP 454)  - Assign pci0 to core 2 and
+		#                            Assign pci2 to core 1
+		############## affinity for pci0 ########################
+		irq_num=`grep pci0_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci0_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci0_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pci0_reo2ppe_ /proc/interrupts | sed -n 's/.*pci0_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -626,18 +626,18 @@ enable_affinity_al02_c9() {
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 
-		############## affinity for pci3 ########################
-		irq_num=`grep pci3_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		############## affinity for pci2 ########################
+		irq_num=`grep pci2_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci3_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci2_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci3_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci2_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci3_reo2ppe_ /proc/interrupts | sed -n 's/.*pci3_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pci2_reo2ppe_ /proc/interrupts | sed -n 's/.*pci2_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
