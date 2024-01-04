@@ -75,7 +75,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	if (params->flags) {
  		if (ieee80211_sdata_running(sdata)) {
-@@ -931,14 +935,27 @@ static int ieee80211_set_monitor_channel
+@@ -929,14 +933,27 @@ static int ieee80211_set_monitor_channel
  {
  	struct ieee80211_local *local = wiphy_priv(wiphy);
  	struct ieee80211_sub_if_data *sdata;
@@ -106,7 +106,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		if (sdata) {
  			sdata_lock(sdata);
  			mutex_lock(&local->mtx);
-@@ -959,11 +976,87 @@ static int ieee80211_set_monitor_channel
+@@ -957,11 +974,87 @@ static int ieee80211_set_monitor_channel
  	}
  
  	if (ret == 0)
@@ -195,7 +195,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  static int
  ieee80211_set_probe_resp(struct ieee80211_sub_if_data *sdata,
  			 const u8 *resp, size_t resp_len,
-@@ -3267,6 +3360,7 @@ static int ieee80211_set_tx_power(struct
+@@ -3227,6 +3320,7 @@ static int ieee80211_set_tx_power(struct
  	bool update_txp_type = false;
  	bool has_monitor = false;
  	struct ieee80211_link_data *link_data;
@@ -203,7 +203,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	if (wdev) {
  		sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
-@@ -3276,8 +3370,14 @@ static int ieee80211_set_tx_power(struct
+@@ -3236,8 +3330,14 @@ static int ieee80211_set_tx_power(struct
  			return -ENOLINK;
  
  		if (sdata->vif.type == NL80211_IFTYPE_MONITOR) {
@@ -219,7 +219,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  			if (!sdata)
  				return -EOPNOTSUPP;
  		}
-@@ -3319,7 +3419,6 @@ static int ieee80211_set_tx_power(struct
+@@ -3279,7 +3379,6 @@ static int ieee80211_set_tx_power(struct
  		break;
  	}
  
@@ -227,7 +227,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	mutex_lock(&local->iflist_mtx);
  	list_for_each_entry(sdata, &local->interfaces, list) {
  		if (sdata->vif.type == NL80211_IFTYPE_MONITOR) {
-@@ -3339,16 +3438,19 @@ static int ieee80211_set_tx_power(struct
+@@ -3299,16 +3398,19 @@ static int ieee80211_set_tx_power(struct
  	mutex_unlock(&local->iflist_mtx);
  
  	if (has_monitor) {
@@ -256,7 +256,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	}
  
  	return 0;
-@@ -4598,7 +4700,7 @@ static int ieee80211_cfg_get_channel(str
+@@ -4538,30 +4640,45 @@ static int ieee80211_cfg_get_channel(str
  	struct ieee80211_local *local = wiphy_priv(wiphy);
  	struct ieee80211_chanctx_conf *chanctx_conf;
  	struct ieee80211_link_data *link;
@@ -265,13 +265,34 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	rcu_read_lock();
  	link = rcu_dereference(sdata->link[link_id]);
-@@ -4614,10 +4716,18 @@ static int ieee80211_cfg_get_channel(str
- 	} else if (local->open_count > 0 &&
- 		   local->open_count == local->monitors &&
- 		   sdata->vif.type == NL80211_IFTYPE_MONITOR) {
+ 	if (!link) {
+-		ret = -ENOLINK;
+-		goto out;
++		rcu_read_unlock();
++		return -ENOLINK;
+ 	}
+ 
+ 	chanctx_conf = rcu_dereference(link->conf->chanctx_conf);
++
+ 	if (chanctx_conf) {
+ 		*chandef = link->conf->chandef;
+-		ret = 0;
+-	} else if (local->open_count > 0 &&
+-		   local->open_count == local->monitors &&
+-		   sdata->vif.type == NL80211_IFTYPE_MONITOR) {
 -		if (local->use_chanctx)
 -			*chandef = local->monitor_chandef;
 -		else
++		rcu_read_unlock();
++		return 0;
++	}
++	rcu_read_unlock();
++
++	mutex_lock(&local->mtx);
++
++	if (local->open_count > 0 &&
++	    local->open_count == local->monitors &&
++	    sdata->vif.type == NL80211_IFTYPE_MONITOR) {
 +		if (local->use_chanctx) {
 +			i = 0;
 +			do {
@@ -286,8 +307,14 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		}
  		ret = 0;
  	}
- out:
-@@ -5557,6 +5667,8 @@ const struct cfg80211_ops mac80211_confi
+-out:
+-	rcu_read_unlock();
++
++	mutex_unlock(&local->mtx);
+ 
+ 	return ret;
+ }
+@@ -5497,6 +5614,8 @@ const struct cfg80211_ops mac80211_confi
  	.inform_bss = ieee80211_inform_bss,
  	.set_txq_params = ieee80211_set_txq_params,
  	.set_monitor_channel = ieee80211_set_monitor_channel,
@@ -352,7 +379,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		rx_chains_dynamic = rx_chains_static = local->rx_chains;
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1633,8 +1633,9 @@ struct ieee80211_local {
+@@ -1630,8 +1630,9 @@ struct ieee80211_local {
  	struct ieee80211_sub_if_data __rcu *p2p_sdata;
  
  	/* virtual monitor interface */
@@ -745,7 +772,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -844,10 +844,9 @@ ieee80211_rx_monitor(struct ieee80211_lo
+@@ -764,10 +764,9 @@ ieee80211_rx_monitor(struct ieee80211_lo
  	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(origskb);
  	struct ieee80211_sub_if_data *sdata;
  	struct sk_buff *monskb = NULL;
@@ -758,7 +785,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	bool only_monitor = false;
  	unsigned int min_head_len;
  
-@@ -922,6 +921,17 @@ ieee80211_rx_monitor(struct ieee80211_lo
+@@ -834,6 +833,17 @@ ieee80211_rx_monitor(struct ieee80211_lo
  					   rtap_space);
  	}
  
@@ -810,7 +837,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  			info->hw_queue =
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -744,6 +744,7 @@ static void __iterate_interfaces(struct
+@@ -731,6 +731,7 @@ static void __iterate_interfaces(struct
  {
  	struct ieee80211_sub_if_data *sdata;
  	bool active_only = iter_flags & IEEE80211_IFACE_ITER_ACTIVE;
@@ -818,7 +845,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
  		switch (sdata->vif.type) {
-@@ -767,13 +768,16 @@ static void __iterate_interfaces(struct
+@@ -754,13 +755,16 @@ static void __iterate_interfaces(struct
  				 &sdata->vif);
  	}
  
@@ -842,7 +869,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  }
  
  void ieee80211_iterate_interfaces(
-@@ -2636,7 +2640,7 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2598,7 +2602,7 @@ int ieee80211_reconfig(struct ieee80211_
  	struct ieee80211_sub_if_data *sdata;
  	struct ieee80211_chanctx *ctx;
  	struct sta_info *sta;
@@ -851,7 +878,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	bool reconfig_due_to_wowlan = false;
  	struct ieee80211_sub_if_data *sched_scan_sdata;
  	struct cfg80211_sched_scan_request *sched_scan_req;
-@@ -2720,18 +2724,21 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2682,18 +2686,21 @@ int ieee80211_reconfig(struct ieee80211_
  	ieee80211_mod_tpt_led_trig(local,
  				   IEEE80211_TPT_LEDTRIG_FL_RADIO, 0);
  
@@ -884,7 +911,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  	list_for_each_entry(sdata, &local->interfaces, list) {
  		if ((sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
-@@ -2768,11 +2775,13 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2730,11 +2737,13 @@ int ieee80211_reconfig(struct ieee80211_
  				WARN_ON(drv_add_chanctx(local, ctx));
  		mutex_unlock(&local->chanctx_mtx);
  
