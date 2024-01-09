@@ -18,20 +18,19 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -11744,6 +11744,12 @@ static int ath12k_mac_vdev_start_restart
+@@ -11753,6 +11753,11 @@ static int ath12k_mac_vdev_start_restart
+ 	arg.channel.max_reg_power = chandef->chan->max_reg_power;
  	arg.channel.max_antenna_gain = chandef->chan->max_antenna_gain;
  	arg.ru_punct_bitmap = ~chandef->ru_punct_bitmap;
- 
 +	if (test_bit(WMI_TLV_SERVICE_SW_PROG_DFS_SUPPORT,
 +		     ar->ab->wmi_ab.svc_map)) {
 +		arg.width_device = chandef->width_device;
 +		arg.center_freq_device = chandef->center_freq_device;
 +	}
-+
+ 
  	arg.pref_tx_streams = ar->num_tx_chains;
  	arg.pref_rx_streams = ar->num_rx_chains;
- 
-@@ -12189,6 +12195,13 @@ ath12k_mac_multi_vdev_restart(struct ath
+@@ -12199,6 +12204,13 @@ ath12k_mac_multi_vdev_restart(struct ath
  	arg.channel.freq2_radar = radar_enabled;
  	arg.channel.passive |= !!(chandef->chan->flags & IEEE80211_CHAN_NO_IR);
  	arg.ru_punct_bitmap = ~chandef->ru_punct_bitmap;
@@ -45,12 +44,31 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ret = ath12k_wmi_pdev_multiple_vdev_restart(ar, &arg);
  	if (ret)
  		ath12k_warn(ab, "mac failed to do mvr (%d)\n", ret);
+@@ -15711,8 +15723,7 @@ static int ath12k_mac_op_set_radar_backg
+ 		}
+ 
+ 		if (cfg80211_chandef_identical(&conf_def, def) &&
+-		    def->width_device != def->width &&
+-		    def->center_freq_device != def->center_freq1) {
++			cfg80211_chandef_device_present(def)) {
+ 			if (!test_bit(WMI_TLV_SERVICE_SW_PROG_DFS_SUPPORT,
+ 				      ar->ab->wmi_ab.svc_map))
+ 				ret = -EINVAL;
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -1603,6 +1603,60 @@ int ath12k_wmi_vdev_down(struct ath12k *
+@@ -1606,6 +1606,79 @@ int ath12k_wmi_vdev_down(struct ath12k *
  	return ret;
  }
  
++static inline bool
++ath12k_wmi_check_device_present(u32 width_device,
++				u32 center_freq_device,
++				u32 center_freq_oper)
++{
++	return (center_freq_device && width_device &&
++		center_freq_device != center_freq_oper);
++}
++
 +static void ath12k_wmi_set_wmi_channel_device(struct ath12k_wmi_channel_params *chan_device,
 +					      struct wmi_channel_arg *channel,
 +					      u32 cf_device, u32 width_device)
@@ -63,18 +81,28 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +							 sizeof(*chan_device));
 +	chan_device->mhz = cpu_to_le32(channel->freq);
 +	chan_device->band_center_freq1 = cpu_to_le32(cf_device);
-+	chan_device->band_center_freq2 = 0;
 +
-+	if (width_device == NL80211_CHAN_WIDTH_320)
++	if (width_device == NL80211_CHAN_WIDTH_320) {
 +		mode_device = MODE_11BE_EHT320;
-+	else if  (width_device == NL80211_CHAN_WIDTH_160)
++		if (channel->freq > chan_device->band_center_freq1)
++			chan_device->band_center_freq1 = cf_device + 80;
++		else
++			chan_device->band_center_freq1 = cf_device - 80;
++		chan_device->band_center_freq2 = cf_device;
++	} else if (width_device == NL80211_CHAN_WIDTH_160) {
 +		mode_device = MODE_11BE_EHT160;
-+	else if  (width_device == NL80211_CHAN_WIDTH_80)
++		if (channel->freq > chan_device->band_center_freq1)
++			chan_device->band_center_freq1 = cf_device + 40;
++		else
++			chan_device->band_center_freq1 = cf_device - 40;
++		chan_device->band_center_freq2 = cf_device;
++	} else if (width_device == NL80211_CHAN_WIDTH_80) {
 +		mode_device = MODE_11BE_EHT80;
-+	else if  (width_device == NL80211_CHAN_WIDTH_40)
++	} else if (width_device == NL80211_CHAN_WIDTH_40) {
 +		mode_device = MODE_11BE_EHT40;
-+	else
++	} else {
 +		mode_device = MODE_UNKNOWN;
++	}
 +
 +	chan_device->info |= le32_encode_bits(mode_device, WMI_CHAN_INFO_MODE);
 +	if (channel->passive)
@@ -108,7 +136,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  static void ath12k_wmi_put_wmi_channel(struct ath12k_wmi_channel_params *chan,
  				       struct wmi_channel_arg chan_arg)
  {
-@@ -1671,6 +1725,7 @@ int ath12k_wmi_vdev_start(struct ath12k
+@@ -1674,20 +1747,28 @@ int ath12k_wmi_vdev_start(struct ath12k
  	struct sk_buff *skb;
  	struct ath12k_wmi_channel_params *chan;
  	struct wmi_tlv *tlv;
@@ -116,7 +144,11 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	void *ptr;
  	int ret, len, ml_arg_size = 0;
  	u8 i;
-@@ -1681,10 +1736,14 @@ int ath12k_wmi_vdev_start(struct ath12k
+ 	struct ath12k_hw_group *ag = ar->ab->ag;
++	bool device_params_present = false;
+ 
+ 	if (WARN_ON(arg->ssid_len > sizeof(cmd->ssid.ssid)))
+ 		return -EINVAL;
  
  	if (!restart && arg->ml.enabled)
  		ml_arg_size = TLV_HDR_SIZE + sizeof(*ml_params) +
@@ -125,14 +157,16 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	len = sizeof(*cmd) + sizeof(*chan) + TLV_HDR_SIZE + ml_arg_size;
  
-+	if (arg->center_freq_device && arg->width_device &&
-+	    arg->center_freq_device != arg->channel.band_center_freq1)
++	device_params_present = ath12k_wmi_check_device_present(arg->width_device,
++								arg->center_freq_device,
++								arg->channel.band_center_freq1);
++	if (device_params_present)
 +		len += TLV_HDR_SIZE + sizeof(*chan_device);
 +
  	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
  	if (!skb)
  		return -ENOMEM;
-@@ -1740,59 +1799,74 @@ int ath12k_wmi_vdev_start(struct ath12k
+@@ -1743,59 +1824,73 @@ int ath12k_wmi_vdev_start(struct ath12k
  
  	ptr += sizeof(*tlv);
  
@@ -222,8 +256,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 -			   partner_info->vdev_id, partner_info->hw_link_id,
 -			   partner_info->vdev_addr.addr);
 -		partner_info++;
-+	if (arg->center_freq_device && arg->width_device &&
-+	    arg->center_freq_device != arg->channel.band_center_freq1) {
++	if (device_params_present) {
 +		tlv = ptr;
 +		tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_STRUCT,
 +						 sizeof(*chan_device));
@@ -244,7 +277,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	if (restart)
  		ret = ath12k_wmi_cmd_send(wmi, skb,
  					  WMI_VDEV_RESTART_REQUEST_CMDID);
-@@ -14621,6 +14695,7 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+@@ -14787,12 +14882,14 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  	struct wmi_pdev_multiple_vdev_restart_request_cmd *cmd;
  	struct ath12k_wmi_channel_params *chan;
  	struct wmi_tlv *tlv;
@@ -252,7 +285,14 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	u32 num_vdev_ids;
  	__le32 *vdev_ids;
  	size_t vdev_ids_len;
-@@ -14635,7 +14710,12 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+ 	struct sk_buff *skb;
+ 	void *ptr;
+ 	int ret, len, i;
++	bool device_params_present = false;
+ 
+ 	if (WARN_ON(arg->vdev_ids.id_len > TARGET_NUM_VDEVS))
+ 		return -EINVAL;
+@@ -14801,7 +14898,15 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  	vdev_ids_len = num_vdev_ids * sizeof(__le32);
  
  	len = sizeof(*cmd) + TLV_HDR_SIZE + vdev_ids_len +
@@ -260,13 +300,16 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	      sizeof(*chan) + TLV_HDR_SIZE + TLV_HDR_SIZE +
 +	      TLV_HDR_SIZE;
 +
-+	if (arg->center_freq_device && arg->width_device &&
-+	    arg->center_freq_device != arg->channel.band_center_freq1)
++	device_params_present = ath12k_wmi_check_device_present(arg->width_device,
++								arg->center_freq_device,
++								arg->channel.band_center_freq1);
++
++	if (device_params_present)
 +		len += TLV_HDR_SIZE + sizeof(*chan_device);
  
  	skb = ath12k_wmi_alloc_skb(wmi->wmi_ab, len);
  	if (!skb)
-@@ -14667,6 +14747,33 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+@@ -14833,6 +14938,32 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  	chan->tlv_header = ath12k_wmi_tlv_cmd_hdr(WMI_TAG_CHANNEL, sizeof(*chan));
  	ptr += sizeof(*chan);
  
@@ -284,8 +327,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_UINT32, 0);
 +	ptr += sizeof(*tlv);
 +
-+	if (arg->center_freq_device && arg->width_device &&
-+	    arg->center_freq_device != arg->channel.band_center_freq1) {
++	if (device_params_present) {
 +		tlv = ptr;
 +		tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_STRUCT,
 +						 sizeof(*chan_device));
@@ -302,7 +344,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	if (ret) {
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -3569,6 +3569,8 @@ struct wmi_vdev_start_req_arg {
+@@ -3571,6 +3571,8 @@ struct wmi_vdev_start_req_arg {
  	u32 mbssid_tx_vdev_id;
  	u32 ru_punct_bitmap;
  	struct wmi_ml_arg ml;
@@ -311,7 +353,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  struct ath12k_wmi_peer_create_arg {
-@@ -8064,6 +8066,8 @@ struct wmi_pdev_multiple_vdev_restart_re
+@@ -8102,6 +8104,8 @@ struct wmi_pdev_multiple_vdev_restart_re
  	struct wmi_vdev_ids_arg vdev_ids;
  	struct wmi_channel_arg channel;
  	u16 ru_punct_bitmap;
