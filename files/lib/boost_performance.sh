@@ -720,7 +720,7 @@ boost_performance() {
 				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
 				#For 5GHz reo queues
-				echo 0x33333333 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
 				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
 
 				#For 2GHz reo queues
