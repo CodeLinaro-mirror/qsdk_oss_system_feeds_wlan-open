@@ -470,6 +470,16 @@ EOF
 chmod 777 /lib/repeater_6g_ch_sw.sh
 wpa_cli -i $sta_intf -a /lib/repeater_6g_ch_sw.sh &
 
+cat > /lib/radar_detect.sh << EOF
+#!/bin/sh
+
+if [ "`echo $\2`" = "DFS-RADAR-DETECTED" ] && [ "`echo $\1`" = $sta_intf ]; then
+        wpa_cli -i $sta_intf disable 0
+fi
+EOF
+chmod 777 /lib/radar_detect.sh
+wpa_cli -i $sta_intf -a /lib/radar_detect.sh &
+
 if [ -f $ap_link_file]; then
 	rm $ap_link_file
 fi
