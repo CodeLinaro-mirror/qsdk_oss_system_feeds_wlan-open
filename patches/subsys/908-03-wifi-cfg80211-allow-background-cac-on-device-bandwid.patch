@@ -1,7 +1,7 @@
-From 7807b8da069cf3a3461fed5711a8076e9646a41d Mon Sep 17 00:00:00 2001
+From ef6089b63cac2c6f92f00df82785f9d2f8aaf923 Mon Sep 17 00:00:00 2001
 From: Aloka Dixit <quic_alokad@quicinc.com>
-Date: Tue, 28 Nov 2023 10:56:40 -0800
-Subject: [PATCH 3/8] wifi: cfg80211: allow background cac on device bandwidth
+Date: Wed, 24 Jan 2024 13:50:54 -0800
+Subject: [PATCH] wifi: cfg80211: allow background cac on device bandwidth
 
 Allow userspace to start a background channel availability check (CAC)
 on the current channel if device bandwidth is different than the
@@ -18,40 +18,18 @@ cfg80211_chandef_identical().
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/mac.c |  2 +-
- drivers/net/wireless/ath/ath12k/wmi.c |  2 +-
- include/net/cfg80211.h                | 24 +++++++++--
- net/wireless/chan.c                   | 61 ++++++++++++++++++++++++++-
- net/wireless/core.h                   |  3 +-
- net/wireless/mlme.c                   | 21 +++++++--
- net/wireless/nl80211.c                | 17 +++++++-
- 7 files changed, 117 insertions(+), 13 deletions(-)
+ include/net/cfg80211.h | 24 ++++++++++++++---
+ net/wireless/chan.c    | 61 +++++++++++++++++++++++++++++++++++++++++-
+ net/wireless/core.h    |  3 ++-
+ net/wireless/mlme.c    | 20 +++++++++++---
+ net/wireless/nl80211.c | 17 ++++++++++--
+ 5 files changed, 114 insertions(+), 11 deletions(-)
 
---- a/drivers/net/wireless/ath/ath12k/mac.c
-+++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -11684,7 +11684,7 @@ ath12k_mac_vdev_config_after_start(struc
- 	    cfg80211_chandef_dfs_usable(ar->ah->hw->wiphy, chandef)) {
- 		set_bit(ATH12K_CAC_RUNNING, &ar->dev_flags);
- 		dfs_cac_time = cfg80211_chandef_dfs_cac_time(ar->ah->hw->wiphy,
--							     chandef, false);
-+							     chandef, false, false);
- 		ath12k_dbg(ab, ATH12K_DBG_MAC,
- 			   "CAC (for %u ms) Started in center_freq %d center_freq1 %d for vdev %d\n",
- 			   dfs_cac_time, chandef->chan->center_freq,
---- a/drivers/net/wireless/ath/ath12k/wmi.c
-+++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -14761,7 +14761,7 @@ int ath12k_wmi_vdev_adfs_ch_cfg_cmd_send
- 		cmd->ocac_mode = WMI_ADFS_MODE_QUICK_OCAC;
- 		cmd->min_duration_ms = cfg80211_chandef_dfs_cac_time(ar->ah->hw->wiphy,
- 								     def,
--								     true);
-+								     true, false);
- 
- 		if (cmd->min_duration_ms == MIN_WEATHER_RADAR_CHAN_PRECAC_TIMEOUT)
- 			cmd->max_duration_ms = MAX_WEATHER_RADAR_CHAN_PRECAC_TIMEOUT;
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index d385dbc1b111..d7817aae6697 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -978,8 +978,9 @@ cfg80211_chandef_identical(const struct
+@@ -978,8 +978,9 @@ cfg80211_chandef_identical(const struct cfg80211_chan_def *chandef1,
  		chandef1->freq1_offset == chandef2->freq1_offset &&
  		chandef1->center_freq2 == chandef2->center_freq2 &&
  		chandef1->ru_punct_bitmap == chandef2->ru_punct_bitmap &&
@@ -63,10 +41,11 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  }
  
  /**
-@@ -1168,16 +1169,31 @@ bool cfg80211_chandef_dfs_usable(struct
+@@ -1159,17 +1160,32 @@ ieee80211_chandef_rate_flags(struct cfg80211_chan_def *chandef)
+ bool cfg80211_chandef_dfs_usable(struct wiphy *wiphy,
  				 const struct cfg80211_chan_def *chandef);
  
- /**
++/**
 + * cfg80211_chandef_dfs_usable_device - checks if chandef is DFS usable
 + * @wiphy: the wiphy to validate against
 + * @chandef: the channel definition to check
@@ -80,7 +59,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +bool cfg80211_chandef_dfs_usable_device(struct wiphy *wiphy,
 +					const struct cfg80211_chan_def *chandef);
 +
-+/**
+ /**
   * cfg80211_chandef_dfs_cac_time - get maximum dfs cac time traversing
   * through the entire channel width
   * @wiphy: the wiphy to validate against
@@ -97,9 +76,11 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  /**
   * ieee80211_chandef_max_power - maximum transmission power for the chandef
+diff --git a/net/wireless/chan.c b/net/wireless/chan.c
+index 2ffa11671796..f7fa434dd068 100644
 --- a/net/wireless/chan.c
 +++ b/net/wireless/chan.c
-@@ -922,6 +922,29 @@ bool cfg80211_chandef_dfs_usable(struct
+@@ -922,6 +922,29 @@ bool cfg80211_chandef_dfs_usable(struct wiphy *wiphy,
  }
  EXPORT_SYMBOL(cfg80211_chandef_dfs_usable);
  
@@ -129,7 +110,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  /*
   * Checks if center frequency of chan falls with in the bandwidth
   * range of chandef.
-@@ -1247,9 +1270,40 @@ static unsigned int cfg80211_get_chans_d
+@@ -1247,9 +1270,40 @@ static unsigned int cfg80211_get_chans_dfs_cac_time(struct wiphy *wiphy,
  	return dfs_cac_ms;
  }
  
@@ -171,7 +152,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  {
  	int width;
  	unsigned int t1 = 0, t2 = 0, dfs_cac_time;
-@@ -1257,6 +1311,11 @@ cfg80211_chandef_dfs_cac_time(struct wip
+@@ -1257,6 +1311,11 @@ cfg80211_chandef_dfs_cac_time(struct wiphy *wiphy,
  	if (WARN_ON(!cfg80211_chandef_valid(chandef)))
  		return 0;
  
@@ -183,9 +164,11 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	width = cfg80211_chandef_get_width(chandef);
  	if (width < 0)
  		return 0;
+diff --git a/net/wireless/core.h b/net/wireless/core.h
+index 970e668fb1eb..e09d6beccc60 100644
 --- a/net/wireless/core.h
 +++ b/net/wireless/core.h
-@@ -484,7 +484,8 @@ void cfg80211_sched_dfs_chan_update(stru
+@@ -485,7 +485,8 @@ void cfg80211_sched_dfs_chan_update(struct cfg80211_registered_device *rdev);
  int
  cfg80211_start_background_radar_detection(struct cfg80211_registered_device *rdev,
  					  struct wireless_dev *wdev,
@@ -195,9 +178,11 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  
  void cfg80211_stop_background_radar_detection(struct wireless_dev *wdev);
  
+diff --git a/net/wireless/mlme.c b/net/wireless/mlme.c
+index 2d895c5276ab..fdfff092b6ed 100644
 --- a/net/wireless/mlme.c
 +++ b/net/wireless/mlme.c
-@@ -1124,6 +1124,11 @@ __cfg80211_background_cac_event(struct c
+@@ -1143,6 +1143,11 @@ __cfg80211_background_cac_event(struct cfg80211_registered_device *rdev,
  
  	netdev = wdev ? wdev->netdev : NULL;
  	nl80211_radar_notify(rdev, chandef, event, netdev, GFP_KERNEL);
@@ -209,7 +194,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  }
  
  static void
-@@ -1169,8 +1174,10 @@ EXPORT_SYMBOL(cfg80211_background_cac_ab
+@@ -1188,8 +1193,10 @@ EXPORT_SYMBOL(cfg80211_background_cac_abort);
  int
  cfg80211_start_background_radar_detection(struct cfg80211_registered_device *rdev,
  					  struct wireless_dev *wdev,
@@ -221,7 +206,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	unsigned int cac_time_ms;
  	int err;
  
-@@ -1193,8 +1200,15 @@ cfg80211_start_background_radar_detectio
+@@ -1212,8 +1219,15 @@ cfg80211_start_background_radar_detection(struct cfg80211_registered_device *rde
  	if (err)
  		return err;
  
@@ -239,9 +224,11 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	if (!cac_time_ms)
  		cac_time_ms = IEEE80211_DFS_MIN_CAC_TIME_MS;
  
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 95c994c6c156..c36dbee334eb 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -10828,6 +10828,19 @@ static int nl80211_start_radar_detection
+@@ -10880,6 +10880,19 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
  		goto unlock;
  	}
  
@@ -261,7 +248,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	if (!cfg80211_chandef_dfs_usable(wiphy, &chandef)) {
  		err = -EINVAL;
  		goto unlock;
-@@ -10835,7 +10848,7 @@ static int nl80211_start_radar_detection
+@@ -10887,7 +10900,7 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
  
  	if (nla_get_flag(info->attrs[NL80211_ATTR_RADAR_BACKGROUND])) {
  		err = cfg80211_start_background_radar_detection(rdev, wdev,
@@ -270,7 +257,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  		goto unlock;
  	}
  
-@@ -10861,7 +10874,7 @@ static int nl80211_start_radar_detection
+@@ -10913,7 +10926,7 @@ static int nl80211_start_radar_detection(struct sk_buff *skb,
  	}
  
  	cac_time_ms = cfg80211_chandef_dfs_cac_time(&rdev->wiphy, &chandef,
@@ -279,3 +266,6 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  	if (WARN_ON(!cac_time_ms))
  		cac_time_ms = IEEE80211_DFS_MIN_CAC_TIME_MS;
  
+-- 
+2.17.1
+
