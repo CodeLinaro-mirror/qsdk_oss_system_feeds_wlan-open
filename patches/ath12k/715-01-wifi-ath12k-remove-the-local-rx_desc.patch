@@ -33,43 +33,35 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static inline u8 ath12k_dp_rx_h_msdu_end_ip_valid(struct ath12k_base *ab,
                                                      struct hal_rx_desc *desc)
  {
-@@ -2456,11 +2450,10 @@ static void ath12k_get_dot11_hdr_from_rx
-	struct hal_rx_desc *rx_desc = rxcb->rx_desc;
-	struct ath12k_base *ab = ar->ab;
-	size_t hdr_len, crypto_len;
+@@ -2449,10 +2443,9 @@ static void ath12k_get_dot11_hdr_from_rx
+ 	struct hal_rx_desc *rx_desc = rxcb->rx_desc;
+ 	struct ath12k_base *ab = ar->ab;
+ 	size_t hdr_len, crypto_len;
 -	struct ieee80211_hdr *hdr;
 +	struct ieee80211_hdr hdr;
-	u16 qos_ctl;
--	__le16 fc;
- 	int expand_by;
--	u8 *crypto_hdr;
 +	u8 *crypto_hdr, mesh_ctrl;
-
-	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
-		crypto_len = ath12k_dp_rx_crypto_param_len(ar, enctype);
-@@ -2473,27 +2466,28 @@ static void ath12k_get_dot11_hdr_from_rx
+ 	u16 qos_ctl;
+-	__le16 fc;
+-	u8 *crypto_hdr;
+ 
+ 	if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
+ 		crypto_len = ath12k_dp_rx_crypto_param_len(ar, enctype);
+@@ -2460,22 +2453,21 @@ static void ath12k_get_dot11_hdr_from_rx
  		ath12k_dp_rx_desc_get_crypto_header(ab, rx_desc, crypto_hdr, enctype);
  	}
  
 -	fc = cpu_to_le16(ath12k_dp_rxdesc_get_mpdu_frame_ctrl(ab, rx_desc));
 -	hdr_len = ieee80211_hdrlen(fc);
-+	/* Get wifi header from rx_desc */
-+	ath12k_dp_rx_desc_get_dot11_hdr(ab, rx_desc, &hdr);
-+
-+	hdr_len = ieee80211_hdrlen(hdr.frame_control);
- 	if (skb_headroom(msdu) < hdr_len) {
- 		expand_by = hdr_len - skb_headroom(msdu);
- 		if (WARN_ON_ONCE(pskb_expand_head(msdu, expand_by, 0, GFP_ATOMIC)))
- 			return;
- 	}
 -	skb_push(msdu, hdr_len);
 -	hdr = (struct ieee80211_hdr *)msdu->data;
 -	hdr->frame_control = fc;
- 
--	/* Get wifi header from rx_desc */
+-
+ 	/* Get wifi header from rx_desc */
 -	ath12k_dp_rx_desc_get_dot11_hdr(ab, rx_desc, hdr);
-+	mesh_ctrl = ath12k_dp_rx_h_mesh_ctl_present(ab, rx_desc);
++	ath12k_dp_rx_desc_get_dot11_hdr(ab, rx_desc, &hdr);
 +
++	hdr_len = ieee80211_hdrlen(hdr.frame_control);
++	mesh_ctrl = ath12k_dp_rx_h_mesh_ctl_present(ab, rx_desc);
 +	skb_push(msdu, hdr_len);
 +	memcpy(msdu->data, &hdr, min(hdr_len, sizeof(hdr)));
  
@@ -84,8 +76,8 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +		if (mesh_ctrl)
  			qos_ctl |= IEEE80211_QOS_CTL_MESH_CONTROL_PRESENT;
  
- 		/* TODO Add other QoS ctl fields when required */
-@@ -2656,7 +2650,7 @@ static bool ath12k_dp_rx_check_fast_rx(s
+ 		/* TODO: Add other QoS ctl fields when required */
+@@ -2632,7 +2624,7 @@ static bool ath12k_dp_rx_check_fast_rx(s
  static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  				struct sk_buff *msdu,
  				struct hal_rx_desc *rx_desc,
@@ -94,7 +86,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  				bool *fast_rx)
  {
  	bool  fill_crypto_hdr;
-@@ -2666,6 +2660,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2642,6 +2634,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	bool is_decrypted = false;
  	struct ieee80211_hdr *hdr;
  	struct ath12k_peer *peer;
@@ -102,7 +94,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	u32 err_bitmap;
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	u32 vp;
-@@ -2753,8 +2748,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2729,8 +2722,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  	if (!is_decrypted || fill_crypto_hdr)
  		return;
  
@@ -112,7 +104,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		hdr = (void *)msdu->data;
  		hdr->frame_control &= ~__cpu_to_le16(IEEE80211_FCTL_PROTECTED);
  	}
-@@ -2843,10 +2837,19 @@ static void ath12k_dp_rx_h_rate(struct a
+@@ -2819,10 +2811,19 @@ static void ath12k_dp_rx_h_rate(struct a
  	}
  }
  
@@ -133,7 +125,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	u8 channel_num;
  	u32 center_freq, meta_data;
  	struct ieee80211_channel *channel;
-@@ -3012,22 +3015,18 @@ static bool ath12k_dp_rx_check_max_nwifi
+@@ -2984,22 +2985,18 @@ static bool ath12k_dp_rx_check_max_nwifi
  						struct hal_rx_desc *rx_desc,
  						struct sk_buff *msdu)
  {
@@ -165,7 +157,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	}
  
  	return false;
-@@ -3036,12 +3035,11 @@ static bool ath12k_dp_rx_check_max_nwifi
+@@ -3008,12 +3005,11 @@ static bool ath12k_dp_rx_check_max_nwifi
  static int ath12k_dp_rx_process_msdu(struct ath12k *ar,
  				     struct sk_buff *msdu,
  				     struct sk_buff_head *msdu_list,
@@ -180,7 +172,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	struct ath12k_skb_rxcb *rxcb;
  	struct sk_buff *last_buf;
  	u8 l3_pad_bytes;
-@@ -3057,12 +3055,7 @@ static int ath12k_dp_rx_process_msdu(str
+@@ -3029,12 +3025,7 @@ static int ath12k_dp_rx_process_msdu(str
  		goto free_out;
  	}
  
@@ -194,7 +186,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	lrx_desc = (struct hal_rx_desc *)last_buf->data;
  	if (!ath12k_dp_rx_h_msdu_done(ab, lrx_desc)) {
  		ath12k_warn(ab, "msdu_done bit in msdu_end is not set\n");
-@@ -3098,18 +3091,21 @@ static int ath12k_dp_rx_process_msdu(str
+@@ -3070,18 +3061,21 @@ static int ath12k_dp_rx_process_msdu(str
  		}
  	}
  
@@ -220,7 +212,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  	return 0;
  
-@@ -3124,6 +3120,7 @@ static void ath12k_dp_rx_process_receive
+@@ -3096,6 +3090,7 @@ static void ath12k_dp_rx_process_receive
  {
  	struct ieee80211_rx_status rx_status = {0};
  	struct ath12k_skb_rxcb *rxcb;
@@ -228,7 +220,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	struct sk_buff *msdu;
  	struct ath12k *ar;
  	u8 mac_id, hw_link_id;
-@@ -3133,11 +3130,12 @@ static void ath12k_dp_rx_process_receive
+@@ -3105,11 +3100,12 @@ static void ath12k_dp_rx_process_receive
  	if (skb_queue_empty(msdu_list))
  		return;
  
@@ -243,7 +235,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		rxcb = ATH12K_SKB_RXCB(msdu);
  		/* Enable fast rx by default, the value will cahnge based on peer cap
                  * and packet type */
-@@ -3169,8 +3167,8 @@ static void ath12k_dp_rx_process_receive
+@@ -3141,8 +3137,8 @@ static void ath12k_dp_rx_process_receive
  			continue;
  		}
  
@@ -254,7 +246,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  		if (ret) {
  			ath12k_dbg(ab, ATH12K_DBG_DATA,
  				   "Unable to process %s chip_id %d msdu %d",
-@@ -3478,6 +3476,7 @@ static int ath12k_dp_rx_h_verify_tkip_mi
+@@ -3451,6 +3447,7 @@ static int ath12k_dp_rx_h_verify_tkip_mi
  	struct ieee80211_key_conf *key_conf;
  	struct ieee80211_hdr *hdr;
  	u8 mic[IEEE80211_CCMP_MIC_LEN];
@@ -262,7 +254,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	int head_len, tail_len, ret;
  	size_t data_len;
  	u32 hdr_len, hal_rx_desc_sz = ar->ab->hw_params->hal_desc_sz;
-@@ -3487,6 +3486,9 @@ static int ath12k_dp_rx_h_verify_tkip_mi
+@@ -3460,6 +3457,9 @@ static int ath12k_dp_rx_h_verify_tkip_mi
  	if (ath12k_dp_rx_h_enctype(ab, rx_desc) != HAL_ENCRYPT_TYPE_TKIP_MIC)
  		return 0;
  
@@ -272,7 +264,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	hdr = (struct ieee80211_hdr *)(msdu->data + hal_rx_desc_sz);
  	hdr_len = ieee80211_hdrlen(hdr->frame_control);
  	head_len = hdr_len + hal_rx_desc_sz + IEEE80211_TKIP_IV_LEN;
-@@ -3517,7 +3519,7 @@ mic_fail:
+@@ -3490,7 +3490,7 @@ mic_fail:
  		    RX_FLAG_IV_STRIPPED | RX_FLAG_DECRYPTED;
  	skb_pull(msdu, hal_rx_desc_sz);
  
@@ -281,7 +273,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  	ath12k_dp_rx_h_undecap(ar, msdu, rx_desc,
  			       HAL_ENCRYPT_TYPE_TKIP_MIC, rxs, true);
  	ieee80211_rx(ar->ah->hw, msdu);
-@@ -4176,7 +4178,7 @@ static void ath12k_dp_rx_null_q_desc_sg_
+@@ -4155,7 +4155,7 @@ static void ath12k_dp_rx_null_q_desc_sg_
  }
  
  static int ath12k_dp_rx_h_null_q_desc(struct ath12k *ar, struct sk_buff *msdu,
@@ -290,7 +282,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  				      struct sk_buff_head *msdu_list)
  {
  	struct ath12k_base *ab = ar->ab;
-@@ -4233,12 +4235,16 @@ static int ath12k_dp_rx_h_null_q_desc(st
+@@ -4221,12 +4221,16 @@ static int ath12k_dp_rx_h_null_q_desc(st
  		skb_put(msdu, hal_rx_desc_sz + l3pad_bytes + msdu_len);
  		skb_pull(msdu, hal_rx_desc_sz + l3pad_bytes);
  	}
@@ -310,7 +302,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  	rxcb->tid = ath12k_dp_rx_h_tid(ab, desc);
  
-@@ -4262,7 +4268,7 @@ static int ath12k_dp_rx_h_null_q_desc(st
+@@ -4250,7 +4254,7 @@ static int ath12k_dp_rx_h_null_q_desc(st
  }
  
  static bool ath12k_dp_rx_h_reo_err(struct ath12k *ar, struct sk_buff *msdu,
@@ -319,7 +311,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  				   struct sk_buff_head *msdu_list)
  {
  	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
-@@ -4270,7 +4276,7 @@ static bool ath12k_dp_rx_h_reo_err(struc
+@@ -4258,7 +4262,7 @@ static bool ath12k_dp_rx_h_reo_err(struc
  
  	switch (rxcb->err_code) {
  	case HAL_REO_DEST_RING_ERROR_CODE_DESC_ADDR_ZERO:
@@ -328,7 +320,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  			drop = true;
  		break;
  	case HAL_REO_DEST_RING_ERROR_CODE_PN_CHECK_FAILED:
-@@ -4296,7 +4302,7 @@ static bool ath12k_dp_rx_h_reo_err(struc
+@@ -4284,7 +4288,7 @@ static bool ath12k_dp_rx_h_reo_err(struc
  }
  
  static bool ath12k_dp_rx_h_tkip_mic_err(struct ath12k *ar, struct sk_buff *msdu,
@@ -337,7 +329,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  {
  	struct ath12k_base *ab = ar->ab;
  	u16 msdu_len;
-@@ -4321,18 +4327,19 @@ static bool ath12k_dp_rx_h_tkip_mic_err(
+@@ -4309,18 +4313,19 @@ static bool ath12k_dp_rx_h_tkip_mic_err(
  	skb_put(msdu, hal_rx_desc_sz + l3pad_bytes + msdu_len);
  	skb_pull(msdu, hal_rx_desc_sz + l3pad_bytes);
  
@@ -363,7 +355,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  {
  	struct ath12k_base *ab = ar->ab;
  	u16 msdu_len, peer_id;
-@@ -4362,12 +4369,13 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+@@ -4353,12 +4358,13 @@ static bool ath12k_dp_rx_h_4addr_null_fr
  	skb_put(msdu, hal_rx_desc_sz + l3pad_bytes + msdu_len);
  	skb_pull(msdu, hal_rx_desc_sz + l3pad_bytes);
  
@@ -380,7 +372,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  
  	rxcb->tid = ath12k_dp_rx_h_tid(ab, rx_desc);
  
-@@ -4382,7 +4390,7 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+@@ -4373,7 +4379,7 @@ static bool ath12k_dp_rx_h_4addr_null_fr
  	return drop;
  }
  static bool ath12k_dp_rx_h_rxdma_err(struct ath12k *ar,  struct sk_buff *msdu,
@@ -389,7 +381,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  {
  	struct ath12k_base *ab = ar->ab;
  	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
-@@ -4392,13 +4400,15 @@ static bool ath12k_dp_rx_h_rxdma_err(str
+@@ -4383,13 +4389,15 @@ static bool ath12k_dp_rx_h_rxdma_err(str
  
  	switch (rxcb->err_code) {
  	case HAL_REO_ENTR_RING_RXDMA_ECODE_UNAUTH_WDS_ERR:
@@ -407,7 +399,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  			break;
  		}
  		fallthrough;
-@@ -4425,14 +4435,18 @@ static void ath12k_dp_rx_wbm_err(struct
+@@ -4416,14 +4424,18 @@ static void ath12k_dp_rx_wbm_err(struct
  {
  	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
  	struct ieee80211_rx_status rxs = {0};
@@ -450,7 +442,7 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  static inline u32 ath12k_he_gi_to_nl80211_he_gi(u8 sgi)
  {
  	u32 ret = 0;
-@@ -143,7 +156,7 @@ u8 ath12k_dp_rx_h_decap_type(struct ath1
+@@ -139,7 +152,7 @@ u8 ath12k_dp_rx_h_decap_type(struct ath1
  u32 ath12k_dp_rx_h_mpdu_err(struct ath12k_base *ab,
  			    struct hal_rx_desc *desc);
  void ath12k_dp_rx_h_ppdu(struct ath12k *ar, struct hal_rx_desc *rx_desc,
@@ -458,10 +450,10 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
 +			 struct ath12k_dp_rx_info *rx_info);
  struct ath12k_peer *
  ath12k_dp_rx_h_find_peer(struct ath12k_base *ab, struct sk_buff *msdu);
- #endif /* ATH12K_DP_RX_H */
+ 
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
-@@ -418,7 +418,7 @@ static void ath12k_hw_qcn9274_rx_desc_ge
+@@ -463,7 +463,7 @@ static void ath12k_hw_qcn9274_rx_desc_ge
  	ether_addr_copy(hdr->addr2, desc->u.qcn9274.mpdu_start.addr2);
  	ether_addr_copy(hdr->addr3, desc->u.qcn9274.mpdu_start.addr3);
  	if (__le32_to_cpu(desc->u.qcn9274.mpdu_start.info4) &
