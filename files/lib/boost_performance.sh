@@ -515,7 +515,7 @@ boost_performance() {
                                 echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
 
                                 #For 6GHz reo queues
-                                echo 0x21212121 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix2
                                 echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix3
 
                                 #For 5GHz reo queues
@@ -523,7 +523,7 @@ boost_performance() {
                                 echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
 
                                 #For 2GHz reo queues
-                                echo 0x21212121 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+                                echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
                                 echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
                                 echo 0 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/stats_disable
@@ -724,7 +724,7 @@ boost_performance() {
 				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
 
 				#For 2GHz reo queues
-				echo 0x21212121 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
 				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
 				echo 0 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/stats_disable
