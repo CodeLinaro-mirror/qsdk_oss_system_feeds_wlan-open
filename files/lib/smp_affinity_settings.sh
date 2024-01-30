@@ -951,17 +951,17 @@ enable_affinity_mi01_3() {
 		#Assign 5G band to core 2 and
 		#6G alone to core 1 to support upto 320MHz BW
 		############## affinity for 5G band - pci1 ########################
-		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pcic1_reo2ppe_ /proc/interrupts | sed -n 's/.*pcic1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -970,17 +970,17 @@ enable_affinity_mi01_3() {
 
 
 		############## affinity for 6G band - pci2 ########################
-		irq_num=`grep pci2_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic2_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci2_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic2_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci2_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic2_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci2_reo2ppe_ /proc/interrupts | sed -n 's/.*pci2_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pcic2_reo2ppe_ /proc/interrupts | sed -n 's/.*pcic2_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
@@ -1045,17 +1045,17 @@ enable_affinity_mi01_3_c2() {
 
 		# For Miami Board (RDP 477 / RDP 478) - Assign pci1(5G) to core 2
 		############## affinity for pci1 - 5G ########################
-		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pcic1_reo2ppe_ /proc/interrupts | sed -n 's/.*pcic1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -1208,22 +1208,22 @@ enable_affinity_mi01_14() {
 
 	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
-		echo "Configure Affinity for PPE DS for mi01_2" > /dev/ttyMSM0
+		echo "Configure Affinity for PPE DS for mi01_14" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 481) - Assign pcic1(5G) to core 1 and
 		#                             Assign pci1(6G) to core 2
-		############## affinity for pci0 - 5G ########################
-		irq_num=`grep pci0_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		############## affinity for 5GHz QCN6432  ####################
+		irq_num=`grep pcic1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci0_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci0_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci0_reo2ppe_ /proc/interrupts | sed -n 's/.*pci0_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pcic1_reo2ppe_ /proc/interrupts | sed -n 's/.*pcic1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
@@ -1231,7 +1231,7 @@ enable_affinity_mi01_14() {
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 
-		############## affinity for pci1 - 6G ########################
+		############## affinity for 6GHz QCN9274 #####################
 		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -1336,22 +1336,22 @@ enable_affinity_mi01_12() {
 
 	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
-		echo "Configure Affinity for PPE DS for mi01_2" > /dev/ttyMSM0
+		echo "Configure Affinity for PPE DS for mi01_12" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 479) - Assign pci1(5G) to core 1 and
 		#                             Assign pcic1(6G) to core 2
-		############## affinity for pci1 - 5G ########################
-		irq_num=`grep pci0_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		############## affinity for 5GHz QCN9274 #####################
+		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci0_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci0_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci0_reo2ppe_ /proc/interrupts | sed -n 's/.*pci0_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
@@ -1359,18 +1359,18 @@ enable_affinity_mi01_12() {
 		[ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
 
 
-		############## affinity for pcic1 - 6G ########################
-		irq_num=`grep pci1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		############## affinity for 6GHz QCN6432 ####################
+		irq_num=`grep pcic1_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
-		irq_num=`grep pci1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+		irq_num=`grep pcic1_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pcic1_reo2ppe_ /proc/interrupts | sed -n 's/.*pcic1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
