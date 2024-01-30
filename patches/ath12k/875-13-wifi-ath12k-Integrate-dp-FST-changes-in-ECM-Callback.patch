@@ -1,6 +1,6 @@
-From 90e7d20647c2671bd7c15035b5d1ef7f529e1106 Mon Sep 17 00:00:00 2001
+From edc98070943a9445d6380acef4baefb873582a10 Mon Sep 17 00:00:00 2001
 From: Nithyanantham Paramasivam <quic_nithp@quicinc.com>
-Date: Sat, 13 Jan 2024 18:46:29 +0530
+Date: Sun, 28 Jan 2024 12:37:19 +0530
 Subject: [PATCH] wifi: ath12k: Integrate dp FST APIs in ECM Changes
 
 Integrate the ECM callback with fst changes. When the flow is
@@ -14,8 +14,8 @@ Signed-off-by: Nithyanantham Paramasivam <quic_nithp@quicinc.com>
  drivers/net/wireless/ath/ath12k/fse.c | 70 ++++++++++++++++++++++++---
  drivers/net/wireless/ath/ath12k/fse.h |  2 +-
  drivers/net/wireless/ath/ath12k/hw.c  | 10 ++--
- drivers/net/wireless/ath/ath_fse.c    | 39 +--------------
- 4 files changed, 70 insertions(+), 51 deletions(-)
+ drivers/net/wireless/ath/ath_fse.c    | 49 ++++---------------
+ 4 files changed, 77 insertions(+), 54 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/fse.c b/drivers/net/wireless/ath/ath12k/fse.c
 index 08bd743..bb29683 100644
@@ -134,7 +134,7 @@ index 9dc923f..bf0802d 100644
  void ath12k_fse_deinit(struct ath12k_base *ab);
  void *ath12k_fse_get_ab_from_netdev(struct net_device *dev,
 diff --git a/drivers/net/wireless/ath/ath12k/hw.c b/drivers/net/wireless/ath/ath12k/hw.c
-index ee7e4b5..1d4d7a9 100644
+index 0573b1e..88d0418 100644
 --- a/drivers/net/wireless/ath/ath12k/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/hw.c
 @@ -1595,7 +1595,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
@@ -183,10 +183,21 @@ index ee7e4b5..1d4d7a9 100644
  };
  
 diff --git a/drivers/net/wireless/ath/ath_fse.c b/drivers/net/wireless/ath/ath_fse.c
-index bdac23a..8b8e1bd 100644
+index bdac23a..bae038e 100644
 --- a/drivers/net/wireless/ath/ath_fse.c
 +++ b/drivers/net/wireless/ath/ath_fse.c
-@@ -55,15 +55,6 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
+@@ -39,7 +39,9 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
+ 		return false;
+ 	}
+ 	if (!fse_info->src_dev->ieee80211_ptr && !fse_info->dest_dev->ieee80211_ptr) {
+-		pr_warn("Not a wlan traffic for FSE rule push\n");
++		pr_debug("Not a wlan traffic for FSE rule push:sdev:%s ddev:%s\n",
++			 netdev_name(fse_info->src_dev),
++			 netdev_name(fse_info->dest_dev));
+ 		return false;
+ 	}
+ 	/* Based on src_dev / dest_dev is a VAP, get the 5 tuple info
+@@ -55,15 +57,6 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
  			       netdev_name(fse_info->src_dev));
  			return false;
  		}
@@ -202,7 +213,7 @@ index bdac23a..8b8e1bd 100644
  		ret = fse_cb->fse_rule_add(ab,
  					   fse_info->src_ip, fse_info->src_port,
  					   fse_info->dest_ip, fse_info->dest_port,
-@@ -81,14 +72,6 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
+@@ -81,14 +74,6 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
  			       netdev_name(fse_info->dest_dev));
  			return false;
  		}
@@ -217,7 +228,23 @@ index bdac23a..8b8e1bd 100644
  		ret = fse_cb->fse_rule_add(ab,
  					   fse_info->dest_ip, fse_info->dest_port,
  					   fse_info->src_ip, fse_info->src_port,
-@@ -142,16 +125,7 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
+@@ -123,11 +108,13 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
+ 		return false;
+ 
+ 	if (!fse_info->src_dev || !fse_info->dest_dev) {
+-		pr_info("Unable to find dev for FSE rule delete");
++		pr_warn("Unable to find dev for FSE rule delete");
+ 		return false;
+ 	}
+ 	if (!fse_info->src_dev->ieee80211_ptr && !fse_info->dest_dev->ieee80211_ptr) {
+-		pr_info("Not a wlan traffic for FSE rule delete");
++		pr_debug("Not a wlan traffic for FSE rule delete:sdev:%s ddev:%s\n",
++			 netdev_name(fse_info->src_dev),
++			 netdev_name(fse_info->dest_dev));
+ 		return false;
+ 	}
+ 	/* Based on src_dev / dest_dev is a VAP, get the 5 tuple info
+@@ -142,16 +129,7 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
  			pr_err("Failed to delete a rule in FST<ab NULL>");
  			return false;
  		}
@@ -235,7 +262,7 @@ index bdac23a..8b8e1bd 100644
  						  fse_info->src_ip, fse_info->src_port,
  						  fse_info->dest_ip, fse_info->dest_port,
  						  fse_info->protocol, fse_info->version);
-@@ -163,16 +137,7 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
+@@ -163,16 +141,7 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
  			pr_err("Failed to delete a rule in FST<ab NULL>");
  			return false;
  		}
@@ -254,5 +281,5 @@ index bdac23a..8b8e1bd 100644
  						  fse_info->src_ip, fse_info->src_port,
  						  fse_info->protocol, fse_info->version);
 -- 
-2.34.1
+2.17.1
 
