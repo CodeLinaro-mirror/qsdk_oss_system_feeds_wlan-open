@@ -75,9 +75,9 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
   * ieee80211_chandef_max_power - maximum transmission power for the chandef
 --- a/net/wireless/chan.c
 +++ b/net/wireless/chan.c
-@@ -922,6 +922,123 @@ bool cfg80211_chandef_dfs_usable(struct
+@@ -748,6 +748,90 @@ bool cfg80211_is_freq_device_non_oper(co
+ 	return true;
  }
- EXPORT_SYMBOL(cfg80211_chandef_dfs_usable);
  
 +static bool cfg80211_valid_240mhz_freq_device(const struct cfg80211_chan_def *chandef)
 +{
@@ -98,7 +98,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +	struct ieee80211_channel *c;
 +
 +	if (chandef->center_freq1 == chandef->center_freq_device)
-+ 		return device_ru_punct_bitmap;
++		return device_ru_punct_bitmap;
 +
 +	/* Note: The condition is applicable when AP is
 +	 * enabled on 5G band when operating center frequency
@@ -122,8 +122,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +		end_freq = MHZ_TO_KHZ(chandef->center_freq_device - 10);
 +
 +	for (freq = start_freq; freq <= end_freq;
-+		 freq += MHZ_TO_KHZ(20), count_non_oper_chan++) {
-+
++	     freq += MHZ_TO_KHZ(20), count_non_oper_chan++) {
 +		if (count_non_oper_chan > 3 &&
 +		    chandef->width_device == NL80211_CHAN_WIDTH_320)
 +			continue;
@@ -144,14 +143,12 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +			device_ru_punct_bitmap = device_ru_punct_bitmap << 2;
 +		else
 +			set_ru_punct_bitmap = set_ru_punct_bitmap << 2;
-+
 +		return (device_ru_punct_bitmap | set_ru_punct_bitmap);
 +	} else if (chandef->width_device == NL80211_CHAN_WIDTH_160) {
 +		if (chandef->center_freq1 > chandef->center_freq_device)
 +			device_ru_punct_bitmap = device_ru_punct_bitmap << 4;
 +		else
 +			set_ru_punct_bitmap = set_ru_punct_bitmap << 4;
-+
 +		return (device_ru_punct_bitmap | set_ru_punct_bitmap);
 +	} else if (chandef->width_device == NL80211_CHAN_WIDTH_320) {
 +		if (chandef->center_freq1 > chandef->center_freq_device)
@@ -166,6 +163,67 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
 +	return device_ru_punct_bitmap;
 +}
 +
+ static int cfg80211_get_chans_dfs_required(struct wiphy *wiphy,
+ 					    u32 center_freq,
+ 					    u32 bandwidth,
+@@ -779,6 +863,7 @@ int cfg80211_chandef_dfs_required(struct
+ {
+ 	int width;
+ 	int ret;
++	u32 ru_punct_bitmap;
+ 
+ 	if (WARN_ON(!cfg80211_chandef_valid(chandef)))
+ 		return -EINVAL;
+@@ -792,13 +877,28 @@ int cfg80211_chandef_dfs_required(struct
+ 	case NL80211_IFTYPE_AP:
+ 	case NL80211_IFTYPE_P2P_GO:
+ 	case NL80211_IFTYPE_MESH_POINT:
+-		width = cfg80211_chandef_get_width(chandef);
+-		if (width < 0)
+-			return -EINVAL;
++		if (cfg80211_chandef_device_present(chandef)) {
++			width =  nl80211_chan_width_to_mhz(chandef->width_device);
++			if (width < 0)
++				return -EINVAL;
++
++			ru_punct_bitmap = cfg80211_set_ru_punc_bitmap_device(wiphy, chandef);
++
++			ret =
++			cfg80211_get_chans_dfs_required(wiphy,
++							MHZ_TO_KHZ(chandef->center_freq_device),
++							width, ru_punct_bitmap);
++		} else {
++			width = cfg80211_chandef_get_width(chandef);
++
++			if (width < 0)
++				return -EINVAL;
++
++			ret = cfg80211_get_chans_dfs_required(wiphy,
++							      ieee80211_chandef_to_khz(chandef),
++							      width, chandef->ru_punct_bitmap);
++		}
+ 
+-		ret = cfg80211_get_chans_dfs_required(wiphy,
+-					ieee80211_chandef_to_khz(chandef),
+-					width, chandef->ru_punct_bitmap);
+ 		if (ret < 0)
+ 			return ret;
+ 		else if (ret > 0)
+@@ -808,8 +908,8 @@ int cfg80211_chandef_dfs_required(struct
+ 			return 0;
+ 
+ 		ret = cfg80211_get_chans_dfs_required(wiphy,
+-					MHZ_TO_KHZ(chandef->center_freq2),
+-					width, chandef->ru_punct_bitmap);
++						      MHZ_TO_KHZ(chandef->center_freq2),
++						      width, chandef->ru_punct_bitmap);
+ 		if (ret < 0)
+ 			return ret;
+ 		else if (ret > 0)
+@@ -922,6 +1022,36 @@ bool cfg80211_chandef_dfs_usable(struct
+ }
+ EXPORT_SYMBOL(cfg80211_chandef_dfs_usable);
+ 
 +bool cfg80211_chandef_dfs_usable_device(struct wiphy *wiphy,
 +					const struct cfg80211_chan_def *chandef)
 +{
@@ -199,7 +257,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  /*
   * Checks if center frequency of chan falls with in the bandwidth
   * range of chandef.
-@@ -1247,9 +1364,40 @@ static unsigned int cfg80211_get_chans_d
+@@ -1247,9 +1377,40 @@ static unsigned int cfg80211_get_chans_d
  	return dfs_cac_ms;
  }
  
@@ -241,7 +299,7 @@ Signed-off-by: Shivani Tambatkar <quic_stambatk@quicinc.com>
  {
  	int width;
  	unsigned int t1 = 0, t2 = 0, dfs_cac_time;
-@@ -1257,6 +1405,11 @@ cfg80211_chandef_dfs_cac_time(struct wip
+@@ -1257,6 +1418,11 @@ cfg80211_chandef_dfs_cac_time(struct wip
  	if (WARN_ON(!cfg80211_chandef_valid(chandef)))
  		return 0;
  
