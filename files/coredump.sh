@@ -98,9 +98,7 @@ fi
 
 if [ -n "$FILENAME" ]; then
 	printf "%s\n" "Collecting dump_data in $SERVER" > /dev/console
-	cd /tmp
-	cp $DUMPPATH $FILENAME
-	$(tftp -l $FILENAME -p $SERVER 2>&1)
+	$(tftp -l $DUMPPATH -r $FILENAME -p $SERVER 2>&1)
 	if [ $? -eq 0 ]; then
 		printf "%s\n" "$FILENAME collected in $SERVER" \
 								> /dev/console
@@ -109,6 +107,4 @@ if [ -n "$FILENAME" ]; then
 								> /dev/console
 	fi
 	echo 1 > $DUMPPATH
-	rm $FILENAME
-	cd /
 fi
