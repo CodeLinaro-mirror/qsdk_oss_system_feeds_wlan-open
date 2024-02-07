@@ -1694,6 +1694,26 @@ drv_mac80211_setup() {
 		return 1
 	}
 
+	if [ $(cat /sys/module/ath12k/parameters/ppe_rfs_support) == 'Y' ]; then
+		# Note: ppe_vp_accel and ppe_vp_rfs are mutually exclusive.
+		#       ppe_vp_accel enables PPE acceleration path and ppe_vp_rfs
+		#       is expected to enable only flow steering for VLAN type
+		#       interface (eg: WDS root).
+		echo 1 >> /sys/module/mac80211/parameters/ppe_vp_rfs
+		# Note: Format is default MLO mask followed by band specific core masks
+		#	in order of 2 GHz, 5 GHz and 6GHz bands
+		#	echo <DEFAULT/ MLO MASK>,<2GHZ MASK>,<5GHZ MASK>,<6GHZ_MASK>
+		echo 0x7,0x7,0x7,0x7 > /sys/module/ath12k/parameters/rfs_core_mask
+		if [ $(cat /sys/module/mac80211/parameters/ppe_vp_accel) == 'Y' ]; then
+			echo "ppe_vp_accel is enabled. Please disable to support RFS on WDS" > /dev/ttyMSM0
+		fi
+
+		if echo "$(cat /sys/sfe/ppe_rfs_feature)" | grep -q "disabled"; then
+			echo 1 >> /sys/sfe/ppe_rfs_feature
+			echo "enabled ppe_rfs_feature" > /dev/ttyMSM0
+		fi
+	fi
+
 	wireless_set_data phy="$phy"
 	[ -z "$(uci -q -P /var/state show wireless._${phy})" ] && uci -q -P /var/state set wireless._${phy}=phy
 
