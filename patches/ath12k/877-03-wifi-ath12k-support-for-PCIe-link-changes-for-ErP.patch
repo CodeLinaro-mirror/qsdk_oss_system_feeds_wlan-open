@@ -9,6 +9,7 @@ with subcmd QCA_WLAN_VENDOR_ATTR_RM_ERP_ATH and attribute
 QCA_WLAN_VENDOR_ATTR_ERP_ATH_PCIE_CONFIG.
 
 Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
+Co-developed-by: Aloka Dixit <quic_alokad@quicinc.com>
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/core.c   | 36 ++++++++++++++++++++++
@@ -19,7 +20,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -4160,6 +4160,38 @@ void *ath12k_get_ab_nd_peer_from_peer_ma
+@@ -4145,6 +4145,38 @@ void *ath12k_get_ab_nd_peer_from_peer_ma
  
  #endif /* CPTCFG_ATH12K_SAWF */
  
@@ -60,7 +61,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  				 unsigned long event, void *ptr)
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1771,6 +1771,7 @@ const struct firmware *ath12k_core_firmw
+@@ -1772,6 +1772,7 @@ const struct firmware *ath12k_core_firmw
  
  void ath12k_core_wait_dump_collect(struct ath12k_base *ab);
  void ath12k_core_issue_bug_on(struct ath12k_base *ab);
@@ -70,17 +71,24 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  void ath12k_fw_stats_pdevs_free(struct list_head *head);
 --- a/drivers/net/wireless/ath/ath12k/vendor.c
 +++ b/drivers/net/wireless/ath/ath12k/vendor.c
-@@ -11,7 +11,9 @@
+@@ -3,6 +3,8 @@
+  * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved
+  */
+ #include <linux/mutex.h>
++#include <linux/pci.h>
++#include <linux/workqueue.h>
+ #include <net/netlink.h>
+ #include <net/mac80211.h>
+ #include "core.h"
+@@ -12,6 +14,7 @@
  #include "sawf.h"
  #include "bondif.h"
- #ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+#include <linux/pci.h>
- #include <linux/mutex.h>
-+#include "pci.h"
  #include "dp_rx.h"
- #endif /* CPTCFG_ATH12K_ERP_SUPPORT */
++#include "pci.h"
  
-@@ -153,6 +155,7 @@ ath12k_vendor_erp_config_policy[QCA_WLAN
+ #ifdef CPTCFG_ATH12K_SAWF
+ static const struct nla_policy
+@@ -150,6 +153,7 @@ ath12k_vendor_erp_config_policy[QCA_WLAN
  	[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_TRIGGER] =
  		NLA_POLICY_RANGE(NLA_U32, 1,
  				 QCA_WLAN_VENDOR_TRIGGER_TYPE_MAX - 1),
@@ -88,19 +96,70 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  static const struct nla_policy
-@@ -182,6 +185,8 @@ struct ath12k_erp_state_machine {
- 	struct mutex lock;
- 	enum ath12k_erp_states state;
+@@ -173,6 +177,18 @@ enum ath12k_erp_states {
+ 	ATH12K_ERP_ENTER_COMPLETE,
+ };
+ 
++enum ath12k_erp_pcie_rescan {
++	ATH12K_ERP_PCIE_RESCAN_INVALID,
++	ATH12K_ERP_PCIE_RESCAN_STARTED,
++	ATH12K_ERP_PCIE_RESCAN_COMPLETE,
++};
++
++struct ath12k_erp_pci_dev {
++	bool active;
++	struct pci_dev *dev;
++	struct pci_bus *bus;
++};
++
+ struct ath12k_erp_state_machine {
+ 	bool initialized;
+ 	/* Protects the structure members */
+@@ -181,6 +197,11 @@ struct ath12k_erp_state_machine {
+ 	struct ath12k *trigger_ar;
  	enum ath12k_routing_pkt_type trigger;
-+	u8 rescan_pdev_cnt;
-+	struct pci_dev *rescan_pdev[MAX_RADIOS];
+ 	struct dentry *erp_dir;
++	struct workqueue_struct *workqueue;
++	struct work_struct remove_pcie_work;
++	u8 rescan_pci_dev_cnt;
++	struct ath12k_erp_pci_dev rescan_pci_dev[MAX_RADIOS];
++
  };
  
  static struct ath12k_erp_state_machine erp_sm = {};
-@@ -1472,6 +1477,25 @@ static int ath12k_erp_config_trigger(str
+@@ -1302,6 +1323,8 @@ static void ath12k_erp_reset_state(void)
+ 	erp_sm.state = ATH12K_ERP_OFF;
+ 	erp_sm.trigger = 0;
+ 	erp_sm.trigger_ar = 0;
++	memset(erp_sm.rescan_pci_dev, 0, sizeof(erp_sm.rescan_pci_dev));
++	erp_sm.rescan_pci_dev_cnt = 0;
+ }
+ 
+ static u32 ath12k_erp_convert_trigger_bitmap(u32 bitmap)
+@@ -1488,6 +1511,45 @@ static int ath12k_erp_config_trigger(str
  	return 0;
  }
  
++static void ath12k_erp_remove_pcie(struct work_struct *work)
++{
++	struct ath12k_erp_pci_dev *erp_pci_dev;
++	int i;
++
++	ath12k_dbg(NULL, ATH12K_DBG_RM, "removing PCIe slots\n");
++
++	mutex_lock(&erp_sm.lock);
++	for (i = 0; i < erp_sm.rescan_pci_dev_cnt; i++) {
++		erp_pci_dev = &erp_sm.rescan_pci_dev[i];
++
++		if (!erp_pci_dev->active)
++			continue;
++
++		pci_stop_and_remove_bus_device_locked(erp_pci_dev->dev);
++		erp_pci_dev->active = false;
++	}
++	mutex_unlock(&erp_sm.lock);
++}
++
 +static int ath12k_erp_config_pcie(struct wiphy *wiphy)
 +{
 +	struct pci_dev *pci_dev = ath12k_pci_get_dev_by_wiphy(wiphy, true);
@@ -112,18 +171,18 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		return -EINVAL;
 +	}
 +
-+	pci_lock_rescan_remove();
-+	pci_stop_and_remove_bus_device_locked(pci_dev);
-+	pci_unlock_rescan_remove();
-+	erp_sm.rescan_pdev[erp_sm.rescan_pdev_cnt] = pci_dev;
-+	erp_sm.rescan_pdev_cnt++;
++	erp_sm.rescan_pci_dev[erp_sm.rescan_pci_dev_cnt].dev= pci_dev;
++	erp_sm.rescan_pci_dev[erp_sm.rescan_pci_dev_cnt].bus= pci_dev->bus;
++	erp_sm.rescan_pci_dev[erp_sm.rescan_pci_dev_cnt].active = true;
++	erp_sm.rescan_pci_dev_cnt++;
++	queue_work(erp_sm.workqueue, &erp_sm.remove_pcie_work);
 +	return 0;
 +}
 +
  static int ath12k_erp_config(struct wiphy *wiphy, struct nlattr *attrs)
  {
  	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_MAX + 1];
-@@ -1484,12 +1508,23 @@ static int ath12k_erp_config(struct wiph
+@@ -1500,12 +1562,23 @@ static int ath12k_erp_config(struct wiph
  		return ret;
  	}
  
@@ -149,23 +208,180 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  static int ath12k_erp_enter(struct wiphy *wiphy,
-@@ -1580,6 +1615,13 @@ int ath12k_erp_exit(struct wiphy *wiphy,
+@@ -1570,7 +1643,6 @@ static void ath12k_vendor_send_erp_trigg
+ 
+ 	if (nla_put_flag(skb, QCA_WLAN_VENDOR_ATTR_ERP_EXIT)) {
+ 		ath12k_warn(NULL, "Failure to put ErP vendor event flag\n");
+-		/* Allow this error case for now */
+ 	}
+ 
+ 	nla_nest_end(skb, erp_ath);
+@@ -1579,12 +1651,13 @@ static void ath12k_vendor_send_erp_trigg
+ 
+ int ath12k_erp_exit(struct wiphy *wiphy, struct ath12k *ar, bool send_reply)
+ {
++	struct ath12k_erp_pci_dev *erp_pci_dev;
+ 	int ret, i;
+ 
+-	mutex_lock(&erp_sm.lock);
++	lockdep_assert_held(&erp_sm.lock);
++
+ 	if (erp_sm.state != ATH12K_ERP_ENTER_COMPLETE) {
+ 		ath12k_err(NULL, "driver is not in ErP mode\n");
+-		mutex_unlock(&erp_sm.lock);
  		return -EINVAL;
  	}
  
-+	for (i = 0; i < erp_sm.rescan_pdev_cnt; i++) {
+@@ -1592,16 +1665,26 @@ int ath12k_erp_exit(struct wiphy *wiphy,
+ 	    ath12k_erp_set_pkt_filter(NULL, ar, erp_sm.trigger,
+ 				      ATH12K_WMI_PKTROUTE_DEL)) {
+ 		ath12k_err(NULL, "failed to reset pkt bitmap %d", ret);
+-		mutex_unlock(&erp_sm.lock);
+ 		return -EINVAL;
+ 	}
+ 
++	for (i = 0; i < erp_sm.rescan_pci_dev_cnt; i++) {
++		erp_pci_dev = &erp_sm.rescan_pci_dev[i];
++
++		if (erp_pci_dev->active)
++			continue;
++
 +		pci_lock_rescan_remove();
-+		pci_rescan_bus(erp_sm.rescan_pdev[i]->bus);
++		pci_rescan_bus(erp_pci_dev->bus->parent);
++		erp_pci_dev->active = true;
 +		pci_unlock_rescan_remove();
-+		msleep(4000);
 +	}
 +
- 	erp_sm.state = ATH12K_ERP_OFF;
+ 	ath12k_erp_reset_state();
  
  	if (send_reply)
+ 		ath12k_vendor_send_erp_trigger(wiphy);
+ 
+-	mutex_unlock(&erp_sm.lock);
+ 	return 0;
+ }
+ 
+@@ -1626,8 +1709,11 @@ static int ath12k_vendor_parse_rm_erp(st
+ 	    nla_get_flag(tb[QCA_WLAN_VENDOR_ATTR_ERP_ENTER_COMPLETE]) ||
+ 	    tb[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG])
+ 		ret = ath12k_erp_enter(wiphy, wdev, tb);
+-	else if (nla_get_flag(tb[QCA_WLAN_VENDOR_ATTR_ERP_EXIT]))
++	else if (nla_get_flag(tb[QCA_WLAN_VENDOR_ATTR_ERP_EXIT])) {
++		mutex_lock(&erp_sm.lock);
+ 		ret = ath12k_erp_exit(wiphy, NULL, false);
++		mutex_unlock(&erp_sm.lock);
++	}
+ 
+ 	return ret;
+ }
+@@ -1663,9 +1749,76 @@ void ath12k_erp_handle_trigger(struct wo
+ 	if (!ar->erp_trigger_set)
+ 		return;
+ 
++	mutex_lock(&erp_sm.lock);
+ 	(void)ath12k_erp_exit(ar->ah->hw->wiphy, ar, true);
++	mutex_unlock(&erp_sm.lock);
+ }
+ 
++static ssize_t ath12k_write_erp_rescan_pcie(struct file *file,
++					    const char __user *ubuf,
++					    size_t count, loff_t *ppos)
++{
++	u32 state;
++	int ret = -EINVAL;
++
++	if (!erp_sm.initialized) {
++		ath12k_err(NULL, "Erp is not initialized\n");
++		return -EOPNOTSUPP;
++	}
++
++	mutex_lock(&erp_sm.lock);
++	if (erp_sm.state != ATH12K_ERP_ENTER_COMPLETE) {
++		ath12k_err(NULL, "driver is not in ErP mode\n");
++		goto out;
++	}
++
++	ret = kstrtou32_from_user(ubuf, count, 0, &state);
++	if (ret)
++		goto out;
++
++	if (state != ATH12K_ERP_PCIE_RESCAN_STARTED)
++		goto out;
++
++	if (ath12k_erp_exit(NULL, erp_sm.trigger_ar, false))
++		goto out;
++
++	mutex_unlock(&erp_sm.lock);
++	return count;
++
++out:
++	mutex_unlock(&erp_sm.lock);
++	return ret;
++}
++
++static ssize_t ath12k_read_erp_rescan_pcie(struct file *file,
++					   const char __user *ubuf,
++					   size_t count, loff_t *ppos)
++{
++	int len = 0;
++	char buf[4];
++
++	if (!erp_sm.initialized) {
++		ath12k_err(NULL, "Erp is not initialized\n");
++		return -EOPNOTSUPP;
++	}
++
++	mutex_lock(&erp_sm.lock);
++	if (erp_sm.state == ATH12K_ERP_OFF)
++		len += scnprintf(buf, sizeof(buf), "%u", ATH12K_ERP_PCIE_RESCAN_COMPLETE);
++	else
++		len += scnprintf(buf, sizeof(buf), "%u", ATH12K_ERP_PCIE_RESCAN_INVALID);
++	mutex_unlock(&erp_sm.lock);
++
++	return simple_read_from_buffer(ubuf, count, ppos, buf, len);
++}
++
++static const struct file_operations ath12k_fops_erp_rescan_pcie = {
++       .write = ath12k_write_erp_rescan_pcie,
++       .open = simple_open,
++       .read = ath12k_read_erp_rescan_pcie,
++};
++
++
+ int ath12k_erp_init(void)
+ {
+ 	if (erp_sm.initialized)
+@@ -1675,6 +1828,17 @@ int ath12k_erp_init(void)
+ 	ath12k_erp_reset_state();
+ 
+ 	erp_sm.erp_dir = ath12k_debugfs_erp_create();
++	if (erp_sm.erp_dir && !IS_ERR(erp_sm.erp_dir))
++		debugfs_create_file("rescan_pcie", 0200, erp_sm.erp_dir,
++				    NULL, &ath12k_fops_erp_rescan_pcie);
++
++	erp_sm.workqueue = create_singlethread_workqueue("ath12k_erp_wq");
++	if (!erp_sm.workqueue) {
++		ath12k_err(NULL, "failed to initialize ErP work queue\n");
++		return -EINVAL;
++	}
++
++	INIT_WORK(&erp_sm.remove_pcie_work, ath12k_erp_remove_pcie);
+ 
+ 	erp_sm.initialized = true;
+ 	return 0;
+@@ -1688,6 +1852,9 @@ void ath12k_erp_deinit(void)
+ 	mutex_lock(&erp_sm.lock);
+ 
+ 	erp_sm.erp_dir = NULL;
++	cancel_work_sync(&erp_sm.remove_pcie_work);
++	flush_workqueue(erp_sm.workqueue);
++	destroy_workqueue(erp_sm.workqueue);
+ 
+ 	ath12k_erp_reset_state();
+ 	erp_sm.initialized = false;
 --- a/drivers/net/wireless/ath/ath12k/vendor.h
 +++ b/drivers/net/wireless/ath/ath12k/vendor.h
-@@ -686,11 +686,15 @@ enum qca_wlan_vendor_trigger_types {
+@@ -684,11 +684,15 @@ enum qca_wlan_vendor_trigger_types {
   * to set wake-up trigger to bring the device out of ErP mode. This is bitmap
   * where each bit corresponds to the values defined in
   * enum qca_wlan_vendor_trigger_types.
@@ -191,14 +407,14 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +struct pci_dev *ath12k_pci_get_dev_by_wiphy(struct wiphy *wiphy, bool no_arvifs)
 +{
 +	struct pci_dev *pci_dev = NULL;
-+	struct ath12k_pci *pci;
++	struct ath12k_pci *ab_pci;
 +	struct ath12k_base *ab;
 +
 +	ab = ath12k_core_get_ab_by_wiphy(wiphy, no_arvifs);
 +	if (ab) {
-+		pci = ath12k_pci_priv(ab);
-+		if (pci)
-+			pci_dev = pci->pdev;
++		ab_pci = ath12k_pci_priv(ab);
++		if (ab_pci)
++			pci_dev = ab_pci->pdev;
 +
 +	}
 +

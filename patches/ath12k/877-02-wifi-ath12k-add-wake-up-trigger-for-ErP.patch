@@ -21,130 +21,130 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -73,6 +73,12 @@ bool ath12k_debug_critical = false;
+@@ -73,6 +73,10 @@ bool ath12k_debug_critical = false;
  module_param_named(debug_critical, ath12k_debug_critical, bool, 0644);
  MODULE_PARM_DESC(debug_critical, "Debug critical issue (0 - disable, 1 - enable)");
  
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+unsigned int ath12k_erp_support = 0;
-+module_param_named(erp_support, ath12k_erp_support, uint, 0644);
++bool ath12k_erp_support = false;
++module_param_named(erp_support, ath12k_erp_support, bool, 0444);
 +MODULE_PARM_DESC(erp_support, "ErP support (0 - disable, 1 - enable)");
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
 +
  static DEFINE_MUTEX(ath12k_hw_lock);
  static struct list_head ath12k_hw_groups = LIST_HEAD_INIT(ath12k_hw_groups);
  
-@@ -2165,6 +2171,13 @@ static void ath12k_core_pre_reconfigure_
+@@ -2165,6 +2169,11 @@ static void ath12k_core_pre_reconfigure_
  		ar->monitor_vdev_id = -1;
  		clear_bit(MONITOR_VDEV_STARTED, &ar->monitor_flags);
  		clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
 +
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +		if (ath12k_erp_support) {
 +			cancel_work_sync(&ar->erp_handle_trigger_work);
 +			ar->erp_trigger_set = false;
 +		}
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  	}
  
  	wake_up(&ab->wmi_ab.tx_credits_wq);
-@@ -2244,6 +2257,13 @@ void ath12k_core_halt(struct ath12k *ar)
+@@ -2244,6 +2253,11 @@ void ath12k_core_halt(struct ath12k *ar)
  		INIT_LIST_HEAD(&ar->arvifs);
  
  	idr_init(&ar->txmgmt_idr);
 +
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +	if (ath12k_erp_support) {
 +		cancel_work_sync(&ar->erp_handle_trigger_work);
 +		ar->erp_trigger_set = false;
 +	}
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  }
  
  static int ath12k_core_mode1_recovery_sta_list(void *data,
-@@ -3800,6 +3820,11 @@ int ath12k_core_init(struct ath12k_base
+@@ -4187,8 +4201,13 @@ static int ath12k_init(void)
+ 		goto error_ahb;
+ 	}
  
- 	ag->mgmt_rx_reorder = ath12k_mgmt_rx_reordering;
- 
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+	if (ath12k_erp_support)
-+		ath12k_erp_init();
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
++	if (ath12k_erp_support && ath12k_erp_init())
++		goto error_pci;
 +
  	return 0;
  
- err_hw_group:
-@@ -3942,6 +3967,11 @@ void ath12k_core_deinit(struct ath12k_ba
- 	mutex_unlock(&ag->mutex_lock);
++error_pci:
++	ath12k_pci_exit();
+ error_ahb:
+ 	ath12k_ahb_exit();
+ error:
+@@ -4199,6 +4218,8 @@ error:
  
- 	ath12k_core_put_hw_group(ab);
-+
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
+ static void ath12k_exit(void)
+ {
 +	if (ath12k_erp_support)
 +		ath12k_erp_deinit();
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
- }
- 
- void ath12k_core_free(struct ath12k_base *ab)
+ 	atomic_notifier_chain_unregister(&panic_notifier_list, &rddm_notifier);
+ 	ath12k_pci_exit();
+ 	ath12k_ahb_exit();
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1082,6 +1082,11 @@ struct ath12k {
+@@ -49,6 +49,7 @@
+ #define	ATH12K_RX_RATE_TABLE_11AX_NUM	576
+ 
+ extern unsigned int ath12k_frame_mode;
++extern bool ath12k_erp_support;
+ 
+ #define ATH12K_PHY_2GHZ "phy00"
+ #define ATH12K_PHY_5GHZ "phy01"
+@@ -1084,6 +1085,9 @@ struct ath12k {
  	u32 ani_listen_period;
  	int ani_ofdm_level;
  	struct completion ani_ofdm_event;
 +
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +	bool erp_trigger_set;
 +	struct work_struct erp_handle_trigger_work;
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  };
  
  struct ath12k_hw {
-@@ -1865,4 +1870,11 @@ static inline int ath12k_ahb_init(void)
+@@ -1867,4 +1871,10 @@ static inline int ath12k_ahb_init(void)
  static inline void ath12k_ahb_exit(void) {};
  #endif
  
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+void ath12k_erp_init(void);
++int ath12k_erp_init(void);
 +void ath12k_erp_deinit(void);
 +bool ath12k_erp_in_progress(void);
 +int ath12k_erp_exit(struct wiphy *wiphy, struct ath12k *ar, bool send_reply);
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
++void ath12k_erp_handle_trigger(struct work_struct *work);
 +
  #endif /* _CORE_H_ */
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2912,6 +2912,12 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2912,6 +2912,10 @@ static void ath12k_dp_rx_h_mpdu(struct a
  		rxcb->peer_id = rx_info->peer_id;
  
  	spin_lock_bh(&ar->ab->base_lock);
 +
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +	if (ar->erp_trigger_set)
-+		ieee80211_queue_work(ar->ah->hw, &ar->erp_handle_trigger_work);
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
++		queue_work(ar->ab->workqueue, &ar->erp_handle_trigger_work);
 +
  	peer = ath12k_dp_rx_h_find_peer(ar->ab, msdu, rx_info);
  	if (peer) {
  		/* If the pkt is a valid IP packet and peer supports
 --- a/drivers/net/wireless/ath/ath12k/vendor.c
 +++ b/drivers/net/wireless/ath/ath12k/vendor.c
-@@ -10,6 +10,10 @@
+@@ -2,6 +2,7 @@
+ /*
+  * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved
+  */
++#include <linux/mutex.h>
+ #include <net/netlink.h>
+ #include <net/mac80211.h>
+ #include "core.h"
+@@ -10,6 +11,7 @@
  #include "telemetry.h"
  #include "sawf.h"
  #include "bondif.h"
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+#include <linux/mutex.h>
 +#include "dp_rx.h"
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  
  #ifdef CPTCFG_ATH12K_SAWF
  static const struct nla_policy
-@@ -142,6 +146,47 @@ ath12k_ds_policy[QCA_WLAN_VENDOR_ATTR_DS
+@@ -142,6 +144,47 @@ ath12k_ds_policy[QCA_WLAN_VENDOR_ATTR_DS
  	[QCA_WLAN_VENDOR_ATTR_CONFIG_EHT_MLO_MODE] = {.type = NLA_U8},
  };
  
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +static const struct nla_policy
 +ath12k_vendor_erp_config_policy[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_MAX + 1] = {
 +	[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_IFINDEX] = {.type = NLA_U32},
@@ -179,20 +179,27 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	/* Protects the structure members */
 +	struct mutex lock;
 +	enum ath12k_erp_states state;
++	struct ath12k *trigger_ar;
 +	enum ath12k_routing_pkt_type trigger;
++	struct dentry *erp_dir;
 +};
 +
 +static struct ath12k_erp_state_machine erp_sm = {};
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
 +
  #ifdef CPTCFG_ATH12K_SAWF
  
  static void ath12k_set_default_values(struct ath12k_sawf_svc_params *param)
-@@ -1254,7 +1299,396 @@ static int ath12k_vendor_set_scs_qos_par
+@@ -1254,7 +1297,413 @@ static int ath12k_vendor_set_scs_qos_par
  	return ret;
  }
  
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
++static void ath12k_erp_reset_state(void)
++{
++	erp_sm.state = ATH12K_ERP_OFF;
++	erp_sm.trigger = 0;
++	erp_sm.trigger_ar = 0;
++}
++
 +static u32 ath12k_erp_convert_trigger_bitmap(u32 bitmap)
 +{
 +	u32 new_bitmap = 0;
@@ -300,7 +307,17 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	}
 +
 +	vif = wdev_to_ieee80211_vif(wdev);
++	if (!vif) {
++		ath12k_dbg(NULL, ATH12K_DBG_RM, "vif absent, ignoring packet bitmap");
++		return 0;
++	}
++
 +	ahvif = ath12k_vif_to_ahvif(vif);
++	if (!ahvif) {
++		ath12k_dbg(NULL, ATH12K_DBG_RM, "ahvif absent, ignoring packet bitmap");
++		return 0;
++	}
++
 +	ar = ahvif->deflink.ar; /* current support is only for SLO */
 +
 +set_trigger:
@@ -315,10 +332,15 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	}
 +
 +	spin_lock_bh(&ar->ab->base_lock);
-+	if (op_code == ATH12K_WMI_PKTROUTE_ADD)
++	if (op_code == ATH12K_WMI_PKTROUTE_ADD) {
 +		ar->erp_trigger_set = true;
-+	else if (op_code == ATH12K_WMI_PKTROUTE_DEL)
++		erp_sm.trigger = bitmap;
++		erp_sm.trigger_ar = ar;
++	} else if (op_code == ATH12K_WMI_PKTROUTE_DEL) {
 +		ar->erp_trigger_set = false;
++		erp_sm.trigger = 0;
++		erp_sm.trigger_ar = NULL;
++	}
 +	spin_unlock_bh(&ar->ab->base_lock);
 +
 +	return 0;
@@ -329,7 +351,6 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	struct net_device *netdev;
 +	struct wireless_dev *wdev;
 +	u32 trigger, if_index;
-+	int ret;
 +
 +	ath12k_dbg(NULL, ATH12K_DBG_RM, "setting ErP wake up trigger\n");
 +
@@ -357,11 +378,9 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	dev_put(netdev);
 +
 +	trigger = nla_get_u32(attrs[QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_TRIGGER]);
-+	ret = ath12k_erp_set_pkt_filter(wdev, NULL, trigger, ATH12K_WMI_PKTROUTE_ADD);
-+	if (ret)
-+		return ret;
++	if (ath12k_erp_set_pkt_filter(wdev, NULL, trigger, ATH12K_WMI_PKTROUTE_ADD))
++		return -EINVAL;
 +
-+	erp_sm.trigger = trigger;
 +	return 0;
 +}
 +
@@ -423,7 +442,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	return ret;
 +}
 +
-+static void ath12k_vendor_send_rm_erp(struct wiphy *wiphy)
++static void ath12k_vendor_send_erp_trigger(struct wiphy *wiphy)
 +{
 +	struct sk_buff *skb;
 +	struct nlattr *erp_ath;
@@ -465,18 +484,18 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		return -EINVAL;
 +	}
 +
-+	ret = ath12k_erp_set_pkt_filter(NULL, ar, erp_sm.trigger,
-+					ATH12K_WMI_PKTROUTE_DEL);
-+	if (ret) {
++	if (ar == erp_sm.trigger_ar &&
++	    ath12k_erp_set_pkt_filter(NULL, ar, erp_sm.trigger,
++				      ATH12K_WMI_PKTROUTE_DEL)) {
 +		ath12k_err(NULL, "failed to reset pkt bitmap %d", ret);
 +		mutex_unlock(&erp_sm.lock);
 +		return -EINVAL;
 +	}
 +
-+	erp_sm.state = ATH12K_ERP_OFF;
++	ath12k_erp_reset_state();
 +
 +	if (send_reply)
-+		ath12k_vendor_send_rm_erp(wiphy);
++		ath12k_vendor_send_erp_trigger(wiphy);
 +
 +	mutex_unlock(&erp_sm.lock);
 +	return 0;
@@ -543,20 +562,18 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	(void)ath12k_erp_exit(ar->ah->hw->wiphy, ar, true);
 +}
 +
-+static void ath12k_erp_reset_state(void)
-+{
-+	erp_sm.state = ATH12K_ERP_OFF;
-+	erp_sm.trigger = 0;
-+}
-+
-+void ath12k_erp_init(void)
++int ath12k_erp_init(void)
 +{
 +	if (erp_sm.initialized)
-+		return;
++		return 0;
 +
 +	mutex_init(&erp_sm.lock);
 +	ath12k_erp_reset_state();
++
++	erp_sm.erp_dir = ath12k_debugfs_erp_create();
++
 +	erp_sm.initialized = true;
++	return 0;
 +}
 +
 +void ath12k_erp_deinit(void)
@@ -565,15 +582,17 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		return;
 +
 +	mutex_lock(&erp_sm.lock);
++
++	erp_sm.erp_dir = NULL;
++
 +	ath12k_erp_reset_state();
 +	erp_sm.initialized = false;
++
 +	mutex_unlock(&erp_sm.lock);
 +	mutex_destroy(&erp_sm.lock);
 +}
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
 +
  static struct wiphy_vendor_command ath12k_vendor_commands[] = {
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +	{
 +		.info.vendor_id = QCA_NL80211_VENDOR_ID,
 +		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_RM_GENERIC,
@@ -581,20 +600,17 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +		.policy = ath12k_vendor_rm_generic_policy,
 +		.maxattr = QCA_WLAN_VENDOR_ATTR_RM_GENERIC_MAX,
 +	},
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  #ifdef CPTCFG_ATH12K_SAWF
  	{
  		.info.vendor_id = QCA_NL80211_VENDOR_ID,
-@@ -1306,6 +1740,12 @@ static const struct nl80211_vendor_cmd_i
+@@ -1306,6 +1755,10 @@ static const struct nl80211_vendor_cmd_i
  		.subcmd = QCA_NL80211_VENDOR_SUBCMD_SDWF_DEV_OPS,
  	},
  #endif
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
 +	[QCA_NL80211_VENDOR_SUBCMD_RM_GENERIC_INDEX] = {
 +		.vendor_id = QCA_NL80211_VENDOR_ID,
 +		.subcmd = QCA_NL80211_VENDOR_SUBCMD_RM_GENERIC,
 +	},
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  };
  
  int ath12k_vendor_register(struct ath12k_hw *ah)
@@ -616,12 +632,10 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  #ifdef CPTCFG_ATH12K_SAWF
-@@ -589,4 +591,112 @@ enum qca_wlan_vendor_attr_scs_rule_confi
+@@ -589,4 +591,109 @@ enum qca_wlan_vendor_attr_scs_rule_confi
  	QCA_WLAN_VENDOR_ATTR_SCS_RULE_CONFIG_AFTER_LAST - 1,
  };
  
-+#ifdef CPTCFG_ATH12K_ERP_SUPPORT
-+
 +/**
 + * enum qca_wlan_vendor_attr_rm_generic - Attributes required for vendor
 + * command %QCA_NL80211_VENDOR_SUBCMD_RM_GENERIC to register a Resource Manager
@@ -726,7 +740,6 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +	QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_MAX =
 +			QCA_WLAN_VENDOR_ATTR_ERP_CONFIG_AFTER_LAST - 1,
 +};
-+#endif /* CPTCFG_ATH12K_ERP_SUPPORT */
 +
  #endif /* QCA_VENDOR_H */
 --- a/drivers/net/wireless/ath/ath12k/debug.h
@@ -739,3 +752,53 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/* keep last*/
  	ATH12K_DBG_ANY		= 0xffffffff,
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -5619,3 +5619,8 @@ void ath12k_debugfs_remove_interface(str
+ 	debugfs_remove(arvif->debugfs_rtsthreshold);
+ 	arvif->debugfs_rtsthreshold = NULL;
+ }
++
++struct dentry *ath12k_debugfs_erp_create(void)
++{
++	return debugfs_create_dir("erp", debugfs_ath12k);
++}
+--- a/drivers/net/wireless/ath/ath12k/debugfs.h
++++ b/drivers/net/wireless/ath/ath12k/debugfs.h
+@@ -322,6 +322,7 @@ static inline int ath12k_debugfs_rx_filt
+ 
+ void ath12k_debugfs_add_interface(struct ath12k_link_vif *arvif);
+ void ath12k_debugfs_remove_interface(struct ath12k_link_vif *arvif);
++struct dentry *ath12k_debugfs_erp_create(void);
+ 
+ #else
+ static inline int ath12k_debugfs_create(void)
+@@ -414,6 +415,12 @@ static inline void ath12k_debugfs_nrp_cl
+ static inline void ath12k_debugfs_nrp_cleanup_all(struct ath12k *ar)
+ {
+ }
++
++struct dentry *ath12k_debugfs_erp_create(void)
++{
++	return NULL;
++}
++
+ #endif /* CPTCFG_MAC80211_DEBUGFS*/
+ 
+ #ifdef CPTCFG_ATH12K_PKTLOG
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -17098,8 +17098,11 @@ static int ath12k_mac_setup(struct ath12
+ 	ar->monitor_vdev_id = -1;
+ 	clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
+ 	rcu_assign_pointer(ag->hw_links[hw_link_id], ar);
+- 
+- 	return 0;
++
++	if (ath12k_erp_support)
++		INIT_WORK(&ar->erp_handle_trigger_work, ath12k_erp_handle_trigger);
++
++	return 0;
+ }
+ 
+ int ath12k_mac_allocate(struct ath12k_hw_group *ag)
