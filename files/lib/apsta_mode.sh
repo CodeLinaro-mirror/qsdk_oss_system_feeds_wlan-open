@@ -222,6 +222,22 @@ hostapd_ht20_mode() {
         hostapd_cli -i $ap_intf $ml_link set ht_capab $ht_capab_20 2> /dev/null
 }
 
+get_ap_ht_capab() {
+        sta_freq=$1
+        sta_radio_band_idx=$(ls /var/run/wpa_supplicant-*-updated-cfg | awk '{ print $1 }' | cut -f2 -d"-" | awk '{print substr($0,length,1)}')
+        for i in $sta_radio_band_idx
+        do
+                freq_list=$(cat /var/run/wpa_supplicant-radio${phy: -1}_band${i}-updated-cfg | grep freq_list | cut -d'=' -f 2)
+                highest_freq=$(echo "$freq_list" | awk '{print $NF}')
+                least_freq=$(echo "$freq_list" | cut -d ' ' -f1)
+                if [ "$sta_freq" -ge "$least_freq" ] && [ "$sta_freq" -le "$highest_freq" ]; then
+			hostapd_conf="/var/run/hostapd-${phy}_band$i.conf"
+			ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
+                fi
+        done
+}
+
+
 # STA association is completed, hence adjusting hostapd running config
 hostapd_adjust_config() {
 	sta_freq=$1
@@ -245,6 +261,8 @@ hostapd_adjust_config() {
 	else
 		hostapd_cli -i $ap_intf $ml_link set hw_mode g 2> /dev/null
 	fi
+
+	get_ap_ht_capab $sta_freq
 
 	ap_ht_mode=$(echo $ap_ht_capab | sed -n 's/.*\(\[HT40*+*-*]\).*/\1/p')
 	#echo "Current AP HT capab $ap_ht_capab" > /dev/ttyMSM0
