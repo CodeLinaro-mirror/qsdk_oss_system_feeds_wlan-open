@@ -1,0 +1,100 @@
+From 83966125e766f051884cc12a4a32704a3917d1dc Mon Sep 17 00:00:00 2001
+From: Sarika Sharma <quic_sarishar@quicinc.com>
+Date: Wed, 28 Feb 2024 10:57:20 +0530
+Subject: [PATCH] wifi: ath12k: fix ml_peer_id lookup
+
+While iw station dump, rx bitrate is not getting shown as last_rate is
+becoming 0 in sta_get_last_rx_stats().
+For updating last_rate we are using link_id from peer object and currently
+we are trying to find peer using ml_peer_id from
+ath12k_peer_find_by_id().
+Here, ath12k_peer_find_by_id() func returns the peer object which is fetch
+first from matching ml_peer_id but to update the station dump stats
+correctly, we require the peer from which traffic flow is happening
+currently.
+
+Hence, add helper function to fetch the peer using ml_peer_id and
+pdev_idx and update corresponding station dump stats for valid link_id.
+
+Depends On: [PATCH] ath12k: changes for handling multi link sta
+
+Signed-off-by: Sarika Sharma <quic_sarishar@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp_rx.c |  2 +-
+ drivers/net/wireless/ath/ath12k/peer.c  | 35 +++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/peer.h  |  1 +
+ 3 files changed, 37 insertions(+), 1 deletion(-)
+
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -3224,7 +3224,7 @@ static void ath12k_dp_rx_deliver_msdu(st
+ 
+ 	spin_lock_bh(&ab->base_lock);
+ 	if (rxcb->peer_id)
+-		peer = ath12k_peer_find_by_id(ab, rxcb->peer_id);
++		peer = ath12k_peer_find_by_id_pdev_idx(ab, ar->pdev_idx, rxcb->peer_id);
+ 	if (!peer && (rx_info->filled & BIT_ULL(ATH12K_RX_INFO_ADDR2)))
+ 		peer = ath12k_peer_find_by_addr(ab, rx_info->addr2);
+ 
+--- a/drivers/net/wireless/ath/ath12k/peer.c
++++ b/drivers/net/wireless/ath/ath12k/peer.c
+@@ -91,6 +91,23 @@ static struct ath12k_peer *ath12k_peer_f
+ 	return NULL;
+ }
+ 
++static struct ath12k_peer *ath12k_peer_find_by_ml_id_pdev_idx(struct ath12k_base *ab,
++							      u8 pdev_idx, int ml_peer_id)
++{
++	struct ath12k_peer *peer;
++
++	lockdep_assert_held(&ab->base_lock);
++
++	list_for_each_entry(peer, &ab->peers, list) {
++		if (ml_peer_id == peer->ml_peer_id) {
++			if (pdev_idx != peer->pdev_idx)
++				continue;
++		}
++		return peer;
++	}
++	return NULL;
++}
++
+ struct ath12k_peer *ath12k_peer_find_list_by_id(struct ath12k_base *ab,
+ 						int peer_id)
+ {
+@@ -132,6 +149,24 @@ struct ath12k_peer *ath12k_peer_find_by_
+ 	}
+ }
+ 
++struct ath12k_peer *ath12k_peer_find_by_id_pdev_idx(struct ath12k_base *ab,
++						    u8 pdev_idx, int peer_id)
++{
++	lockdep_assert_held(&ab->base_lock);
++
++	if (peer_id == ATH12K_PEER_ID_INVALID)
++		return NULL;
++
++	if (peer_id & ATH12K_ML_PEER_ID_VALID)
++		return ath12k_peer_find_by_ml_id_pdev_idx(ab, pdev_idx, peer_id);
++
++	if (!ab->rhead_peer_id)
++		return NULL;
++
++	return rhashtable_lookup_fast(ab->rhead_peer_id, &peer_id,
++				      ab->rhash_peer_id_param);
++}
++
+ bool ath12k_peer_exist_by_vdev_id(struct ath12k_base *ab, int vdev_id)
+ {
+ 	struct ath12k_peer *peer;
+--- a/drivers/net/wireless/ath/ath12k/peer.h
++++ b/drivers/net/wireless/ath/ath12k/peer.h
+@@ -105,6 +105,8 @@ struct ath12k_peer *ath12k_peer_find_lis
+ struct ath12k_peer *ath12k_peer_find_by_addr(struct ath12k_base *ab,
+ 					     const u8 *addr);
+ struct ath12k_peer *ath12k_peer_find_by_id(struct ath12k_base *ab, int peer_id);
++struct ath12k_peer *ath12k_peer_find_by_id_pdev_idx(struct ath12k_base *ab,
++						    u8 pdev_idx, int peer_id);
+ #ifdef CPTCFG_ATH12K_SAWF
+ struct ath12k_peer *ath12k_peer_find_pri_by_id(struct ath12k_base *ab, int peer_id);
+ #endif
