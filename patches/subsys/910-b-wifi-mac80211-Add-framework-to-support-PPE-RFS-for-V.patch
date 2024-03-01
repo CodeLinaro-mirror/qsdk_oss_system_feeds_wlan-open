@@ -111,3 +111,78 @@ index a9aa70e527b9..83e882892e6d 100644
  		ieee80211_netif_rx_ppe(rx, skb);
  		atomic_inc(&sta->rx_netif_pkts);
  		return;
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 9703d6b436d1..d23235ce9ad8 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -6372,6 +6372,7 @@ struct wireless_dev {
+ 	struct net_device *bond_netdev;
+ 	bool ml_netdev;
+ 
++	int ppe_rfs_num;
+ 	u32 identifier;
+ 
+ 	struct list_head mgmt_registrations;
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index 4aa5a49af54d..44ec79edbfce 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -882,8 +882,8 @@ static int ieee80211_stop(struct net_device *dev)
+ #endif
+ 
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+-	/* Free VP port here for PPE_VP mode or RFS Mode for VLANs */
+-	if ((ppe_vp_accel || ppe_vp_rfs) && sdata->vif.ppe_vp_num != -1) {
++	/* Free VP port here for PPE_VP mode */
++	if (ppe_vp_accel && sdata->vif.ppe_vp_num != -1) {
+ 		ppe_vp_free(sdata->vif.ppe_vp_num);
+ 		sdata_info(sdata, "Destroyed PPE VP port no:%d for dev:%s\n",
+ 			   sdata->vif.ppe_vp_num, dev->name);
+@@ -1717,6 +1717,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
+ 		vp = ieee80211_ppe_vp_802_3_redir_vap(sdata, dev);
+ 		if (vp > 0) {
+ 			sdata->vif.ppe_vp_num = vp;
++			wdev->ppe_rfs_num = vp;
+ 			sdata_info(sdata, "Allocated vp:%d for device:%s\n",
+ 				   sdata->vif.ppe_vp_num, dev->name);
+ 		} else {
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+index de647e2ea63d..9e1f7a7036a8 100644
+--- a/net/wireless/core.c
++++ b/net/wireless/core.c
+@@ -66,6 +66,8 @@ EXPORT_SYMBOL(g_bonded_interface_model);
+ int (*driver_bond_dev_cb)(struct wireless_dev *wdev, struct net_device *dev, bool is_register);
+ EXPORT_SYMBOL(driver_bond_dev_cb);
+ #endif
++void (*driver_rfs_vp_cleanup_cb)(struct net_device *dev, int ppe_vp_num);
++EXPORT_SYMBOL(driver_rfs_vp_cleanup_cb);
+ 
+ struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
+ {
+@@ -1412,9 +1414,25 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
+ 
+ 	if (wdev->netdev) {
+ 		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
+-		if (unregister_netdev)
++		if (unregister_netdev) {
++			/* NOTE: PPE driver expects ppe_vp_free to be done only after
++			 * interface removal from  bridge and flow rule cleanup.
++			 * Currently this is achieved only through NETDEV_UNREGISTER due
++			 * to lack of syncronous flow rule cleanup APIs.
++			 * This holds reference to netdevice until ppe_vp_free is done.
++			 */
++			dev_hold(wdev->netdev);
++
+ 			unregister_netdevice(wdev->netdev);
+ 
++			if (*driver_rfs_vp_cleanup_cb && wdev->ppe_rfs_num > 0)
++				(*driver_rfs_vp_cleanup_cb)(wdev->netdev, wdev->ppe_rfs_num);
++
++			wdev->ppe_rfs_num = 0;
++			/* release any taken netdev reference for netdev cleanup */
++			dev_put(wdev->netdev);
++		}
++
+ #ifdef CPTCFG_MAC80211_BONDED_SUPPORT
+ 		if (wdev->bond_netdev) {
+ 			if (wdev->iftype == NL80211_IFTYPE_MESH_POINT ||

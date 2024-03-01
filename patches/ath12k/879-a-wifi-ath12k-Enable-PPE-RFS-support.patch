@@ -54,9 +54,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  void ath12k_disable_ppe_for_link_netdev(struct ath12k_base *ab,
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -79,6 +79,16 @@ module_param_named(erp_support, ath12k_e
+@@ -77,6 +77,16 @@ bool ath12k_erp_support = false;
+ module_param_named(erp_support, ath12k_erp_support, bool, 0444);
  MODULE_PARM_DESC(erp_support, "ErP support (0 - disable, 1 - enable)");
- #endif /* CPTCFG_ATH12K_ERP_SUPPORT */
  
 +bool ath12k_ppe_rfs_support = true;
 +module_param_named(ppe_rfs_support, ath12k_ppe_rfs_support, bool, 0644);
@@ -71,11 +71,22 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  static DEFINE_MUTEX(ath12k_hw_lock);
  static struct list_head ath12k_hw_groups = LIST_HEAD_INIT(ath12k_hw_groups);
  
+@@ -4243,8 +4253,9 @@ static int ath12k_init(void)
+ 	if (ath12k_erp_support && ath12k_erp_init())
+ 		goto error_pci;
+ 
+-	return 0;
++	driver_rfs_vp_cleanup_cb = ath12k_ppe_rfs_cleanup;
+ 
++	return 0;
+ error_pci:
+ 	ath12k_pci_exit();
+ error_ahb:
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -50,6 +50,9 @@
- 
+@@ -51,6 +51,9 @@
  extern unsigned int ath12k_frame_mode;
+ extern bool ath12k_erp_support;
  
 +#define ATH12K_MAX_CORE_MASK	(0xFFFF & ((1 << NR_CPUS) - 1))
 +extern unsigned int ath12k_rfs_core_mask[4];
@@ -83,7 +94,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #define ATH12K_PHY_2GHZ "phy00"
  #define ATH12K_PHY_5GHZ "phy01"
  #define ATH12K_PHY_5GHZ_LOW "phy01"
-@@ -506,10 +509,14 @@ struct ath12k_vif {
+@@ -507,10 +510,14 @@ struct ath12k_vif {
  #ifdef CPTCFG_ATH12K_DEBUGFS
  	struct dentry *debugfs_linkstats;
  	struct dentry *debugfs_primary_link;
@@ -99,6 +110,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  struct ath12k_vif_iter {
  	u32 vdev_id;
+@@ -1861,6 +1868,7 @@ static inline const char *ath12k_bus_str
+ 
+ int ath12k_pci_init(void);
+ void ath12k_pci_exit(void);
++extern void (*driver_rfs_vp_cleanup_cb)(struct net_device *dev, int ppe_vp_num);
+ #ifdef CPTCFG_ATH12K_AHB
+ int ath12k_ahb_init(void);
+ void ath12k_ahb_exit(void);
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
 @@ -17,6 +17,7 @@
@@ -109,7 +128,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  static struct dentry *debugfs_ath12k;
  
-@@ -5494,6 +5495,65 @@ static const struct file_operations ath1
+@@ -5495,6 +5496,65 @@ static const struct file_operations ath1
  	.llseek = default_llseek,
  };
  
@@ -175,7 +194,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  void ath12k_debugfs_add_interface(struct ath12k_link_vif *arvif)
  {
  	struct ath12k_vif *ahvif = arvif->ahvif;
-@@ -5581,6 +5641,12 @@ void ath12k_debugfs_add_interface(struct
+@@ -5582,6 +5642,12 @@ void ath12k_debugfs_add_interface(struct
  		ahvif->debugfs_linkstats = NULL;
  	}
  
@@ -188,7 +207,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	/* Note: Add new AP mode only debugfs file before "ap_and_sta_debugfs_file" label.
  	 * Add new debugfs file for both AP and STA mode after the "ap_and_sta_debugfs_file"
  	 * label.
-@@ -5611,6 +5677,9 @@ void ath12k_debugfs_remove_interface(str
+@@ -5612,6 +5678,9 @@ void ath12k_debugfs_remove_interface(str
  	debugfs_remove(ahvif->debugfs_primary_link);
  	ahvif->debugfs_primary_link = NULL;
  
@@ -208,36 +227,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
  #include "bondif.h"
  #endif
-@@ -7484,9 +7485,10 @@ static int ath12k_mac_handle_link_sta_st
- {
- 	struct ath12k *ar = arvif->ar;
- 	struct ieee80211_vif *vif = arvif->ahvif->vif;
-+	struct ath12k_vif *ahvif = arvif->ahvif;
- 	struct ath12k_sta *ahsta = arsta->ahsta;
- 	struct ieee80211_sta *sta;
--	int ret = 0;
-+	int ret = 0, ppe_rfs_core_mask;
- 
- 	if (!ar) {
- 		ath12k_err(NULL, "unable to determine device to set sta state\n");
-@@ -7541,6 +7543,16 @@ static int ath12k_mac_handle_link_sta_st
- 
- 		ath12k_dp_peer_default_route_setup(ar, arvif, arsta);
- 
-+		if (arvif->ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
-+			ppe_rfs_core_mask = ath12k_ppeds_get_core_mask(vif, ar);
-+
-+			if (arvif->ahvif->ppe_rfs_vp_num == ATH12K_INVALID_PPE_RFS_VP_NUM) {
-+				ret = ath12k_enable_ppe_rfs(ar->ab, ahvif, ar, NULL);
-+				if (ret)
-+					ath12k_warn(ar->ab, "Failed to enable ppe rfs\n");
-+			}
-+		}
-+
- 		if (vif->type == NL80211_IFTYPE_AP ||
- 		    vif->type == NL80211_IFTYPE_MESH_POINT ||
- 		    vif->type == NL80211_IFTYPE_ADHOC) {
-@@ -11230,7 +11242,7 @@ static int ath12k_mac_op_add_interface(s
+@@ -11255,7 +11256,7 @@ static int ath12k_mac_op_add_interface(s
  {
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
  	struct ath12k_hw *ah = hw->priv;
@@ -246,7 +236,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	/* The ar in which this vif will be assigned can be determined since
  	 * it depends on the channel in which the vif is brought up.
-@@ -11241,6 +11253,11 @@ static int ath12k_mac_op_add_interface(s
+@@ -11266,6 +11267,11 @@ static int ath12k_mac_op_add_interface(s
  	 */
  
  	mutex_lock(&ah->conf_mutex);
@@ -258,13 +248,14 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	memset(ahvif, 0, sizeof(*ahvif));
  
  	ahvif->vdev_type = vif->type;
-@@ -11250,6 +11267,14 @@ static int ath12k_mac_op_add_interface(s
+@@ -11275,6 +11281,15 @@ static int ath12k_mac_op_add_interface(s
  	ahvif->deflink.ahvif = ahvif;
  	ahvif->deflink.link_id = 0;
  	ahvif->mcbc_gsn = 0;
 +
 +	if (ppe_rfs_vp_num == ATH12K_INVALID_PPE_RFS_VP_NUM) {
 +		ahvif->ppe_rfs_vp_num = ATH12K_INVALID_PPE_RFS_VP_NUM;
++		ath12k_enable_ppe_rfs(ahvif, NULL);
 +	} else {
 +		ahvif->ppe_rfs_vp_num = ppe_rfs_vp_num;
 +		ahvif->ppe_rfs_core_mask = ppe_rfs_core_mask;
@@ -273,47 +264,50 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	INIT_LIST_HEAD(&ahvif->deflink.list);
  	INIT_WORK(&ahvif->deflink.update_obss_color_notify_work,
  		  ath12k_update_obss_color_notify_work);
-@@ -11413,6 +11438,9 @@ static void ath12k_mac_op_remove_interfa
+@@ -11470,6 +11485,8 @@ static void ath12k_mac_op_remove_interfa
+ 		ath12k_mac_unassign_link_vif(arvif);
+ 	}
  
- 	mutex_lock(&ah->conf_mutex);
++	/* NOTE: ppe vp corresponding to ahvif will be freed after
++	 * unregister_netdev */
+ 	mutex_unlock(&ah->conf_mutex);
+ }
  
-+	if (ahvif->ppe_rfs_vp_num != ATH12K_INVALID_PPE_RFS_VP_NUM)
-+		ath12k_disable_ppe_rfs(NULL, ahvif);
-+
- 	for_each_set_bit(link_id, &ahvif->links_map, ATH12K_NUM_MAX_LINKS) {
- 		arvif = ahvif->link[link_id];
- 
-@@ -13435,6 +13463,13 @@ ath12k_mac_op_assign_vif_chanctx(struct
- 
- 	ab = ar->ab;
- 
-+	/* TODO: check which scenarios has IBSS set for vdev_type */
-+	if ((ahvif->vdev_type == WMI_VDEV_TYPE_AP ||
-+	     ahvif->vdev_type == WMI_VDEV_TYPE_IBSS) &&
-+	     ahvif->ppe_rfs_vp_num == ATH12K_INVALID_PPE_RFS_VP_NUM) {
-+		ath12k_enable_ppe_rfs(ab, ahvif, ar, NULL);
-+	}
-+
- 	mutex_lock(&ar->conf_mutex);
- 
- 	ath12k_dbg(ab, ATH12K_DBG_MAC,
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -1269,3 +1269,128 @@ void ath12k_dp_srng_ppeds_cleanup(struct
+@@ -24,6 +24,15 @@ extern int g_bonded_interface_model;
+ 
+ static atomic_t num_ppeds_nodes;
+ 
++void ath12k_ppe_rfs_cleanup(struct net_device *dev, int ppe_rfs_num)
++{
++	if (ppe_rfs_num > 0) {
++
++		ath12k_info(NULL, "ppe_vp_free for %d\n", ppe_rfs_num);
++		ppe_vp_free(ppe_rfs_num);
++	}
++}
++
+ extern struct sk_buff *
+ ath12k_dp_ppeds_tx_release_desc_nolock(struct ath12k_dp *dp,
+ 				struct ath12k_ppeds_tx_desc_info *tx_desc,
+@@ -1269,3 +1278,132 @@ void ath12k_dp_srng_ppeds_cleanup(struct
  	ath12k_dp_srng_cleanup(ab, &dp->ppeds_comp_ring.ppe_wbm2sw_ring);
  }
  
-+int ath12k_ppeds_get_core_mask(struct ieee80211_vif *vif,
-+			       struct ath12k *ar)
++int ath12k_ppeds_get_core_mask(struct ath12k_vif *ahvif)
 +{
-+	struct ath12k_pdev *pdev = ar->pdev;
++	struct ath12k_pdev *pdev;
++	struct ath12k *ar = ahvif->ah->radio;
 +	int core_mask;
 +
++
 +	/* MLO case */
-+	if (ar->ab->ag->mlo_capable)
++	if (ath12k_mlo_capable)
 +		return ATH12K_PPE_RFS_DEFAULT_CORE_MASK;
 +
 +	/* SLO case */
++	pdev = ar->pdev;
 +	if (pdev->cap.supported_bands & WMI_HOST_WLAN_2G_CAP)
 +		core_mask = ATH12K_PPE_RFS_2GHZ_CORE_MASK;
 +	else if (pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP &&
@@ -355,7 +349,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +	ath12k_disable_ppe_rfs(ab, ahvif);
 +
-+	ret = ath12k_enable_ppe_rfs(ab, ahvif, ahvif->deflink.ar, &core_mask);
++	ret = ath12k_enable_ppe_rfs(ahvif, &core_mask);
 +	if (ret) {
 +		ath12k_warn(ab, "error in enabling ppe vp for netdev %s\n",
 +			    wdev->netdev->name);
@@ -383,12 +377,11 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	ath12k_info(NULL,
 +		    "Destroyed PASSIVE PPE VP port no:%d for dev:%s\n",
 +		    ahvif->ppe_rfs_vp_num, wdev->netdev->name);
++	wdev->ppe_rfs_num = 0;
 +	ahvif->ppe_rfs_vp_num = ATH12K_INVALID_PPE_RFS_VP_NUM;
 +}
 +
-+int ath12k_enable_ppe_rfs(struct ath12k_base *ab,
-+			  struct ath12k_vif *ahvif,
-+			  struct ath12k *ar,
++int ath12k_enable_ppe_rfs(struct ath12k_vif *ahvif,
 +			  int *core_mask)
 +{
 +	struct ppe_vp_ai vpai;
@@ -396,7 +389,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	struct wireless_dev *wdev = ieee80211_vif_to_wdev(ahvif->vif);
 +
 +	ahvif->ppe_rfs_vp_num = ATH12K_INVALID_PPE_RFS_VP_NUM;
-+	if (!ath12k_ppe_rfs_support || wdev->bond_netdev)
++	if (!ath12k_ppe_rfs_support || wdev->bond_netdev ||
++	    ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR ||
++	    !wdev->netdev)
 +		return 0;
 +
 +	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
@@ -409,19 +404,20 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	if (core_mask)
 +		vpai.core_mask = *core_mask;
 +	else
-+		vpai.core_mask = ath12k_ppeds_get_core_mask(ahvif->vif, ar);
++		vpai.core_mask = ath12k_ppeds_get_core_mask(ahvif);
 +
 +	ppe_vp_num = ppe_vp_alloc(wdev->netdev, &vpai);
 +	if (ppe_vp_num <= 0) {
-+		ath12k_err(ab, "Error in enabling PASSIVE VP for netdev %s\n",
++		ath12k_err(NULL, "Error in enabling PASSIVE VP for netdev %s\n",
 +			   wdev->netdev->name);
 +		return -ENOSR;
 +	}
 +
 +	ahvif->ppe_rfs_vp_num = ppe_vp_num;
 +	ahvif->ppe_rfs_core_mask = vpai.core_mask;
++	wdev->ppe_rfs_num = ppe_vp_num;
 +
-+	ath12k_info(ab,
++	ath12k_info(NULL,
 +		    "Enabling PASSIVE VP for ahvif %p dev %s vp_num %d core_mask 0x%x\n",
 +		    ahvif, wdev->netdev->name,
 +		    ahvif->ppe_rfs_vp_num, ahvif->ppe_rfs_core_mask);
@@ -430,7 +426,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +}
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
-@@ -8,6 +8,17 @@
+@@ -8,6 +8,18 @@
  
  #define ATH12K_PPEDS_DEFAULT_POOL_ID 0
  
@@ -444,23 +440,29 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +#define ATH12K_INVALID_PPE_RFS_VP_NUM -1
 +extern bool ath12k_ppe_rfs_support;
++extern unsigned int ath12k_mlo_capable;
 +
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  
  #define ATH12K_DP_PPEDS_NAPI_DONE_BIT	1
-@@ -48,4 +59,16 @@ void ath12k_dp_ppeds_interrupt_start(str
+@@ -18,6 +30,7 @@ struct dp_ppe_ds_idxs {
+ 	u32 reo2ppe_start_idx;
+ };
+ 
++void ath12k_ppe_rfs_cleanup(struct net_device *dev, int ppe_rfs_num);
+ void ath12k_dp_srng_ppeds_cleanup(struct ath12k_base *ab);
+ int ath12k_dp_srng_ppeds_setup(struct ath12k_base *ab);
+ int ath12k_dp_ppeds_register_soc(struct ath12k_dp *dp,
+@@ -48,4 +61,13 @@ void ath12k_dp_ppeds_interrupt_start(str
  void ath12k_ppeds_partner_link_start_queues(struct ath12k *ar);
  void ath12k_ppeds_partner_link_stop_queues(struct ath12k *ar);
  #endif
 +
-+int ath12k_ppeds_get_core_mask(struct ieee80211_vif *vif,
-+			       struct ath12k *ar);
++int ath12k_ppeds_get_core_mask(struct ath12k_vif *ahvif);
 +int ath12k_change_core_mask_for_ppe_rfs(struct ath12k_base *ab,
 +					struct ath12k_vif *ahvif,
 +					int core_mask);
-+int ath12k_enable_ppe_rfs(struct ath12k_base *ab,
-+			  struct ath12k_vif *ahvif,
-+			  struct ath12k *ar,
++int ath12k_enable_ppe_rfs(struct ath12k_vif *ahvif,
 +			  int *core_mask);
 +void ath12k_disable_ppe_rfs(struct ath12k_base *ab, struct ath12k_vif *ahvif);
 +
