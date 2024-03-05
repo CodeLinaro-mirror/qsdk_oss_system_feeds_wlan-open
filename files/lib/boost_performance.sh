@@ -906,7 +906,69 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
+			ap-mi01.03-c3)
+				tc qdisc replace dev eth0 root noqueue
+				tc qdisc replace dev eth1 root noqueue
 
+				ethtool -K eth0 gro off
+				ethtool -K eth0 gso off
+				ethtool -K eth1 gro off
+				ethtool -K eth1 gso off
+
+				ssdk_sh fdb learnCtrl set disable
+				ssdk_sh fdb entry flush 1
+
+				sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+				sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+				echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+
+				/etc/init.d/firewall stop
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+				#5G/6G reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+				#For 2G reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/stats_disable
+
+				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					tc qdisc replace dev wlan0_b root noqueue
+					tc qdisc replace dev wlan0_l0 root noqueue
+					tc qdisc replace dev wlan0_l1 root noqueue
+					tc qdisc replace dev wlan0_l2 root noqueue
+
+					tc qdisc replace dev eth0 root noqueue
+					tc qdisc replace dev eth1 root noqueue
+					tc qdisc replace dev eth2 root noqueue
+					tc qdisc replace dev eth3 root noqueue
+					tc qdisc replace dev eth4 root noqueue
+					tc qdisc replace dev eth5 root noqueue
+
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
+				tc qdisc replace dev wlan0 root noqueue
+				tc qdisc replace dev wlan1 root noqueue
+				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#no settings
+				;;
 			*)
 				#no settings
 				;;
