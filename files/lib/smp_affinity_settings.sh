@@ -1497,7 +1497,9 @@ enable_smp_affinity_wifi() {
 					;;
 			ap-al02-c4 | \
 			ap-al02-c8 | \
-			ap-al02-c10)
+			ap-al02-c10 | \
+			ap-al05 | \
+			ap-al06)
 					#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 					enable_affinity_al02_c4
 					;;
@@ -1509,7 +1511,8 @@ enable_smp_affinity_wifi() {
 					#case for rdp454 (QCN9274 (2.4 and 5 Low) + QCN9274 (5 High and 6 GHz))
 					enable_affinity_al02_c9
 					;;
-			ap-mi01.2)
+			ap-mi01.2 | \
+			mi01.2-c2)
 					#for RDP441 (IPQ5332(2.4GHz) + QCN9274(5 and 6 GHz))
 					enable_affinity_mi01_2
 					;;
