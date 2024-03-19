@@ -167,7 +167,8 @@ boost_performance() {
 				echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/rx_hash
 
 				;;
-			ap-al02-c4)
+			ap-al02-c4 | \
+			ap-al05)
 				tc qdisc replace dev eth0 root noqueue
 				tc qdisc replace dev eth1 root noqueue
 				tc qdisc replace dev eth2 root noqueue
@@ -252,7 +253,8 @@ boost_performance() {
 				#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 
 				;;
-			ap-al02-c6)
+			ap-al02-c6 | \
+			ap-al06)
 				#rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 
 				tc qdisc replace dev eth0 root noqueue
@@ -415,7 +417,8 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 
 				;;
-			ap-mi01.2)
+			ap-mi01.2 | \
+			ap-mi01.2-c2)
 				tc qdisc replace dev eth0 root noqueue
 				tc qdisc replace dev eth1 root noqueue
 
