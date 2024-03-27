@@ -395,7 +395,7 @@ enable_affinity_al02_c4() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for al02_c4" > /dev/ttyMSM0
 
@@ -601,7 +601,7 @@ enable_affinity_al02_c9() {
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for al02_c9" > /dev/ttyMSM0
 
@@ -739,7 +739,7 @@ enable_affinity_mi01_2() {
 	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_2" > /dev/ttyMSM0
 
@@ -848,7 +848,7 @@ enable_affinity_mi01_6() {
         irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_6" > /dev/ttyMSM0
 
@@ -944,7 +944,7 @@ enable_affinity_mi01_3() {
 
 
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3" > /dev/ttyMSM0
 
@@ -1039,7 +1039,7 @@ enable_affinity_mi01_3_c2() {
         irq_affinity_num=`grep -E -m1 'pcic1_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3_c2" > /dev/ttyMSM0
 
@@ -1114,7 +1114,7 @@ enable_affinity_mi01_3_c3() {
 	irq_affinity_num=`grep -E -m1 'pcic1_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3_c3" > /dev/ttyMSM0
 
@@ -1280,7 +1280,7 @@ enable_affinity_mi01_14() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_14" > /dev/ttyMSM0
 
@@ -1408,7 +1408,7 @@ enable_affinity_mi01_12() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	enable_affinity_for_ds=$(cat /sys/module/cfg80211/parameters/g_bonded_interface_model)
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
 	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
 		echo "Configure Affinity for PPE DS for mi01_12" > /dev/ttyMSM0
 

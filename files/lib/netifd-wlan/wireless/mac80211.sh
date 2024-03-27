@@ -1626,40 +1626,6 @@ drv_mac80211_cleanup() {
 	hostapd_common_cleanup
 }
 
-mac80211_update_bondif() {
-	local iflist
-	config_load wireless
-	mac80211_get_wifi_mlds() {
-		append _mlds $1
-	}
-
-	config_foreach mac80211_get_wifi_mlds wifi-mld
-
-	if [ -z "$_mlds" ]; then
-		return
-	fi
-	for _mld in $_mlds
-	do
-		config_get mld_ifname "$_mld" ifname
-		config_get is_bonded "$_mld" bonded
-		mac80211_export_mld_info
-		#Check if ppe_ds_enable is set and then update the bondif
-		if ([ $mld_vaps_count -ge 2 ] && [ -n $mld_ifname ]); then
-			cmd="ls /sys/class/net"
-			iface=$($cmd | grep "$mld_ifname"_b)
-			if ([ -d /sys/class/net/"$mld_ifname"_b ] && [ -n $network_bridge ]); then
-				bonded_macaddr=$(iw dev $mld_ifname info | grep addr | head -1 | awk '{print $2}')
-				brctl delif $network_bridge $mld_ifname
-				brctl addif $network_bridge "$mld_ifname"_b
-				ifconfig "$mld_ifname"_b down
-				ifconfig "$mld_ifname"_b hw ether $bonded_macaddr
-				ifconfig "$mld_ifname"_b up
-			fi
-		fi
-	done
-	return
-}
-
 drv_mac80211_setup() {
 	local device=$1
 	# Note: In case of single wiphy, the device name would be radio#idx_band#bid
@@ -1941,12 +1907,6 @@ drv_mac80211_setup() {
 		. /lib/performance.sh
 	}
 	for_each_interface "ap mesh" mac80211_set_fq_limit
-	#Check if ppe_ds_enable is set and then update the bondif
-	if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
-		mac80211_update_bondif
-	fi
-
-
 }
 
 _list_phy_interfaces() {
