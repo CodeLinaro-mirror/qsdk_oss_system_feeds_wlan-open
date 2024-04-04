@@ -1,0 +1,37 @@
+From 5a1ab3069d1ba204ee30e2bf1fc06aab33a0065a Mon Sep 17 00:00:00 2001
+From: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+Date: Fri, 12 Apr 2024 12:18:26 -0700
+Subject: [PATCH] wifi: mac80211: Add rtnl locks in cfg80211_event_work
+
+This change adds rtnl_locks to the event worker thread.
+During the bring down sequence, if there are EVENTS to be
+processed at the cfg layer, the worker thread works on the link specific
+netdevice in DS and it must have RTNL locks to release the
+netdevice to ensure there are no RTNL assertions.
+
+Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
+---
+ net/wireless/core.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+index aa9a707..57bde0b 100644
+--- a/net/wireless/core.c
++++ b/net/wireless/core.c
+@@ -353,9 +353,13 @@ static void cfg80211_event_work(struct work_struct *work)
+ 	rdev = container_of(work, struct cfg80211_registered_device,
+ 			    event_work);
+ 
++	if (g_bonded_interface_model)
++		rtnl_lock();
+ 	wiphy_lock(&rdev->wiphy);
+ 	cfg80211_process_rdev_events(rdev);
+ 	wiphy_unlock(&rdev->wiphy);
++	if (g_bonded_interface_model)
++		rtnl_unlock();
+ }
+ 
+ void cfg80211_destroy_ifaces(struct cfg80211_registered_device *rdev)
+-- 
+2.25.1
+
