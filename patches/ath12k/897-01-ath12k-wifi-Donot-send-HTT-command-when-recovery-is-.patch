@@ -1,0 +1,70 @@
+From ca23d54a504ab306fdbe32f8023fcfe36d121968 Mon Sep 17 00:00:00 2001
+From: Nandha Kishore Easwaran <quic_nandhaki@quicinc.com>
+Date: Tue, 9 Apr 2024 17:42:19 +0530
+Subject: [PATCH] ath12k: wifi: Donot send HTT command when recovery is in
+ progress
+
+Skip sending HTT command to invalidate FSE cache when recovery is
+in progress. This is required for mode1 recovery where one radio
+can recover without affecting the operation of other radios.
+
+When recovery is happening on one radio, update the rules only on other
+radios which are active. Once recovery is completed, Invalidate the full
+cache so that the radio which was under recovery gets updated with the
+latest set of FSE rules.
+
+Signed-off-by: Nandha Kishore Easwaran <quic_nandhaki@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index c0332ec..7a516f3 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -5992,6 +5992,10 @@ int ath12k_dp_rx_flow_add_entry(struct ath12k_base *ab,
+ 		if (!partner_ab)
+ 			continue;
+ 
++		/* Skip sending HTT command when recovery in progress */
++		if (test_bit(ATH12K_FLAG_RECOVERY, &partner_ab->dev_flags))
++			continue;
++
+ 		ret = ath12k_htt_rx_flow_fse_operation(partner_ab,
+ 						       DP_HTT_FST_CACHE_INVALIDATE_ENTRY,
+ 						       &flow_info->flow_tuple_info);
+@@ -6065,6 +6069,10 @@ int ath12k_dp_rx_flow_delete_entry(struct ath12k_base *ab,
+ 		if (!partner_ab)
+ 			continue;
+ 
++		/* Skip sending HTT command when recovery in progress */
++		if (test_bit(ATH12K_FLAG_RECOVERY, &partner_ab->dev_flags))
++			continue;
++
+ 		ret = ath12k_htt_rx_flow_fse_operation(partner_ab,
+ 						       DP_HTT_FST_CACHE_INVALIDATE_ENTRY,
+ 						       &flow_info->flow_tuple_info);
+@@ -6126,6 +6134,10 @@ int ath12k_dp_rx_flow_delete_all_entries(struct ath12k_base *ab)
+ 		if (!partner_ab)
+ 			continue;
+ 
++		/* Skip sending HTT command when recovery in progress */
++		if (test_bit(ATH12K_FLAG_RECOVERY, &partner_ab->dev_flags))
++			continue;
++
+ 		ret = ath12k_htt_rx_flow_fse_operation(partner_ab,
+ 						       DP_HTT_FST_CACHE_INVALIDATE_FULL,
+ 						       NULL);
+@@ -6189,4 +6201,9 @@ void ath12k_dp_rx_fst_init(struct ath12k_base *ab)
+ 
+ 	ath12k_dp_fst_core_map_init(ab);
+ 	ath12k_dp_rx_flow_send_fst_setup(ab, ab->ag->fst);
++	/* After fst setup, make sure that the DDR table and HW cache is in sync
++	 * by sending INVALIDATE FULL command. This is needed to avoid DDR
++	 * and HW cache going out of sync when one soc goes for a recovery.
++	 */
++	ath12k_htt_rx_flow_fse_operation(ab, DP_HTT_FST_CACHE_INVALIDATE_FULL, NULL);
+ }
+-- 
+2.34.1
+
