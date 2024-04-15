@@ -396,7 +396,7 @@ enable_affinity_al02_c4() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for al02_c4" > /dev/ttyMSM0
 
 		#RDP433  - Assign 5G and 2G bands to core 2 and
@@ -450,7 +450,7 @@ enable_affinity_al02_c4() {
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
 		##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
-		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci4_reo2ppe_\([0-9]*\).*/\1/p'`
+		ppeds_node=`grep pci1_reo2ppe_ /proc/interrupts | sed -n 's/.*pci1_reo2ppe_\([0-9]*\).*/\1/p'`
 		irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
 		[ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
 
@@ -540,7 +540,7 @@ enable_affinity_al02_c6() {
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for al02_c6" > /dev/ttyMSM0
 
 		#Assign 5G  to core 2 and
@@ -645,7 +645,7 @@ enable_affinity_al02_c9() {
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for al02_c9" > /dev/ttyMSM0
 
 		#For split wifi (RDP 454)  - Assign pci0 to core 2 and
@@ -783,7 +783,7 @@ enable_affinity_mi01_2() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_2" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 441) - Assign pci0(5G) to core 1 and
@@ -892,7 +892,7 @@ enable_affinity_mi01_6() {
         [ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_6" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 468) - Assign pci1 to Core 2
@@ -988,7 +988,7 @@ enable_affinity_mi01_3() {
 
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3" > /dev/ttyMSM0
 
 		#Assign 5G band to core 2 and
@@ -1083,7 +1083,7 @@ enable_affinity_mi01_3_c2() {
         [ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3_c2" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 477 / RDP 478) - Assign pci1(5G) to core 2
@@ -1158,7 +1158,7 @@ enable_affinity_mi01_3_c3() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_3_c3" > /dev/ttyMSM0
 
 		#Assign 5G band to core 2 and
@@ -1324,7 +1324,7 @@ enable_affinity_mi01_14() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_14" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 481) - Assign pcic1(5G) to core 1 and
@@ -1452,7 +1452,7 @@ enable_affinity_mi01_12() {
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
-	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == 'Y' ]; then
+	if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
 		echo "Configure Affinity for PPE DS for mi01_12" > /dev/ttyMSM0
 
 		# For Miami Board (RDP 479) - Assign pci1(5G) to core 1 and

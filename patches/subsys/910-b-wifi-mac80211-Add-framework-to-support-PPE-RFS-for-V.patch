@@ -32,6 +32,17 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #endif
  
  /**
+@@ -854,8 +858,8 @@ static int ieee80211_stop(struct net_dev
+ #endif
+ 
+ #ifdef CPTCFG_MAC80211_PPE_SUPPORT
+-	/* Free VP port here for PPE_VP mode */
+-	if (ppe_vp_accel && sdata->vif.ppe_vp_num != -1) {
++	/* Free VP port here for PPE_VP mode or RFS Mode for VLANs */
++	if ((ppe_vp_accel || ppe_vp_rfs) && sdata->vif.ppe_vp_num != -1) {
+ 		ppe_vp_free(sdata->vif.ppe_vp_num);
+ 		sdata_info(sdata, "Destroyed PPE VP port no:%d for dev:%s\n",
+ 			   sdata->vif.ppe_vp_num, dev->name);
 @@ -1371,18 +1375,30 @@ static int ieee80211_ppe_vp_802_3_redir_
  	memset(&vpai, 0, sizeof(struct ppe_vp_ai));
  
@@ -69,20 +80,16 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	return vp;
  }
  #endif
-@@ -1667,10 +1683,12 @@ int ieee80211_do_open(struct wireless_de
+@@ -1667,7 +1683,8 @@ int ieee80211_do_open(struct wireless_de
  #endif
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
 -	if (ppe_vp_accel) {
 +	/* for PPE RFS, driver handles VP allocation for non VLAN interfaces */
-+	if (ppe_vp_accel || (ppe_vp_rfs && sdata->vif.type == NL80211_IFTYPE_AP_VLAN)) {
++	if ((ppe_vp_accel || ppe_vp_rfs) && sdata->vif.ppe_vp_num != -1) {
  		vp = ieee80211_ppe_vp_802_3_redir_vap(sdata, dev);
  		if (vp > 0) {
  			sdata->vif.ppe_vp_num = vp;
-+			wdev->ppe_rfs_num = vp;
- 			sdata_info(sdata, "Allocated vp:%d for device:%s\n",
- 				   sdata->vif.ppe_vp_num, dev->name);
- 		} else {
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
 @@ -5017,7 +5017,10 @@ static void ieee80211_rx_8023(struct iee
@@ -97,50 +104,3 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		ieee80211_netif_rx_ppe(rx, skb);
  		atomic_inc(&sta->rx_netif_pkts);
  		return;
---- a/include/net/cfg80211.h
-+++ b/include/net/cfg80211.h
-@@ -6368,6 +6368,7 @@ struct wireless_dev {
- 	struct list_head list;
- 	struct net_device *netdev;
- 
-+	int ppe_rfs_num;
- 	u32 identifier;
- 
- 	struct list_head mgmt_registrations;
---- a/net/wireless/core.c
-+++ b/net/wireless/core.c
-@@ -53,6 +53,8 @@ static bool cfg80211_disable_40mhz_24ghz
- module_param(cfg80211_disable_40mhz_24ghz, bool, 0644);
- MODULE_PARM_DESC(cfg80211_disable_40mhz_24ghz,
- 		 "Disable 40MHz support in the 2.4GHz band");
-+void (*driver_rfs_vp_cleanup_cb)(struct net_device *dev, int ppe_vp_num);
-+EXPORT_SYMBOL(driver_rfs_vp_cleanup_cb);
- 
- struct cfg80211_registered_device *cfg80211_rdev_by_wiphy_idx(int wiphy_idx)
- {
-@@ -1387,8 +1389,24 @@ static void _cfg80211_unregister_wdev(st
- 
- 	if (wdev->netdev) {
- 		sysfs_remove_link(&wdev->netdev->dev.kobj, "phy80211");
--		if (unregister_netdev)
-+		if (unregister_netdev) {
-+			/* NOTE: PPE driver expects ppe_vp_free to be done only after
-+			 * interface removal from  bridge and flow rule cleanup.
-+			 * Currently this is achieved only through NETDEV_UNREGISTER due
-+			 * to lack of syncronous flow rule cleanup APIs.
-+			 * This holds reference to netdevice until ppe_vp_free is done.
-+			 */
-+			dev_hold(wdev->netdev);
-+
- 			unregister_netdevice(wdev->netdev);
-+
-+			if (*driver_rfs_vp_cleanup_cb && wdev->ppe_rfs_num > 0)
-+				(*driver_rfs_vp_cleanup_cb)(wdev->netdev, wdev->ppe_rfs_num);
-+
-+			wdev->ppe_rfs_num = 0;
-+			/* release any taken netdev reference for netdev cleanup */
-+			dev_put(wdev->netdev);
-+		}
- 	}
- 
- 	list_del_rcu(&wdev->list);
