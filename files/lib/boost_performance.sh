@@ -255,7 +255,7 @@ boost_performance() {
 				;;
 			ap-al02-c6 | \
 			ap-al06)
-				#rdp433 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
+				#rdp476 (IPQ9574(2.4 GHz) + QCN9274(5 and 6 GHz))
 
 				tc qdisc replace dev eth0 root noqueue
 				tc qdisc replace dev eth1 root noqueue
@@ -282,29 +282,27 @@ boost_performance() {
 					soc=`ls  /sys/kernel/debug/ath12k/ | head -1 |awk '{print substr($0,0,13)}' | awk '{print $2}'`
 					case $soc in
 						"hw1.0")
-							echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix2
-							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/rx_hash_ix3
-							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+							echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/stats_disable
+							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
 							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/stats_disable
 							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0004\:01\:00.0/stats_disable
 							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/stats_disable
 							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath11k/ipq9574/stats_disable
 
 						;;
 						"hw2.0")
-							echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix2
-							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/rx_hash_ix3
-							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix2
+							echo 0x33333333 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix2
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/rx_hash_ix3
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/stats_disable
+							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix2
+							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix3
 							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/stats_disable
 							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0004\:01\:00.0/stats_disable
 							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/stats_disable
 							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath11k/ipq9574/stats_disable
 
 						;;
 					esac
