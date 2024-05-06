@@ -5,9 +5,12 @@ Subject: [PATCH 2/2] ath12k: wifi: Remove error prints on flow add/del failure
 
 Remove error prints on flow addition or deletion failure and record
 them via stats in the fst table. This is required to avoid console
-flooding when very high number of flows are added.
+flooding when very high number of flows are added. Also, remove the
+warn_on() when ab is NULL. This is required when ECM module detects
+the flow on ath11k and calls the fse rule addition in ath12k.
 
 Signed-off-by: Nandha Kishore Easwaran <quic_nandhaki@quicinc.com>
+Signed-off-by: Nithyanantham Paramasivam <quic_nithp@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/debugfs.c |  8 +++++
  drivers/net/wireless/ath/ath12k/dp_rx.c   | 42 +++++++++++++----------
@@ -16,15 +19,12 @@ Signed-off-by: Nandha Kishore Easwaran <quic_nandhaki@quicinc.com>
  drivers/net/wireless/ath/ath_fse.c        | 10 +++---
  5 files changed, 43 insertions(+), 25 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index 927b725..6e6db7e 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2653,6 +2653,14 @@ static ssize_t ath12k_dump_fst_flow_stats(struct file *file,
- 			"\nNo of IPv6 Flow entries inserted: %u\n",
+@@ -2654,6 +2654,14 @@ static ssize_t ath12k_dump_fst_flow_stat
  			ab->ag->fst->ipv6_fse_rule_cnt);
  
-+	len += scnprintf(buf + len, size - len,
+ 	len += scnprintf(buf + len, size - len,
 +			"\nFlow addition failure: %u\n",
 +			ab->ag->fst->flow_add_fail);
 +
@@ -32,14 +32,13 @@ index 927b725..6e6db7e 100644
 +			"\nFlow deletion failure: %u\n",
 +			ab->ag->fst->flow_del_fail);
 +
- 	len += scnprintf(buf + len, size - len,
++	len += scnprintf(buf + len, size - len,
  			"\nNo of Flows per reo:\n0:%u\t1:%u\t2:%u\t3:%u\n",
  			ab->ag->fst->flows_per_reo[0],
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index 7a516f3..b13ec69 100644
+ 			ab->ag->fst->flows_per_reo[1],
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -5826,20 +5826,20 @@ void ath12k_dp_rx_flow_dump_flow_entry(struct ath12k_base *ab,
+@@ -5826,20 +5826,20 @@ void ath12k_dp_rx_flow_dump_flow_entry(s
  				       struct dp_rx_fst *fst,
  				       struct hal_flow_tuple_info *tuple_info)
  {
@@ -74,7 +73,7 @@ index 7a516f3..b13ec69 100644
  }
  
  u32 ath12k_dp_rx_flow_compute_flow_hash(struct ath12k_base *ab,
-@@ -5880,7 +5880,8 @@ ath12k_dp_rx_flow_find_entry_by_tuple(struct ath12k_base *ab,
+@@ -5880,7 +5880,8 @@ ath12k_dp_rx_flow_find_entry_by_tuple(st
  						    &flow_info->flow_tuple_info,
  						    &flow_idx);
  	if (status != 0) {
@@ -84,7 +83,7 @@ index 7a516f3..b13ec69 100644
  		ath12k_dp_rx_flow_dump_flow_entry(ab, fst, &flow_info->flow_tuple_info);
  		return NULL;
  	}
-@@ -5922,7 +5923,7 @@ ath12k_dp_rx_flow_alloc_entry(struct ath12k_base *ab,
+@@ -5922,7 +5923,7 @@ ath12k_dp_rx_flow_alloc_entry(struct ath
  						 &flow_info->flow_tuple_info,
  						 &flow_idx);
  	if (status != 0) {
@@ -93,7 +92,7 @@ index 7a516f3..b13ec69 100644
  			   status, flow_hash);
  		return NULL;
  	}
-@@ -5966,8 +5967,9 @@ int ath12k_dp_rx_flow_add_entry(struct ath12k_base *ab,
+@@ -5966,8 +5967,9 @@ int ath12k_dp_rx_flow_add_entry(struct a
  	/* Allocate entry in DP FST */
  	fse = ath12k_dp_rx_flow_alloc_entry(ab, fst, flow_info, &flow);
  	if (!fse) {
@@ -104,7 +103,7 @@ index 7a516f3..b13ec69 100644
  		spin_unlock_bh(&fst->fst_lock);
  		return -ENOMEM;
  	}
-@@ -5982,6 +5984,7 @@ int ath12k_dp_rx_flow_add_entry(struct ath12k_base *ab,
+@@ -5982,6 +5984,7 @@ int ath12k_dp_rx_flow_add_entry(struct a
  		ath12k_err(ab, "Unable to alloc FSE entry");
  		ath12k_dp_rx_flow_dump_flow_entry(ab, fst, &flow_info->flow_tuple_info);
  		fse->is_valid = false;
@@ -112,7 +111,7 @@ index 7a516f3..b13ec69 100644
  		spin_unlock_bh(&fst->fst_lock);
  		return -EEXIST;
  	}
-@@ -6006,6 +6009,7 @@ int ath12k_dp_rx_flow_add_entry(struct ath12k_base *ab,
+@@ -6006,6 +6009,7 @@ int ath12k_dp_rx_flow_add_entry(struct a
  							  &flow_info->flow_tuple_info);
  			ath12k_hal_rx_flow_delete_entry(partner_ab, fse->hal_fse);
  			fse->is_valid = false;
@@ -120,7 +119,7 @@ index 7a516f3..b13ec69 100644
  			spin_unlock_bh(&fst->fst_lock);
  			return ret;
  		}
-@@ -6048,8 +6052,9 @@ int ath12k_dp_rx_flow_delete_entry(struct ath12k_base *ab,
+@@ -6048,8 +6052,9 @@ int ath12k_dp_rx_flow_delete_entry(struc
  
  	fse = ath12k_dp_rx_flow_find_entry_by_tuple(ab, fst, flow_info, &flow);
  	if (!fse || !fse->is_valid) {
@@ -131,7 +130,7 @@ index 7a516f3..b13ec69 100644
  		spin_unlock_bh(&fst->fst_lock);
  		return -EINVAL;
  	}
-@@ -6081,6 +6086,7 @@ int ath12k_dp_rx_flow_delete_entry(struct ath12k_base *ab,
+@@ -6081,6 +6086,7 @@ int ath12k_dp_rx_flow_delete_entry(struc
  				   ret);
  			ath12k_dp_rx_flow_dump_flow_entry(partner_ab, fst,
  							  &flow_info->flow_tuple_info);
@@ -139,8 +138,6 @@ index 7a516f3..b13ec69 100644
  			/* Do not add entry back in DP FSE and HAL FSE */
  			spin_unlock_bh(&fst->fst_lock);
  			return ret;
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.h b/drivers/net/wireless/ath/ath12k/dp_rx.h
-index 8720bbd..f0ac63c 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.h
 @@ -159,6 +159,8 @@ struct dp_rx_fst {
@@ -152,11 +149,9 @@ index 8720bbd..f0ac63c 100644
  	/* spinlock to prevent concurrent table access */
  	spinlock_t fst_lock;
  };
-diff --git a/drivers/net/wireless/ath/ath12k/hal_rx.c b/drivers/net/wireless/ath/ath12k/hal_rx.c
-index de7b44d..589eb5f 100644
 --- a/drivers/net/wireless/ath/ath12k/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/hal_rx.c
-@@ -1125,7 +1125,8 @@ int ath12k_hal_rx_find_flow_from_tuple(struct ath12k_base *ab,
+@@ -1125,7 +1125,8 @@ int ath12k_hal_rx_find_flow_from_tuple(s
  	}
  
  	if (i == fst->max_skid_length) {
@@ -166,7 +161,7 @@ index de7b44d..589eb5f 100644
  		return -ERANGE;
  	}
  
-@@ -1272,7 +1273,8 @@ int ath12k_hal_rx_insert_flow_entry(struct ath12k_base *ab, struct hal_rx_fst *f
+@@ -1272,7 +1273,8 @@ int ath12k_hal_rx_insert_flow_entry(stru
  	}
  
  	if (i == fst->max_skid_length) {
@@ -176,11 +171,20 @@ index de7b44d..589eb5f 100644
  		return -ERANGE;
  	}
  
-diff --git a/drivers/net/wireless/ath/ath_fse.c b/drivers/net/wireless/ath/ath_fse.c
-index bae038e..fc6af5d 100644
 --- a/drivers/net/wireless/ath/ath_fse.c
 +++ b/drivers/net/wireless/ath/ath_fse.c
-@@ -62,8 +62,8 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
+@@ -53,8 +53,8 @@ bool ath_fse_add_rule(struct ath_fse_flo
+ 	if (fse_info->src_dev->ieee80211_ptr) {
+ 		ab = fse_cb->fse_get_ab(fse_info->src_dev, fse_info->src_mac);
+ 		if (!ab) {
+-			pr_err("%s: Failed to add a rule in FST<ab NULL>",
+-			       netdev_name(fse_info->src_dev));
++			pr_debug("%s: Failed to add a rule in FST<ab NULL>",
++				 netdev_name(fse_info->src_dev));
+ 			return false;
+ 		}
+ 		ret = fse_cb->fse_rule_add(ab,
+@@ -62,16 +62,16 @@ bool ath_fse_add_rule(struct ath_fse_flo
  					   fse_info->dest_ip, fse_info->dest_port,
  					   fse_info->protocol, fse_info->version);
  		if (ret) {
@@ -191,7 +195,17 @@ index bae038e..fc6af5d 100644
  			return false;
  		}
  	}
-@@ -89,8 +89,8 @@ bool ath_fse_add_rule(struct ath_fse_flow_info *fse_info)
+ 	if (fse_info->dest_dev->ieee80211_ptr) {
+ 		ab = fse_cb->fse_get_ab(fse_info->dest_dev, fse_info->dest_mac);
+ 		if (!ab) {
+-			pr_err("%s: Failed to add a rule in FST<ab NULL>",
+-			       netdev_name(fse_info->dest_dev));
++			pr_debug("%s: Failed to add a rule in FST<ab NULL>",
++				 netdev_name(fse_info->dest_dev));
+ 			return false;
+ 		}
+ 		ret = fse_cb->fse_rule_add(ab,
+@@ -89,8 +89,8 @@ bool ath_fse_add_rule(struct ath_fse_flo
  						fse_info->dest_ip, fse_info->dest_port,
  						fse_info->protocol, fse_info->version);
  			}
@@ -202,7 +216,25 @@ index bae038e..fc6af5d 100644
  			return false;
  		}
  	}
-@@ -149,7 +149,7 @@ bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info)
+@@ -126,7 +126,7 @@ bool ath_fse_delete_rule(struct ath_fse_
+ 	if (fse_info->src_dev->ieee80211_ptr) {
+ 		ab = fse_cb->fse_get_ab(fse_info->src_dev, fse_info->src_mac);
+ 		if (!ab) {
+-			pr_err("Failed to delete a rule in FST<ab NULL>");
++			pr_debug("Failed to delete a rule in FST<ab NULL>");
+ 			return false;
+ 		}
+ 		fw_ret = fse_cb->fse_rule_delete(ab,
+@@ -138,7 +138,7 @@ bool ath_fse_delete_rule(struct ath_fse_
+ 	if (fse_info->dest_dev->ieee80211_ptr) {
+ 		ab = fse_cb->fse_get_ab(fse_info->dest_dev, fse_info->dest_mac);
+ 		if (!ab) {
+-			pr_err("Failed to delete a rule in FST<ab NULL>");
++			pr_debug("Failed to delete a rule in FST<ab NULL>");
+ 			return false;
+ 		}
+ 		rv_ret = fse_cb->fse_rule_delete(ab,
+@@ -149,7 +149,7 @@ bool ath_fse_delete_rule(struct ath_fse_
  	if (!fw_ret && !rv_ret)
  		return true;
  
@@ -211,6 +243,14 @@ index bae038e..fc6af5d 100644
  	return false;
  }
  EXPORT_SYMBOL(ath_fse_delete_rule);
--- 
-2.34.1
-
+--- a/drivers/net/wireless/ath/ath12k/fse.c
++++ b/drivers/net/wireless/ath/ath12k/fse.c
+@@ -67,7 +67,7 @@ void *ath12k_fse_get_ab_from_netdev(stru
+ 	for_each_set_bit(link_id, &ahvif->links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
+ 		arvif = ahvif->link[link_id];
+ 
+-		if (WARN_ON(!arvif))
++		if (!arvif)
+ 			continue;
+ 		ar = arvif->ar;
+ 		if (!ar)
