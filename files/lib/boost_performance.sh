@@ -622,6 +622,9 @@ boost_performance() {
 
                                     echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
                                     echo f > /proc/net/nf_conntrack
+                                    #Set PPE offload to eth1 and disable offload for all other ethernet port
+                                    #using this interface bitmasks
+                                    echo 2 > /proc/sys/ppe/ppe_drv/if_bm_to_offload
                                 fi
 
                                 tc qdisc replace dev wlan0 root noqueue
