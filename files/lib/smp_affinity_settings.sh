@@ -703,7 +703,7 @@ enable_affinity_mi01_2() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 4 tcl completions to last 4 CPUs
-	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -842,7 +842,7 @@ enable_affinity_mi01_6() {
         [ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
         #assign 4 tcl completions to last 4 CPUs
-        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
         irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -930,7 +930,7 @@ enable_affinity_mi01_3() {
         [ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
         #assign 4 tcl completions to last 4 CPUs
-        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
         irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -1045,7 +1045,7 @@ enable_affinity_mi01_3_c2() {
         [ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
         #assign 4 tcl completions to last 4 CPUs
-        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+        irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
         irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
         [ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -1121,7 +1121,7 @@ enable_affinity_mi01_3_c3() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 4 tcl completions to last 4 CPUs
-	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -1255,7 +1255,7 @@ enable_affinity_mi01_14() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 4 tcl completions to last 4 CPUs
-	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
@@ -1383,7 +1383,7 @@ enable_affinity_mi01_12() {
 	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#assign 4 tcl completions to last 4 CPUs
-	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ath-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
