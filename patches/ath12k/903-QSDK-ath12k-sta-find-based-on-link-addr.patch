@@ -1,0 +1,48 @@
+From ee9caf61f44ea9f1aa6f1e9cf4e0b04e06fa7a14 Mon Sep 17 00:00:00 2001
+From: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
+Date: Fri, 10 May 2024 10:47:11 +0530
+Subject: [PATCH] QSDK: ath12k: sta find based on link addr
+
+In TX completion, during QOS NULL frame handling, AP tries to find sta_info
+based on STA mld address(addr1) against AP link addr(addr2) and it's not
+able to find because the AP's link address will not match with sta mld.
+Only AP's mld address will match. So that, STA search gets failed and
+client disconnect happens due to DISASSOC_DUE_TO_INACTIVITY. Fix this issue
+by adding WAR on finding a sta through link address search.
+
+Patch-dependency: Iff2e6ae0 ("mac80211: support poll sta for ML clients")
+Fixes: Iff2e6ae0 ("mac80211: support poll sta for ML clients")
+
+Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
+---
+ net/mac80211/status.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/net/mac80211/status.c b/net/mac80211/status.c
+index 6c03cf5..52653a6 100644
+--- a/net/mac80211/status.c
++++ b/net/mac80211/status.c
+@@ -1093,12 +1093,19 @@ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
+ 		.info = IEEE80211_SKB_CB(skb),
+ 	};
+ 	struct sta_info *sta;
++	struct ieee80211_sta *link_sta;
+ 
+ 	rcu_read_lock();
+ 
+ 	sta = sta_info_get_by_addrs(local, hdr->addr1, hdr->addr2);
+-	if (sta)
++	if (!sta) {
++		link_sta = ieee80211_find_sta_by_link_addrs(local, hdr->addr1, NULL, NULL);
++		if (link_sta) {
++			status.sta = link_sta;
++		}
++	} else {
+ 		status.sta = &sta->sta;
++	}
+ 
+ 	ieee80211_tx_status_ext(hw, &status);
+ 	rcu_read_unlock();
+-- 
+2.17.1
+
