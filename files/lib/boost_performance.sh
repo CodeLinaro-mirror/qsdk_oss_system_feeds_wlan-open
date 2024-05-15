@@ -366,10 +366,10 @@ boost_performance() {
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0000\:01\:00.0/rx_hash_ix3
 							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/stats_disable
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/stats_disable
+							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0000\:01\:00.0/stats_disable
+							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0000\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/stats_disable
 
 						;;
 						"hw2.0")
@@ -377,10 +377,10 @@ boost_performance() {
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000\:01\:00.0/rx_hash_ix3
 							echo 0x21212121 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix2
 							echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix3
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001\:01\:00.0/stats_disable
-							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001\:01\:00.0/stats_disable
-							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003\:01\:00.0/stats_disable
+							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000\:01\:00.0/stats_disable
+							echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000\:01\:00.0/stats_disable
+							echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/stats_disable
 
 						;;
 					esac
