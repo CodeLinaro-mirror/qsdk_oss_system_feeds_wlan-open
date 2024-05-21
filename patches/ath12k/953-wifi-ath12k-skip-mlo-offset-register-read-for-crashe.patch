@@ -1,0 +1,64 @@
+From 919443ec44aeab7b37cc8734b8aa392073c4d6eb Mon Sep 17 00:00:00 2001
+From: Saravanakumar Duraisamy <quic_saradura@quicinc.com>
+Date: Tue, 21 May 2024 19:22:15 +0530
+Subject: [PATCH] wifi: ath12k: skip mlo offset register read for crashed radio
+
+In SSR MODE1 usecase after Q6 power down and between power up
+and server arrive when we access then we got NOC error from
+FW.
+
+As the interrupt received not for the crash radio but stil we
+tried to read the reg of crashed radio. Skipped the reg read based
+on ce pipe init because the ce pipe will not be initialize and
+no interrupted expected by the time and also reg read is not valid.
+
+Signed-off-by: Saravanakumar Duraisamy <quic_saradura@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.c  | 1 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 4 +---
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index de39b29..2522bf1 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -3705,6 +3705,7 @@ static void ath12k_core_reset(struct work_struct *work)
+ 		if (ab->hif.bus == ATH12K_BUS_PCI) {
+ 			ath12k_hif_power_down(ab);
+ 			ath12k_qmi_free_target_mem_chunk(ab);
++			ab->ce_pipe_init_done = false;
+ 			ath12k_hif_power_up(ab);
+ 		} else if (ab->hif.bus == ATH12K_BUS_AHB ||
+ 			   ab->hif.bus == ATH12K_BUS_HYBRID) {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 876de4f..cc5b861 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -27,7 +27,6 @@
+ #include <ppe_vp_tx.h>
+ #endif
+ 
+-
+ #define ATH12K_DP_RX_FRAGMENT_TIMEOUT_MS (2 * HZ)
+ 
+ static void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
+@@ -2104,7 +2103,7 @@ static void ath12k_htt_mlo_offset_event_handler(struct ath12k_base *ab,
+ 
+ 			pdev = &tmp_ab->pdevs[j];
+ 			tmp_ar = pdev->ar;
+-			if (!tmp_ar)
++			if (!tmp_ar || !tmp_ab->ce_pipe_init_done)
+ 				continue;
+ 
+ 			if (tmp_ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
+@@ -2113,7 +2112,6 @@ static void ath12k_htt_mlo_offset_event_handler(struct ath12k_base *ab,
+ 		}
+ 	}
+ 
+-
+ 	spin_unlock_bh(&ar->data_lock);
+ }
+ 
+-- 
+2.34.1
+
