@@ -1,0 +1,51 @@
+From 69cb47253031168d7fb972adba67ab9b6c746d04 Mon Sep 17 00:00:00 2001
+From: Saravanakumar Duraisamy <quic_saradura@quicinc.com>
+Date: Wed, 29 May 2024 12:38:34 +0530
+Subject: [PATCH] wifi: ath12k: skip mlo offset register read for crashed radio
+
+In SSR MODE1 use-case during Q6 power on sequence when host access
+the registers of WCSS crashed Q6 then host received NOC error
+from FW.
+
+During issue case host did not receive MLO timestamp offset interrupt
+for crashed Q6 but still host read the register of Q6. Skipped the
+reg read based on ce pipe init because the ce pipe will not be
+initialize and no interrupt expected by the time and
+also reg read on crashed Q6 is not valid.
+
+Patch-depdendency:784-04-ath12k-Add-SAWF-tx-delay-stats-support.patch
+
+Signed-off-by: Saravanakumar Duraisamy <quic_saradura@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.c  | 1 +
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 2 +-
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
+index 9fcc390..de1c0ba 100644
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -3664,6 +3664,7 @@ static void ath12k_core_reset(struct work_struct *work)
+ 		if (ab->hif.bus == ATH12K_BUS_PCI) {
+ 			ath12k_hif_power_down(ab);
+ 			ath12k_qmi_free_target_mem_chunk(ab);
++			ab->ce_pipe_init_done = false;
+ 			ath12k_hif_power_up(ab);
+ 		} else if (ab->hif.bus == ATH12K_BUS_AHB ||
+ 			   ab->hif.bus == ATH12K_BUS_HYBRID) {
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index a853618..51805ac 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -2110,7 +2110,7 @@ static void ath12k_htt_mlo_offset_event_handler(struct ath12k_base *ab,
+ 
+ 			pdev = &tmp_ab->pdevs[j];
+ 			tmp_ar = pdev->ar;
+-			if (!tmp_ar)
++			if (!tmp_ar || !tmp_ab->ce_pipe_init_done)
+ 				continue;
+ 
+ 			if (tmp_ab->hw_params->hal_ops->hal_get_tsf2_scratch_reg)
+-- 
+2.34.1
+
