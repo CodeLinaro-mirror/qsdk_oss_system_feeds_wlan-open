@@ -31,9 +31,21 @@ Signed-off-by: Sarika Sharma <quic_sarishar@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -11873,14 +11873,28 @@ static void ath12k_mgmt_rx_event(struct
+@@ -11799,6 +11799,8 @@ static void ath12k_mgmt_rx_event(struct
+ 	struct ath12k_mgmt_frame_stats *mgmt_stats;
+ 	u16 frm_type = 0;
+ 	struct ath12k_mgmt_rx_reo_frame_descriptor desc = {0};
++	struct ieee80211_sta *pubsta = NULL;
++	bool is_4addr_null_pkt = false;
+ 	bool is_queued = false;
+ 	int ret;
+ 
+@@ -11877,15 +11879,40 @@ static void ath12k_mgmt_rx_event(struct
+ 	hdr = (struct ieee80211_hdr *)skb->data;
  	fc = le16_to_cpu(hdr->frame_control);
  	frm_type = FIELD_GET(IEEE80211_FCTL_STYPE, fc);
++	is_4addr_null_pkt = ieee80211_is_nullfunc(hdr->frame_control) &&
++			    ieee80211_has_a4(hdr->frame_control);
  
 -	spin_lock_bh(&ab->base_lock);
 -
@@ -41,7 +53,11 @@ Signed-off-by: Sarika Sharma <quic_sarishar@quicinc.com>
 -	if(!peer)
 -		peer = ath12k_peer_find_by_addr(ab, hdr->addr3);
 -	if (!peer) {
-+	if (ieee80211_is_nullfunc(hdr->frame_control) && ieee80211_has_a4(hdr->frame_control)) {
++	if (ieee80211_is_data(hdr->frame_control) && !is_4addr_null_pkt) {
++		dev_kfree_skb(skb);
++		goto exit;
++	}
++	if (is_4addr_null_pkt) {
 +		spin_lock_bh(&ab->base_lock);
 +		peer = ath12k_peer_find_by_addr(ab, hdr->addr2);
 +		if (!peer)
@@ -51,10 +67,15 @@ Signed-off-by: Sarika Sharma <quic_sarishar@quicinc.com>
 +			dev_kfree_skb(skb);
 +			goto exit;
 +		}
-+		status->link_valid = 1;
++		pubsta = peer->sta;
++		if (pubsta && peer->sta->valid_links) {
++			status->link_valid = 1;
++			status->link_id = peer->link_id;
++		}
  		spin_unlock_bh(&ab->base_lock);
 -		goto skip_mgmt_stats;
-+		goto pass_up;
++		ieee80211_rx_napi(ar->ah->hw, pubsta, skb, NULL);
++		goto exit;
 +	} else {
 +		spin_lock_bh(&ab->base_lock);
 +		peer = ath12k_peer_find_by_addr(ab, hdr->addr1);
