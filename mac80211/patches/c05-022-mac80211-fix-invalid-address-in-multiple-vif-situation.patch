@@ -1,0 +1,37 @@
+From 0b6f8a478a95b95b29b8c74895cfbf979f607590 Mon Sep 17 00:00:00 2001
+From: Long Cheng <quic_longchen@quicinc.com>
+Date: Wed, 17 Jul 2024 11:14:08 +0800
+Subject: [PATCH] mac80211: prevernt access invalid address in multiple vifs
+ case
+
+When setup multiple sta/ap vifs, sometime the bss value of sdata will
+reset to null temporarily which will cause crash when access it from wakeup softirq.
+This patch prevent this situation.
+
+Change-Id: I478058249c60334a9d23565f1484e28fe7212217
+---
+ net/mac80211/util.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index 529c008..6ef4704 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -301,8 +301,13 @@ static void __ieee80211_wake_txqs(struct ieee80211_sub_if_data *sdata, int ac)
+ 	local_bh_disable();
+ 	spin_lock(&fq->lock);
+ 
+-	if (sdata->vif.type == NL80211_IFTYPE_AP)
++	if (sdata->vif.type == NL80211_IFTYPE_AP) {
++		// this is because the vif has been closed but not be deleted yet.
++		// ignore it in this case.
++		if (sdata->bss == NULL)
++			goto out;
+ 		ps = &sdata->bss->ps;
++	}
+ 
+ 	sdata->vif.txqs_stopped[ac] = false;
+ 
+-- 
+2.7.4
+
