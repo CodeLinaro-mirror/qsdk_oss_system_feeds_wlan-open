@@ -1313,8 +1313,8 @@ drv_mac80211_setup() {
 		wireless_set_retry 0
 		return 1
 	}
-	# workaround for buggy hostapd.sh in premium profile
-	[ -e /lib/wifi/hostapd.sh ] && mac80211_map_config_ifaces_to_json $1
+
+	mac80211_map_config_ifaces_to_json $1
 
 	wireless_set_data phy="$phy"
 	mac80211_interface_cleanup "$phy"
