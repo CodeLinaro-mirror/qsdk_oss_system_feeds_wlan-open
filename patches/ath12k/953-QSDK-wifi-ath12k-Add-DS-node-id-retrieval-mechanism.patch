@@ -22,8 +22,6 @@ Signed-off-by: Pavankumar Nandeshwar <quic_pnandesh@quicinc.com>
  create mode 100644 drivers/net/wireless/ath/ath12k/accel_cfg.h
  create mode 100644 drivers/net/wireless/ath/ath_accel_cfg.c
 
-diff --git a/drivers/net/wireless/ath/Makefile b/drivers/net/wireless/ath/Makefile
-index 5c05264..33d21c4 100644
 --- a/drivers/net/wireless/ath/Makefile
 +++ b/drivers/net/wireless/ath/Makefile
 @@ -20,7 +20,8 @@ ath-objs :=	main.o \
@@ -36,8 +34,6 @@ index 5c05264..33d21c4 100644
  
  ath-$(CPTCFG_ATH_TRACEPOINTS) += trace.o
  
-diff --git a/drivers/net/wireless/ath/ath12k/Makefile b/drivers/net/wireless/ath/ath12k/Makefile
-index d4e961e..b92e8b7 100644
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
 @@ -23,7 +23,8 @@ ath12k-y += core.o \
@@ -50,12 +46,9 @@ index d4e961e..b92e8b7 100644
  
  ath12k-$(CPTCFG_ATH12K_DEBUGFS) += debugfs.o debugfs_htt_stats.o debugfs_sta.o
  ath12k-$(CPTCFG_NL80211_TESTMODE) += testmode.o
-diff --git a/drivers/net/wireless/ath/ath12k/accel_cfg.c b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-new file mode 100644
-index 0000000..c0c39ef
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,140 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -85,6 +78,7 @@ index 0000000..c0c39ef
 +	struct ieee80211_sta *sta;
 +	struct ath12k_sta *ahsta;
 +	struct ath12k_link_vif *arvif;
++	struct ath12k_base *ab;
 +
 +	wdev = ndev->ieee80211_ptr;
 +	if (!wdev) {
@@ -115,9 +109,18 @@ index 0000000..c0c39ef
 +	if (!ahvif)
 +		return false;
 +
++	if (ahvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
++		return false;
++
 +	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
-+		arvif	 = ahvif->link[ahvif->primary_link_id];
-+		*node_id = arvif->ar->ab->ppe.ds_node_id;
++		arvif = ahvif->link[ahvif->primary_link_id];
++		ab = arvif->ab;
++
++		/* Update and return DS node_id only if the chipset support DS*/
++		if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
++			return false;
++
++		*node_id = ab->ppe.ds_node_id;
 +		return true;
 +	}
 +
@@ -134,14 +137,20 @@ index 0000000..c0c39ef
 +
 +		arvif = (!sta->mlo) ? ahvif->link[ahsta->deflink.link_id] :
 +				ahvif->link[ahsta->primary_link_id];
++		ab = arvif->ab;
 +
-+		*node_id = arvif->ar->ab->ppe.ds_node_id;
++		/* Update and return DS node_id only if the chipset support DS*/
++		if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags)) {
++			rcu_read_unlock();
++			return false;
++		}
++
++		*node_id = ab->ppe.ds_node_id;
 +
 +		rcu_read_unlock();
 +
 +		return true;
 +	}
-+
 +	return false;
 +}
 +
@@ -180,9 +189,6 @@ index 0000000..c0c39ef
 +
 +	ath12k_dbg(ab, ATH12K_DBG_DP_RX, "DS context deinitialized\n");
 +}
-diff --git a/drivers/net/wireless/ath/ath12k/accel_cfg.h b/drivers/net/wireless/ath/ath12k/accel_cfg.h
-new file mode 100644
-index 0000000..6b792f2
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/accel_cfg.h
 @@ -0,0 +1,26 @@
@@ -212,8 +218,6 @@ index 0000000..6b792f2
 + */
 +void ath12k_dp_accel_cfg_deinit(struct ath12k_base *ab);
 +#endif
-diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index a35431f..43f3b36 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -21,6 +21,7 @@
@@ -224,7 +228,7 @@ index a35431f..43f3b36 100644
  #include "ppe.h"
  #include "ahb.h"
  #include "telemetry.h"
-@@ -1291,6 +1292,7 @@ static int ath12k_core_pdev_init(struct ath12k_base *ab)
+@@ -1294,6 +1295,7 @@ static int ath12k_core_pdev_init(struct
  	ath12k_sawf_init(ab);
  	ath12k_telemetry_init(ab);
  	ath12k_fse_init(ab);
@@ -232,7 +236,7 @@ index a35431f..43f3b36 100644
  
  	ret = ath12k_dp_ppeds_start(ab);
  	if (ret) {
-@@ -1315,6 +1317,7 @@ static void ath12k_core_pdev_deinit(struct ath12k_base *ab)
+@@ -1318,6 +1320,7 @@ static void ath12k_core_pdev_deinit(stru
  	ath12k_cfr_deinit(ab);
  	ath12k_spectral_deinit(ab);
  	ath12k_thermal_unregister(ab);
@@ -240,8 +244,6 @@ index a35431f..43f3b36 100644
  	ath12k_fse_deinit(ab);
  	ath12k_telemetry_deinit(ab);
  	ath12k_sawf_deinit(ab);
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 2b22446..7553ad3 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -54,6 +54,7 @@
@@ -252,9 +254,6 @@ index 2b22446..7553ad3 100644
  
  #define ATH12K_MAX_CORE_MASK	(0xFFFF & ((1 << NR_CPUS) - 1))
  extern unsigned int ath12k_rfs_core_mask[4];
-diff --git a/drivers/net/wireless/ath/ath_accel_cfg.c b/drivers/net/wireless/ath/ath_accel_cfg.c
-new file mode 100644
-index 0000000..c943a4c
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath_accel_cfg.c
 @@ -0,0 +1,37 @@
@@ -295,6 +294,3 @@ index 0000000..c943a4c
 +						&info->out_ppe_ds_node_id);
 +}
 +EXPORT_SYMBOL(ath_dp_accel_cfg_fetch_ds_node_id);
--- 
-2.34.1
-
