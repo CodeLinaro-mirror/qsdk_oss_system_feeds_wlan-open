@@ -1000,6 +1000,14 @@ mac80211_prepare_vif() {
 
 	if_idx=$((${if_idx:-0} + 1))
 
+	disable_qdisc_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
+        if [ -n "$disable_qdisc_for_ds" ] && [ $disable_qdisc_for_ds == '1' ]; then
+                [ -f "/lib/ds_enable.sh" ] && {
+                        . /lib/ds_enable.sh
+                        disable_qdisc_on_eth
+                }
+        fi
+
 	set_default wds 0
 	set_default powersave 0
 
