@@ -25,7 +25,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -53,7 +53,7 @@ static unsigned int ath12k_en_fwlog = tr
+@@ -57,7 +57,7 @@ static unsigned int ath12k_en_fwlog = tr
  module_param_named(en_fwlog, ath12k_en_fwlog, uint, 0644);
  MODULE_PARM_DESC(en_fwlog, "fwlog: 0-disable, 1-enable");
  
@@ -34,6 +34,18 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  module_param_named(ppe_ds_enable, ath12k_ppe_ds_enabled, uint, 0644);
  MODULE_PARM_DESC(ppe_ds_enable, "ppe_ds_enable: 0-disable, 1-enable");
  
+@@ -1773,9 +1773,8 @@ int ath12k_core_qmi_firmware_ready(struc
+ 			 * @ath12k_mac_update_vif_offload()
+ 			 * TODO: add device capability check
+ 			 */
+-			ath12k_frame_mode = ATH12K_HW_TXRX_ETHERNET;
+-		}
+-		if (ab->hif.bus == ATH12K_BUS_PCI || ab->hif.bus == ATH12K_BUS_HYBRID)
++			ath12k_ppe_ds_enabled = 0;
++		} else if (ab->hif.bus == ATH12K_BUS_PCI || ab->hif.bus == ATH12K_BUS_HYBRID)
+ 			set_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags);
+ 	}
+ #endif
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -514,11 +514,12 @@ struct ath12k_vif {
@@ -71,7 +83,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -11439,8 +11439,12 @@ static int ath12k_mac_op_add_interface(s
+@@ -11448,8 +11448,12 @@ static int ath12k_mac_op_add_interface(s
  {
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
  	struct ath12k_hw *ah = hw->priv;
@@ -85,7 +97,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  
  	/* The ar in which this vif will be assigned can be determined since
  	 * it depends on the channel in which the vif is brought up.
-@@ -11451,15 +11455,17 @@ static int ath12k_mac_op_add_interface(s
+@@ -11460,15 +11464,17 @@ static int ath12k_mac_op_add_interface(s
  	 */
  
  	mutex_lock(&ah->conf_mutex);
@@ -104,7 +116,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	ahvif->vdev_type = vif->type;
  	ahvif->vif = vif;
  	ahvif->ah = ah;
-@@ -11468,20 +11474,22 @@ static int ath12k_mac_op_add_interface(s
+@@ -11477,20 +11483,22 @@ static int ath12k_mac_op_add_interface(s
  	ahvif->deflink.link_id = 0;
  	ahvif->mcbc_gsn = 0;
  
@@ -117,6 +129,8 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 -	    (vif->type == NL80211_IFTYPE_AP ||
 -	    vif->type == NL80211_IFTYPE_STATION) &&
 -	    ath12k_frame_mode == ATH12K_HW_TXRX_ETHERNET) {
+-		ppe_vp_type = PPE_VP_USER_TYPE_DS;
+-	} else if (ath12k_ppe_rfs_support && vif->type != NL80211_IFTYPE_AP_VLAN) {
 +#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
 +	switch (wdev->ppe_vp_type) {
 +	case PPE_VP_USER_TYPE_PASSIVE:
@@ -125,9 +139,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 +		ppe_vp_type = wdev->ppe_vp_type;
 +		break;
 +	default:
- 		ppe_vp_type = PPE_VP_USER_TYPE_DS;
--	} else if (ath12k_ppe_rfs_support && vif->type != NL80211_IFTYPE_AP_VLAN) {
--		ppe_vp_type = PPE_VP_USER_TYPE_PASSIVE;
+ 		ppe_vp_type = PPE_VP_USER_TYPE_PASSIVE;
 +		break;
  	}
  
@@ -138,7 +150,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	if (ppe_vp_type != ATH12K_INVALID_PPE_VP_TYPE) {
  		if (ppe_vp_num == ATH12K_INVALID_PPE_VP_NUM) {
  			ahvif->ppe_vp_num = ATH12K_INVALID_PPE_VP_NUM;
-@@ -11492,7 +11500,7 @@ static int ath12k_mac_op_add_interface(s
+@@ -11501,7 +11509,7 @@ static int ath12k_mac_op_add_interface(s
  			ahvif->ppe_vp_type = ppe_vp_type;
  		}
  	}
@@ -147,7 +159,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	INIT_LIST_HEAD(&ahvif->deflink.list);
  	INIT_DELAYED_WORK(&ahvif->deflink.connection_loss_work,
  			ath12k_mac_vif_sta_connection_loss_work);
-@@ -11693,9 +11701,10 @@ static void ath12k_mac_op_remove_interfa
+@@ -11702,9 +11710,10 @@ static void ath12k_mac_op_remove_interfa
  		ath12k_mac_remove_link_interface(hw, arvif);
  		ath12k_mac_unassign_link_vif(arvif);
  	}
@@ -161,18 +173,18 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -1287,8 +1287,6 @@ int ath12k_change_core_mask_for_ppe_rfs(
- 	struct wireless_dev *wdev = ieee80211_vif_to_wdev(ahvif->vif);
- 	int ret;
+@@ -1290,8 +1290,6 @@ int ath12k_change_core_mask_for_ppe_rfs(
+ 	if (!wdev)
+ 		return -ENODEV;
  
 -	if (!ath12k_ppe_rfs_support)
 -		return 0;
  
  	if (ahvif->ppe_vp_num <= 0 || ahvif->ppe_vp_type != PPE_VP_USER_TYPE_PASSIVE) {
  		ath12k_warn(ab, "invalid vp for dev %s\n", wdev->netdev->name);
-@@ -1361,9 +1359,6 @@ int ath12k_vif_alloc_vp(struct ath12k_vi
- 	int ppe_vp_num = ATH12K_INVALID_PPE_VP_NUM;
- 	struct ppe_vp_ai vpai;
+@@ -1370,9 +1368,6 @@ int ath12k_vif_alloc_vp(struct ath12k_vi
+ 	if (!wdev)
+ 		return -ENODEV;
  
 -	if (ppe_vp_type == PPE_VP_USER_TYPE_PASSIVE && !ath12k_ppe_rfs_support)
 -		return 0;
@@ -180,7 +192,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  	if (ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR || !wdev->netdev)
  		return 0;
  
-@@ -1411,8 +1406,8 @@ int ath12k_vif_alloc_vp(struct ath12k_vi
+@@ -1420,8 +1415,8 @@ int ath12k_vif_alloc_vp(struct ath12k_vi
  	}
  
  	if (ppe_vp_num <= 0) {
@@ -204,7 +216,7 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
  };
  
  static const struct netlink_range_validation
-@@ -984,34 +984,53 @@ end_stats:
+@@ -984,34 +984,60 @@ end_stats:
  	return ret;
  }
  
@@ -261,22 +273,29 @@ Signed-off-by: Balamurugan Mahalingam <quic_bmahalin@quicinc.com>
 +		type = "ds";
 +		break;
 +	default:
-+		type = "none";
-+		ppe_vp_type = 0;
++		type = "passive";
++		ppe_vp_type = 1;
 +		break;
 +	}
-+	wdev->ppe_vp_type = ppe_vp_type;
-+	/* TODO: Ignore if the same is reassigned and flush the existing ecm rules */
++
++	if (!ath12k_ppe_ds_enabled) {
++		type = "passive";
++		ppe_vp_type = 1;
++		ath12k_err(NULL, "Overriding offload type to passive as DS isn't enabled\n");
++	}
  
 -	ath12k_dbg(NULL, ATH12K_DBG_PPE,
 -		   "Marking dev [%s] as mlo netdev. %d\n", wdev->netdev->name, ml_netdev);
++	wdev->ppe_vp_type = ppe_vp_type;
++	/* TODO: Ignore if the same is reassigned and flush the existing ecm rules */
++
 +	ath12k_info(NULL,"[%s] vendor cmd type [%s] %d (%s) state %d\n",
 +		    current->comm,  wdev->netdev->name, wdev->ppe_vp_type,
 +		    type, netif_running(wdev->netdev));
  
  	return 0;
  }
-@@ -2027,9 +2046,9 @@ static struct wiphy_vendor_command ath12
+@@ -2027,9 +2053,9 @@ static struct wiphy_vendor_command ath12
  	{
  		.info.vendor_id = QCA_NL80211_VENDOR_ID,
  		.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_SET_WIFI_CONFIGURATION,
