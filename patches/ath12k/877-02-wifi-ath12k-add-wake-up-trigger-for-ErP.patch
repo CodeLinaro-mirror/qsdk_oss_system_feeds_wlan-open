@@ -10,6 +10,7 @@ QCA_WLAN_VENDOR_ATTR_RM_ERP_ATH.
 the configured trigger is received.
 
 Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
+Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/core.c   |   8 +
  drivers/net/wireless/ath/ath12k/core.h   |   7 +
@@ -56,7 +57,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  static int ath12k_core_mode1_recovery_sta_list(void *data,
-@@ -4192,8 +4206,13 @@ static int ath12k_init(void)
+@@ -4199,8 +4213,13 @@ static int ath12k_init(void)
  		goto error_ahb;
  	}
  
@@ -70,7 +71,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  error_ahb:
  	ath12k_ahb_exit();
  error:
-@@ -4204,6 +4223,8 @@ error:
+@@ -4211,6 +4230,8 @@ error:
  
  static void ath12k_exit(void)
  {
@@ -89,7 +90,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  #define ATH12K_PHY_2GHZ "phy00"
  #define ATH12K_PHY_5GHZ "phy01"
-@@ -1084,6 +1085,9 @@ struct ath12k {
+@@ -1086,6 +1087,9 @@ struct ath12k {
  	u32 ani_listen_period;
  	int ani_ofdm_level;
  	struct completion ani_ofdm_event;
@@ -99,7 +100,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  struct ath12k_hw {
-@@ -1867,4 +1871,10 @@ static inline int ath12k_ahb_init(void)
+@@ -1869,4 +1873,10 @@ static inline int ath12k_ahb_init(void)
  static inline void ath12k_ahb_exit(void) {};
  #endif
  
@@ -112,17 +113,41 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #endif /* _CORE_H_ */
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2914,6 +2914,10 @@ static void ath12k_dp_rx_h_mpdu(struct a
+@@ -2920,6 +2920,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  		rxcb->peer_id = rx_info->peer_id;
  
  	spin_lock_bh(&ar->ab->base_lock);
 +
-+	if (ar->erp_trigger_set)
-+		queue_work(ar->ab->workqueue, &ar->erp_handle_trigger_work);
-+
  	peer = ath12k_dp_rx_h_find_peer(ar->ab, msdu, rx_info);
  	if (peer) {
  		/* If the pkt is a valid IP packet and peer supports
+@@ -4701,6 +4702,13 @@ static bool ath12k_dp_rx_h_reo_err(struc
+ 	case HAL_REO_DEST_RING_ERROR_CODE_DESC_ADDR_ZERO:
+ 		if (ath12k_dp_rx_h_null_q_desc(ar, msdu, rx_info, msdu_list))
+ 			drop = true;
++
++		/* CCE rule configured for the ERP feature on REO RELEASE RING gets
++		 * handled under this specific error code
++		 * */
++		if (!drop && ar->erp_trigger_set)
++			queue_work(ar->ab->workqueue, &ar->erp_handle_trigger_work);
++
+ 		break;
+ 	case HAL_REO_DEST_RING_ERROR_CODE_PN_CHECK_FAILED:
+ 		/* TODO: Do not drop PN failed packets in the driver;
+@@ -4979,12 +4987,6 @@ int ath12k_dp_rx_process_wbm_err(struct
+ 		if (!err_info.continuation)
+ 			budget--;
+ 
+-		if (err_info.push_reason !=
+-		    HAL_REO_DEST_RING_PUSH_REASON_ERR_DETECTED) {
+-			dev_kfree_skb_any(msdu);
+-			continue;
+-		}
+-
+ 		rxcb->err_rel_src = err_info.err_rel_src;
+ 		rxcb->err_code = err_info.err_code;
+ 		rxcb->is_first_msdu = err_info.first_msdu;
 --- a/drivers/net/wireless/ath/ath12k/vendor.c
 +++ b/drivers/net/wireless/ath/ath12k/vendor.c
 @@ -2,6 +2,7 @@
@@ -328,7 +353,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 +set_trigger:
 +	param.opcode = op_code;
 +	param.meta_data = ATH12K_RX_PROTOCOL_TAG_START_OFFSET + bitmap;
-+	param.dst_ring = ATH12K_ROUTE_WBM_RELEASE(ar->ab);
++	param.dst_ring = ATH12K_REO_RELEASE_RING;
 +	param.dst_ring_handler = ATH12K_WMI_PKTROUTE_USE_CCE;
 +	param.route_type_bmap = bitmap;
 +	if (ath12k_wmi_send_pdev_pkt_route(ar, &param)) {
@@ -760,7 +785,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	ATH12K_DBG_ANY		= 0xffffffff,
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -5629,3 +5629,8 @@ void ath12k_debugfs_remove_interface(str
+@@ -5699,3 +5699,8 @@ void ath12k_debugfs_remove_interface(str
  	debugfs_remove(arvif->debugfs_rtsthreshold);
  	arvif->debugfs_rtsthreshold = NULL;
  }
@@ -794,7 +819,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #ifdef CPTCFG_ATH12K_PKTLOG
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -17150,8 +17150,11 @@ static int ath12k_mac_setup(struct ath12
+@@ -17126,8 +17126,11 @@ static int ath12k_mac_setup(struct ath12
  	ar->monitor_vdev_id = -1;
  	clear_bit(MONITOR_VDEV_CREATED, &ar->monitor_flags);
  	rcu_assign_pointer(ag->hw_links[hw_link_id], ar);
@@ -808,3 +833,21 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  int ath12k_mac_allocate(struct ath12k_hw_group *ag)
+--- a/drivers/net/wireless/ath/ath12k/wmi.h
++++ b/drivers/net/wireless/ath/ath12k/wmi.h
+@@ -3587,6 +3587,15 @@ struct ath12k_wmi_pdev_set_regdomain_arg
+ 	u32 pdev_id;
+ };
+ 
++enum ath12k_dp_rx_routing_reo_dest_ring {
++	ATH12K_REO2SW0_RING,
++	ATH12K_REO2SW1_RING,
++	ATH12K_REO2SW2_RING,
++	ATH12K_REO2SW3_RING,
++	ATH12K_REO2SW4_RING,
++	ATH12K_REO_RELEASE_RING,
++};
++
+ /* Defines various options for routing policy */
+ enum wmi_pdev_dest_ring_handler_type {
+ 	ATH12K_WMI_PKTROUTE_USE_CCE  = 0,
