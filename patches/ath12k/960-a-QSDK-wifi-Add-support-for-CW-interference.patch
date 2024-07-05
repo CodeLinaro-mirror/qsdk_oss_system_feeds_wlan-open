@@ -1,6 +1,6 @@
-From bc534a52093f1979ff2f4388475d38763506156d Mon Sep 17 00:00:00 2001
-From: Amit Pandit <quic_pamit@quicinc.com>
-Date: Tue, 21 May 2024 23:23:16 +0530
+From fe7dfeb966a0d873d71638c4c0fe78e6fe3c2e1f Mon Sep 17 00:00:00 2001
+From: Naveen S <quic_naves@quicinc.com>
+Date: Fri, 5 Jul 2024 14:57:55 +0530
 Subject: [PATCH] QSDK: wifi: Add support for CW interference
 
 During the time when an access point is operational there might be
@@ -29,15 +29,18 @@ be used to enable/disable this feature to the driver.
 Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
 ---
  drivers/net/wireless/ath/ath12k/core.h |   1 +
- drivers/net/wireless/ath/ath12k/mac.c  |  22 ++++
+ drivers/net/wireless/ath/ath12k/mac.c  |  21 ++++
  drivers/net/wireless/ath/ath12k/mac.h  |   1 +
  drivers/net/wireless/ath/ath12k/wmi.c  | 147 +++++++++++++++++++------
  drivers/net/wireless/ath/ath12k/wmi.h  |   6 +
- 5 files changed, 141 insertions(+), 36 deletions(-)
+ net/mac80211/main.c                    |   1 +
+ 6 files changed, 141 insertions(+), 36 deletions(-)
 
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 129eab3..8921b03 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1129,6 +1129,7 @@ struct ath12k {
+@@ -1128,6 +1128,7 @@ struct ath12k {
  
  	u16 csa_active_cnt;
  	s32 sensitivity_level;
@@ -45,6 +48,8 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  };
  
  struct ath12k_6ghz_sp_reg_rule {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index b5b90fc..4c6a59b 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
 @@ -5132,6 +5132,10 @@ skip_pending_cs_up:
@@ -58,14 +63,14 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  }
  
  static void ath12k_mac_op_vif_cfg_changed(struct ieee80211_hw *hw,
-@@ -15664,6 +15668,24 @@ exit:
+@@ -15682,6 +15686,23 @@ exit:
  	return ret;
  }
  
 +void ath12k_mac_set_cw_intf_detect(struct ath12k *ar, u8 intf_detect_param) {
 +	u8 cw_intf;
 +
-+	mutex_lock(&ar->conf_mutex);
++	lockdep_assert_held(&ar->conf_mutex);
 +	/* TODO: Since for now only CW Interference is supported on the set path,
 +	 * later when there is support added for other interference types,
 +	 * the driver would recieve intf_detect_bitmap
@@ -77,12 +82,13 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
 +		ath12k_wmi_pdev_set_param(ar, WMI_PDEV_PARAM_DCS,
 +					  ar->dcs_enable_bitmap, ar->pdev->pdev_id);
 + 	}
-+	mutex_unlock(&ar->conf_mutex);
 +}
 +
  void ath12k_mac_ap_ps_recalc(struct ath12k *ar) {
  	struct ath12k_link_vif *arvif;
  	enum ath12k_ap_ps_state state = ATH12K_AP_PS_STATE_OFF;
+diff --git a/drivers/net/wireless/ath/ath12k/mac.h b/drivers/net/wireless/ath/ath12k/mac.h
+index bc29713..bbd64ef 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.h
 +++ b/drivers/net/wireless/ath/ath12k/mac.h
 @@ -114,6 +114,7 @@ enum ath12k_background_dfs_events {
@@ -93,9 +99,11 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  void ath12k_mac_ap_ps_recalc(struct ath12k *ar);
  void ath12k_mac_destroy(struct ath12k_hw_group *ag);
  void ath12k_mac_unregister(struct ath12k_hw_group *ag);
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 59855bb..b7bdeab 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -13450,12 +13450,13 @@ ath12k_wmi_pdev_dfs_radar_detected_event
+@@ -13450,12 +13450,13 @@ ath12k_wmi_pdev_dfs_radar_detected_event(struct ath12k_base *ab, struct sk_buff
  		ath12k_dfs_calculate_subchannels(ab, ev, do_full_bw_nol);
  }
  
@@ -110,7 +118,7 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  
          switch (tag) {
          case WMI_TAG_DCS_AWGN_INT_TYPE:
-@@ -13467,17 +13468,22 @@ static int ath12k_wmi_awgn_intf_subtlv_p
+@@ -13467,17 +13468,22 @@ static int ath12k_wmi_awgn_intf_subtlv_parser(struct ath12k_base *ab,
                             awgn_info->chan_bw_interference_bitmap);
                  memcpy(data, awgn_info, sizeof(*awgn_info));
                  break;
@@ -135,7 +143,7 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
                                              u16 tag, u16 len,
                                              const void *ptr, void *data)
  {
-@@ -13497,7 +13503,7 @@ static int ath12k_wmi_dcs_awgn_event_par
+@@ -13497,7 +13503,7 @@ static int ath12k_wmi_dcs_awgn_event_parser(struct ath12k_base *ab,
                  if (len == 0)
                          return 0;
                  ret = ath12k_wmi_tlv_iter(ab, ptr, len,
@@ -144,10 +152,11 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
                                            data);
                  break;
          default:
-@@ -13578,6 +13584,58 @@ bool ath12k_wmi_validate_dcs_awgn_info(s
+@@ -13577,6 +13583,58 @@ bool ath12k_wmi_validate_dcs_awgn_info(struct ath12k *ar, struct wmi_dcs_awgn_in
+         return true;
  }
  
- static void
++static void
 +ath12k_wmi_dcs_cw_interference_event(struct ath12k_base *ab,
 +				     struct sk_buff *skb)
 +{
@@ -199,11 +208,10 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
 +	rcu_read_unlock();
 +}
 +
-+static void
+ static void
  ath12k_wmi_dcs_awgn_interference_event(struct ath12k_base *ab,
                                         struct sk_buff *skb)
- {
-@@ -13586,10 +13644,7 @@ ath12k_wmi_dcs_awgn_interference_event(s
+@@ -13586,10 +13644,7 @@ ath12k_wmi_dcs_awgn_interference_event(struct ath12k_base *ab,
          struct cfg80211_chan_def *chandef;
          struct ath12k_mac_any_chandef_arg arg;
          struct ath12k *ar;
@@ -214,7 +222,7 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
          int ret;
  
          if (!test_bit(WMI_TLV_SERVICE_DCS_AWGN_INT_SUPPORT, ab->wmi_ab.svc_map)) {
-@@ -13597,35 +13652,8 @@ ath12k_wmi_dcs_awgn_interference_event(s
+@@ -13597,35 +13652,8 @@ ath12k_wmi_dcs_awgn_interference_event(struct ath12k_base *ab,
                  return;
          }
  
@@ -305,7 +313,7 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  #ifdef CPTCFG_ATH12K_PKTLOG
  static void
  ath12k_wmi_pktlog_decode_info(struct ath12k_base *ab,
-@@ -15479,7 +15554,7 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -15479,7 +15554,7 @@ static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  		ath12k_wmi_diag_event(ab, skb);
  		break;
  	case WMI_DCS_INTERFERENCE_EVENTID:
@@ -314,9 +322,11 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
                  break;
  	case WMI_PDEV_PKTLOG_DECODE_INFO_EVENTID:
  #ifdef CPTCFG_ATH12K_PKTLOG
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index a38b33c..9cf69e4 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -5506,6 +5506,8 @@ struct wmi_pdev_radar_flags_param {
+@@ -5515,6 +5515,8 @@ struct wmi_pdev_radar_flags_param {
  } __packed;
  #define WMI_PDEV_RADAR_FLAGS_FULL_BW_NOL_MARK_BIT 0
  
@@ -325,7 +335,7 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  #define WMI_DCS_AWGN_INTF       0x04
  
  struct wmi_dcs_awgn_info {
-@@ -5516,6 +5518,10 @@ struct wmi_dcs_awgn_info {
+@@ -5525,6 +5527,10 @@ struct wmi_dcs_awgn_info {
          u32 chan_bw_interference_bitmap;
  } __packed;
  
@@ -336,3 +346,18 @@ Signed-off-by: Amit Pandit <quic_pamit@quicinc.com>
  struct wmi_dcs_interference_ev {
          u32 interference_type;
          u32 pdev_id;
+diff --git a/net/mac80211/main.c b/net/mac80211/main.c
+index 76523a1..6f42498 100644
+--- a/net/mac80211/main.c
++++ b/net/mac80211/main.c
+@@ -852,6 +852,7 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
+ 	INIT_WORK(&local->cw_detected_work,
+ 		  ieee80211_cw_detected_work);
+ 	INIT_LIST_HEAD(&local->awgn_info_list);
++	INIT_LIST_HEAD(&local->cw_info_list);
+ 
+ 	INIT_WORK(&local->reconfig_filter, ieee80211_reconfig_filter);
+ 	local->smps_mode = IEEE80211_SMPS_OFF;
+-- 
+2.34.1
+
