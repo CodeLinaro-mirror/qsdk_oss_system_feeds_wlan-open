@@ -35,11 +35,9 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  drivers/net/wireless/ath/ath12k/wmi.h   |  42 +++
  6 files changed, 689 insertions(+), 4 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 8d01437..a185198 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1119,6 +1119,7 @@ struct ath12k {
+@@ -1121,6 +1121,7 @@ struct ath12k {
  	u32 ani_listen_period;
  	int ani_ofdm_level;
  	struct completion ani_ofdm_event;
@@ -47,8 +45,8 @@ index 8d01437..a185198 100644
  
  	bool erp_trigger_set;
  	struct work_struct erp_handle_trigger_work;
-@@ -1126,6 +1127,11 @@ struct ath12k {
- 	u16 csa_active_cnt;
+@@ -1129,6 +1130,11 @@ struct ath12k {
+ 	s32 sensitivity_level;
  };
  
 +struct ath12k_6ghz_sp_reg_rule {
@@ -59,7 +57,7 @@ index 8d01437..a185198 100644
  struct ath12k_hw {
  	struct ieee80211_hw *hw;
  	const struct ieee80211_ops *ops;
-@@ -1492,6 +1498,12 @@ struct ath12k_base {
+@@ -1506,6 +1512,12 @@ struct ath12k_base {
  	 */
  	struct ieee80211_regdomain *new_regd[MAX_RADIOS];
  
@@ -72,8 +70,6 @@ index 8d01437..a185198 100644
  	/* Current DFS Regulatory */
  	enum ath12k_dfs_region dfs_region;
  	struct ath12k_reg_freq reg_freq_2g;
-diff --git a/drivers/net/wireless/ath/ath12k/debug.h b/drivers/net/wireless/ath/ath12k/debug.h
-index 104b6e7..d32c7bd 100644
 --- a/drivers/net/wireless/ath/ath12k/debug.h
 +++ b/drivers/net/wireless/ath/ath12k/debug.h
 @@ -37,6 +37,7 @@ enum ath12k_debug_mask {
@@ -84,11 +80,9 @@ index 104b6e7..d32c7bd 100644
  
  	/* keep last*/
  	ATH12K_DBG_ANY		= 0xffffffff,
-diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
-index 7d22e10..5238bce 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.c
 +++ b/drivers/net/wireless/ath/ath12k/reg.c
-@@ -537,9 +537,94 @@ static u32 ath12k_map_fw_phy_flags(u32 phy_flags)
+@@ -537,9 +537,94 @@ static u32 ath12k_map_fw_phy_flags(u32 p
  	return flags;
  }
  
@@ -186,7 +180,7 @@ index 7d22e10..5238bce 100644
  
  static const char *
  ath12k_reg_get_regdom_str(enum nl80211_dfs_regions dfs_region)
-@@ -843,6 +928,152 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+@@ -843,6 +928,155 @@ ath12k_reg_build_regd(struct ath12k_base
  	return new_regd;
  }
  
@@ -233,7 +227,10 @@ index 7d22e10..5238bce 100644
 +
 +	ar->afc.is_6ghz_afc_power_event_received = true;
 +
-+	regd = ab->default_regd[pdev_idx];
++	if (test_bit(ATH12K_FLAG_REGISTERED, &ab->dev_flags))
++		regd = ab->new_regd[pdev_idx];
++	else
++		regd = ab->default_regd[pdev_idx];
 +
 +	if (!regd) {
 +		ath12k_warn(ab, "Regulatory domain data not present\n");
@@ -339,8 +336,6 @@ index 7d22e10..5238bce 100644
  void ath12k_regd_update_work(struct work_struct *work)
  {
  	struct ath12k *ar = container_of(work, struct ath12k,
-diff --git a/drivers/net/wireless/ath/ath12k/reg.h b/drivers/net/wireless/ath/ath12k/reg.h
-index a895d75..0d0d6a9 100644
 --- a/drivers/net/wireless/ath/ath12k/reg.h
 +++ b/drivers/net/wireless/ath/ath12k/reg.h
 @@ -36,6 +36,71 @@ enum ath12k_reg_phy_bitmap {
@@ -415,18 +410,16 @@ index a895d75..0d0d6a9 100644
  enum ath12k_reg_cc_code {
  	REG_SET_CC_STATUS_PASS = 0,
  	REG_CURRENT_ALPHA2_NOT_FOUND = 1,
-@@ -108,5 +173,5 @@ int ath12k_reg_update_chan_list(struct ath12k *ar);
+@@ -108,5 +173,5 @@ int ath12k_reg_update_chan_list(struct a
  int ath12k_reg_get_num_chans_in_band(struct ath12k *ar,
  				     struct ieee80211_supported_band *band,
  			             u32 freq_low, u32 freq_high);
 -
 +int ath12k_reg_process_afc_power_event(struct ath12k *ar);
  #endif
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 87dc4a4..6c2610b 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -188,6 +188,16 @@ static const struct ath12k_wmi_tlv_policy ath12k_wmi_tlv_policies[] = {
+@@ -188,6 +188,16 @@ static const struct ath12k_wmi_tlv_polic
  		.min_len = sizeof(struct wmi_cp_stats_event_fixed_param) },
  	[WMI_TAG_OFFCHAN_DATA_TX_COMPL_EVENT] = {
  		.min_len = sizeof(struct wmi_offchan_data_tx_compl_event) },
@@ -443,7 +436,7 @@ index 87dc4a4..6c2610b 100644
  };
  
  static const u32 eml_trans_timeout[EMLCAP_TIMEOUT_MAX] = {
-@@ -7063,6 +7073,327 @@ static int ath12k_pull_vdev_start_resp_tlv(struct ath12k_base *ab, struct sk_buf
+@@ -7060,6 +7070,327 @@ static int ath12k_pull_vdev_start_resp_t
  	return 0;
  }
  
@@ -771,7 +764,7 @@ index 87dc4a4..6c2610b 100644
  static struct ath12k_reg_rule
  *create_ext_reg_rules_from_wmi(u32 num_reg_rules,
  			       struct ath12k_wmi_reg_rule_ext_params *wmi_reg_rule)
-@@ -15057,6 +15388,9 @@ static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
+@@ -15054,6 +15385,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_PDEV_ANI_OFDM_LEVEL_EVENTID:
  		ath12k_wmi_event_ani_ofdm_level(ab, skb);
  		break;
@@ -781,8 +774,6 @@ index 87dc4a4..6c2610b 100644
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
-index 0b29918..e6c3b23 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -1067,6 +1067,7 @@ enum wmi_tlv_event_id {
@@ -793,7 +784,7 @@ index 0b29918..e6c3b23 100644
  	WMI_NDI_CAP_RSP_EVENTID = WMI_TLV_CMD(WMI_GRP_PROTOTYPE),
  	WMI_NDP_INITIATOR_RSP_EVENTID,
  	WMI_NDP_RESPONDER_RSP_EVENTID,
-@@ -2186,6 +2187,12 @@ enum wmi_tlv_tag {
+@@ -2190,6 +2191,12 @@ enum wmi_tlv_tag {
  	WMI_TAG_MLO_PEER_CREATE_PARAMS = 0x3D5,
  	WMI_TAG_MLO_VDEV_START_PARAMS = 0x3D6,
  	WMI_TAG_MLO_VDEV_CREATE_PARAMS = 0x3D7,
@@ -806,7 +797,7 @@ index 0b29918..e6c3b23 100644
  	WMI_TAG_VDEV_SET_INTRA_BSS_PARAMS = 0x3EE,
  	WMI_TAG_PEER_SET_INTRA_BSS_PARAMS,
  	WMI_TAG_PDEV_PKTLOG_DECODE_INFO = 0x414,
-@@ -8494,6 +8501,9 @@ struct wmi_peer_tid_latency_cmd {
+@@ -8567,6 +8574,9 @@ struct wmi_peer_tid_latency_cmd {
  #define WMI_ANI_EVENT_PDEV_ID_VALID	BIT(31)
  #define WMI_ANI_EVENT_PDEV_ID		GENMASK(7, 0)
  
@@ -816,7 +807,7 @@ index 0b29918..e6c3b23 100644
  struct wmi_pdev_ani_event {
  	__le32 tlv_header;
  	__s32 ani_level;
-@@ -8504,6 +8514,38 @@ struct wmi_pdev_ani_event {
+@@ -8577,6 +8587,38 @@ struct wmi_pdev_ani_event {
  	__le32 pdev_id_bitmap;
  } __packed;
  
@@ -855,6 +846,3 @@ index 0b29918..e6c3b23 100644
  #define ATH12K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
--- 
-2.34.1
-
