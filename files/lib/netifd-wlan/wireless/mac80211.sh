@@ -25,6 +25,7 @@ NEWUMLIST=
 OLDUMLIST=
 
 hostapd_started=
+sta_started=
 bss_color=
 enable_color=
 interf_dfs=
@@ -1783,6 +1784,7 @@ mac80211_setup_vif() {
 	local name="$1"
 	local failed
 	local action=up
+	local allow_action=0
 
 	json_select data
 	json_get_vars ifname
@@ -1794,7 +1796,15 @@ mac80211_setup_vif() {
 	json_get_var vif_enable enable 1
 
 	[ "$vif_enable" = 1 ] || action=down
-	if [ "$mode" != "ap" ] || \
+	if [ "$mode" = "sta" ]; then
+		if ["$sta_started" -eq 1 ]; then
+			allow_action=1
+		fi
+	elif [ "$mode" != "ap" ]; then
+		allow_action=1
+	fi
+
+	if [ "$allow_action" -eq 1 ] || \
 	   ( [ "$ifname" = "$ap_ifname" ] && \
 	     ( [[ "$mode" = "ap" ]] && [ "$hostapd_started" -eq 1 ] ) ); then
 		ip link set dev "$ifname" "$action" || {
