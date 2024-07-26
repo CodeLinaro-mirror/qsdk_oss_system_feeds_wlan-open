@@ -15,7 +15,7 @@ in regular path.
 and removal of link stats in fast path.
 
 Remove CHECKSUM_PARTIAL check in dp_tx_direct, since in SFE/Fast
-case CHECKSUM_PARTIAL check won't hit.
+case ip_summed will be always CHECKSUM_PARTIAL.
 
 Patch Dependency : 720-c-ath12k-Optimize-the-tx-completion-routine-by-avoid-a.patch
 		   718-f-ath12k-Add-ath12k_dp_tx_direct-for-faster-tx-process.patch
@@ -78,17 +78,18 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  #endif
  
  	skb_cb->vif = arvif->ahvif->vif;
-@@ -322,9 +322,6 @@ int ath12k_dp_tx_direct(struct ath12k_li
+@@ -322,9 +322,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
          tcl_desc.info1 =  desc->info1;
          tcl_desc.info2 =  skb->len;
  
 -        if (likely(skb->ip_summed == CHECKSUM_PARTIAL))
 -                tcl_desc.info2 |= TX_IP_CHECKSUM;
 -
++	tcl_desc.info2 |= TX_IP_CHECKSUM;
          tcl_desc.info3 = desc->info3;
          tcl_desc.info4 = desc->info4;
          tcl_desc.info5 = 0;
-@@ -612,8 +609,8 @@ skip_htt_meta:
+@@ -612,8 +610,8 @@ skip_htt_meta:
  
  	tx_desc->skb = skb;
  	tx_desc->mac_id = ar->pdev_idx;
@@ -98,7 +99,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  	ti.desc_id = tx_desc->desc_id;
  	ti.data_len = skb->len;
  	skb_cb->paddr = ti.paddr;
-@@ -763,25 +760,24 @@ static inline void ath12k_dp_tx_decremen
+@@ -763,25 +761,24 @@ static inline void ath12k_dp_tx_decremen
  
  static void ath12k_dp_tx_free_txbuf(struct ath12k_base *ab,
  				    struct sk_buff *msdu, u8 mac_id,
@@ -135,7 +136,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  }
  
  static inline void ath12k_dp_tx_status_parse(struct ath12k_base *ab,
-@@ -819,7 +815,7 @@ static void
+@@ -819,7 +816,7 @@ static void
  ath12k_dp_tx_htt_tx_complete_buf(struct ath12k_base *ab,
  				 struct sk_buff *msdu,
  				 int tcl_data_ring_id, int htt_status,
@@ -144,7 +145,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  				 void *desc, ktime_t timestamp)
  {
  	struct ieee80211_tx_info *info;
-@@ -829,49 +825,19 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+@@ -829,49 +826,19 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  	struct ath12k_vif *ahvif;
  	struct ath12k_peer *peer;
  	struct hal_tx_status ts_status = { 0 };
@@ -196,7 +197,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  		if (msdu->destructor) {
  			msdu->wifi_acked_valid = 1;
  			msdu->wifi_acked = htt_status;
-@@ -884,6 +850,12 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+@@ -884,6 +851,12 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  		return;
  	}
  
@@ -209,7 +210,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  	if (unlikely(!skb_cb->vif)) {
  		ieee80211_free_txskb(ar->ah->hw, msdu);
  		return;
-@@ -902,6 +874,8 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
+@@ -902,6 +875,8 @@ ath12k_dp_tx_htt_tx_complete_buf(struct
  			    ahvif->links_map);
  	}
  
@@ -218,7 +219,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  	memset(&info->status, 0, sizeof(info->status));
  
  	if (htt_status == HAL_WBM_REL_HTT_TX_COMP_STATUS_OK) {
-@@ -943,14 +917,14 @@ ath12k_dp_tx_process_htt_tx_complete(str
+@@ -943,14 +918,14 @@ ath12k_dp_tx_process_htt_tx_complete(str
  				     void *desc, u8 mac_id,
  				     struct sk_buff *msdu,
  				     int data_ring_id,
@@ -235,7 +236,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  
  		break;
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_DROP:
-@@ -958,7 +932,7 @@ ath12k_dp_tx_process_htt_tx_complete(str
+@@ -958,7 +933,7 @@ ath12k_dp_tx_process_htt_tx_complete(str
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_REINJ:
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_INSPECT:
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_VDEVID_MISMATCH:
@@ -244,7 +245,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  		break;
  	case HAL_WBM_REL_HTT_TX_COMP_STATUS_MEC_NOTIFY:
  		/* This event is to be handled only when the driver decides to
-@@ -1107,7 +1081,8 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1107,7 +1082,8 @@ static void ath12k_dp_tx_complete_msdu(s
  				       struct sk_buff *msdu,
  				       struct hal_wbm_completion_ring_tx *tx_status,
  				       enum hal_wbm_rel_src_module buf_rel_source,
@@ -254,7 +255,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  {
  	struct ieee80211_tx_status status = { 0 };
  	struct ieee80211_rate_status status_rate = { 0 };
-@@ -1118,6 +1093,7 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1118,6 +1094,7 @@ static void ath12k_dp_tx_complete_msdu(s
  	struct ath12k_link_sta *arsta;
  	struct rate_info rate;
  	struct hal_tx_status ts = { 0 };
@@ -262,7 +263,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  	struct ieee80211_vif *vif;
  	struct ath12k_vif *ahvif;
  	u8 flags = 0;
-@@ -1127,10 +1103,12 @@ static void ath12k_dp_tx_complete_msdu(s
+@@ -1127,10 +1104,12 @@ static void ath12k_dp_tx_complete_msdu(s
  	bool tx_error = false;
  
  	skb_cb = ATH12K_SKB_CB(msdu);
@@ -277,7 +278,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  	if (unlikely(!rcu_access_pointer(ab->pdevs_active[ar->pdev_idx]))) {
                  ieee80211_free_txskb(ar->ah->hw, msdu);
                  return;
-@@ -1578,20 +1556,16 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1578,20 +1557,16 @@ int ath12k_dp_tx_completion_handler(stru
  	struct hal_srng *status_ring = &ab->hal.srng_list[hal_ring_id];
  	struct ath12k_tx_desc_info *tx_desc = NULL;
  	struct list_head desc_free_list, *cur;
@@ -299,7 +300,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  
  	struct htt_tx_wbm_completion *status_desc;
  	int htt_status;
-@@ -1648,8 +1622,6 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1648,8 +1623,6 @@ int ath12k_dp_tx_completion_handler(stru
  
  		msdu = tx_desc->skb;
  		mac_id = tx_desc->mac_id;
@@ -308,7 +309,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  
  #ifdef CPTCFG_ATH12K_SAWF
  		timestamp = tx_desc->timestamp;
-@@ -1680,7 +1652,7 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1680,7 +1653,7 @@ int ath12k_dp_tx_completion_handler(stru
  							     (void *)tx_status,
  							     mac_id, msdu,
  							     data_ring_id,
@@ -317,7 +318,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  							     timestamp, htt_status);
  			continue;
  		}
-@@ -1693,28 +1665,10 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1693,28 +1666,10 @@ int ath12k_dp_tx_completion_handler(stru
  			continue;
  		}
  
@@ -349,7 +350,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  			if (unlikely(msdu->destructor)) {
  				msdu->wifi_acked_valid = 1;
  				msdu->wifi_acked = htt_status == HAL_WBM_TQM_REL_REASON_FRAME_ACKED;
-@@ -1723,17 +1677,15 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1723,17 +1678,15 @@ int ath12k_dp_tx_completion_handler(stru
  				kfree_skb_list(skb_shinfo(msdu)->frag_list);
  				skb_shinfo(msdu)->frag_list = NULL;
  			}
@@ -371,7 +372,7 @@ Signed-off-by: Yuvasree Sivasankaran <quic_ysivasan@quicinc.com>
  
  	spin_lock_bh(&dp->tx_desc_lock[ring_id]);
  	list_for_each(cur, &desc_free_list) {
-@@ -1745,7 +1697,6 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1745,7 +1698,6 @@ int ath12k_dp_tx_completion_handler(stru
  	list_splice_tail(&desc_free_list, &dp->tx_desc_free_list[ring_id]);
  	spin_unlock_bh(&dp->tx_desc_lock[ring_id]);
  
