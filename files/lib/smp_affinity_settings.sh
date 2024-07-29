@@ -1654,7 +1654,8 @@ enable_smp_affinity_wifi() {
 					enable_affinity_mi01_3
 					;;
 			ap-mi01.3-c2 | \
-			ap-mi04.1-c2)
+			ap-mi04.1-c2 | \
+			ap-mi04.3)
 					#for RDP477, 478(IPQ5332(2.4GHz) + QCN6432(5GHz))
 					enable_affinity_mi01_3_c2
 					;;
