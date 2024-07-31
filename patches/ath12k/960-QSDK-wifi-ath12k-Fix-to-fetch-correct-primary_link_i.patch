@@ -10,9 +10,12 @@ incorrect primary_link in cases where sta is associated with primary
 link other than 0.
 Hence, instead of ahvif->primary_link, use ahsta->primary_link_id for
 sta mode as well.
-Also, in fse_add_flow and fse_delete_flow hardcoded link 0 is used,
-instead use deflink/valid_links to get active link to fetch correct
-arvif during ECM query.
+Also, in fse_add_flow and fse_delete_flow, instead of fetching ab
+through arvif, fetch ag directly from ah as SFE rules for PPE DS
+is maintained at hardware group ag instead of ab. ab is
+currently used only for debug prints in FSE. This helps in
+avoiding a scenario of failed rule deletion when valid_links is not
+updated properly arvif during ECM query.
 
 fixes: I9dacaefcb (QSDK: wifi: ath12k: Add DS node id retrieval mechanism)
 Ib3037ac47 (wifi: ath12k: Fix default link reference issue when DS enabled)
@@ -27,11 +30,9 @@ Signed-off-by: Pavankumar Nandeshwar <quic_pnandesh@quicinc.com>
  drivers/net/wireless/ath/ath12k/ppe.c       | 14 ++++++---
  2 files changed, 35 insertions(+), 14 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/accel_cfg.c b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-index 368964a..d1cef6d 100644
 --- a/drivers/net/wireless/ath/ath12k/accel_cfg.c
 +++ b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-@@ -67,14 +67,29 @@ static bool ath12k_ds_get_node_id(struct net_device *ndev, const u8 *peer_mac,
+@@ -67,14 +67,29 @@ static bool ath12k_ds_get_node_id(struct
  		return false;
  
  	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
@@ -63,7 +64,7 @@ index 368964a..d1cef6d 100644
  		return true;
  	}
  
-@@ -82,10 +97,8 @@ static bool ath12k_ds_get_node_id(struct net_device *ndev, const u8 *peer_mac,
+@@ -82,10 +97,8 @@ static bool ath12k_ds_get_node_id(struct
  		rcu_read_lock();
  
  		sta = ieee80211_find_sta(vif, peer_mac);
@@ -76,7 +77,7 @@ index 368964a..d1cef6d 100644
  
  		ahsta = ath12k_sta_to_ahsta(sta);
  
-@@ -94,10 +107,8 @@ static bool ath12k_ds_get_node_id(struct net_device *ndev, const u8 *peer_mac,
+@@ -94,10 +107,8 @@ static bool ath12k_ds_get_node_id(struct
  		ab = arvif->ab;
  
  		/* Update and return DS node_id only if the chipset support DS*/
@@ -89,7 +90,7 @@ index 368964a..d1cef6d 100644
  
  		*node_id = ab->ppe.ds_node_id;
  
-@@ -106,6 +117,10 @@ static bool ath12k_ds_get_node_id(struct net_device *ndev, const u8 *peer_mac,
+@@ -106,6 +117,10 @@ static bool ath12k_ds_get_node_id(struct
  		return true;
  	}
  	return false;
@@ -100,38 +101,153 @@ index 368964a..d1cef6d 100644
  }
  
  static const struct ath_dp_accel_cfg_ops ath_dp_accel_cfg_ops_obj = {
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 57f852f..6a563ca 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -1504,8 +1504,11 @@ ath12k_dp_rx_ppeds_fse_add_flow_entry(struct ppe_drv_fse_rule_info *ppe_flow_inf
+@@ -1485,10 +1485,10 @@ ath12k_dp_rx_ppeds_fse_add_flow_entry(st
+ 	struct rx_flow_info flow_info = { 0 };
+ 	struct wireless_dev *wdev;
+ 	struct ieee80211_vif *vif;
++	struct ath12k_hw_group *ag;
++	struct ath12k_hw *ah;
+ 	struct ath12k_base *ab = NULL;
+-	struct ath12k *ar;
+ 	struct ath12k_vif *ahvif;
+-	struct ath12k_link_vif *arvif;
+ 	struct net_device *dev = ppe_flow_info->dev;
+ 
+ 	if (!ath12k_fse_enable)
+@@ -1505,20 +1505,28 @@ ath12k_dp_rx_ppeds_fse_add_flow_entry(st
  
  	ahvif = ath12k_vif_to_ahvif(vif);
  
 -	/* FST rules are maintained at ag. Always chose default deflink's ab */
 -	arvif = (vif->valid_links) ? (ahvif->link[0]) : (&ahvif->deflink);
-+	if (!vif->valid_links)
-+		arvif = &ahvif->deflink;
-+	else
-+		arvif = ahvif->link[ffs(vif->valid_links) - 1];
-+
- 	if (WARN_ON(!arvif))
+-	if (WARN_ON(!arvif))
++	ah = ahvif->ah;
++	if (!ah) {
++		ath12k_warn(NULL, "FSE flow rule addition failed ah = NULL \n");
  		return false;
++	}
  
-@@ -1548,8 +1551,11 @@ ath12k_dp_rx_ppeds_fse_del_flow_entry(struct ppe_drv_fse_rule_info *ppe_flow_inf
+-	ar = arvif->ar;
+-	if (!ar)
++	ag = ah->ag;
++	if (!ag) {
++		ath12k_warn(NULL, "FSE flow rule addition failed ag = NULL \n");
+ 		return false;
++	}
+ 
+-	ab = ar->ab;
+-	if (!ab)
++	/* TODO: protect ag->ab[] by spin lock */
++	/* NOTE: ag->ab[0] can be any arbitirary ab but first ab is used to cover non-MLO */
++	ab = ag->ab[0];
++	if (!ab) {
++		ath12k_warn(NULL, "FSE flow rule addition failed ab = NULL \n");
+ 		return false;
++	}
+ 
+-	ath12k_dp_rx_ppeds_fse_update_flow_info(ab, &flow_info, ppe_flow_info, FSE_RULE_ADD);
++	ath12k_dp_rx_ppeds_fse_update_flow_info(ab, &flow_info, ppe_flow_info,
++						FSE_RULE_ADD);
+ 
+ 	return ath12k_dp_rx_flow_add_entry(ab, &flow_info);
+ }
+@@ -1529,10 +1537,10 @@ ath12k_dp_rx_ppeds_fse_del_flow_entry(st
+ 	struct rx_flow_info flow_info = { 0 };
+ 	struct wireless_dev *wdev;
+ 	struct ieee80211_vif *vif;
++	struct ath12k_hw_group *ag;
++	struct ath12k_hw *ah;
+ 	struct ath12k_base *ab = NULL;
+-	struct ath12k *ar;
+ 	struct ath12k_vif *ahvif;
+-	struct ath12k_link_vif *arvif;
+ 	struct net_device *dev = ppe_flow_info->dev;
+ 
+ 	if (!ath12k_fse_enable)
+@@ -1549,23 +1557,25 @@ ath12k_dp_rx_ppeds_fse_del_flow_entry(st
  
  	ahvif = ath12k_vif_to_ahvif(vif);
  
 -	/* FST rules are maintained at ag. Always chose default deflink's ab */
 -	arvif = (vif->valid_links) ? (ahvif->link[0]) : (&ahvif->deflink);
-+	if (!vif->valid_links)
-+		arvif = &ahvif->deflink;
-+	else
-+		arvif = ahvif->link[ffs(vif->valid_links) - 1];
-+
- 	if (WARN_ON(!arvif))
+-	if (WARN_ON(!arvif))
+-		return false;
+-
+-	ar = arvif->ar;
+-	if (!ar)
++	ah = ahvif->ah;
++	if (!ah) {
++		ath12k_warn(NULL, "FSE flow rule deletion failed ah = NULL \n");
  		return false;
++	}
  
--- 
-2.34.1
-
+-	ab = ar->ab;
+-	if (!ab)
++	ag = ah->ag;
++	if (!ag) {
++		ath12k_warn(NULL, "FSE flow rule deletion failed ag = NULL \n");
+ 		return false;
++	}
+ 
+-	/* Skip deleting entries during rmmod and SSR */
+-	if (ppe_flow_info->dev->reg_state >= NETREG_UNREGISTERING ||
+-	    netif_queue_stopped(ppe_flow_info->dev))
++	/* TODO: protect ag->ab[] by spin lock */
++	/* NOTE: ag->ab[0] can be any arbitirary ab but first ab is used to cover non-MLO */
++	ab = ag->ab[0];
++	if (!ab) {
++		ath12k_warn(NULL, "FSE flow rule deletion failed ab = NULL \n");
+ 		return false;
++	}
+ 
+ 	ath12k_dp_rx_ppeds_fse_update_flow_info(ab, &flow_info, ppe_flow_info,
+ 						FSE_RULE_DELETE);
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -127,6 +127,11 @@ void ath12k_core_put_hw_group(struct ath
+ 	if (!ag)
+ 		return;
+ 
++	if (ag->fst) {
++		ath12k_dp_rx_fst_detach(ab, ag->fst);
++		ag->fst = NULL;
++	}
++
+ 	mutex_lock(&ag->mutex_lock);
+ 
+ 	if (chip_id >= ag->num_chip) {
+@@ -154,11 +159,8 @@ void ath12k_core_put_hw_group(struct ath
+ 
+ 	mutex_unlock(&ag->mutex_lock);
+ 
+-	if (!num_probed) {
+-		ath12k_dp_rx_fst_detach(ab, ag->fst);
++	if (!num_probed)
+ 		ath12k_core_hw_group_free(ag);
+-	}
+-
+ }
+ 
+ static void ath12k_core_hw_group_reset(struct work_struct *work)
+@@ -210,7 +212,7 @@ ath12k_core_hw_group_alloc(u8 id, u8 max
+ 	ag->hw_queues_stopped = false;
+ 	ag->recovery_mode = ATH12K_MLO_RECOVERY_MODE0;
+ 	INIT_WORK(&ag->reset_work, ath12k_core_hw_group_reset);
+-
++	ag->fst = NULL;
+ #ifdef CPTCFG_ATH12K_POWER_OPTIMIZATION
+ 	ath12k_global_ps_ctx.ag = ag;
+ #endif
+@@ -351,8 +353,8 @@ again:
+ 	ab->chip_id = ag->num_probed;
+ 	ag->ab[ag->num_probed++] = ab;
+ 
+-	/* Call FST attach only for the first probed chip */
+-	if (ag->num_probed == 1)
++	/* Call FST attach only once for ag */
++	if (!ag->fst)
+ 		ag->fst = ath12k_dp_rx_fst_attach(ab);
+ 
+ 	ab->ag = ag;
