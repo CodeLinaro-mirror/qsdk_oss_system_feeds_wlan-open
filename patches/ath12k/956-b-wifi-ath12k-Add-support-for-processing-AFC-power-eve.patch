@@ -37,7 +37,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1123,6 +1123,7 @@ struct ath12k {
+@@ -1124,6 +1124,7 @@ struct ath12k {
  	u32 ani_listen_period;
  	int ani_ofdm_level;
  	struct completion ani_ofdm_event;
@@ -45,7 +45,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  
  	bool erp_trigger_set;
  	struct work_struct erp_handle_trigger_work;
-@@ -1131,6 +1132,11 @@ struct ath12k {
+@@ -1132,6 +1133,11 @@ struct ath12k {
  	s32 sensitivity_level;
  };
  
@@ -57,7 +57,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  struct ath12k_hw {
  	struct ieee80211_hw *hw;
  	const struct ieee80211_ops *ops;
-@@ -1526,6 +1532,12 @@ struct ath12k_base {
+@@ -1532,6 +1538,12 @@ struct ath12k_base {
  	 */
  	struct ieee80211_regdomain *new_regd[MAX_RADIOS];
  
@@ -180,10 +180,54 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  
  static const char *
  ath12k_reg_get_regdom_str(enum nl80211_dfs_regions dfs_region)
-@@ -843,6 +928,152 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -841,6 +926,200 @@ ath12k_reg_build_regd(struct ath12k_base
  	return new_regd;
  }
  
++/* ath12k_reg_coalesce_afc_freq_info() - Coalesce the freq info objects received
++ * in the AFC power event.
++ *
++ * @afc_reg_info: Pointer to AFC response
++ *
++ * When freq info objects are a continuous sequence, coalesce them. The max_psd
++ * of the coalesced freq info obj should be the minimum of all psd values of the
++ * freq info objects that are being coalesced.
++ * Eg: If the freq info objects are as follows
++ * {freq_low: 6330, freq_high: 6361, max_psd: 11}
++ * {freq_low: 6361, freq_high: 6425, max_psd: 23}
++ * {freq_low: 6525, freq_high: 6540, max_psd: 23}
++ * {freq_low: 6540, freq_high: 6570, max_psd: 22}
++ *
++ * These should be coalesced into
++ * {freq_low: 6330, freq_high: 6425, max_psd: 11}
++ * {freq_low: 6525, freq_high: 6570, max_psd: 22}
++ **/
++static void
++ath12k_reg_coalesce_afc_freq_info(struct ath12k_afc_sp_reg_info *afc_reg_info)
++{
++	struct ath12k_afc_freq_obj *afc_freq_info = afc_reg_info->afc_freq_info;
++	u8 num_freq_objs = afc_reg_info->num_freq_objs;
++	int start_idx = 0;
++	int next_idx = start_idx + 1;
++
++	while (next_idx < num_freq_objs) {
++		if (afc_freq_info[start_idx].high_freq ==
++		    afc_freq_info[next_idx].low_freq) {
++			afc_freq_info[start_idx].high_freq = afc_freq_info[next_idx].high_freq;
++			afc_freq_info[start_idx].max_psd = min(afc_freq_info[start_idx].max_psd,
++							       afc_freq_info[next_idx].max_psd);
++			next_idx++;
++			afc_reg_info->num_freq_objs--;
++		} else {
++			start_idx++;
++			afc_freq_info[start_idx].low_freq = afc_freq_info[next_idx].low_freq;
++			afc_freq_info[start_idx].high_freq = afc_freq_info[next_idx].high_freq;
++			afc_freq_info[start_idx].max_psd = afc_freq_info[next_idx].max_psd;
++			next_idx++;
++		}
++	}
++}
++
 +int ath12k_reg_process_afc_power_event(struct ath12k *ar)
 +{
 +	int new_reg_rule_cnt, num_regd_rules, num_afc_rules, num_sp_rules;
@@ -227,7 +271,10 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
 +
 +	ar->afc.is_6ghz_afc_power_event_received = true;
 +
-+	regd = ab->default_regd[pdev_idx];
++	if (ab->new_regd[pdev_idx])
++		regd = ab->new_regd[pdev_idx];
++	else
++		regd = ab->default_regd[pdev_idx];
 +
 +	if (!regd) {
 +		ath12k_warn(ab, "Regulatory domain data not present\n");
@@ -237,6 +284,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
 +
 +	num_sp_rules = ab->sp_rule->num_6ghz_sp_rule;
 +	num_regd_rules = regd->n_reg_rules;
++	ath12k_reg_coalesce_afc_freq_info(afc_reg_info);
 +	num_afc_rules = afc_reg_info->num_freq_objs;
 +
 +	for (i = 0; i < num_regd_rules; i++) {
@@ -433,7 +481,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  };
  
  static const u32 eml_trans_timeout[EMLCAP_TIMEOUT_MAX] = {
-@@ -7147,6 +7157,327 @@ static int ath12k_pull_vdev_start_resp_t
+@@ -7151,6 +7161,327 @@ static int ath12k_pull_vdev_start_resp_t
  	return 0;
  }
  
@@ -761,7 +809,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  static struct ath12k_reg_rule
  *create_ext_reg_rules_from_wmi(u32 num_reg_rules,
  			       struct ath12k_wmi_reg_rule_ext_params *wmi_reg_rule)
-@@ -15148,6 +15479,9 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -15151,6 +15482,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_PDEV_ANI_OFDM_LEVEL_EVENTID:
  		ath12k_wmi_event_ani_ofdm_level(ab, skb);
  		break;
@@ -794,7 +842,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  	WMI_TAG_VDEV_SET_INTRA_BSS_PARAMS = 0x3EE,
  	WMI_TAG_PEER_SET_INTRA_BSS_PARAMS,
  	WMI_TAG_PDEV_PKTLOG_DECODE_INFO = 0x414,
-@@ -8601,6 +8608,9 @@ struct wmi_peer_tid_latency_cmd {
+@@ -8613,6 +8620,9 @@ struct wmi_peer_tid_latency_cmd {
  #define WMI_ANI_EVENT_PDEV_ID_VALID	BIT(31)
  #define WMI_ANI_EVENT_PDEV_ID		GENMASK(7, 0)
  
@@ -804,7 +852,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  struct wmi_pdev_ani_event {
  	__le32 tlv_header;
  	__s32 ani_level;
-@@ -8611,6 +8621,38 @@ struct wmi_pdev_ani_event {
+@@ -8623,6 +8633,38 @@ struct wmi_pdev_ani_event {
  	__le32 pdev_id_bitmap;
  } __packed;
  
