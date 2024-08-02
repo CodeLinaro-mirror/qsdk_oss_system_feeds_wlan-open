@@ -22,7 +22,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -2049,6 +2049,17 @@ static inline bool ieee80211_vif_is_mesh
+@@ -2049,8 +2049,20 @@ static inline bool ieee80211_vif_is_mesh
  struct ieee80211_vif *wdev_to_ieee80211_vif(struct wireless_dev *wdev);
  
  /**
@@ -39,8 +39,21 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +/**
   * wdev_to_ieee80211_vif_vlan - return a vif struct from a wdev
   * @wdev: the wdev to get the vif for
++ * @is_add_vlan: Whether the callback is from op_add_interface or not
   *
-@@ -2815,6 +2826,8 @@ struct ieee80211_txq {
+  * This can be used by mac80211 drivers with direct cfg80211 APIs
+  * (like the vendor commands) that get a wdev.
+@@ -2059,7 +2071,8 @@ struct ieee80211_vif *wdev_to_ieee80211_
+  * fetches the master interface and returns it. This API can be used for
+  * non-ap/VLAN interfaces.
+  */
+-struct ieee80211_vif *wdev_to_ieee80211_vif_vlan(struct wireless_dev *wdev);
++struct ieee80211_vif *wdev_to_ieee80211_vif_vlan(struct wireless_dev *wdev,
++						 bool is_add_vlan);
+ 
+ /**
+  * ieee80211_vif_to_wdev - return a wdev struct from a vif
+@@ -2815,6 +2828,8 @@ struct ieee80211_txq {
   *
   * @IEE80211_HW_SUPPORT_ECM_REGISTRATION: driver supports ECM registration
   *
@@ -49,7 +62,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
   * @NUM_IEEE80211_HW_FLAGS: number of hardware flags, used for sizing arrays
   */
  enum ieee80211_hw_flags {
-@@ -2878,6 +2891,7 @@ enum ieee80211_hw_flags {
+@@ -2878,6 +2893,7 @@ enum ieee80211_hw_flags {
  	IEEE80211_HW_SUPPORTS_AP_PS,
  	IEEE80211_HW_HAS_TX_QUEUE,
  	IEEE80211_HW_SUPPORT_ECM_REGISTRATION,
@@ -59,7 +72,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	NUM_IEEE80211_HW_FLAGS
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2431,7 +2431,9 @@ static int ieee80211_change_station(stru
+@@ -2499,7 +2499,9 @@ static int ieee80211_change_station(stru
  			rcu_assign_pointer(vlansdata->u.vlan.sta, sta);
  			__ieee80211_check_fast_rx_iface(vlansdata);
  
@@ -181,10 +194,11 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		if (vp > 0) {
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -850,14 +850,23 @@ struct ieee80211_vif *wdev_to_ieee80211_
+@@ -850,12 +850,25 @@ struct ieee80211_vif *wdev_to_ieee80211_
  }
  EXPORT_SYMBOL_GPL(wdev_to_ieee80211_vif);
  
+-struct ieee80211_vif *wdev_to_ieee80211_vif_vlan(struct wireless_dev *wdev)
 +struct ieee80211_sta *wdev_to_ieee80211_vlan_sta(struct wireless_dev *wdev)
 +{
 +	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
@@ -197,18 +211,18 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +}
 +EXPORT_SYMBOL_GPL(wdev_to_ieee80211_vlan_sta);
 +
- struct ieee80211_vif *wdev_to_ieee80211_vif_vlan(struct wireless_dev *wdev)
++struct ieee80211_vif *wdev_to_ieee80211_vif_vlan(struct wireless_dev *wdev,
++						 bool is_add_vlan)
  {
  	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
  	struct ieee80211_sub_if_data *master;
  
 -	if (!ieee80211_sdata_running(sdata))
--		return NULL;
--
++	if (!is_add_vlan && !ieee80211_sdata_running(sdata))
+ 		return NULL;
+ 
  	switch (sdata->vif.type) {
- 	case NL80211_IFTYPE_AP_VLAN:
- 		master = container_of(sdata->bss,
-@@ -2645,7 +2654,8 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2645,7 +2658,8 @@ int ieee80211_reconfig(struct ieee80211_
  
  	list_for_each_entry(sdata, &local->interfaces, list) {
  		if ((sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
@@ -218,7 +232,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		    sdata->vif.type != NL80211_IFTYPE_MONITOR &&
  		    ieee80211_sdata_running(sdata)) {
  			res = drv_add_interface(local, sdata);
-@@ -2661,7 +2671,8 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2661,7 +2675,8 @@ int ieee80211_reconfig(struct ieee80211_
  		list_for_each_entry_continue_reverse(sdata, &local->interfaces,
  						     list)
  			if ((sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
@@ -228,7 +242,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  			    sdata->vif.type != NL80211_IFTYPE_MONITOR &&
  			    ieee80211_sdata_running(sdata))
  				drv_remove_interface(local, sdata);
-@@ -2715,7 +2726,8 @@ int ieee80211_reconfig(struct ieee80211_
+@@ -2715,7 +2730,8 @@ int ieee80211_reconfig(struct ieee80211_
  			}
  
  			if (sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
