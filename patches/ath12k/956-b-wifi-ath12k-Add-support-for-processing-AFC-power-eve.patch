@@ -180,10 +180,54 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  
  static const char *
  ath12k_reg_get_regdom_str(enum nl80211_dfs_regions dfs_region)
-@@ -843,6 +928,155 @@ ath12k_reg_build_regd(struct ath12k_base
+@@ -843,6 +928,200 @@ ath12k_reg_build_regd(struct ath12k_base
  	return new_regd;
  }
  
++/* ath12k_reg_coalesce_afc_freq_info() - Coalesce the freq info objects received
++ * in the AFC power event.
++ *
++ * @afc_reg_info: Pointer to AFC response
++ *
++ * When freq info objects are a continuous sequence, coalesce them. The max_psd
++ * of the coalesced freq info obj should be the minimum of all psd values of the
++ * freq info objects that are being coalesced.
++ * Eg: If the freq info objects are as follows
++ * {freq_low: 6330, freq_high: 6361, max_psd: 11}
++ * {freq_low: 6361, freq_high: 6425, max_psd: 23}
++ * {freq_low: 6525, freq_high: 6540, max_psd: 23}
++ * {freq_low: 6540, freq_high: 6570, max_psd: 22}
++ *
++ * These should be coalesced into
++ * {freq_low: 6330, freq_high: 6425, max_psd: 11}
++ * {freq_low: 6525, freq_high: 6570, max_psd: 22}
++ **/
++static void
++ath12k_reg_coalesce_afc_freq_info(struct ath12k_afc_sp_reg_info *afc_reg_info)
++{
++	struct ath12k_afc_freq_obj *afc_freq_info = afc_reg_info->afc_freq_info;
++	u8 num_freq_objs = afc_reg_info->num_freq_objs;
++	int start_idx = 0;
++	int next_idx = start_idx + 1;
++
++	while (next_idx < num_freq_objs) {
++		if (afc_freq_info[start_idx].high_freq ==
++		    afc_freq_info[next_idx].low_freq) {
++			afc_freq_info[start_idx].high_freq = afc_freq_info[next_idx].high_freq;
++			afc_freq_info[start_idx].max_psd = min(afc_freq_info[start_idx].max_psd,
++							       afc_freq_info[next_idx].max_psd);
++			next_idx++;
++			afc_reg_info->num_freq_objs--;
++		} else {
++			start_idx++;
++			afc_freq_info[start_idx].low_freq = afc_freq_info[next_idx].low_freq;
++			afc_freq_info[start_idx].high_freq = afc_freq_info[next_idx].high_freq;
++			afc_freq_info[start_idx].max_psd = afc_freq_info[next_idx].max_psd;
++			next_idx++;
++		}
++	}
++}
++
 +int ath12k_reg_process_afc_power_event(struct ath12k *ar)
 +{
 +	int new_reg_rule_cnt, num_regd_rules, num_afc_rules, num_sp_rules;
@@ -240,6 +284,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
 +
 +	num_sp_rules = ab->sp_rule->num_6ghz_sp_rule;
 +	num_regd_rules = regd->n_reg_rules;
++	ath12k_reg_coalesce_afc_freq_info(afc_reg_info);
 +	num_afc_rules = afc_reg_info->num_freq_objs;
 +
 +	for (i = 0; i < num_regd_rules; i++) {
@@ -764,7 +809,7 @@ Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
  static struct ath12k_reg_rule
  *create_ext_reg_rules_from_wmi(u32 num_reg_rules,
  			       struct ath12k_wmi_reg_rule_ext_params *wmi_reg_rule)
-@@ -15054,6 +15385,9 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -15053,6 +15384,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_PDEV_ANI_OFDM_LEVEL_EVENTID:
  		ath12k_wmi_event_ani_ofdm_level(ab, skb);
  		break;
