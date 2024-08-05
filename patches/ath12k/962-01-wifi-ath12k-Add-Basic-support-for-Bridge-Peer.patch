@@ -622,9 +622,25 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		arvif = ahvif->link[link_id];
  		arsta = ahsta->link[link_id];
  
+@@ -827,6 +844,7 @@ int ath12k_peer_create(struct ath12k *ar
+ 
+ 	peer->pdev_idx = ar->pdev_idx;
+ 	peer->sta = sta;
++	peer->is_bridge_peer = arg->mlo_bridge_peer;
+ 
+ 	if (vif->type == NL80211_IFTYPE_STATION) {
+ 		arvif->ast_hash = peer->ast_hash;
 --- a/drivers/net/wireless/ath/ath12k/peer.h
 +++ b/drivers/net/wireless/ath/ath12k/peer.h
-@@ -131,6 +131,9 @@ void ath12k_peer_mlo_unmap_event(struct
+@@ -79,6 +79,7 @@ struct ath12k_peer {
+ 	/* To check if the peer entry is part of rhash table or not */
+ 	bool rhash_done;
+ 
++	bool is_bridge_peer;
+ 	/* any other ML info common for all partners can be added
+ 	 * here and would be same for all partner peers
+ 	 */
+@@ -131,6 +132,9 @@ void ath12k_peer_mlo_unmap_event(struct
  int ath12k_peer_delete_send(struct ath12k *ar, u32 vdev_id, const u8 *addr);
  struct ath12k_peer *ath12k_peer_find_by_vdev_id(struct ath12k_base *ab,
  		                        int vdev_id);
@@ -681,14 +697,11 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  struct wmi_peer_create_mlo_params {
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -3203,6 +3203,17 @@ static void ath12k_dp_rx_deliver_msdu(st
+@@ -3203,6 +3203,14 @@ static void ath12k_dp_rx_deliver_msdu(st
  			status->link_valid = 1;
  			status->link_id = peer->link_id;
  		}
-+		spin_lock_bh(&ar->ab->base_lock);
-+		arsta = ath12k_peer_get_link_sta(ar->ab, peer);
-+		spin_unlock_bh(&ar->ab->base_lock);
-+		if (arsta && arsta->is_bridge_peer) {
++		if (peer->is_bridge_peer) {
 +			dev_kfree_skb_any(msdu);
 +			ath12k_dbg(ab, ATH12K_DBG_DATA,
 +				   "Packet received on bridge peer link_id %d, drop it\n",
