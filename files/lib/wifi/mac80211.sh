@@ -4,6 +4,201 @@ append DRIVERS "mac80211"
 
 MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
 
+configure_service_param() {
+	enable_service=$2
+	phy=$3
+	json_load "$1"
+	json_get_var svc_id svc_id
+	json_get_var disable disable
+
+	[ -z "$disable" ] && disable='0'
+
+	if [ $enable_service -eq 1 ] && [ "$disable" -eq 0 ]; then
+		json_get_var min_thruput_rate min_thruput_rate
+		json_get_var max_thruput_rate max_thruput_rate
+		json_get_var burst_size burst_size
+		json_get_var service_interval service_interval
+		json_get_var delay_bound delay_bound
+		json_get_var msdu_ttl msdu_ttl
+		json_get_var priority priority
+		json_get_var tid tid
+		json_get_var msdu_rate_loss msdu_rate_loss
+		json_get_var ul_service_interval ul_service_interval
+		json_get_var ul_min_tput ul_min_tput
+		json_get_var ul_max_latency ul_max_latency
+		json_get_var ul_burst_size ul_burst_size
+		json_get_var ul_ofdma_disable ul_ofdma_disable
+		json_get_var ul_mu_mimo_disable ul_mu_mimo_disable
+
+		cmd="iw $phy service_class create $svc_id "
+		[ ! -z "$min_thruput_rate" ] && cmd=$cmd"min_tput $min_thruput_rate "
+		[ ! -z "$max_thruput_rate" ] && cmd=$cmd"max_tput $max_thruput_rate "
+		[ ! -z "$burst_size" ] && cmd=$cmd"burst_size $burst_size "
+		[ ! -z "$service_interval" ] && cmd=$cmd"service_interval $service_interval "
+		[ ! -z "$delay_bound" ] && cmd=$cmd"delay_bound $delay_bound "
+		[ ! -z "$msdu_ttl" ] && cmd=$cmd"msdu_ttl $msdu_ttl "
+		[ ! -z "$priority" ] && cmd=$cmd"priority $priority "
+		[ ! -z "$tid" ] && cmd=$cmd"tid $tid "
+		[ ! -z "$msdu_rate_loss" ] && cmd=$cmd"msdu_loss $msdu_rate_loss "
+		[ ! -z "$ul_service_interval" ] && cmd=$cmd"ul_service_interval $ul_service_interval "
+		[ ! -z "$ul_min_tput" ] && cmd=$cmd"ul_min_tput $ul_min_tput "
+		[ ! -z "$ul_max_latency" ] && cmd=$cmd"ul_max_latency $ul_max_latency "
+		[ ! -z "$ul_burst_size" ] && cmd=$cmd"ul_burst_size $ul_burst_size "
+		[ ! -z "$ul_ofdma_disable" ] && cmd=$cmd"ul_ofdma_disable $ul_ofdma_disable "
+		[ ! -z "$ul_mu_mimo_disable" ] && cmd=$cmd"ul_mu_mimo_disable $ul_mu_mimo_disable "
+
+		eval $cmd
+	elif [ $enable_service -eq 0 ]; then
+		check_svc_id=$(iw $phy service_class view $svc_id | grep "Service ID" | cut -d ":" -f2)
+		if [ ! -z "$check_svc_id" ] && [ $check_svc_id -eq $svc_id ]; then
+			cmd="iw $phy service_class disable $svc_id"
+			eval $cmd
+		fi
+	fi
+}
+
+configure_service_class() {
+	PHY_PATH="/sys/kernel/debug/ieee80211"
+	phy_present=false
+	if [ -d  $PHY_PATH ]
+	then
+		for phy in $(ls $PHY_PATH 2>/dev/null); do
+			dir_name="$PHY_PATH/$phy/ath12k*"
+			for dir in $dir_name; do
+				[ -d $dir ] && phy_present=true && break
+			done
+			[ $phy_present = true ] && break
+		done
+	fi
+	[ $phy_present = false ] && return
+
+	json_init
+	json_set_namespace default_ns
+	json_load_file /lib/wifi/sawf/def_service_classes.json
+	json_select service_class
+	json_get_keys svc_class_indexes
+	svc_class_index=0
+	enable_svc=$1
+
+	svc_class_index_count=$(echo "$svc_class_indexes" | wc -w)
+	while [ $svc_class_index -lt $svc_class_index_count ]
+	do
+		svc_class_json=$(jsonfilter -i /lib/wifi/sawf/def_service_classes.json -e "@.service_class[$svc_class_index]")
+		configure_service_param "$svc_class_json" "$enable_svc" "$phy"
+		svc_class_index=$((svc_class_index+1))
+	done
+
+	json_set_namespace default_ns
+	json_load_file /lib/wifi/sawf/service_classes.json
+	json_select service_class
+	json_get_keys svc_class_indexes
+	svc_class_index=0
+
+	svc_class_index_count=$(echo "$svc_class_indexes" | wc -w)
+	while [ $svc_class_index -lt $svc_class_index_count ]
+	do
+		svc_class_json=$(jsonfilter -i /lib/wifi/sawf/service_classes.json -e "@.service_class[$svc_class_index]")
+		configure_service_param "$svc_class_json" "$enable_svc" "$phy"
+		svc_class_index=$((svc_class_index+1))
+	done
+}
+
+configure_sla_param() {
+	json_load "$1"
+	json_get_var svc_id svc_id
+	json_get_var disable disable
+	json_get_var min_thruput_rate min_thruput_rate
+	json_get_var max_thruput_rate max_thruput_rate
+	json_get_var burst_size burst_size
+	json_get_var service_interval service_interval
+	json_get_var delay_bound delay_bound
+	json_get_var msdu_ttl msdu_ttl
+	json_get_var msdu_rate_loss msdu_rate_loss
+
+	[ -z "$min_thruput_rate" ] && min_thruput_rate='X'
+	[ -z "$max_thruput_rate" ] && max_thruput_rate='X'
+	[ -z "$burst_size" ] && burst_size='X'
+	[ -z "$service_interval" ] && service_interval='X'
+	[ -z "$delay_bound" ] && delay_bound='X'
+	[ -z "$msdu_ttl" ] && msdu_ttl='X'
+	[ -z "$msdu_rate_loss" ] && msdu_rate_loss='X'
+	[ -z "$disable" ] && disable='0'
+
+	if [ "$disable" -eq 0 ]; then
+		cmd="iw $phy telemetry sla_thershold "$svc_id" "$min_thruput_rate" "$max_thruput_rate" "$burst_size" "$service_interval" "$delay_bound" "$msdu_ttl" "$msdu_rate_loss""
+		echo "$svc_id" "$min_thruput_rate" "$max_thruput_rate" "$burst_size" "$service_interval" "$delay_bound" "$msdu_ttl" "$msdu_rate_loss"
+		eval $cmd
+	fi
+}
+
+configure_telemetry_sla_thersholds() {
+	json_init
+	json_set_namespace sla_ns
+	json_load_file /lib/wifi/sawf/telemetry/sla.json
+	json_select sla
+	json_get_keys sla_indexes
+	sla_index=0
+
+	sla_index_count=$(echo "$sla_indexes" | wc -w)
+
+	echo "SLA Count: $sla_index_count" > /dev/console
+
+	while [ $sla_index -lt $sla_index_count ]
+	do
+		sla_json=$(jsonfilter -i /lib/wifi/sawf/telemetry/sla.json -e "@.sla[$sla_index]")
+		configure_sla_param "$sla_json"
+
+		sla_index=$(expr $sla_index + 1)
+	done
+}
+
+configure_telemetry_sla_detect() {
+	json_init
+	json_load_file /lib/wifi/sawf/telemetry/sla_detect.json
+	json_select x_packet
+		json_get_var delay_x_packet delay
+		json_get_var msdu_loss_x_packet msdu_loss
+		json_get_var ttl_drop_x_packet ttl_drop
+	json_select ..
+	json_select 1_second
+		json_get_var min_throutput min_throutput
+		json_get_var max_throughput max_throughput
+	json_select ..
+	json_select mov_average
+		json_get_var delay_mov_avg delay
+	json_select ..
+	json_select x_second
+		json_get_var service_interval service_interval
+		json_get_var burst_size burst_size
+		json_get_var msdu_loss_x_sec msdu_loss
+		json_get_var ttl_drop_x_sec ttl_drop
+	json_select ..
+
+	cmd="iw $phy telemetry sla_detection_cfg num_packet 0 0 0 0 $delay_x_packet $ttl_drop_x_packet $msdu_loss_x_packet"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg per_second $min_throutput $max_throughput 0 0 0 0 0"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg moving_avg 0 0 0 0 $delay_mov_avg 0 0"
+	eval $cmd
+	cmd="iw $phy telemetry sla_detection_cfg num_second 0 0 $burst_size $service_interval 0 $ttl_drop_x_sec $msdu_loss_x_sec"
+	eval $cmd
+}
+
+configure_telemetry_sla_samples() {
+	json_init
+	json_load_file /lib/wifi/sawf/telemetry/config.json
+
+# Parsing the moving average params
+	json_get_var mavg_num_packet mavg_num_packet
+	json_get_var mavg_num_window mavg_num_window
+
+# Parsing the sla params
+	json_get_var sla_num_packet sla_num_packet
+	json_get_var sla_time_secs sla_time_secs
+
+	iw $phy telemetry sla_samples_cfg "$mavg_num_packet" "$mavg_num_window" "$sla_num_packet" "$sla_time_secs"
+}
+
 update_mld_vap_details() {
 	local _mlds
 	local _devices_up
@@ -248,8 +443,35 @@ pre_mac80211() {
                                 rm -rf /var/run/hostapd-*updated-cfg
                         fi
                         rm -rf /var/run/wpa_supplicant-*-updated-cfg  2>/dev/null
+			rm -rf /tmp/*_freq_list 2>/dev/null
 			if [ -f "$MLD_VAP_DETAILS" ]; then
 				rm -rf $MLD_VAP_DETAILS
+			fi
+			sawf_supp="/sys/module/ath12k/parameters/sawf"
+			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
+				configure_service_class 0
+			fi
+			if [ -f "/tmp/apsta_mode.pid" ]; then
+				pid=$(cat /tmp/apsta_mode.pid)
+				kill -15 $pid 2>/dev/null
+				rm /tmp/apsta_mode.pid 2>/dev/null
+			fi
+		;;
+	esac
+	return 0
+}
+
+post_mac80211() {
+	local action=${1}
+
+	case "${action}" in
+		enable)
+			sawf_supp="/sys/module/ath12k/parameters/sawf"
+			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
+				configure_service_class 1
+				configure_telemetry_sla_samples
+				configure_telemetry_sla_thersholds
+				configure_telemetry_sla_detect
 			fi
 		;;
 	esac
@@ -365,10 +587,19 @@ detect_mac80211() {
 			iter=$total_bands
 		fi
 
+		uci -q set wireless.mac80211=smp_affinity
+		uci -q set wireless.mac80211.enable_smp_affinity=1
+		uci -q set wireless.mac80211.enable_color=1
+
 		while [ $bandidx -le $iter ]
 		do
 			_mode_band=$(eval echo $mode_band | awk -v I=$mode_bandidx '{print $I}')
 			_channel=$(eval echo $channel | awk -v I=$mode_bandidx '{print $I}')
+			if [ $_mode_band == '6g' ]; then
+				_channel=49
+			elif [ $_mode_band == '2g' ]; then
+				_channel=6
+			fi
 			_htmode=$(eval echo $htmode | awk -v I=$mode_bandidx '{print $I}')
 			mode_bandidx=$(($mode_bandidx + 1))
 
@@ -376,7 +607,10 @@ detect_mac80211() {
 			macaddr="$(cat /sys/class/ieee80211/${dev}/macaddress)"
 
 			# work around phy rename related race condition
-			[ -n "$path" -o -n "$macaddr" ] || continue
+			if ! [ -n "$path" ] || ! [ -n "$macaddr" ]; then
+				bandidx=$((bandidx + 1))
+				continue
+			fi
 
 			found=
 			config_foreach check_mac80211_device wifi-device "$path" "$macaddr"
