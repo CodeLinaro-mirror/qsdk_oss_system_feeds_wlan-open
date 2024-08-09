@@ -1,0 +1,55 @@
+From 683a70ae27fa2bbc75ee173eea16b7d9fe2ed599 Mon Sep 17 00:00:00 2001
+From: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
+Date: Wed, 7 Aug 2024 21:19:04 +0530
+Subject: [PATCH] wifi: ath12k: Increment num_rules by 2 only if weather
+ channels are present
+
+When a 5 GHz AP is configured with country Norfolk Islands (country
+code NF), there is a warning trace observed.
+
+In ath12k_reg_build_regd, if the DFS region is ETSI, num_rules is
+increased by 2 to support the weather radar channels. However, in the
+country code NF, no regulatory rule supports weather radar channels.
+Consequently, is_valid_reg_rule returns false when the for-loop
+iteration in is_valid_rd exceeds the actual number of regulatory rules
+present in the rd. The start frequency and end frequency for a
+regulatory rule beyond the last regulatory rule in the rd is 0.
+This triggers a WARN_ON within __regulatory_set_wiphy_regd.
+
+To address this issue, increment num_rules by 1 within the for-loop
+in ath12k_reg_build_regd, but only when the DFS region is ETSI and
+the regulatory rule supports weather radar channels.
+
+Tag: REGULATORY
+
+Signed-off-by: Hariharan Basuthkar <quic_hbasuthk@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/reg.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/reg.c b/drivers/net/wireless/ath/ath12k/reg.c
+index 27c500f..afa9898 100644
+--- a/drivers/net/wireless/ath/ath12k/reg.c
++++ b/drivers/net/wireless/ath/ath12k/reg.c
+@@ -800,10 +800,6 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+ 	if (!num_rules)
+ 		return new_regd;
+ 
+-	/* Add max additional rules to accommodate weather radar band */
+-	if (reg_info->dfs_region == ATH12K_DFS_REG_ETSI)
+-		num_rules += 2;
+-
+ 	/* 6 GHz standard power rules should not be updated to cfg
+ 	 * until we get afc data with valid rules. Hence save the sp
+ 	 * rule in ab and use this to intersect with afc rules when we get
+@@ -939,6 +935,7 @@ ath12k_reg_build_regd(struct ath12k_base *ab,
+ 							     reg_rule, &idx,
+ 							     flags, max_bw);
+ 			idx++;
++			num_rules++;
+ 			continue;
+ 		}
+ 
+-- 
+2.34.1
+
