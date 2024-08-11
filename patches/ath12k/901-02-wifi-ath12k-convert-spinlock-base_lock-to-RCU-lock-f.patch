@@ -33,7 +33,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1474,9 +1474,9 @@ struct ath12k_base {
+@@ -1473,9 +1473,9 @@ struct ath12k_base {
  	/* Protects data like peers and peer list*/
  	spinlock_t base_lock;
  	u32 peer_list_size;
@@ -366,7 +366,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  	return ret;
  }
-@@ -4788,13 +4794,16 @@ static bool ath12k_dp_rx_h_tkip_mic_err(
+@@ -4795,13 +4801,16 @@ static bool ath12k_dp_rx_h_tkip_mic_err(
  exit:
  	if (!ab->stats_disable) {
  		peer_id = ath12k_dp_rx_h_peer_id(ab, desc);
@@ -386,7 +386,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	}
  
  	return drop;
-@@ -4821,14 +4830,14 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+@@ -4828,14 +4837,14 @@ static bool ath12k_dp_rx_h_4addr_null_fr
  	msdu_len = ath12k_dp_rx_h_msdu_len(ab, rx_desc);
  	peer_id = ath12k_dp_rx_h_peer_id(ab, rx_desc);
  
@@ -404,7 +404,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	l3pad_bytes = ath12k_dp_rx_h_l3pad(ab, rx_desc);
  
  	if ((hal_rx_desc_sz + l3pad_bytes + msdu_len) > DP_RX_BUFFER_SIZE) {
-@@ -4863,14 +4872,17 @@ static bool ath12k_dp_rx_h_4addr_null_fr
+@@ -4870,14 +4879,17 @@ static bool ath12k_dp_rx_h_4addr_null_fr
  
  exit:
  	if (!ab->stats_disable && drop) {
@@ -496,7 +496,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		/* Store the NWDELAY to skb->mark which can be fetched
  		 * during tx completion
 @@ -1042,18 +1048,21 @@ void ath12k_dp_tx_update_txcompl(struct
- 	u8 mcs, rate_idx, ofdma;
+ 	u8 mcs, ofdma, rate_idx = 0;
  	int ret;
  
 -	spin_lock_bh(&ab->base_lock);
@@ -666,7 +666,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  static inline
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -1332,11 +1332,22 @@ void ath12k_mac_peer_cleanup_all(struct
+@@ -1337,11 +1337,22 @@ void ath12k_mac_peer_cleanup_all(struct
  	lockdep_assert_held(&ar->conf_mutex);
  
  	mutex_lock(&ab->tbl_mtx_lock);
@@ -680,9 +680,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +					   NULL);
 +	}
 +	spin_unlock_bh(&ab->base_lock);
- 
-+	synchronize_rcu();
 +
++	synchronize_rcu();
+ 
 +	spin_lock_bh(&ab->base_lock);
  	list_for_each_entry_safe(peer, tmp, &ab->peers, list) {
  		peer_id = peer->peer_id;
@@ -690,7 +690,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_dp_rx_peer_tid_cleanup(ar, peer);
  		ath12k_peer_rhash_delete(ab, peer);
  		list_del(&peer->list);
-@@ -1344,11 +1355,6 @@ void ath12k_mac_peer_cleanup_all(struct
+@@ -1349,11 +1360,6 @@ void ath12k_mac_peer_cleanup_all(struct
  	if (peer->sawf_ctx_peer.telemetry_peer_ctx)
  		ath12k_telemetry_peer_ctx_free(peer->sawf_ctx_peer.telemetry_peer_ctx);
  #endif
@@ -702,23 +702,22 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		kfree(peer);
  	}
  	spin_unlock_bh(&ab->base_lock);
-@@ -7262,10 +7268,22 @@ static void ath12k_mac_station_post_remo
- 	if (skip_peer_delete && peer) {
- 		peer->sta = NULL;
- 	} else if (peer && peer->sta == sta) {
-+		ml_peer_id = peer->ml_peer_id & ~ATH12K_ML_PEER_ID_VALID;
-+		rcu_assign_pointer(ab->peer_list[peer->peer_id], NULL);
-+		if (peer->mlo)
-+			rcu_assign_pointer(ab->ml_peer_list[ml_peer_id][peer->pdev_idx],
-+					   NULL);
-+	}
-+	spin_unlock_bh(&ar->ab->base_lock);
-+
-+	synchronize_rcu();
-+
-+	spin_lock_bh(&ar->ab->base_lock);
-+	peer = ath12k_peer_find(ar->ab, arvif->vdev_id, arsta->addr);
-+	if (!skip_peer_delete && peer && peer->sta == sta) {
+@@ -7265,13 +7271,12 @@ static void ath12k_mac_station_post_remo
+ 					   struct ath12k_link_vif *arvif,
+ 					   struct ath12k_link_sta *arsta)
+ {
+-	struct ath12k_base *ab = ar->ab;
+ 	struct ath12k_peer *peer;
+ 	struct ath12k_sta *ahsta = arsta->ahsta;
+ 	struct ieee80211_sta *sta;
+ 	struct ath12k_vif *ahvif = arvif->ahvif;
+ 	struct ieee80211_vif *vif = ahvif->vif;
+-	u16 peer_id, ml_peer_id;
++	u16 peer_id;
+ 	bool skip_peer_delete;
+ 
+ 	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
+@@ -7290,7 +7295,6 @@ static void ath12k_mac_station_post_remo
  		ath12k_warn(ar->ab, "Found peer entry %pM n vdev %i after it was supposedly removed\n",
  			    arsta->addr, arvif->vdev_id);
  		peer_id = peer->peer_id;
@@ -726,7 +725,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		ath12k_peer_rhash_delete(ar->ab, peer);
  		peer->sta = NULL;
  		list_del(&peer->list);
-@@ -7273,11 +7291,6 @@ static void ath12k_mac_station_post_remo
+@@ -7298,11 +7302,6 @@ static void ath12k_mac_station_post_remo
  		if (peer->sawf_ctx_peer.telemetry_peer_ctx)
  			ath12k_telemetry_peer_ctx_free(peer->sawf_ctx_peer.telemetry_peer_ctx);
  #endif
