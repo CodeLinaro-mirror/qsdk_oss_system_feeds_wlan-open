@@ -1,0 +1,330 @@
+From 03a499a4de5ad3b4b9e3cdba7c941ca951fb616b Mon Sep 17 00:00:00 2001
+From: Ronghua Zeng <quic_ronghuaz@quicinc.com>
+Date: Sat, 31 Aug 2024 15:51:44 +0800
+Subject: [PATCH] ath9k: disable airtime fairness feature
+
+For the CPU limitation of QCA4531, enable the airtime fairness
+feature affects the Tx performance. Especiall in MCC mode,
+ieee80211_schedule_txq() function is called during the queue
+scheduling, and packets from different channels are mixed into the
+local->active_txqs, which causing packets from the other channel
+to block the transmission of the current channel.
+---
+ Kconfig.local                            |  3 ++
+ drivers/net/wireless/ath/ath9k/Kconfig   |  7 +++
+ drivers/net/wireless/ath/ath9k/ath9k.h   |  3 ++
+ drivers/net/wireless/ath/ath9k/channel.c | 10 ++++
+ drivers/net/wireless/ath/ath9k/init.c    |  2 +
+ drivers/net/wireless/ath/ath9k/main.c    |  6 +++
+ drivers/net/wireless/ath/ath9k/recv.c    |  4 ++
+ drivers/net/wireless/ath/ath9k/xmit.c    | 85 ++++++++++++++++++++++++++++++++
+ local-symbols                            |  1 +
+ 9 files changed, 121 insertions(+)
+
+diff --git a/Kconfig.local b/Kconfig.local
+index 5c7c46c..563213b 100644
+--- a/Kconfig.local
++++ b/Kconfig.local
+@@ -274,6 +274,9 @@ config BACKPORTED_ATH9K_DFS_DEBUGFS
+ config BACKPORTED_ATH9K_BTCOEX_SUPPORT
+ 	tristate
+ 	default ATH9K_BTCOEX_SUPPORT
++config BACKPORTED_ATH9K_AIRTIME_FAIRNESS_DISABLED
++	tristate
++	default ATH9K_AIRTIME_FAIRNESS_DISABLED
+ config BACKPORTED_ATH9K
+ 	tristate
+ 	default ATH9K
+diff --git a/drivers/net/wireless/ath/ath9k/Kconfig b/drivers/net/wireless/ath/ath9k/Kconfig
+index e7b7a49..a0b8936 100644
+--- a/drivers/net/wireless/ath/ath9k/Kconfig
++++ b/drivers/net/wireless/ath/ath9k/Kconfig
+@@ -20,6 +20,13 @@ config ATH9K_BTCOEX_SUPPORT
+ 	  Say Y, if you want to use the ath9k/ath9k_htc radios together with
+ 	  Bluetooth modules in the same system.
+ 
++config ATH9K_AIRTIME_FAIRNESS_DISABLED
++	bool "Atheros airtime fairness disabled"
++	depends on (ATH9K || ATH9K_HTC)
++	default y
++	help
++	  Say Y, if you want to disable the airtime fairness feature.
++
+ config ATH9K
+ 	tristate "Atheros 802.11n wireless cards support"
+ 	depends on m
+diff --git a/drivers/net/wireless/ath/ath9k/ath9k.h b/drivers/net/wireless/ath/ath9k/ath9k.h
+index 83daaa0..16ef404 100644
+--- a/drivers/net/wireless/ath/ath9k/ath9k.h
++++ b/drivers/net/wireless/ath/ath9k/ath9k.h
+@@ -329,6 +329,9 @@ struct ath_chanctx {
+ 	struct cfg80211_chan_def chandef;
+ 	struct list_head vifs;
+ 	struct ath_acq acq[IEEE80211_NUM_ACS];
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++	struct list_head acq_list[IEEE80211_NUM_ACS];
++#endif
+ 	int hw_queue_base;
+ 
+ 	/* do not dereference, use for comparison only */
+diff --git a/drivers/net/wireless/ath/ath9k/channel.c b/drivers/net/wireless/ath/ath9k/channel.c
+index 1a926fc..e08d574 100644
+--- a/drivers/net/wireless/ath/ath9k/channel.c
++++ b/drivers/net/wireless/ath/ath9k/channel.c
+@@ -119,11 +119,16 @@ void ath_chanctx_init(struct ath_softc *sc)
+ 		INIT_LIST_HEAD(&ctx->vifs);
+ 		ctx->txpower = ATH_TXPOWER_MAX;
+ 		ctx->flush_timeout = HZ / 5; /* 200ms */
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++		for (j = 0; j < ARRAY_SIZE(ctx->acq_list); j++)
++			INIT_LIST_HEAD(&ctx->acq_list[j]);
++#else
+ 		for (j = 0; j < ARRAY_SIZE(ctx->acq); j++) {
+ 			INIT_LIST_HEAD(&ctx->acq[j].acq_new);
+ 			INIT_LIST_HEAD(&ctx->acq[j].acq_old);
+ 			spin_lock_init(&ctx->acq[j].lock);
+ 		}
++#endif
+ 	}
+ }
+ 
+@@ -1349,11 +1354,16 @@ void ath9k_offchannel_init(struct ath_softc *sc)
+ 	ctx->txpower = ATH_TXPOWER_MAX;
+ 	cfg80211_chandef_create(&ctx->chandef, chan, NL80211_CHAN_HT20);
+ 
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++	for (i = 0; i < ARRAY_SIZE(ctx->acq_list); i++)
++		INIT_LIST_HEAD(&ctx->acq_list[i]);
++#else
+ 	for (i = 0; i < ARRAY_SIZE(ctx->acq); i++) {
+ 		INIT_LIST_HEAD(&ctx->acq[i].acq_new);
+ 		INIT_LIST_HEAD(&ctx->acq[i].acq_old);
+ 		spin_lock_init(&ctx->acq[i].lock);
+ 	}
++#endif
+ 
+ 	sc->offchannel.chan.offchannel = true;
+ }
+diff --git a/drivers/net/wireless/ath/ath9k/init.c b/drivers/net/wireless/ath/ath9k/init.c
+index 5388a0c..62d0935 100644
+--- a/drivers/net/wireless/ath/ath9k/init.c
++++ b/drivers/net/wireless/ath/ath9k/init.c
+@@ -1051,7 +1051,9 @@ static void ath9k_set_hw_capab(struct ath_softc *sc, struct ieee80211_hw *hw)
+ 	SET_IEEE80211_PERM_ADDR(hw, common->macaddr);
+ 
+ 	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
++#ifndef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
+ 	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_AIRTIME_FAIRNESS);
++#endif
+ 	wiphy_ext_feature_set(hw->wiphy,
+ 			      NL80211_EXT_FEATURE_MULTICAST_REGISTRATIONS);
+ 	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_CAN_REPLACE_PTK0);
+diff --git a/drivers/net/wireless/ath/ath9k/main.c b/drivers/net/wireless/ath/ath9k/main.c
+index 9eefe82..ed2b495 100644
+--- a/drivers/net/wireless/ath/ath9k/main.c
++++ b/drivers/net/wireless/ath/ath9k/main.c
+@@ -73,10 +73,16 @@ static bool ath9k_has_pending_frames(struct ath_softc *sc, struct ath_txq *txq,
+ 		goto out;
+ 
+ 	if (txq->mac80211_qnum >= 0) {
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++		struct list_head *list;
++		list = &sc->cur_chan->acq_list[txq->mac80211_qnum];
++		if (!list_empty(list))
++#else
+ 		struct ath_acq *acq;
+ 
+ 		acq = &sc->cur_chan->acq[txq->mac80211_qnum];
+ 		if (!list_empty(&acq->acq_new) || !list_empty(&acq->acq_old))
++#endif
+ 			pending = true;
+ 	}
+ out:
+diff --git a/drivers/net/wireless/ath/ath9k/recv.c b/drivers/net/wireless/ath/ath9k/recv.c
+index 89f9655..25afd29 100644
+--- a/drivers/net/wireless/ath/ath9k/recv.c
++++ b/drivers/net/wireless/ath/ath9k/recv.c
+@@ -1007,6 +1007,7 @@ static void ath9k_apply_ampdu_details(struct ath_softc *sc,
+ 	}
+ }
+ 
++#ifndef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
+ static void ath_rx_count_airtime(struct ath_softc *sc,
+ 				 struct ath_rx_status *rs,
+ 				 struct sk_buff *skb)
+@@ -1056,6 +1057,7 @@ static void ath_rx_count_airtime(struct ath_softc *sc,
+ exit:
+ 	rcu_read_unlock();
+ }
++#endif
+ 
+ int ath_rx_tasklet(struct ath_softc *sc, int flush, bool hp)
+ {
+@@ -1203,7 +1205,9 @@ int ath_rx_tasklet(struct ath_softc *sc, int flush, bool hp)
+ 		ath9k_antenna_check(sc, &rs);
+ 		ath9k_apply_ampdu_details(sc, &rs, rxs);
+ 		ath_debug_rate_stats(sc, &rs, skb);
++#ifndef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
+ 		ath_rx_count_airtime(sc, &rs, skb);
++#endif
+ 
+ 		hdr = (struct ieee80211_hdr *)skb->data;
+ 		if (ieee80211_is_ack(hdr->frame_control))
+diff --git a/drivers/net/wireless/ath/ath9k/xmit.c b/drivers/net/wireless/ath/ath9k/xmit.c
+index d6e5abc..693ae17 100644
+--- a/drivers/net/wireless/ath/ath9k/xmit.c
++++ b/drivers/net/wireless/ath/ath9k/xmit.c
+@@ -115,10 +115,23 @@ void ath_txq_unlock_complete(struct ath_softc *sc, struct ath_txq *txq)
+ 
+ void ath_tx_queue_tid(struct ath_softc *sc, struct ath_atx_tid *tid)
+ {
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++	struct list_head *list;
++	struct ath_vif *avp = (struct ath_vif *) tid->an->vif->drv_priv;
++	struct ath_chanctx *ctx = avp->chanctx;
++
++	if (!ctx)
++		return;
++
++	list = &ctx->acq_list[TID_TO_WME_AC(tid->tidno)];
++	if (list_empty(&tid->list))
++		list_add_tail(&tid->list, list);
++#else
+ 	struct ieee80211_txq *queue =
+ 		container_of((void *)tid, struct ieee80211_txq, drv_priv);
+ 
+ 	ieee80211_schedule_txq(sc->hw, queue);
++#endif
+ }
+ 
+ void ath9k_wake_tx_queue(struct ieee80211_hw *hw, struct ieee80211_txq *queue)
+@@ -139,6 +152,9 @@ void ath9k_wake_tx_queue(struct ieee80211_hw *hw, struct ieee80211_txq *queue)
+ 		return;
+ 	}
+ 
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++	ath_tx_queue_tid(sc, tid);
++#endif
+ 	ath_txq_schedule(sc, txq);
+ 	ath_txq_unlock(sc, txq);
+ }
+@@ -666,6 +682,7 @@ static bool bf_is_ampdu_not_probing(struct ath_buf *bf)
+     return bf_isampdu(bf) && !(info->flags & IEEE80211_TX_CTL_RATE_CTRL_PROBE);
+ }
+ 
++#ifndef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
+ static void ath_tx_count_airtime(struct ath_softc *sc,
+ 				 struct ieee80211_sta *sta,
+ 				 struct ath_buf *bf,
+@@ -683,6 +700,7 @@ static void ath_tx_count_airtime(struct ath_softc *sc,
+ 
+ 	ieee80211_sta_register_airtime(sta, tid, airtime, 0);
+ }
++#endif
+ 
+ static void ath_tx_process_buffer(struct ath_softc *sc, struct ath_txq *txq,
+ 				  struct ath_tx_status *ts, struct ath_buf *bf,
+@@ -711,7 +729,9 @@ static void ath_tx_process_buffer(struct ath_softc *sc, struct ath_txq *txq,
+ 	if (sta) {
+ 		struct ath_node *an = (struct ath_node *)sta->drv_priv;
+ 		tid = ath_get_skb_tid(sc, an, bf->bf_mpdu);
++#ifndef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
+ 		ath_tx_count_airtime(sc, sta, bf, ts, tid->tidno);
++#endif
+ 		if (ts->ts_status & (ATH9K_TXERR_FILT | ATH9K_TXERR_XRETRY))
+ 			tid->clear_ps_filter = true;
+ 	}
+@@ -1915,6 +1935,70 @@ void ath_tx_cleanupq(struct ath_softc *sc, struct ath_txq *txq)
+ 	sc->tx.txqsetup &= ~(1<<txq->axq_qnum);
+ }
+ 
++#ifdef CPTCFG_ATH9K_AIRTIME_FAIRNESS_DISABLED
++/* For each acq entry, for each tid, try to schedule packets
++ * for transmit until ampdu_depth has reached min Q depth.
++ */
++void ath_txq_schedule(struct ath_softc *sc, struct ath_txq *txq)
++{
++	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
++	struct ath_atx_tid *tid, *last_tid;
++	struct list_head *tid_list;
++	bool sent = false;
++	int ret;
++
++	if (txq->mac80211_qnum < 0)
++		return;
++
++	if (test_bit(ATH_OP_HW_RESET, &common->op_flags))
++		return;
++
++	spin_lock_bh(&sc->chan_lock);
++	tid_list = &sc->cur_chan->acq_list[txq->mac80211_qnum];
++
++	if (list_empty(tid_list)) {
++		spin_unlock_bh(&sc->chan_lock);
++			return;
++	}
++
++	rcu_read_lock();
++
++	last_tid = list_entry(tid_list->prev, struct ath_atx_tid, list);
++	while (!list_empty(tid_list)) {
++		if (sc->cur_chan->stopped)
++			break;
++
++		tid = list_first_entry(tid_list, struct ath_atx_tid, list);
++			list_del_init(&tid->list);
++
++		ret = ath_tx_sched_aggr(sc, txq, tid);
++		if (ret == 0)
++			sent = true;
++	       /*
++		* add tid to round-robin queue if more frames
++		* are pending for the tid
++		*/
++	       if (!skb_queue_empty(&tid->retry_q))
++		       ath_tx_queue_tid(sc, tid);
++
++	       if (ret == -EBUSY)
++		       break;
++
++	       if (tid == last_tid) {
++		       if (!sent)
++			       break;
++
++		       sent = false;
++		       last_tid = list_entry(tid_list->prev,
++				       struct ath_atx_tid, list);
++	       }
++	}
++
++	rcu_read_unlock();
++	spin_unlock_bh(&sc->chan_lock);
++}
++
++#else
+ /* For each acq entry, for each tid, try to schedule packets
+  * for transmit until ampdu_depth has reached min Q depth.
+  */
+@@ -1956,6 +2040,7 @@ out:
+ 	spin_unlock_bh(&sc->chan_lock);
+ 	ieee80211_txq_schedule_end(hw, txq->mac80211_qnum);
+ }
++#endif
+ 
+ void ath_txq_schedule_all(struct ath_softc *sc)
+ {
+diff --git a/local-symbols b/local-symbols
+index 0bda2c6..a5ca9d1 100644
+--- a/local-symbols
++++ b/local-symbols
+@@ -92,6 +92,7 @@ ATH9K_COMMON=
+ ATH9K_COMMON_DEBUG=
+ ATH9K_DFS_DEBUGFS=
+ ATH9K_BTCOEX_SUPPORT=
++ATH9K_AIRTIME_FAIRNESS_DISABLED=
+ ATH9K=
+ ATH9K_PCI=
+ ATH9K_AHB=
+-- 
+2.7.4
+
