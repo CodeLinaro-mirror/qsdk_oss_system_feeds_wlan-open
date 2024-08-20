@@ -29,7 +29,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -501,8 +501,10 @@ struct ath12k_vif {
+@@ -499,8 +499,10 @@ struct ath12k_vif {
  	spinlock_t mcbc_gsn_lock; /* Protect mcbc_gsn */
  	struct ath12k_vif_cache cache[IEEE80211_MLD_MAX_NUM_LINKS];
  	u8 last_scan_link;
@@ -40,7 +40,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  #endif /* CPTCFG_ATH12K_DEBUGFS */
  	bool mcast_to_ucast_en;
   };
-@@ -722,6 +724,7 @@ struct ath12k_sta {
+@@ -720,6 +722,7 @@ struct ath12k_sta {
  	u16 links_map;
  	u16 ml_peer_id;
  	u8 assoc_link_id;
@@ -50,7 +50,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	 * ONLY used currently in recovery case
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -4827,22 +4827,74 @@ static const struct file_operations ath1
+@@ -4898,22 +4898,74 @@ static const struct file_operations ath1
  	.llseek = default_llseek,
  };
  
@@ -130,7 +130,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  
  	if (!hw->wiphy->num_hw) {
  		arvif->debugfs_twt = debugfs_create_dir("twt",
-@@ -4862,8 +4914,7 @@ int ath12k_debugfs_add_interface(struct
+@@ -4933,8 +4985,7 @@ int ath12k_debugfs_add_interface(struct
  			    "failed to create directory %p\n",
  			    arvif->debugfs_twt);
  		arvif->debugfs_twt = NULL;
@@ -140,7 +140,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	}
  
  	debugfs_create_file("add_dialog", 0200, arvif->debugfs_twt,
-@@ -4886,13 +4937,12 @@ int ath12k_debugfs_add_interface(struct
+@@ -4957,13 +5008,12 @@ int ath12k_debugfs_add_interface(struct
  			debugfs_remove_recursive(arvif->debugfs_twt);
  			arvif->debugfs_twt = NULL;
  			arvif->debugfs_rtsthreshold = NULL;
@@ -156,7 +156,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  
  	ahvif->debugfs_linkstats = debugfs_create_file("link_stats",
  						       0200,
-@@ -4914,8 +4964,17 @@ int ath12k_debugfs_add_interface(struct
+@@ -4985,8 +5035,29 @@ int ath12k_debugfs_add_interface(struct
  		ahvif->debugfs_linkstats = NULL;
  	}
  
@@ -167,20 +167,28 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
 +	 * label.
 +	 */
 +ap_and_sta_debugfs_file:
++	if (ahvif->debugfs_primary_link)
++		return;
++
 +	ahvif->debugfs_primary_link = debugfs_create_file("primary_link",
 +							  0644,
 +							  vif->debugfs_dir,
 +							  ahvif,
 +							  &ath12k_fops_primary_link);
 +
++	/* If debugfs_primary_link already exist, don't remove */
++	if (IS_ERR(ahvif->debugfs_primary_link) &&
++	    PTR_ERR(ahvif->debugfs_primary_link) != -EEXIST) {
++		ath12k_warn(arvif->ar->ab,
++			    "failed to create primary_link file, vif %pM",
++			    vif->addr);
++		debugfs_remove(ahvif->debugfs_primary_link);
++		ahvif->debugfs_primary_link = NULL;
++	}
  }
  
  void ath12k_debugfs_remove_interface(struct ath12k_link_vif *arvif)
-@@ -4928,9 +4987,13 @@ void ath12k_debugfs_remove_interface(str
- 		arvif->debugfs_twt = NULL;
- 		arvif->debugfs_rtsthreshold = NULL;
- 		ahvif->debugfs_linkstats = NULL;
-+		ahvif->debugfs_primary_link = NULL;
+@@ -5002,6 +5073,9 @@ void ath12k_debugfs_remove_interface(str
  		return;
  	}
  
@@ -214,7 +222,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  static inline void ath12k_debugfs_remove_interface(struct ath12k_link_vif *arvif)
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -3475,8 +3475,10 @@ static void ath12k_peer_assoc_h_mlo(stru
+@@ -3484,8 +3484,10 @@ static void ath12k_peer_assoc_h_mlo(stru
  
  	ml->enabled = true;
  	ml->assoc_link = arsta->is_assoc_link;
@@ -227,7 +235,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	ml->peer_id_valid = true;
  	ml->logical_link_idx_valid = true;
  
-@@ -3499,7 +3501,10 @@ static void ath12k_peer_assoc_h_mlo(stru
+@@ -3508,7 +3510,10 @@ static void ath12k_peer_assoc_h_mlo(stru
  		ml->partner_info[i].vdev_id = arvif->vdev_id;
  		ml->partner_info[i].hw_link_id = arvif->ar->pdev->hw_link_id;
  		ml->partner_info[i].assoc_link = arsta_p->is_assoc_link;
@@ -239,7 +247,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  		ml->partner_info[i].logical_link_idx_valid = true;
  		ml->partner_info[i].logical_link_idx = arsta_p->link_idx;
  		ml->num_partner_links++;
-@@ -7225,13 +7230,6 @@ static int ath12k_mac_station_add(struct
+@@ -7230,13 +7235,6 @@ static int ath12k_mac_station_add(struct
  		}
  	}
  
@@ -253,7 +261,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	if (ab->hw_params->vdev_start_delay &&
  	    !arvif->is_started &&
  	    ahvif->vdev_type != WMI_VDEV_TYPE_AP) {
-@@ -7498,6 +7496,11 @@ static int ath12k_mac_handle_link_sta_st
+@@ -7503,6 +7501,11 @@ static int ath12k_mac_handle_link_sta_st
  	} else if (old_state == IEEE80211_STA_AUTH &&
  		   new_state == IEEE80211_STA_ASSOC) {
  
@@ -265,7 +273,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  		ath12k_dp_peer_default_route_setup(ar, arvif, arsta);
  
  		if (vif->type == NL80211_IFTYPE_AP ||
-@@ -7698,6 +7701,7 @@ int ath12k_mac_update_sta_state(struct i
+@@ -7703,6 +7706,7 @@ int ath12k_mac_update_sta_state(struct i
  
  		ahsta->deflink.is_assoc_link = true;
  		ahsta->assoc_link_id = link_id;
@@ -273,7 +281,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	}
  
  	if (new_state == IEEE80211_STA_NOTEXIST && old_state == IEEE80211_STA_NONE) {
-@@ -7823,6 +7827,25 @@ static int ath12k_mac_op_change_sta_link
+@@ -7828,6 +7832,25 @@ static int ath12k_mac_op_change_sta_link
  	/* this op is expected only after initial sta insertion with default link */
  	WARN_ON(ahsta->links_map == 0);
  
@@ -299,7 +307,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  	for_each_set_bit(link_id, &new_links, IEEE80211_MLD_MAX_NUM_LINKS) {
  		if (ahsta->links_map & BIT(link_id))
  			continue;
-@@ -9407,11 +9430,11 @@ static u8 ath12k_mac_get_tx_link(struct
+@@ -9412,11 +9435,11 @@ static u8 ath12k_mac_get_tx_link(struct
  		return link;
  	}
  
@@ -314,7 +322,7 @@ Signed-off-by: Maharaja Kennadyrajan <quic_mkenna@quicinc.com>
  
  	/* 802.11 frame cases */
  	if (link == IEEE80211_LINK_UNSPECIFIED)
-@@ -10941,9 +10964,7 @@ static void ath12k_update_obss_color_not
+@@ -10946,9 +10969,7 @@ static void ath12k_update_obss_color_not
  	}
  #endif
  
