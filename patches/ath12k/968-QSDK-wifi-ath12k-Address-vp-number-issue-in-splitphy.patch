@@ -18,11 +18,9 @@ Signed-off-by: Pavankumar Nandeshwar <quic_pnandesh@quicinc.com>
  drivers/net/wireless/ath/ath12k/ppe.h       |  1 +
  3 files changed, 48 insertions(+), 32 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/accel_cfg.c b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-index d1cef6d..34d0060 100644
 --- a/drivers/net/wireless/ath/ath12k/accel_cfg.c
 +++ b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-@@ -66,57 +66,70 @@ static bool ath12k_ds_get_node_id(struct net_device *ndev, const u8 *peer_mac,
+@@ -66,57 +66,70 @@ static bool ath12k_ds_get_node_id(struct
  	if (ahvif->ppe_vp_type != PPE_VP_USER_TYPE_DS)
  		return false;
  
@@ -47,38 +45,42 @@ index d1cef6d..34d0060 100644
 -				ahvif->link[ahsta->primary_link_id];
 -
 -		if (WARN_ON(!arvif))
-+	} else if (ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
-+		sta = ieee80211_find_sta(vif, peer_mac);
-+		if (!sta)
- 			goto unlock_n_fail;
-+	}
- 
+-			goto unlock_n_fail;
+-
 -		ab = arvif->ab;
-+	ahsta = ath12k_sta_to_ahsta(sta);
-+	arvif = (!sta->mlo) ? ahvif->link[ahsta->deflink.link_id] :
-+			ahvif->link[ahsta->primary_link_id];
- 
+-
 -		/* Update and return DS node_id only if the chipset support DS*/
 -		if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
 -			goto unlock_n_fail;
-+	if (!arvif)
-+		goto unlock_n_fail;
- 
+-
 -		*node_id = ab->ppe.ds_node_id;
 -		rcu_read_unlock();
 -		return true;
 -	}
-+	ab = arvif->ab;
- 
+-
 -	if (ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
 -		rcu_read_lock();
+-
++	} else if (ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
+ 		sta = ieee80211_find_sta(vif, peer_mac);
+ 		if (!sta)
+ 			goto unlock_n_fail;
++	}
+ 
+-		ahsta = ath12k_sta_to_ahsta(sta);
++	ahsta = ath12k_sta_to_ahsta(sta);
++	arvif = (!sta->mlo) ? ahvif->link[ahsta->deflink.link_id] :
++			ahvif->link[ahsta->primary_link_id];
++
++	if (!arvif)
++		goto unlock_n_fail;
++
++	ab = arvif->ab;
++
 +	/* Update and return DS node_id only if the chipset support DS*/
 +	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
 +		goto unlock_n_fail;
- 
--		sta = ieee80211_find_sta(vif, peer_mac);
--		if (!sta)
--			goto unlock_n_fail;
++
 +	/*
 +	 * In splitphy mlo case, the vp number might get mapped to
 +	 * wrong lmac_id causing a traffic halt. Address this issue
@@ -89,24 +91,23 @@ index d1cef6d..34d0060 100644
 +		int idx = arvif->ppe_vp_profile_idx;
 +		int link_id;
 +		struct ath12k_link_vif *iter_arvif;
- 
--		ahsta = ath12k_sta_to_ahsta(sta);
++
 +		for_each_set_bit(link_id, &ahvif->links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
 +			iter_arvif = ahvif->link[link_id];
- 
--		arvif = (!sta->mlo) ? ahvif->link[ahsta->deflink.link_id] :
--				ahvif->link[ahsta->primary_link_id];
--		ab = arvif->ab;
++
 +			if (!iter_arvif || iter_arvif == arvif ||
 +				ab != iter_arvif->ab)
 +				continue;
  
+-		arvif = (!sta->mlo) ? ahvif->link[ahsta->deflink.link_id] :
+-				ahvif->link[ahsta->primary_link_id];
+-		ab = arvif->ab;
++			if (iter_arvif->ppe_vp_profile_idx < idx) {
++				ab->ppe.ppeds_stats.splitphy_fallbacks++;
+ 
 -		/* Update and return DS node_id only if the chipset support DS*/
 -		if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
 -			goto unlock_n_fail;
-+			if (iter_arvif->ppe_vp_profile_idx < idx) {
-+				ab->ppe.ppeds_stats.splitphy_fallbacks++;
-+
 +				goto unlock_n_fail;
 +			}
 +		}
@@ -125,21 +126,17 @@ index d1cef6d..34d0060 100644
  
  unlock_n_fail:
  	rcu_read_unlock();
-diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
-index 7a1a466..d01fc55 100644
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -3090,6 +3090,8 @@ static ssize_t ath12k_debugfs_dump_ppeds_stats(struct file *file,
+@@ -3169,6 +3169,8 @@ static ssize_t ath12k_debugfs_dump_ppeds
  			 ppeds_stats->num_rx_desc_freed);
  	len += scnprintf(buf + len, size - len, "num_rx_desc_realloc %u\n",
  			 ppeds_stats->num_rx_desc_realloc);
 +	len += scnprintf(buf + len, size - len, "splitphy_fallbacks %u\n",
 +			 ppeds_stats->splitphy_fallbacks);
- 
- 	if (len > size)
- 		len = size;
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
-index e261ae3..b648c41 100644
+ 	len += scnprintf(buf + len, size - len,
+ 			 "\ntqm_rel_reason: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u 8:%u 9:%u 10:%u 11:%u 12:%u 13:%u 14:%u\n",
+ 			 ppeds_stats->tqm_rel_reason[0],
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -49,6 +49,7 @@ struct ath12k_ppeds_stats {
@@ -147,9 +144,6 @@ index e261ae3..b648c41 100644
  	u32 num_rx_desc_freed;
  	u32 num_rx_desc_realloc;
 +	u32 splitphy_fallbacks;
+ 	u32 tqm_rel_reason[HAL_WBM_TQM_REL_REASON_MAX];
  };
  
- struct ath12k_ppeds_napi {
--- 
-2.34.1
-
