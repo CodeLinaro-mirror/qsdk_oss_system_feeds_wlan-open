@@ -119,8 +119,6 @@ drv_mac80211_init_device_config() {
 		he_spr_psr_enabled \
 		he_bss_color_enabled \
 		he_twt_required \
-		multiple_bssid \
-		ema \
 		ru_punct_ofdma \
 		use_ru_puncture_dfs
 	config_add_int \
@@ -140,6 +138,8 @@ drv_mac80211_init_device_config() {
 		ru_punct_bitmap \
 		ru_punct_acs_threshold \
 		ccfs \
+		multiple_bssid \
+		mbssid_group_size \
 		he_6ghz_reg_pwr_type
 	config_add_boolean \
 		ldpc \
@@ -603,8 +603,9 @@ mac80211_hostapd_setup_base() {
 			he_ul_mumimo \
 			eht_ulmumimo_80mhz \
 			eht_ulmumimo_160mhz \
-			multiple_bssid ema \
 			eht_ulmumimo_320mhz \
+			multiple_bssid \
+			mbssid_group_size \
 			he_6ghz_reg_pwr_type:0
 
 		if [ "$band" = "6g" ]; then
@@ -711,16 +712,24 @@ mac80211_hostapd_setup_base() {
 		fi
 
 		if [ "$is_6ghz" == "1" ]; then
-			if [ -z "$multiple_bssid" ] && [ -z "$ema" ]; then
-				multiple_bssid=1
-				ema=1
+			if [ -z "$multiple_bssid" ] && [ "$has_ap" -gt 1 ]; then
+				multiple_bssid=2
+			fi
+		fi
+
+		if [ "$multiple_bssid" == "3" ]; then
+			if [ -z "$mbssid_group_size" ]; then
+				mbssid_group_size=4
 			fi
 		fi
 
 		if [[ "$htmode" == "HE"* ]] || [ "$is_6ghz" == "1" ]; then
 			if [ "$has_ap" -gt 1 ]; then
-				[ -n "$multiple_bssid" ] && [ "$multiple_bssid" -gt 0 ] && ([ -z "$ema" ] || ([ -n "$ema" ] && [ "$ema" -eq 0 ])) && append base_cfg "mbssid=1" "$N"
-				[ -n "$ema" ] && [ "$ema" -gt 0 ] && append base_cfg "mbssid=2" "$N" && append base_cfg "ema=1" "$N"
+				append base_cfg "mbssid=$multiple_bssid" "$N"
+
+				if [ "$multiple_bssid" == "3" ]; then
+					append base_cfg "mbssid_group_size=$mbssid_group_size" "$N"
+				fi
 			fi
 		fi
 
@@ -799,6 +808,8 @@ mac80211_hostapd_setup_bss() {
 	local mode="$5"
 	local ieee80211w
 	local beacon_prot
+	local mbssid_group_size="$6"
+	local id="$((macidx - 1))"
 
 	hostapd_cfg=
 	append hostapd_cfg "$type=$ifname" "$N"
@@ -842,9 +853,11 @@ mac80211_hostapd_setup_bss() {
 			append fils_cfg "fils_discovery_max_interval=20" "$N"
 		fi
 
-		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -eq 1 ] && [ "$type" == "interface" ]; then
+		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -ge 1 ] && [ "$type" == "interface" ]; then
 			append hostapd_cfg "$fils_cfg" "$N"
 		elif [ -z "$multiple_bssid" ] || [ "$multiple_bssid" -eq 0 ]; then
+			append hostapd_cfg "$fils_cfg" "$N"
+		elif [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -eq 3 ] && [ $((id % mbssid_group_size)) == "0" ]; then
 			append hostapd_cfg "$fils_cfg" "$N"
 		fi
 	fi
@@ -966,12 +979,51 @@ mac80211_generate_mac() {
 
 	macidx=$(($id + 1))
 
-	if [ "$mode" == "ap" ] && [ "$multiple_bssid" -eq 1 ] && [ "$id" -gt 0 ]; then
-		ref_dec=$( printf '%d\n' $( echo "0x$ref" | tr -d ':' ) )
+	if [ "$multiple_bssid" == "3" ]; then
+		max_bssid_ind=0
+		local iter=$((mbssid_group_size-1))
+		while [ "$iter" -gt 0 ]
+		do
+			max_bssid_ind=$((max_bssid_ind+1))
+			iter=$((iter >> 1))
+		done
+		max_bssid=$((1 << max_bssid_ind))
+	fi
+
+	if [ "$mode" == "ap" ] && [ "$multiple_bssid" -ge 1 ] && [ "$id" -ge 0 ]; then
+		local ref_dec
+		local max_mbssid_mac="$(cat /tmp/${device}_mbssid_mac)"
+
+		if [ "$multiple_bssid" == "3" ] && [ "$id" -ge "$mbssid_group_size" ]; then
+			ref_dec=$((max_mbssid_mac+1))
+		else
+			ref_dec=$( printf '%d\n' $( echo "0x$ref" | tr -d ':' ) )
+		fi
+
 		bssid_l_mask=$(((1 << $max_bssid_ind) - 1))
 		bssid_l=$(((($ref_dec & $bssid_l_mask) + $id) % $max_bssid))
 		bssid_h=$((($bssid_l_mask ^ 0xFFFFFFFFFFFF) & $ref_dec))
 		printf $( echo $( printf '%012x\n' $((bssid_h | bssid_l))) | sed 's!\(..\)!\1:!g;s!:$!!' )
+
+		if [ "$multiple_bssid" != "3" ]; then
+			return
+		fi
+
+		if [ "$id" -eq 0 ]; then
+			rm -rf /tmp/${device}_mbssid_mac
+			echo -n "$(($bssid_h | $bssid_l)) " > /tmp/${device}_mbssid_mac
+		fi
+		max_mbssid_mac="$(cat /tmp/${device}_mbssid_mac)"
+		if [ "$id" -lt "$mbssid_group_size" ]; then
+			if [ $((bssid_h | bssid_l)) -gt "$max_mbssid_mac" ]; then
+				echo -n "$((bssid_h | bssid_l)) " > /tmp/${device}_mbssid_mac
+			fi
+		else
+			if [ $((id % mbssid_group_size)) -eq $((mbssid_group_size-1)) ]; then
+				echo -n "$((bssid_h | bssid_l)) " > /tmp/${device}_mbssid_mac
+			fi
+		fi
+
 		return
 	fi
 
@@ -1250,7 +1302,7 @@ mac80211_prepare_vif() {
 				type=interface
 			fi
 
-			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" "$mode" || return
+			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" "$mode" "$3" || return
 
 			NEWAPLIST="${NEWAPLIST}$ifname "
 			[ -n "$hostapd_ctrl" ] || {
@@ -1999,7 +2051,8 @@ drv_mac80211_setup() {
 		eht_ulmumimo_80mhz \
 		eht_ulmumimo_160mhz \
 		eht_ulmumimo_320mhz \
-		ccfs
+		ccfs \
+		mbssid_group_size
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_get_values channel_list channels
@@ -2114,7 +2167,7 @@ drv_mac80211_setup() {
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
 	[ "$has_ap" -gt 0 ] && mac80211_hostapd_setup_base "$phy" "$device"
 
-	if [ $multiple_bssid -eq 1 ] && [ "$has_ap" -gt 1 ]; then
+	if [ "$multiple_bssid" -ge 1 ] && [ "$has_ap" -gt 1 ]; then
 		max_bssid_ind=0
 		local iter=$((has_ap-1))
 		while [ "$iter" -gt 0 ]
@@ -2130,7 +2183,7 @@ drv_mac80211_setup() {
 
 
 	NEWAPLIST=
-	for_each_interface "ap" mac80211_prepare_vif "${device}" "${multiple_bssid}"
+	for_each_interface "ap" mac80211_prepare_vif "${device}" "${multiple_bssid}" "${mbssid_group_size}"
 	uci -q -P /var/state set wireless."${device}".aplist="${NEWAPLIST}"
 
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum "${hostapd_conf_file}")
