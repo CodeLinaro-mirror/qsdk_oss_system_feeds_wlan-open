@@ -1,0 +1,67 @@
+From 6b3a8f123eb6f4d2df408e0c4f23fb9264ffe450 Mon Sep 17 00:00:00 2001
+From: Hari Naraayana Desikan Kannan <quic_hnaraaya@quicinc.com>
+Date: Tue, 6 Aug 2024 10:22:28 +0530
+Subject: [PATCH] QSDK: wifi: ath12k: Handle duplicate switch count from
+ firmware.
+
+Currently, when a duplicate switch count is received from the firmware,
+it causes switch count mismatch between host and target, leading to a
+WARN_ON when host switch counter reaches 0. It’s difficult to identify
+the specific vdev causing this issue. Therefore, to detect the issue at
+the first instance of duplicate switch count received,
+BUG_ON has been added to understand the firmware state.
+
+Patch-depdendency: None
+
+Patch-work:
+
+Feature: DEBUG
+
+Signed-off-by: Hari Naraayana Desikan Kannan <quic_hnaraaya@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/wmi.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
+index 52f00468068e..bc553bedbca3 100644
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -13217,7 +13217,7 @@ ath12k_wmi_process_csa_switch_count_event(struct ath12k_base *ab,
+ 					  const struct ath12k_wmi_pdev_csa_event *ev,
+ 					  const u32 *vdev_ids)
+ {
+-	int i;
++	int i, count;
+ 	struct ath12k_link_vif *arvif;
+ 	struct ieee80211_bss_conf *link_conf;
+ 
+@@ -13231,7 +13231,7 @@ ath12k_wmi_process_csa_switch_count_event(struct ath12k_base *ab,
+ 			continue;
+ 		}
+ 		link_conf = rcu_dereference(arvif->ahvif->vif->link_conf[arvif->link_id]);
+- 
++
+ 		if (!link_conf)
+ 			continue;
+ 
+@@ -13241,8 +13241,15 @@ ath12k_wmi_process_csa_switch_count_event(struct ath12k_base *ab,
+ 				if (link_conf->csa_active)
+ 					ieee80211_csa_finish(arvif->ahvif->vif, arvif->link_id);
+ 			} else if (ev->current_switch_count > 1) {
+-				ieee80211_beacon_update_cntdwn(arvif->ahvif->vif,
+-							       arvif->link_id);
++				count = ieee80211_beacon_update_cntdwn(arvif->ahvif->vif,
++								       arvif->link_id);
++				if (ev->current_switch_count != count + 1) {
++					ath12k_warn(ab, "Received duplicate csa count for vdev %d current_switch_count=%d cntdwn_current_counter=%d",
++						    vdev_ids[i],
++						    ev->current_switch_count,
++						    count);
++					BUG_ON(ev->current_switch_count > count + 1);
++				}
+ 			} else {
+ 				if (link_conf->color_change_active)
+ 					ieee80211_color_change_finish(arvif->ahvif->vif, arvif->link_id);
+-- 
+2.34.1
+

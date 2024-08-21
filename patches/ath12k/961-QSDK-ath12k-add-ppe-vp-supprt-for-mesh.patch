@@ -6,6 +6,8 @@ Subject: [PATCH] QSDK: ath12k: add ppe vp support for mesh
 Enable PPE VP support for mesh.
 Enable FSE flow support for mesh.
 
+Also add support for ppe vp in ap and sta mode when stats is enabled.
+
 Patch-dependency: 957-QSDK-ath12k-add-support-to-enable-ppe-vp-per-vif.patch
 
 Throughput test config :
@@ -34,69 +36,63 @@ Signed-off-by: Hari Chandrakanthan <quic_haric@quicinc.com>
  drivers/net/wireless/ath/ath12k/peer.h  |  1 +
  5 files changed, 25 insertions(+), 1 deletion(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index 6e13b17..3d10cac 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2864,6 +2864,21 @@ ath12k_dp_rx_update_peer_dependent_param(struct ath12k *ar, struct sk_buff *msdu
+@@ -2869,6 +2869,21 @@ ath12k_dp_rx_update_peer_dependent_param
  	return enctype;
  }
  
-+static inline void ath12k_dp_rx_update_mesh_fse_info(struct ath12k_base *ab,
-+						     struct ath12k_peer *peer,
-+						     struct sk_buff *msdu,
-+						     struct ath12k_dp_rx_info *rx_info,
-+						     struct hal_rx_desc *rx_desc)
++static inline void ath12k_dp_rx_update_fse_info(struct ath12k_base *ab,
++						struct ath12k_peer *peer,
++						struct sk_buff *msdu,
++						struct ath12k_dp_rx_info *rx_info,
++						struct hal_rx_desc *rx_desc)
 +{
-+	if ((peer->ppe_vp_num > 0) && (peer->vif_type == NL80211_IFTYPE_MESH_POINT)) {
++	if (peer->ppe_vp_num > 0) {
 +		ab->hw_params->hal_ops->rx_desc_get_fse_info(rx_desc, rx_info);
 +		if (!rx_info->flow_idx_timeout && !rx_info->flow_idx_invalid &&
 +		    rx_info->flow_metadata != ATH12K_RX_FSE_FLOW_MATCH_SFE)
-+			msdu->mark = u32_encode_bits(ATH12K_MESH_FSE_MAGIC_NUM, ATH12K_MESH_FSE_MAGIC_NUM_MASK) |
-+				     u32_encode_bits(rx_info->flow_metadata, ATH12K_MESH_PPE_VP_NUM);
++			msdu->mark = u32_encode_bits(ATH12K_FSE_MAGIC_NUM, ATH12K_FSE_MAGIC_NUM_MASK) |
++				     u32_encode_bits(rx_info->flow_metadata, ATH12K_PPE_VP_NUM);
 +	}
 +}
 +
  static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
  				struct sk_buff *msdu,
  				struct hal_rx_desc *rx_desc,
-@@ -2923,6 +2938,8 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
+@@ -2928,6 +2943,8 @@ static void ath12k_dp_rx_h_mpdu(struct a
  		enctype =
  			ath12k_dp_rx_update_peer_dependent_param(ar, msdu,
  								 rx_info, peer);
 +
-+		ath12k_dp_rx_update_mesh_fse_info(ab, peer, msdu, rx_info, rx_desc);
++		ath12k_dp_rx_update_fse_info(ab, peer, msdu, rx_info, rx_desc);
  	} else {
  		spin_lock_bh(&ab->base_lock);
  
-@@ -2931,6 +2948,7 @@ static void ath12k_dp_rx_h_mpdu(struct ath12k *ar,
+@@ -2936,6 +2953,7 @@ static void ath12k_dp_rx_h_mpdu(struct a
  			enctype =
  				ath12k_dp_rx_update_peer_dependent_param(ar, msdu,
  									 rx_info, peer);
-+			ath12k_dp_rx_update_mesh_fse_info(ab, peer, msdu, rx_info, rx_desc);
++			ath12k_dp_rx_update_fse_info(ab, peer, msdu, rx_info, rx_desc);
  		} else {
  			enctype = HAL_ENCRYPT_TYPE_OPEN;
  		}
-diff --git a/drivers/net/wireless/ath/ath12k/fse.h b/drivers/net/wireless/ath/ath12k/fse.h
-index 0474421..77107ac 100644
 --- a/drivers/net/wireless/ath/ath12k/fse.h
 +++ b/drivers/net/wireless/ath/ath12k/fse.h
 @@ -10,6 +10,10 @@
  
  #define ATH12K_RX_FSE_FLOW_MATCH_SFE 0xAAAA
  
-+#define ATH12K_MESH_FSE_MAGIC_NUM      0xAA
-+#define ATH12K_MESH_FSE_MAGIC_NUM_MASK GENMASK(7,0)
-+#define ATH12K_MESH_PPE_VP_NUM         GENMASK(15, 8)
++#define ATH12K_FSE_MAGIC_NUM      0xAA
++#define ATH12K_FSE_MAGIC_NUM_MASK GENMASK(7,0)
++#define ATH12K_PPE_VP_NUM         GENMASK(15, 8)
 +
  enum fse_operation {
  	FSE_RULE_ADD,
  	FSE_RULE_DELETE,
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index 444f3f2..773b03a 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12393,7 +12393,7 @@ static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -12008,7 +12008,7 @@ static int ath12k_mac_op_add_interface(s
  	}
  
  	if (vif->type == NL80211_IFTYPE_MESH_POINT &&
@@ -104,31 +100,4 @@ index 444f3f2..773b03a 100644
 +	    ppe_vp_type == PPE_VP_USER_TYPE_DS) {
  		ppe_vp_type = PPE_VP_USER_TYPE_PASSIVE;
  	}
- 
-diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
-index d1e0c53..8358e9c 100644
---- a/drivers/net/wireless/ath/ath12k/peer.c
-+++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -873,6 +873,7 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_link_vif *arvif,
- 	 */
- 	if (arvif->ahvif->ppe_vp_type == PPE_VP_USER_TYPE_ACTIVE)
- 		peer->ppe_vp_num = arvif->ahvif->ppe_vp_num;
-+	peer->vif_type = peer->vif->type;
- #endif
- #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
- 	if (arvif->ahvif->ppe_vp_type == PPE_VP_USER_TYPE_DS)
-diff --git a/drivers/net/wireless/ath/ath12k/peer.h b/drivers/net/wireless/ath/ath12k/peer.h
-index 3f54d6e..376b303 100644
---- a/drivers/net/wireless/ath/ath12k/peer.h
-+++ b/drivers/net/wireless/ath/ath12k/peer.h
-@@ -87,6 +87,7 @@ struct ath12k_peer {
- #if defined(CPTCFG_MAC80211_PPE_SUPPORT) || defined(CPTCFG_ATH12K_PPE_DS_SUPPORT)
- 	/* Duplicate PPE port number to avoid link vif lookup in rx data path */
- 	int ppe_vp_num;
-+	enum nl80211_iftype vif_type;
- #endif
- };
- 
--- 
-2.34.1
-
+ 	if (ppe_vp_type != ATH12K_INVALID_PPE_VP_TYPE) {
