@@ -31,16 +31,16 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/accel_cfg.c
 +++ b/drivers/net/wireless/ath/ath12k/accel_cfg.c
-@@ -55,7 +55,7 @@ static bool ath12k_ds_get_node_id(struct
- 	if (!ieee80211_hw_check(hw, SUPPORT_ECM_REGISTRATION))
- 		return false;
+@@ -50,7 +50,7 @@ static bool ath12k_ds_get_node_id(struct
+ 		}
+ 	}
  
 -	vif = wdev_to_ieee80211_vif_vlan(wdev);
 +	vif = wdev_to_ieee80211_vif_vlan(wdev, false);
  	if (!vif)
  		return false;
  
-@@ -82,8 +82,11 @@ static bool ath12k_ds_get_node_id(struct
+@@ -77,8 +77,11 @@ static bool ath12k_ds_get_node_id(struct
  		}
  	} else if (ahvif->vdev_type == WMI_VDEV_TYPE_AP) {
  		sta = ieee80211_find_sta(vif, peer_mac);
@@ -92,33 +92,33 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  #define ATH12K_HALF_20MHZ_BW 10
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -59,6 +59,7 @@ int ath12k_dp_peer_default_route_setup(s
- 	struct ieee80211_sta *sta;
+@@ -60,7 +60,6 @@ int ath12k_dp_peer_default_route_setup(s
  	u32 reo_dest, param_value;
  	u32 lmac_peer_routing_id = ATH12K_DP_LMAC_PEER_ID_LEGACY;
-+	bool is_ap_vlan = false;
  	int ret;
- 	struct ath12k_vif *ahvif = arvif->ahvif;
+-	struct ath12k_vif *ahvif = arvif->ahvif;
  
-@@ -92,7 +93,7 @@ int ath12k_dp_peer_default_route_setup(s
- 	    (ahvif->vdev_type != WMI_VDEV_TYPE_MONITOR &&
- 	    !(ahvif->vdev_type == WMI_VDEV_TYPE_AP &&
- 	    arvif->vdev_subtype == WMI_VDEV_SUBTYPE_MESH_11S)))
+ 	sta = container_of((void *)arsta->ahsta, struct ieee80211_sta, drv_priv);
+ 
+@@ -86,15 +85,6 @@ int ath12k_dp_peer_default_route_setup(s
+ 	ath12k_dbg(ab, ATH12K_DBG_DP_RX, "peer %pM set def route id %d sta_link %d\n",
+ 		   arsta->addr, lmac_peer_routing_id,
+ 		   hweight16(sta->valid_links));
+-#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+-	/* keep last - override any PPE DS specific routing config */
+-	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA ||
+-	    (ahvif->vdev_type != WMI_VDEV_TYPE_MONITOR &&
+-	    !(ahvif->vdev_type == WMI_VDEV_TYPE_AP &&
+-	    arvif->vdev_subtype == WMI_VDEV_SUBTYPE_MESH_11S)))
 -		ath12k_dp_peer_ppeds_route_setup(ar, arvif, arsta);
-+		ath12k_dp_peer_ppeds_route_setup(ar, arvif, arsta, is_ap_vlan);
- #endif
- 
+-#endif
+-
  	return 0;
+ }
+ 
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -7722,12 +7722,16 @@ static void ath12k_sta_set_4addr_wk(stru
- 	struct ath12k_link_sta *arsta;
- 	struct ieee80211_sta *sta;
- 	struct ath12k_peer *peer;
-+	bool is_ap_vlan = true;
- 	int ret = 0;
- 	u8 link_id;
- 
+@@ -7728,6 +7728,9 @@ static void ath12k_sta_set_4addr_wk(stru
  	ahsta = container_of(wk, struct ath12k_sta, set_4addr_wk);
  	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
  
@@ -128,7 +128,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	for_each_set_bit(link_id, &ahsta->links_map, ATH12K_NUM_MAX_LINKS) {
  		arsta = ahsta->link[link_id];
  		arvif = arsta->arvif;
-@@ -7759,6 +7763,9 @@ static void ath12k_sta_set_4addr_wk(stru
+@@ -7759,6 +7762,9 @@ static void ath12k_sta_set_4addr_wk(stru
  			if (peer->vif->type == NL80211_IFTYPE_AP)
  				peer->dev = peer->sta->dev;
  
@@ -138,16 +138,59 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  			if ((ar->ab->stats_disable) &&
  			    ((peer->vif->type == NL80211_IFTYPE_AP) ||
  			     (peer->vif->type == NL80211_IFTYPE_STATION))) {
-@@ -7767,6 +7774,8 @@ static void ath12k_sta_set_4addr_wk(stru
+@@ -7767,6 +7773,8 @@ static void ath12k_sta_set_4addr_wk(stru
  
  			spin_unlock_bh(&ar->ab->base_lock);
  		}
-+		ath12k_dp_peer_ppeds_route_setup(ar, arvif, arsta, is_ap_vlan);
++		ath12k_dp_peer_ppeds_route_setup(ar, arvif, arsta);
 +
  
  		ret = ath12k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
  						    WMI_VDEV_PARAM_AP_ENABLE_NAWDS,
-@@ -9021,8 +9030,11 @@ static void ath12k_mac_op_sta_set_4addr(
+@@ -8406,6 +8414,9 @@ static int ath12k_mac_handle_link_sta_st
+ 	} else if (old_state == IEEE80211_STA_ASSOC &&
+ 		   new_state == IEEE80211_STA_AUTHORIZED) {
+ 		ret = ath12k_station_authorize(ar, arvif, arsta);
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++		ath12k_dp_peer_ppeds_route_setup(ar, arvif, arsta);
++#endif
+ 	} else if (old_state == IEEE80211_STA_AUTHORIZED &&
+ 		   new_state == IEEE80211_STA_ASSOC) {
+ 		ath12k_station_unauthorize(ar, arvif, arsta);
+@@ -8625,6 +8636,9 @@ int ath12k_mac_update_sta_state(struct i
+ 	struct ath12k_link_sta *arsta;
+ 	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
+ 	struct ath12k_sta *ahsta = ath12k_sta_to_ahsta(sta);
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	struct wireless_dev *wdev;
++#endif
+ 	unsigned long links;
+ 	int ret = 0;
+ 	u8 link_id = 0, link, num_devices = ah->ag->num_chip;
+@@ -8632,6 +8646,22 @@ int ath12k_mac_update_sta_state(struct i
+ 
+ 	mutex_lock(&ah->conf_mutex);
+ 
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	if (!ahsta->ppe_vp_num)
++		ahsta->ppe_vp_num = ahvif->ppe_vp_num;
++
++	if (vif->type == NL80211_IFTYPE_AP_VLAN) {
++		wdev = ieee80211_vif_to_wdev(vif);
++		/* Update parent vif for further use */
++		vif = wdev_to_ieee80211_vif_vlan(wdev, false);
++		ahsta->ppe_vp_num = ahvif->ppe_vp_num;
++		if (ahvif->vlan_iface && !ahvif->vlan_iface->attach_link_done)
++			ath12k_ppe_ds_attach_vlan_vif_link(ahvif->vlan_iface, ahvif->ppe_vp_num);
++		/* Update ahvif with parent vif */
++		ahvif = ath12k_vif_to_ahvif(vif);
++	}
++#endif
++
+ 	if (vif->valid_links && sta->valid_links) {
+ 		if (!sta->mlo)
+ 			WARN_ON(hweight16(sta->valid_links) != 1);
+@@ -9007,8 +9037,11 @@ static void ath12k_mac_op_sta_set_4addr(
  {
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k_sta *ahsta = ath12k_sta_to_ahsta(sta);
@@ -159,7 +202,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		ieee80211_queue_work(ah->hw, &ahsta->set_4addr_wk);
  		ahsta->use_4addr_set = true;
  	}
-@@ -12331,12 +12343,15 @@ out:
+@@ -12322,12 +12355,15 @@ out:
  static int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
  				       struct ieee80211_vif *vif)
  {
@@ -177,7 +220,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	int ppe_vp_type = ATH12K_INVALID_PPE_VP_TYPE;
  #endif
  
-@@ -12355,6 +12370,8 @@ static int ath12k_mac_op_add_interface(s
+@@ -12346,6 +12382,8 @@ static int ath12k_mac_op_add_interface(s
  		ppe_vp_num = ahvif->ppe_vp_num;
  		ppe_core_mask = ahvif->ppe_core_mask;
  		ppe_vp_type = ahvif->ppe_vp_type;
@@ -186,7 +229,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	}
  #endif
  
-@@ -12375,6 +12392,20 @@ static int ath12k_mac_op_add_interface(s
+@@ -12366,6 +12404,20 @@ static int ath12k_mac_op_add_interface(s
  	ahvif->mcbc_gsn = 0;
  
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
@@ -207,7 +250,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	switch (wdev->ppe_vp_type) {
  	case PPE_VP_USER_TYPE_PASSIVE:
  	case PPE_VP_USER_TYPE_ACTIVE:
-@@ -12390,17 +12421,56 @@ static int ath12k_mac_op_add_interface(s
+@@ -12381,17 +12433,56 @@ static int ath12k_mac_op_add_interface(s
  	    ppe_vp_type == PPE_VP_USER_TYPE_DS) {
  		ppe_vp_type = PPE_VP_USER_TYPE_PASSIVE;
  	}
@@ -265,7 +308,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	INIT_LIST_HEAD(&ahvif->deflink.list);
  	INIT_DELAYED_WORK(&ahvif->deflink.connection_loss_work,
  			ath12k_mac_vif_sta_connection_loss_work);
-@@ -12427,6 +12497,7 @@ static int ath12k_mac_op_add_interface(s
+@@ -12418,6 +12509,7 @@ static int ath12k_mac_op_add_interface(s
  		vif->offload_flags |= IEEE80211_OFFLOAD_ENCAP_4ADDR;
  
  	vif->driver_flags |= IEEE80211_VIF_SUPPORTS_UAPSD;
@@ -273,7 +316,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	mutex_unlock(&ah->conf_mutex);
  	return 0;
  }
-@@ -12564,16 +12635,29 @@ static void ath12k_mac_op_remove_interfa
+@@ -12555,16 +12647,29 @@ static void ath12k_mac_op_remove_interfa
  					   struct ieee80211_vif *vif)
  {
  	struct ath12k_hw *ah = hw->priv;
@@ -306,7 +349,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  		if (!arvif)
  			continue;
-@@ -12589,6 +12673,11 @@ static void ath12k_mac_op_remove_interfa
+@@ -12580,6 +12685,11 @@ static void ath12k_mac_op_remove_interfa
  		if (unlikely(test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags)))
  			continue;
  
@@ -318,7 +361,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  		if (arvif->is_scan_vif && arvif->is_started) {
  			mutex_lock(&ar->conf_mutex);
  			ret = ath12k_mac_vdev_stop(arvif);
-@@ -12606,10 +12695,13 @@ static void ath12k_mac_op_remove_interfa
+@@ -12597,10 +12707,13 @@ static void ath12k_mac_op_remove_interfa
  		ath12k_mac_remove_link_interface(hw, arvif);
  		ath12k_mac_unassign_link_vif(arvif);
  	}
@@ -332,7 +375,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	mutex_unlock(&ah->conf_mutex);
  }
-@@ -14830,7 +14922,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
+@@ -14821,7 +14934,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
  
  	ab = ar->ab;
  
@@ -342,7 +385,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	if (ret)
  		ath12k_info(ab, "Unable to attach ppe ds node for arvif\n");
  
-@@ -15182,7 +15275,7 @@ stop_primary:
+@@ -15173,7 +15287,7 @@ stop_primary:
  
  	mutex_unlock(&ar->conf_mutex);
  
@@ -351,7 +394,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	ath12k_mac_remove_link_interface(hw, arvif);
  	ath12k_mac_unassign_link_vif(arvif);
-@@ -18879,6 +18972,9 @@ static int ath12k_mac_hw_register(struct
+@@ -18879,6 +18993,9 @@ static int ath12k_mac_hw_register(struct
  	if (ath12k_frame_mode == ATH12K_HW_TXRX_ETHERNET) {
  		ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
  		ieee80211_hw_set(hw, SUPPORTS_RX_DECAP_OFFLOAD);
@@ -363,26 +406,27 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	if (ab_dflt->hw_params->supports_ap_ps)
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -498,7 +498,7 @@ static struct ppe_ds_wlan_ops ppeds_ops
- };
+@@ -506,13 +506,18 @@ void ath12k_dp_peer_ppeds_route_setup(st
+ 	u32 service_code = PPE_DRV_SC_SPF_BYPASS;
+ 	bool ppe_routing_enable = true;
+ 	bool use_ppe = true;
+-	u32 priority_valid = 0, src_info = ahvif->ppe_vp_num;
+ 	struct ath12k_sta *ahsta = arsta->ahsta;
++	u32 priority_valid = 0, src_info = ahsta->ppe_vp_num;
+ 	struct ieee80211_sta *sta;
  
- void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
--				      struct ath12k_link_sta *arsta)
-+				      struct ath12k_link_sta *arsta, bool is_apvlan_iface)
- {
- 	struct ath12k_base *ab = ar->ab;
- 	struct ath12k_link_vif *primary_link_arvif;
-@@ -526,6 +526,9 @@ void ath12k_dp_peer_ppeds_route_setup(st
- 	if (ab->hw_params->support_fse && ath12k_fse_enable)
- 		use_ppe = false;
+ 	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
+ 		return;
  
-+	if (is_apvlan_iface)
-+		src_info = ahsta->ppe_vp_num;
++	if (arvif->ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR ||
++	    (arvif->ahvif->vdev_type == WMI_VDEV_TYPE_AP &&
++	     arvif->vdev_subtype == WMI_VDEV_SUBTYPE_MESH_11S))
++	     	return;
 +
- 	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
- 
- 	/* When SLO STA is associated to AP link vif which does not have DS rings,
-@@ -779,7 +782,116 @@ void ath12k_dp_ppeds_update_vp_entry(str
+ 	if (ahvif->ppe_vp_num == -1 ||
+ 	    ahvif->ppe_vp_type != PPE_VP_USER_TYPE_DS) {
+ 		ath12k_dbg(ab, ATH12K_DBG_PPE, "DS is disabled for peer %pM\n",
+@@ -779,7 +784,116 @@ void ath12k_dp_ppeds_update_vp_entry(str
  	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
  }
  
@@ -500,7 +544,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  {
  	struct ath12k *ar = arvif->ar;
  	struct ath12k_base *ab = ar->ab;
-@@ -788,7 +900,6 @@ int ath12k_ppeds_attach_link_vif(struct
+@@ -788,7 +902,6 @@ int ath12k_ppeds_attach_link_vif(struct
  	int ppe_vp_profile_idx, ppe_vp_tbl_idx;
  	int ppe_vp_search_tbl_idx = -1;
  	int vdev_id = arvif->vdev_id;
@@ -508,7 +552,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	int ret;
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
-@@ -844,7 +955,7 @@ int ath12k_ppeds_attach_link_vif(struct
+@@ -844,7 +957,7 @@ int ath12k_ppeds_attach_link_vif(struct
  	/* For the sta mode fill up the index reg number */
  	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
  
@@ -517,7 +561,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	ath12k_dbg(ab, ATH12K_DBG_PPE,
  		   "PPEDS vdev attach success chip_id %d soc_idx %d ds_node_id %d vdev_id %d vpnum %d ppe_vp_profile_idx %d "
-@@ -893,13 +1004,43 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache
+@@ -893,13 +1006,43 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache
  	}
  }
  
@@ -563,7 +607,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  
  	if (!test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
  		return;
-@@ -1371,6 +1512,44 @@ void ath12k_vif_free_vp(struct ath12k_vi
+@@ -1371,6 +1514,44 @@ void ath12k_vif_free_vp(struct ath12k_vi
  	ahvif->ppe_vp_num = ATH12K_INVALID_PPE_VP_NUM;
  }
  
@@ -608,7 +652,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  int ath12k_vif_alloc_vp(struct ath12k_vif *ahvif, int ppe_vp_type, int *core_mask)
  {
  	struct wireless_dev *wdev = ieee80211_vif_to_wdev(ahvif->vif);
-@@ -1518,7 +1697,7 @@ ath12k_dp_rx_ppeds_fse_add_flow_entry(st
+@@ -1518,7 +1699,7 @@ ath12k_dp_rx_ppeds_fse_add_flow_entry(st
  
  	wdev = dev->ieee80211_ptr;
  
@@ -617,7 +661,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  	if (!vif)
  		return false;
  
-@@ -1570,7 +1749,7 @@ ath12k_dp_rx_ppeds_fse_del_flow_entry(st
+@@ -1570,7 +1751,7 @@ ath12k_dp_rx_ppeds_fse_del_flow_entry(st
  
  	wdev = dev->ieee80211_ptr;
  
@@ -652,7 +696,7 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  int ath12k_vif_alloc_vp(struct ath12k_vif *ahvif, int vp_type, int *core_mask);
  void ath12k_vif_free_vp(struct ath12k_vif *ahvif);
  
-@@ -94,11 +97,17 @@ int ath12k_dp_ppeds_register_soc(struct
+@@ -95,9 +98,15 @@ int ath12k_dp_ppeds_register_soc(struct
  void ath12k_dp_ppeds_stop(struct ath12k_base *ab);
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
@@ -668,12 +712,9 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
 +					 int link_id);
 +void ath12k_ppeds_detach_link_vif(struct ath12k_link_vif *arvif, int ppe_vp_profile_idx);
  void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
--				      struct ath12k_link_sta *arsta);
-+				      struct ath12k_link_sta *arsta, bool is_apvlan_iface);
+ 				      struct ath12k_link_sta *arsta);
  int ath12k_ppeds_get_handle(struct ath12k_base *ab);
- void *ath12k_dp_get_ppe_ds_ctxt(struct ath12k_base *ab);
- irqreturn_t ath12k_ds_ppe2tcl_irq_handler(int irq, void *ctxt);
-@@ -145,28 +154,42 @@ int ath12k_dp_ppeds_start(struct ath12k_
+@@ -146,22 +155,36 @@ int ath12k_dp_ppeds_start(struct ath12k_
  	return 0;
  }
  
@@ -712,18 +753,11 @@ Signed-off-by: Tamizh Chelvam Raja <quic_tamizhr@quicinc.com>
  {
  	return;
  }
- 
- void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
--				      struct ath12k_link_sta *arsta)
-+				      struct ath12k_link_sta *arsta, bool is_apvlan_iface)
- {
- 	return;
- }
 --- a/drivers/net/wireless/ath/ath12k/fse.c
 +++ b/drivers/net/wireless/ath/ath12k/fse.c
-@@ -65,7 +65,7 @@ void *ath12k_fse_get_ab_from_netdev(stru
- 	if (!ieee80211_hw_check(hw, SUPPORT_ECM_REGISTRATION))
- 		return NULL;
+@@ -58,7 +58,7 @@ void *ath12k_fse_get_ab_from_netdev(stru
+ 
+ 	wdev = dev->ieee80211_ptr;
  
 -	vif = wdev_to_ieee80211_vif_vlan(wdev);
 +	vif = wdev_to_ieee80211_vif_vlan(wdev, false);
