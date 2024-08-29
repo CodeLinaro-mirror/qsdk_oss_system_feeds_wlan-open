@@ -22,7 +22,6 @@ dfs_log=1
 phy="$4"
 ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
-ap_link_file="/tmp/ap_interface_link.txt"
 
 get_sta_freq_list() {
 	phy=$1
@@ -498,10 +497,7 @@ EOF
 chmod 777 /lib/radar_detect.sh
 wpa_cli -i $sta_intf -a /lib/radar_detect.sh &
 
-if [ -f $ap_link_file]; then
-	rm $ap_link_file
-fi
-#echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
+echo "Checking wpa_state $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)" > /dev/ttyMSM0
 
 while true;
 do
@@ -543,8 +539,6 @@ do
 				else
 					hostapd_cli -i $ap_intf disable
 				fi
-				#echo "Last link disabled: $i" > /dev/ttyMSM0
-				echo "$ap_intf=$i" >> $ap_link_file
 			fi
 		done
 	fi
@@ -566,7 +560,7 @@ do
 				for ap_intf in $ap_intfs
 				do
 					ml_link=$(get_link_info $ap_intf $freq)
-					#echo link config command is $ml_link $freq $ap_intf  > /dev/console
+					echo link config command is $ml_link $freq $ap_intf  > /dev/console
 					if [ -n "$ml_link" ]; then
 						hostapd_adjust_config $freq $ap_intf
 					fi
@@ -579,7 +573,7 @@ do
 			# workaround for upstream station mld failed to get sta freq list
 			if [ $sta_freq -eq 0 ] && [ $wifi_gen -eq 6 ]; then
 				sta_freq=$(wpa_cli -i $sta_intf mlo_status 2> /dev/null | grep freq | cut -d'=' -f 2)
-			#	echo "sta freq $sta_freq" >> /tmp/apsta_debug.log
+				echo "sta freq $sta_freq" >> /tmp/apsta_debug.log
 			fi
 
 			wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
@@ -593,7 +587,7 @@ do
 		# workaround for sending 4addr packet to AP from repeater after association
 		ip_addr="$(ifconfig | grep -A 1 'br-lan' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
 		arping "$ip_addr" -U -I br-lan -D -c 5
-		#echo "Enabling below hostapd config:" > /dev/ttyMSM0
+		echo "Enabling below hostapd config:" > /dev/ttyMSM0
 
 		ap_status=$(hostapd_get_ap_status $ap_intf)
 
@@ -602,25 +596,8 @@ do
 			do
 				ap_links=$(get_link_ids $ap_intf)
 				if [ -n "$ap_links" ]; then
-
-					if [ -f $ap_link_file ]; then
-						#This is needed temporarily as hostapd needs to disable order
-						#to be restored atleast for the last disabled link
-						while read link_file; do
-							last_ap_intf=`echo $link_file | cut -d'=' -f1`
-							if [ $last_ap_intf = $ap_intf ];then
-								mld_disable_last_link=`echo $link_file | cut -d'=' -f2`
-								break;
-							fi
-						done < $ap_link_file
-					fi
-					#echo "Last link going to enable: $mld_disable_last_link" > /dev/ttyMSM0
-					hostapd_cli -i $ap_intf -l $mld_disable_last_link enable
 					for i in $ap_links
 					do
-						if [ $i = $mld_disable_last_link ];then
-							continue;
-						fi
 						hostapd_cli -i $ap_intf -l $i enable
 					done
 				else
@@ -630,26 +607,11 @@ do
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
 				if [ $ap_status = "DISABLED" ]; then
-
 					if [ -n "$ap_links" ]; then
 						for i in $ap_links
 						do
 							hostapd_cli -i $ap_intf -l $i disable
-							sleep 5
-						done
-
-						#This is needed temporarily as hostapd needs to disable order
-						#to be restored atleast for the last disabled link
-
-						mld_disable_last_link=$i
-						#echo "Last link going to enable: $mld_disable_last_link" > /dev/ttyMSM0
-						hostapd_cli -i $ap_intf -l $mld_disable_last_link enable
-
-						for i in $ap_links
-						do
-							if [ $i = $mld_disable_last_link ];then
-								continue;
-							fi
+							sleep 1
 							hostapd_cli -i $ap_intf -l $i enable
 							sleep 4
 						done
@@ -661,17 +623,15 @@ do
 					fi
 				fi
 
-				if [ -f $ap_link_file ]; then
-					rm $ap_link_file
-				fi
-
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				if [ "$ap_status" = "DISABLED" -o "$ap_status" = "FAIL" ]; then
-					echo "REPEATER AP $ap_intf failed bring-up, exiting" > /dev/ttyMSM0
+					echo "REPEATER AP $ap_intf failed bring-up, status $ap_status exiting" > /dev/ttyMSM0
 					logread > /tmp/logread_AP_failure.log
 					echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
 					echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
 					date >> /tmp/apsta_debug.log
+					iw dev >> /tmp/apsta_debug.log
+					iw dev $ap_intf info >> /tmp/apsta_debug.log
 					ap_link=$(get_link_ids $ap_intf)
 					if [ -n "$ap_link" ]; then
 						for i in $ap_link
