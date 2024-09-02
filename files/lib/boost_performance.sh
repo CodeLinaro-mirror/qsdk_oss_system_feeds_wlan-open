@@ -695,7 +695,8 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 				;;
 			ap-mi01.3-c2 | \
-			ap-mi04.1-c2)
+			ap-mi04.1-c2 | \
+			ap-mi04.3)
 
 				tc qdisc replace dev eth0 root noqueue
 				tc qdisc replace dev eth1 root noqueue
