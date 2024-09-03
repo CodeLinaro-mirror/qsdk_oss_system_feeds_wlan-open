@@ -151,7 +151,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +}
 +
 +void ath12k_cfr_decrement_peer_count(struct ath12k *ar,
-+				     struct ath12k_sta *arsta)
++				     struct ath12k_link_sta *arsta)
 +{
 +	struct ath12k_cfr *cfr = &ar->cfr;
 +
@@ -1401,7 +1401,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +bool peer_is_in_cfr_unassoc_pool(struct ath12k *ar, u8 *peer_mac);
 +void ath12k_cfr_lut_update_paddr(struct ath12k *ar, dma_addr_t paddr,
 +				 u32 buf_id);
-+void ath12k_cfr_decrement_peer_count(struct ath12k *ar, struct ath12k_sta *arsta);
++void ath12k_cfr_decrement_peer_count(struct ath12k *ar, struct ath12k_link_sta *arsta);
 +
 +#else
 +static inline int ath12k_cfr_init(struct ath12k_base *ab)
@@ -1431,7 +1431,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +{
 +}
 +static inline void ath12k_cfr_decrement_peer_count(struct ath12k *ar,
-+						struct ath12k_sta *arsta)
++						struct ath12k_link_sta *arsta)
 +{
 +}
 +#endif /* CPTCFG_ATH12K_CFR */
@@ -1483,16 +1483,16 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  struct ath12k_per_ppdu_tx_stats {
  	u16 succ_pkts;
  	u16 failed_pkts;
-@@ -751,6 +759,9 @@ struct ath12k_sta {
- 	 */
- 	bool low_ack_sent;
- 	struct ath12k_driver_tx_pkts_flow drv_tx_pkts;
+@@ -725,6 +733,9 @@ struct ath12k_link_sta {
+ 	/* will be saved to use during recovery */
+ 	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
+ 	enum ieee80211_sta_state state;
 +#ifdef CPTCFG_ATH12K_CFR
 +	struct ath12k_per_peer_cfr_capture cfr_capture;
 +#endif
-  };
+ 	u32 rx_retries;
+ };
  
- #define ATH12K_HALF_20MHZ_BW 10
 @@ -1060,6 +1071,9 @@ struct ath12k {
  #ifdef CPTCFG_ATH12K_SPECTRAL
  	struct ath12k_spectral spectral;
@@ -1644,7 +1644,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  	ATH12K_DBG_ANY		= 0xffffffff,
 --- a/drivers/net/wireless/ath/ath12k/debugfs_sta.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs_sta.c
-@@ -1905,6 +1905,165 @@ static const struct file_operations fops
+@@ -1905,6 +1905,178 @@ static const struct file_operations fops
  };
  #endif /* CPTCFG_ATH12K_SAWF */
  
@@ -1701,17 +1701,17 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +		goto out;
 +	}
 +
-+	if (cfr_capture_enable == ahsta->cfr_capture.cfr_enable &&
++	if (cfr_capture_enable == arsta->cfr_capture.cfr_enable &&
 +	    (cfr_capture_period &&
-+	     cfr_capture_period == ahsta->cfr_capture.cfr_period) &&
-+	    cfr_capture_bw == ahsta->cfr_capture.cfr_bandwidth &&
-+	    cfr_capture_method == ahsta->cfr_capture.cfr_method) {
++	     cfr_capture_period == arsta->cfr_capture.cfr_period) &&
++	    cfr_capture_bw == arsta->cfr_capture.cfr_bandwidth &&
++	    cfr_capture_method == arsta->cfr_capture.cfr_method) {
 +		ret = count;
 +		goto out;
 +	}
 +
 +	if (!cfr_capture_enable &&
-+	    cfr_capture_enable == ahsta->cfr_capture.cfr_enable) {
++	    cfr_capture_enable == arsta->cfr_capture.cfr_enable) {
 +		ret = count;
 +		goto out;
 +	}
@@ -1725,7 +1725,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +	}
 +
 +	if (ar->cfr.cfr_enabled_peer_cnt >= ATH12K_MAX_CFR_ENABLED_CLIENTS &&
-+	    !ahsta->cfr_capture.cfr_enable) {
++	    !arsta->cfr_capture.cfr_enable) {
 +		ret = -EINVAL;
 +		ath12k_err(ar->ab, "CFR enable peer threshold reached %u\n",
 +			   ar->cfr.cfr_enabled_peer_cnt);
@@ -1733,9 +1733,9 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +	}
 +
 +	if (!cfr_capture_enable) {
-+		cfr_capture_bw = ahsta->cfr_capture.cfr_bandwidth;
-+		cfr_capture_period = ahsta->cfr_capture.cfr_period;
-+		cfr_capture_method = ahsta->cfr_capture.cfr_method;
++		cfr_capture_bw = arsta->cfr_capture.cfr_bandwidth;
++		cfr_capture_period = arsta->cfr_capture.cfr_period;
++		cfr_capture_method = arsta->cfr_capture.cfr_method;
 +	}
 +
 +	arg.request = cfr_capture_enable;
@@ -1755,16 +1755,16 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +	spin_lock_bh(&ar->cfr.lock);
 +	cfr = &ar->cfr;
 +	if (cfr_capture_enable &&
-+	    cfr_capture_enable != ahsta->cfr_capture.cfr_enable)
++	    cfr_capture_enable != arsta->cfr_capture.cfr_enable)
 +		cfr->cfr_enabled_peer_cnt++;
 +	else if (!cfr_capture_enable)
 +		cfr->cfr_enabled_peer_cnt--;
 +	spin_unlock_bh(&ar->cfr.lock);
 +
-+	ahsta->cfr_capture.cfr_enable = cfr_capture_enable;
-+	ahsta->cfr_capture.cfr_period = cfr_capture_period;
-+	ahsta->cfr_capture.cfr_bandwidth = cfr_capture_bw;
-+	ahsta->cfr_capture.cfr_method = cfr_capture_method;
++	arsta->cfr_capture.cfr_enable = cfr_capture_enable;
++	arsta->cfr_capture.cfr_period = cfr_capture_period;
++	arsta->cfr_capture.cfr_bandwidth = cfr_capture_bw;
++	arsta->cfr_capture.cfr_method = cfr_capture_method;
 +out:
 +	mutex_unlock(&ar->conf_mutex);
 +	mutex_unlock(&ah->conf_mutex);
@@ -1778,20 +1778,33 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 +	struct ieee80211_link_sta *link_sta = file->private_data;
 +	struct ieee80211_sta *sta = link_sta->sta;
 +	struct ath12k_sta *ahsta = (struct ath12k_sta *)sta->drv_priv;
++	struct ath12k_link_sta *arsta;
 +	struct ath12k_hw *ah = ahsta->ahvif->ah;
++	u8 link_id = link_sta->link_id;
 +	char buf[512] = {0};
 +	int len = 0;
 +
 +	mutex_lock(&ah->conf_mutex);
 +
++	if (!(BIT(link_id) & ahsta->links_map)) {
++		mutex_unlock(&ah->conf_mutex);
++		return -ENOENT;
++	}
++
++	arsta = ahsta->link[link_id];
++	if (!arsta || !arsta->arvif->ar) {
++		mutex_unlock(&ah->conf_mutex);
++		return -ENOENT;
++	}
++
 +	len += scnprintf(buf + len, sizeof(buf) - len, "cfr_enabled = %d\n",
-+			 ahsta->cfr_capture.cfr_enable);
++			 arsta->cfr_capture.cfr_enable);
 +	len += scnprintf(buf + len, sizeof(buf) - len, "bandwidth = %d\n",
-+			 ahsta->cfr_capture.cfr_bandwidth);
++			 arsta->cfr_capture.cfr_bandwidth);
 +	len += scnprintf(buf + len, sizeof(buf) - len, "period = %d\n",
-+			 ahsta->cfr_capture.cfr_period);
++			 arsta->cfr_capture.cfr_period);
 +	len += scnprintf(buf + len, sizeof(buf) - len, "cfr_method = %d\n",
-+			 ahsta->cfr_capture.cfr_method);
++			 arsta->cfr_capture.cfr_method);
 +
 +	mutex_unlock(&ah->conf_mutex);
 +
@@ -1810,7 +1823,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  void ath12k_debugfs_sta_op_add(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
  			       struct ieee80211_sta *sta, struct dentry *dir)
  {
-@@ -1994,5 +2153,11 @@ void ath12k_debugfs_link_sta_op_add(stru
+@@ -1994,5 +2166,11 @@ void ath12k_debugfs_link_sta_op_add(stru
  				    &fops_sawf_tx_delay_stats);
  	}
  #endif
@@ -2106,7 +2119,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  static inline
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -7586,6 +7586,9 @@ static int ath12k_mac_handle_link_sta_st
+@@ -7588,6 +7588,9 @@ static int ath12k_mac_handle_link_sta_st
  		if (ret)
  			ath12k_warn(ar->ab, "Failed to remove station: %pM for VDEV: %d\n",
  				    arsta->addr, arvif->vdev_id);
@@ -2116,7 +2129,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  		if (sta->valid_links)
  			ath12k_mac_free_unassign_link_sta(arvif->ahvif->ah,
  							  arsta->ahsta, arsta->link_id);
-@@ -9129,6 +9132,7 @@ static int ath12k_mac_mgmt_tx_wmi(struct
+@@ -9131,6 +9134,7 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  	int buf_id;
  	int ret;
  	bool link_agnostic;
@@ -2124,7 +2137,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  
  	spin_lock_bh(&ar->txmgmt_idr_lock);
  	buf_id = idr_alloc(&ar->txmgmt_idr, skb, 0,
-@@ -9172,10 +9176,13 @@ static int ath12k_mac_mgmt_tx_wmi(struct
+@@ -9174,10 +9178,13 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  	if (info->flags & IEEE80211_TX_CTL_TX_OFFCHAN) {
  		ret = ath12k_wmi_offchan_mgmt_send(ar, arvif->vdev_id, buf_id, skb);
  	} else {
@@ -2191,7 +2204,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  send:
  	ret = ath12k_wmi_cmd_send(wmi, skb, WMI_MGMT_TX_SEND_CMDID);
  	if (ret) {
-@@ -5594,6 +5606,45 @@ ath12k_wmi_append_prb_resp_cu_params(str
+@@ -5588,6 +5600,45 @@ ath12k_wmi_append_prb_resp_cu_params(str
  	return ptr;
  }
  
@@ -2237,7 +2250,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  int ath12k_wmi_probe_resp_tmpl(struct ath12k *ar, u32 vdev_id,
  			       struct sk_buff *tmpl)
  {
-@@ -13302,8 +13353,8 @@ ath12k_wmi_rssi_dbm_conv_event_parser(st
+@@ -13298,8 +13349,8 @@ ath12k_wmi_rssi_dbm_conv_event_parser(st
  }
  
  static struct
@@ -2248,7 +2261,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  {
  	struct ath12k *ar;
  	const struct wmi_tlv *tlv;
-@@ -14563,6 +14614,101 @@ static void ath12k_wmi_event_ani_ofdm_le
+@@ -14559,6 +14610,101 @@ static void ath12k_wmi_event_ani_ofdm_le
  	complete(&ar->ani_ofdm_event);
  }
  
@@ -2350,7 +2363,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -14699,6 +14845,9 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -14695,6 +14841,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_CTRL_PATH_STATS_EVENTID:
  		ath12k_wmi_ctrl_path_stats_event(ab, skb);
  		break;
@@ -2519,7 +2532,7 @@ Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
  int ath12k_wmi_mlo_ready(struct ath12k *ar);
 --- a/local-symbols
 +++ b/local-symbols
-@@ -187,6 +187,7 @@ ATH12K_TRACING=
+@@ -188,6 +188,7 @@ ATH12K_TRACING=
  ATH12K_PPE_DS_SUPPORT=
  ATH12K_SPECTRAL=
  ATH12K_PKTLOG=
