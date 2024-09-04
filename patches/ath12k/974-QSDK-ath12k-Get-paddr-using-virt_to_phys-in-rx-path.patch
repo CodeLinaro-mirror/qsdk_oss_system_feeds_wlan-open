@@ -1,0 +1,190 @@
+From d7db4eed7f3c6a215841d3c4c523b2400a971685 Mon Sep 17 00:00:00 2001
+From: P Praneesh <quic_ppranees@quicinc.com>
+Date: Wed, 4 Sep 2024 15:14:59 +0530
+Subject: [PATCH] QSDK: ath12k: Get paddr using virt_to_phys in rx path
+
+Since our internal platforms virtual addresses are linearly mapped to
+the physical addresses (with a platform-specific offset for conversion
+between physical and bus/virtual addresses), using virt_to_phys is more
+CPU-efficient compared to the dma_map_single function. Additionally,
+instead of using dma_unmap_single, simply invalidating the cache line for
+the specific buffer size further reduces CPU cycles. Use SFE define to
+make this implementation QSDK specific.
+
+With this change, seeing 5% CPU improvement in UL test cases of IPQ5332.
+
+Patch-dependency: 786-02-ath11-12k-Add-define-MAC80211_SFE_SUPPORT.patch
+
+Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/dp.c    |  8 +++---
+ drivers/net/wireless/ath/ath12k/dp.h    | 29 +++++++++++++++++++
+ drivers/net/wireless/ath/ath12k/dp_rx.c | 37 ++++++++-----------------
+ 3 files changed, 44 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
+index 4f577c3..a33c2f1 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.c
++++ b/drivers/net/wireless/ath/ath12k/dp.c
+@@ -1642,8 +1642,8 @@ void ath12k_dp_umac_txrx_desc_cleanup(struct ath12k_base *ab)
+ 			if (!skb)
+ 				continue;
+ 
+-			dma_unmap_single(ab->dev, ATH12K_SKB_RXCB(skb)->paddr,
+-					 skb->len + skb_tailroom(skb), DMA_FROM_DEVICE);
++			ATH12K_DP_DMA_UNMAP(ab->dev, ATH12K_SKB_RXCB(skb)->paddr, skb,
++					    DMA_FROM_DEVICE);
+ 			dev_kfree_skb_any(skb);
+ 		}
+ 	}
+@@ -1709,8 +1709,8 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+ 			if (!skb)
+ 				continue;
+ 
+-			dma_unmap_single(ab->dev, ATH12K_SKB_RXCB(skb)->paddr,
+-					 skb->len + skb_tailroom(skb), DMA_FROM_DEVICE);
++			ATH12K_DP_DMA_UNMAP(ab->dev, ATH12K_SKB_RXCB(skb)->paddr, skb,
++					    DMA_FROM_DEVICE);
+ 			dev_kfree_skb_any(skb);
+ 		}
+ 	}
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index feb5667..97d4088 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -305,6 +305,35 @@ struct ath12k_pdev_dp {
+ #define MAX_FW_TX_STATUS 7
+ #define MAX_TCL_RING 4
+ 
++#ifdef CPTCFG_MAC80211_SFE_SUPPORT
++#define ATH12K_DP_DMA_UNMAP(dev, paddr, skb, dma_dir) \
++	dmac_inv_range_no_dsb((skb)->data, (skb)->data + (skb)->len + skb_tailroom(skb));
++#else
++#define ATH12K_DP_DMA_UNMAP(dev, paddr, skb, dma_dir) \
++	dma_unmap_single(dev, paddr, (skb)->len + skb_tailroom(skb), dma_dir);
++#endif
++
++#ifdef CPTCFG_MAC80211_SFE_SUPPORT
++#define ATH12K_DP_DMA_MAP(dev, skb, dma_dir) \
++	({ \
++		dma_addr_t paddr; \
++		if (likely(!(skb)->fast_recycled)) \
++			dmac_inv_range_no_dsb((skb)->data, (skb)->data + (skb)->len + skb_tailroom(skb)); \
++		paddr = (dma_addr_t)virt_to_phys((skb)->data); \
++		paddr; \
++	})
++
++#else
++#define ATH12K_DP_DMA_MAP(dev, skb, dma_dir) \
++	({ \
++		dma_addr_t paddr; \
++		paddr = dma_map_single(dev, (skb)->data, (skb)->len + skb_tailroom(skb), dma_dir); \
++		if (unlikely((dma_mapping_error(dev, paddr)))) \
++				paddr = NULL; \
++		paddr; \
++	})
++#endif
++
+ struct ath12k_dp_tx_bank_profile {
+ 	u8 is_configured;
+ 	u32 num_users;
+diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
+index 1cf023b..01d5b22 100644
+--- a/drivers/net/wireless/ath/ath12k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
+@@ -305,10 +305,8 @@ void ath12k_dp_rx_bufs_replenish(struct ath12k_base *ab,
+ 		if (unlikely(!skb))
+ 			break;
+ 
+-		paddr = dma_map_single_attrs(ab->dev, skb->data,
+-					     skb->len + skb_tailroom(skb),
+-					     DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+-		if (unlikely(dma_mapping_error(ab->dev, paddr))) {
++		paddr = ATH12K_DP_DMA_MAP(ab->dev, skb, DMA_FROM_DEVICE);
++		if (unlikely(!paddr)) {
+ 			dev_kfree_skb_any(skb);
+ 			goto fail_free_skb;
+ 		}
+@@ -355,9 +353,8 @@ fail_ring_unlock:
+ 
+ fail_free_skb:
+ 	while (unlikely(skb = __skb_dequeue(&skb_list))) {
+-		dma_unmap_single_attrs(ab->dev, ATH12K_SKB_RXCB(skb)->paddr,
+-				       skb->len + skb_tailroom(skb),
+-				       DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
++		ATH12K_DP_DMA_UNMAP(ab->dev, ATH12K_SKB_RXCB(skb)->paddr, skb,
++				    DMA_FROM_DEVICE);
+ 		dev_kfree_skb_any(skb);
+ 		ab->soc_stats.free_excess_alloc_skb++;
+ 	}
+@@ -3561,10 +3558,7 @@ try_again:
+ 		list_add_tail(&desc_info->list, &rx_desc_used_list[chip_id]);
+ 
+ 		rxcb = ATH12K_SKB_RXCB(msdu);
+-		dmac_inv_range_no_dsb(msdu->data, msdu->data + (msdu->len + skb_tailroom(msdu)));
+-		dma_unmap_single_attrs(src_ab->dev, rxcb->paddr,
+-				       msdu->len + skb_tailroom(msdu),
+-				       DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
++		ATH12K_DP_DMA_UNMAP(src_ab->dev, rxcb->paddr, msdu, DMA_FROM_DEVICE);
+ 
+ 		num_buffs_reaped[chip_id]++;
+ 		ab->soc_stats.reo_rx[ring_id][chip_id]++;
+@@ -4061,10 +4055,8 @@ static int ath12k_dp_rx_h_defrag_reo_reinject(struct ath12k *ar,
+ 	/* change msdu len in hal rx desc */
+ 	ath12k_dp_rxdesc_set_msdu_len(ab, rx_desc, defrag_skb->len - hal_rx_desc_sz);
+ 
+-	buf_paddr = dma_map_single(ab->dev, defrag_skb->data,
+-				   defrag_skb->len + skb_tailroom(defrag_skb),
+-				   DMA_TO_DEVICE);
+-	if (dma_mapping_error(ab->dev, buf_paddr))
++	buf_paddr = ATH12K_DP_DMA_MAP(ab->dev, defrag_skb, DMA_TO_DEVICE);
++	if (!buf_paddr)
+ 		return -ENOMEM;
+ 
+ 	spin_lock_bh(&dp->rx_desc_lock);
+@@ -4152,8 +4144,7 @@ err_free_desc:
+ 	list_add_tail(&desc_info->list, &dp->rx_desc_free_list);
+ 	spin_unlock_bh(&dp->rx_desc_lock);
+ err_unmap_dma:
+-	dma_unmap_single(ab->dev, buf_paddr, defrag_skb->len + skb_tailroom(defrag_skb),
+-			 DMA_TO_DEVICE);
++	ATH12K_DP_DMA_UNMAP(ab->dev, buf_paddr, defrag_skb, DMA_TO_DEVICE);
+ 	return ret;
+ }
+ 
+@@ -4399,9 +4390,7 @@ ath12k_dp_process_rx_err_buf(struct ath12k *ar, struct hal_reo_dest_ring *desc,
+ 	list_add_tail(&desc_info->list, list);
+ 
+ 	rxcb = ATH12K_SKB_RXCB(msdu);
+-	dma_unmap_single(ar->ab->dev, rxcb->paddr,
+-			 msdu->len + skb_tailroom(msdu),
+-			 DMA_FROM_DEVICE);
++	ATH12K_DP_DMA_UNMAP(ab->dev, rxcb->paddr, msdu, DMA_FROM_DEVICE);
+ 
+ 	if (drop) {
+ 		dev_kfree_skb_any(msdu);
+@@ -4468,8 +4457,7 @@ static int ath12k_dp_h_msdu_buffer_type(struct ath12k_base *ab,
+ 	desc_info->skb = NULL;
+ 	list_add_tail(&desc_info->list, list);
+ 	rxcb = ATH12K_SKB_RXCB(msdu);
+-	dma_unmap_single(ab->dev, rxcb->paddr, msdu->len + skb_tailroom(msdu),
+-			 DMA_FROM_DEVICE);
++	ATH12K_DP_DMA_UNMAP(ab->dev, rxcb->paddr, msdu, DMA_FROM_DEVICE);
+ 	dev_kfree_skb_any(msdu);
+ 
+ 	return 0;
+@@ -5149,10 +5137,7 @@ int ath12k_dp_rx_process_wbm_err(struct ath12k_base *ab,
+ 		list_add_tail(&desc_info->list, &rx_desc_used_list[chip_id]);
+ 
+ 		rxcb = ATH12K_SKB_RXCB(msdu);
+-		dma_unmap_single(src_ab->dev, rxcb->paddr,
+-				 msdu->len + skb_tailroom(msdu),
+-				 DMA_FROM_DEVICE);
+-
++		ATH12K_DP_DMA_UNMAP(src_ab->dev, rxcb->paddr, msdu, DMA_FROM_DEVICE);
+ 		num_buffs_reaped[chip_id]++;
+ 		total_num_buffs_reaped++;
+ 
+-- 
+2.34.1
+
