@@ -325,10 +325,10 @@ get_link_ids() {
 
 		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
 		if [ -n "$ctrl_iface" ]; then
-			def_ctrl_iface_path=$(ls /var/run/hostapd/$ifname* | head -n 1)
+			def_ctrl_iface_path=$(ls /var/run/hostapd/${ifname}_* | head -n 1)
 			#Try to return links only if has link control interface
 			if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
-				links=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}')
+				links=$(ls /var/run/hostapd/${ifname}_* | awk '{print substr($0,length,1)}')
 				if [ -n "$links" ]; then
 					echo "$links"
 					return
@@ -399,23 +399,17 @@ get_link_info() {
 hostapd_get_ap_status() {
 	local ap_intf=$1
 	link_ids=$(get_link_ids $ap_intf)
-	is_eht=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep ieee80211be | cut -d'=' -f 2)
 
-	if [ $is_eht -eq 1 ]; then
-		if [ -n "$link_ids" ]; then
-			for i in $link_ids
-			do
-				res=$(hostapd_cli -i $ap_intf -l $i status 2> /dev/null | grep state | cut -d'=' -f 2)
-				if [ "$res" != "ENABLED" ]; then
-					echo $res
-					return
-				fi
-			done
-			ap_status=$res
-		else
-			echo "FAIL"
-			return
-		fi
+	if [ -n "$link_ids" ]; then
+		for i in $link_ids
+		do
+			res=$(hostapd_cli -i $ap_intf -l $i status 2> /dev/null | grep state | cut -d'=' -f 2)
+			if [ "$res" != "ENABLED" ]; then
+				echo $res
+				return
+			fi
+		done
+		ap_status=$res
 	else
 		ap_status=$(hostapd_cli -i $ap_intf status 2> /dev/null | grep state | cut -d'=' -f 2)
 	fi
