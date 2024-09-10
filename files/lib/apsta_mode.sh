@@ -14,6 +14,7 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+. /lib/netifd/wireless/mac80211.sh
 
 sta_intf="$1"
 ap_intfs="$2"
@@ -22,59 +23,6 @@ dfs_log=1
 phy="$4"
 ml_link=""
 ap_ht_capab=$(cat $hostapd_conf 2> /dev/null | grep ht_capab | grep -v vht | cut -d'=' -f 2)
-
-get_sta_freq_list() {
-	phy=$1
-	sta_freq=$2
-
-	hw_indices=$(iw phy ${phy} info | grep -e "channel list" | cut -d' ' -f 2)
-	if [ -z "$hw_indices" ]; then
-		return
-	fi
-
-	for i in $hw_indices
-	do
-		#fetch hw idx channels from phy info
-		hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
-
-		for _b in `iw phy $phy info | grep 'Band ' | cut -d' ' -f 2`; do
-			expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
-			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
-			band_freq=$(eval ${expr_freq} | awk '{ print $2 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
-
-			# band_freq list has the sta freq in it
-			if [[ "$band_freq" =~ "${sta_freq}" ]]; then
-				sta_chan=$(eval $expr_freq | grep -E -m1 "(\* ${sta_freq:-....} MHz${sta_freq:+|\\[$sta_freq\\]})" | grep MHz | awk '{print $4}' | sed -e "s/\[//g" | sed -e "s/\]//g")
-
-				#fetch band channels from phy info
-				band_nchans=$(echo $(eval ${expr_freq} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g") | tr -d ' ')
-				hw_chans=$(echo $hw_nchans | tr -d ' ')
-
-				#check if the list is present in band info
-				if echo "$band_nchans" | grep -q "${hw_chans}";
-				then
-					found=false
-					for chan in $hw_nchans
-					do
-						if [[ "$chan" == "$sta_chan" ]]; then
-							found=true
-						fi
-					done
-					if [[ "$found" == "true" ]]; then
-						sta_freq_list=""
-						for chidx in ${hw_nchans}; do
-							frqs=$(eval $expr_freq | grep -E -m1 "(\* ${chidx:-....} MHz${chidx:+|\\[$chidx\\]})" | grep MHz | awk '{print $2}')
-							sta_freq_list="${sta_freq_list}${frqs} "
-						done
-						echo $sta_freq_list
-					fi
-				fi
-			else
-				continue;
-			fi
-		done
-	done
-}
 
 # Hostapd VHT and HE calculations
 hostapd_vht_he_eht_oper_chwidth() {
