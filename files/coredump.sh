@@ -78,6 +78,12 @@ if [ -e /sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/de
 	DUMPPATH="/sys/devices/platform/soc@0/d100000.remoteproc/remoteproc/remoteproc0/devcoredump/data"
 fi
 
+# Collect IPQ5424 Internal Radio's Coredump
+if [ -e /sys/devices/platform/soc@0/soc@0:remoteproc@d100000/remoteproc/remoteproc0/devcoredump/data ] && [ "$ACTION" = add ]; then
+	FILENAME="ipq5424-q6dump-$TIMESTAMP.bin"
+	DUMPPATH="/sys/devices/platform/soc@0/soc@0:remoteproc@d100000/remoteproc/remoteproc0/devcoredump/data"
+fi
+
 # Collect IPQ5332 Internal Radio's Coredump
 if [ -e /sys/devices/platform/soc@0/d100000.remoteproc/d100000.remoteproc:remoteproc_pd4/d100000.remoteproc:remoteproc_pd4:remoteproc_pd1/remoteproc/remoteproc2/devcoredump/data ] && [ "$ACTION" = add ]; then
         FILENAME="ipq5332-q6dump-$TIMESTAMP.bin"
