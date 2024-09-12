@@ -535,11 +535,12 @@ do
 		# workaround for sending 4addr packet to AP from repeater after association
 		ip_addr="$(ifconfig | grep -A 1 'br-lan' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
 		arping "$ip_addr" -U -I br-lan -D -c 5
-		echo "Enabling below hostapd config:" > /dev/ttyMSM0
+		#echo "Enabling below hostapd config:" > /dev/ttyMSM0
 
 		ap_status=$(hostapd_get_ap_status $ap_intf)
 
-		if [ "$ap_status" = "DISABLED" ]; then
+		if [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ] &&
+		   [ "$ap_status" = "DISABLED" ]; then
 			for ap_intf in $ap_intfs
 			do
 				ap_links=$(get_link_ids $ap_intf)
@@ -554,7 +555,8 @@ do
 
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				# workaround for single instance hostapd not doing "enable" without "disable" call to deinit hapd driver
-				if [ $ap_status = "DISABLED" ]; then
+				if [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ] &&
+				   [ "$ap_status" = "DISABLED" ]; then
 					if [ -n "$ap_links" ]; then
 						for i in $ap_links
 						do
@@ -572,7 +574,8 @@ do
 				fi
 
 				ap_status=$(hostapd_get_ap_status $ap_intf)
-				if [ "$ap_status" = "DISABLED" -o "$ap_status" = "FAIL" ]; then
+				if [ "$ap_status" = "DISABLED" -o "$ap_status" = "FAIL" ] &&
+				   [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ]; then
 					echo "REPEATER AP $ap_intf failed bring-up, status $ap_status exiting" > /dev/ttyMSM0
 					logread > /tmp/logread_AP_failure.log
 					echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
