@@ -870,16 +870,16 @@ mac80211_hostapd_setup_bss() {
 
 	case "$ppe_vp" in
 		"passive")
-			#append hostapd_cfg "ppe_vp=1" "$N"
+			append hostapd_cfg "ppe_vp=1" "$N"
 			;;
 		"active")
-			#append hostapd_cfg "ppe_vp=2" "$N"
+			append hostapd_cfg "ppe_vp=2" "$N"
 			;;
 		"ds")
-			#append hostapd_cfg "ppe_vp=3" "$N"
+			append hostapd_cfg "ppe_vp=3" "$N"
 			;;
 		*)
-			#append hostapd_cfg "ppe_vp=3" "$N"
+			append hostapd_cfg "ppe_vp=3" "$N"
 			;;
 	esac
 
