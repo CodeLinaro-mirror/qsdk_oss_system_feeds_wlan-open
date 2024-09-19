@@ -4,7 +4,12 @@
 . /lib/functions/system.sh
 [ -e /lib/functions.sh ] && . /lib/functions.sh
 
-init_wireless_driver "$@"
+mlo_add_flag=0
+[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
+if [ $mlo_add_flag -eq 0 ]; then
+	init_wireless_driver "$@"
+fi
+
 MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
 
 MP_CONFIG_INT="mesh_retry_timeout mesh_confirm_timeout mesh_holding_timeout mesh_max_peer_links
@@ -1282,10 +1287,13 @@ mac80211_prepare_vif() {
 	json_add_string ifname "$ifname"
 	json_close_object
 
-	[ "$mode" == "ap" ] && {
-		[ -z "$wpa_psk_file" ] && hostapd_set_psk "$ifname"
-		[ -z "$vlan_file" ] && hostapd_set_vlan "$ifname"
-	}
+	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
+	if [ $mlo_add_flag -eq 0 ]; then
+		[ "$mode" == "ap" ] && {
+			[ -z "$wpa_psk_file" ] && hostapd_set_psk "$ifname"
+			[ -z "$vlan_file" ] && hostapd_set_vlan "$ifname"
+		}
+	fi
 
 	json_select config
 
@@ -2074,28 +2082,31 @@ drv_mac80211_setup() {
 		return 1
 	}
 
-	if [ "$(cat /sys/module/ath12k/parameters/ppe_rfs_support)" == 'Y' ]; then
-		# Note: ppe_vp_accel and ppe_vp_rfs are mutually exclusive.
-		#       ppe_vp_accel enables PPE acceleration path and ppe_vp_rfs
-		#       is expected to enable only flow steering for VLAN type
-		#       interface (eg: WDS root).
-		echo 1 >> /sys/module/mac80211/parameters/ppe_vp_rfs
-		# Note: Format is default MLO mask followed by band specific core masks
-		#	in order of 2 GHz, 5 GHz and 6GHz bands
-		#	echo <DEFAULT/ MLO MASK>,<2GHZ MASK>,<5GHZ MASK>,<6GHZ_MASK>
-		echo 0x7,0x7,0x7,0x7 > /sys/module/ath12k/parameters/rfs_core_mask
+	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
+	if [ $mlo_add_flag -eq 0 ]; then
+		if [ "$(cat /sys/module/ath12k/parameters/ppe_rfs_support)" == 'Y' ]; then
+			# Note: ppe_vp_accel and ppe_vp_rfs are mutually exclusive.
+			#       ppe_vp_accel enables PPE acceleration path and ppe_vp_rfs
+			#       is expected to enable only flow steering for VLAN type
+			#       interface (eg: WDS root).
+			echo 1 >> /sys/module/mac80211/parameters/ppe_vp_rfs
+			# Note: Format is default MLO mask followed by band specific core masks
+			#	in order of 2 GHz, 5 GHz and 6GHz bands
+			#	echo <DEFAULT/ MLO MASK>,<2GHZ MASK>,<5GHZ MASK>,<6GHZ_MASK>
+			echo 0x7,0x7,0x7,0x7 > /sys/module/ath12k/parameters/rfs_core_mask
 
-		if [ "$(cat /sys/module/mac80211/parameters/ppe_vp_accel)" == 'Y' ]; then
-			echo "ppe_vp_accel is enabled. Please disable to support RFS on WDS" > /dev/ttyMSM0
+			if [ "$(cat /sys/module/mac80211/parameters/ppe_vp_accel)" == 'Y' ]; then
+				echo "ppe_vp_accel is enabled. Please disable to support RFS on WDS" > /dev/ttyMSM0
+			fi
+
+			if echo "$(cat /sys/sfe/ppe_rfs_feature)" | grep -q "disabled"; then
+				echo 1 >> /sys/sfe/ppe_rfs_feature
+				echo "enabled ppe_rfs_feature" > /dev/ttyMSM0
+			fi
 		fi
 
-		if echo "$(cat /sys/sfe/ppe_rfs_feature)" | grep -q "disabled"; then
-			echo 1 >> /sys/sfe/ppe_rfs_feature
-			echo "enabled ppe_rfs_feature" > /dev/ttyMSM0
-		fi
+		wireless_set_data phy="$phy"
 	fi
-
-	wireless_set_data phy="$phy"
 	[ -z "$(uci -q -P /var/state show wireless._"${phy}")" ] && uci -q -P /var/state set wireless._"${phy}"=phy
 
 	OLDAPLIST=$(uci -q -P /var/state get wireless."${device}".aplist)
@@ -2106,7 +2117,7 @@ drv_mac80211_setup() {
 	local cwdev
 	local found
 
-	for wdev in $(list_phy_interfaces "$phy"); do
+	[ "$mlo_add_flag" = 1 ] || for wdev in $(list_phy_interfaces "$phy"); do
 		found=0
 		for cwdev in $OLDAPLIST $OLDSPLIST $OLDUMLIST; do
 			if [ "$wdev" = "$cwdev" ]; then
@@ -2120,15 +2131,17 @@ drv_mac80211_setup() {
 		fi
 	done
 
-	# convert channel to frequency
-	[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel" "$band")"
+	if [ $mlo_add_flag -eq 0 ]; then
+		# convert channel to frequency
+		[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel" "$band")"
 
-	[ -n "$country" ] && {
-		iw reg get | grep -q "^country $country:" || {
-			iw reg set "$country"
-			sleep 1
+		[ -n "$country" ] && {
+			iw reg get | grep -q "^country $country:" || {
+				iw reg set "$country"
+				sleep 1
+			}
 		}
-	}
+	fi
 	if [ "$is_sphy_mband" -eq 1 ]; then
 		hostapd_conf_file="/var/run/hostapd-${phy}_band${device:11:1}.conf"
 	else
@@ -2139,32 +2152,34 @@ drv_mac80211_setup() {
 	macidx=0
 	staidx=0
 
-	[ -n "$chanbw" ] && {
-		for file in /sys/kernel/debug/ieee80211/"$phy"/ath9k*/chanbw /sys/kernel/debug/ieee80211/"$phy"/ath5k/bwmode; do
-			[ -f "$file" ] && echo "$chanbw" > "$file"
-		done
-	}
+	if [ $mlo_add_flag -eq 0 ]; then
+		[ -n "$chanbw" ] && {
+			for file in /sys/kernel/debug/ieee80211/"$phy"/ath9k*/chanbw /sys/kernel/debug/ieee80211/"$phy"/ath5k/bwmode; do
+				[ -f "$file" ] && echo "$chanbw" > "$file"
+			done
+		}
 
-	set_default rxantenna 0xffffffff
-	set_default txantenna 0xffffffff
-	set_default distance 0
-	set_default antenna_gain 0
+		set_default rxantenna 0xffffffff
+		set_default txantenna 0xffffffff
+		set_default distance 0
+		set_default antenna_gain 0
 
-	[ "$txantenna" = "all" ] && txantenna=0xffffffff
-	[ "$rxantenna" = "all" ] && rxantenna=0xffffffff
+		[ "$txantenna" = "all" ] && txantenna=0xffffffff
+		[ "$rxantenna" = "all" ] && rxantenna=0xffffffff
 
-	iw phy "$phy" set antenna "$txantenna" "$rxantenna" >/dev/null 2>&1
-	iw phy "$phy" set antenna_gain "$antenna_gain" >/dev/null 2>&1
-	iw phy "$phy" set distance "$distance" >/dev/null 2>&1
+		iw phy "$phy" set antenna "$txantenna" "$rxantenna" >/dev/null 2>&1
+		iw phy "$phy" set antenna_gain "$antenna_gain" >/dev/null 2>&1
+		iw phy "$phy" set distance "$distance" >/dev/null 2>&1
 
-	if [ -n "$txpower" ]; then
-		iw phy "$phy" set txpower fixed "${txpower%%.*}00"
-	else
-		iw phy "$phy" set txpower auto
+		if [ -n "$txpower" ]; then
+			iw phy "$phy" set txpower fixed "${txpower%%.*}00"
+		else
+			iw phy "$phy" set txpower auto
+		fi
+
+		[ -n "$frag" ] && iw phy "$phy" set frag "${frag%%.*}"
+		[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 	fi
-
-	[ -n "$frag" ] && iw phy "$phy" set frag "${frag%%.*}"
-	[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 
 	has_ap=0
 	hostapd_ctrl=
@@ -2194,6 +2209,9 @@ drv_mac80211_setup() {
 
 	NEWAPLIST=
 	for_each_interface "ap" mac80211_prepare_vif "${device}" "${multiple_bssid}" "${mbssid_group_size}"
+	if [ "$mlo_add_flag" = 1 ]; then
+		return;
+	fi
 	uci -q -P /var/state set wireless."${device}".aplist="${NEWAPLIST}"
 
 	NEW_MD5=$(test -e "${hostapd_conf_file}" && md5sum "${hostapd_conf_file}")

@@ -1,8 +1,126 @@
 #!/bin/sh
+. /lib/netifd/netifd-wireless.sh
+. /lib/netifd/wireless/mac80211.sh
 
 append DRIVERS "mac80211"
 
 MLD_VAP_DETAILS="/lib/netifd/wireless/wifi_mld_cfg.config"
+
+mlo_add_link() {
+	local data
+	local link
+	local conf_idx
+	local ssid
+	local encryption
+	local sae_pwe
+	local key
+	local channels
+	local mld
+
+	mld=$(uci show wireless | grep "$3" | cut -d "." -f 2)
+	[ -n "$mld" ] || {
+		echo "wrong interface name is given or mld doesn't found for given interface" > /dev/ttyMSM0
+		return
+	}
+
+	case "$2" in
+		2g)
+		channels="1-14"
+		;;
+		5g)
+		channels="36-177"
+		;;
+		5gl)
+		channels="36-64"
+		;;
+		5gh)
+		channels="100-177"
+		;;
+		6g)
+		channels="2-233"
+		;;
+		6gl)
+		channels="2-93"
+		;;
+		6gh)
+		channels="129-233"
+		;;
+		*) echo "wrong band is given" > /dev/ttyMSM0
+		return;;
+	esac
+	link=$(uci show wireless | grep $channels | cut -d "_" -f 2 | cut -d "." -f 1)
+	[ -n "$link" ] || {
+		echo "failed to find band number" > /dev/ttyMSM0
+		return
+	}
+	uci add wireless wifi-iface
+	conf_idx=$(uci show wireless | sed -n 's/.*@wifi-iface\[\([0-9]\+\)\].*/\1/p' | sort -n | tail -1)
+	echo 1 > /tmp/mlo_support.txt&
+	ssid=$(uci get wireless."$mld".ssid)
+	encryption=$(uci get wireless."$mld".encryption)
+	sae_pwe=$(uci get wireless."$mld".sae_pwe)
+	key=$(uci get wireless."$mld".key)
+
+	uci set wireless.@wifi-iface[$conf_idx]=wifi-iface
+	uci set wireless.@wifi-iface[$conf_idx].device=radio0_$link
+	uci set wireless.@wifi-iface[$conf_idx].network='lan'
+	uci set wireless.@wifi-iface[$conf_idx].mode='ap'
+	uci set wireless.@wifi-iface[$conf_idx].ssid=$(uci get wireless."$mld".ssid)
+	uci set wireless.@wifi-iface[$conf_idx].encryption=$(uci get wireless."$mld".encryption)
+	uci set wireless.@wifi-iface[$conf_idx].sae_pwe=$(uci get wireless."$mld".sae_pwe)
+	uci set wireless.@wifi-iface[$conf_idx].key=$(uci get wireless."$mld".key)
+	uci set wireless.@wifi-iface[$conf_idx].mld="$mld"
+	uci set wireless.@wifi-iface[$conf_idx].macaddr="$4"
+	uci commit wireless
+	input_file=/var/run/hostapd-${1}_${link}.conf
+	if [ -f $input_file ]; then
+		output_file=/tmp/hostapd-${1}_${link}.conf
+		if grep -q "bss=" "$input_file"; then
+			awk '/bss=/ {exit} {print}' "$input_file" > "$output_file"
+		else
+			cp "$input_file" "$output_file"
+		fi
+		echo "wpa_passphrase=$key" >> $output_file
+		echo "ssid=$ssid" >> $output_file
+		if [ $sae_pwe = 1 ]; then
+			echo "sae_pwe=$sae_pwe" >> $output_file
+		fi
+		if [ $encryption = "sae" ]; then
+			echo "wpa_key_mgmt=SAE" >> $output_file
+		fi
+		echo "bssid=$4" >> $output_file
+		echo "interface=$3" >> $output_file
+		hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file"
+		rm "$output_file"
+	else
+		ubus call network reload
+		json_load "$(ubus_wifi_cmd "status" "radio0_${link}")"
+		data=$(json_dump)
+		data=$(echo "$data" | sed 's/.*\("config": { "path\)/\1/' | sed 's/}$//')
+		data=$(echo "$data" | sed '$ s/..$/}/')
+		data="{ $data"
+		data=$(echo "$data" | sed -e 's/"interfaces": \[/"interfaces": { "0": /' -e 's/\} ]/} }/')
+		start_string='"section"'
+		end_string='"section": "@wifi-iface['"$conf_idx"']"'
+		start_index=$(echo "$data" | awk -v pat="$start_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
+		end_index=$(echo "$data" | awk -v pat="$end_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
+		m_data="${data:0:start_index}${data:end_index}"
+		data="$m_data"
+		data=$(echo "$data" | sed -e "s/\"section\": \"@wifi-iface\[$conf_idx\]\"/\"bridge\": \"br-lan\", \"bridge_ifname\": \"br-lan\"/")
+		data=$(echo "$data" | sed -e 's/\[\ ]/{ }/g' -e 's/"stations"/"stas"/g')
+		json_select "radio0_${link}"
+		_wdev_handler_1 "$data" "mac80211" "setup" "radio0_$link" 2> /dev/null
+		json_select ..
+		if [ "6g" = "$2" ]; then
+			echo "mbssid=2" >> "$input_file"
+			echo "ema=1" >> "$input_file"
+		fi
+		hostapd_cli -i $3 mld_add_link bss_config=${1}:/var/run/hostapd-${1}_${link}.conf
+	fi
+	uci set wireless.radio0_${link}.disabled='0'
+	uci commit wireless
+	rm /tmp/mlo_support.txt 2>/dev/null
+}
 
 configure_service_param() {
 	enable_service=$2
