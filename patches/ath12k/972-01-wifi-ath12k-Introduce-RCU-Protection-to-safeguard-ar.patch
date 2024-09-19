@@ -21,7 +21,15 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -512,7 +512,7 @@ struct ath12k_vif {
+@@ -403,6 +403,7 @@ struct ath12k_prb_resp_tmpl_ml_info {
+ };
+ 
+ struct ath12k_link_vif {
++	struct rcu_head rcu_head;
+ 	struct ath12k_base *ab;
+ 	struct ath12k_dp *dp;
+ 	struct ath12k_vif_tcl_desc_template desc;
+@@ -512,7 +513,7 @@ struct ath12k_vif {
  	} u;
  
  	struct ath12k_link_vif deflink;
@@ -30,7 +38,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	/* indicates bitmap of link vdev created in FW */
  	unsigned long links_map;
  	u32 aid;
-@@ -1930,6 +1930,26 @@ static inline const char *ath12k_bus_str
+@@ -1930,6 +1931,26 @@ static inline const char *ath12k_bus_str
  	return "unknown";
  }
  
@@ -59,7 +67,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #ifdef CPTCFG_ATH12K_AHB
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -906,6 +906,27 @@ ieee80211_link_sta *ath12k_get_link_sta(
+@@ -914,6 +914,27 @@ ieee80211_link_sta *ath12k_get_link_sta(
  	return link_sta;
  }
  
@@ -87,7 +95,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static void ath12k_get_arvif_iter(void *data, u8 *mac,
  				  struct ieee80211_vif *vif)
  {
-@@ -918,12 +939,7 @@ static void ath12k_get_arvif_iter(void *
+@@ -926,12 +947,7 @@ static void ath12k_get_arvif_iter(void *
  	 * used with vif protected by rcu lock and since the ahvif->links_map
  	 * or link wont be modified it is safe to access below without its mutex
  	 */
@@ -101,7 +109,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		if ((arvif->vdev_id == arvif_iter->vdev_id) &&
  		    (arvif->ar == arvif_iter->ar)) {
  			arvif_iter->arvif = arvif;
-@@ -932,6 +948,22 @@ static void ath12k_get_arvif_iter(void *
+@@ -940,6 +956,22 @@ static void ath12k_get_arvif_iter(void *
  	}
  }
  
@@ -124,7 +132,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  struct ath12k_link_vif *ath12k_mac_get_arvif(struct ath12k *ar, u32 vdev_id)
  {
  	struct ath12k_vif_iter arvif_iter = {};
-@@ -5690,6 +5722,56 @@ void ath12k_mac_unassign_link_vif(struct
+@@ -5699,6 +5731,56 @@ void ath12k_mac_unassign_link_vif(struct
  		memset(arvif->addr, 0, ETH_ALEN);
  }
  
@@ -148,7 +156,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		clear_bit(link_id, &ahvif->links_map);
 +
 +	if (old_arvif && old_arvif != &ahvif->deflink)
-+		kfree_rcu(old_arvif);
++		kfree_rcu(old_arvif, rcu_head);
 +
 +	return 0;
 +}
@@ -170,7 +178,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	rcu_assign_pointer(ahvif->link[link_id], NULL);
 +	clear_bit(link_id, &ahvif->links_map);
 +	if (old_arvif != &ahvif->deflink)
-+		kfree_rcu(old_arvif);
++		kfree_rcu(old_arvif, rcu_head);
 +	else
 +		memset(old_arvif->addr, 0, ETH_ALEN);
 +
