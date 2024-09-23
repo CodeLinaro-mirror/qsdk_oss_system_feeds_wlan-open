@@ -585,14 +585,17 @@ generate_5g_6g_split_phy_config() {
 		set wireless.default_${name}.network=lan
 		set wireless.default_${name}.mode=ap
 		set wireless.default_${name}.ssid=OpenWrt
+	EOF
 		if [ ${_mode_band} == '5g'  ]; then
-			set wireless.default_${name}.encryption=none
+			uci set wireless.default_${name}.encryption=none
 		else
+			uci -q batch <<-EOF
 			set wireless.default_${name}.encryption=sae
 			set wireless.default_${name}.sae_pwe=1
 			set wireless.default_${name}.key=0123456789
+		EOF
 		fi
-	EOF
+
 		if [ $is_swiphy ] && [ $splitphy -gt 0 ]; then
 			bandidx=$(($bandidx + 1))
 			name=""radio$devidx\_band$(($bandidx - 1))""
