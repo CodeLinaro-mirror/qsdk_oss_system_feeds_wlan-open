@@ -165,7 +165,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	    pkt_type != ATH12K_PKT_TYPE_ARP_IPV4)
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -10920,7 +10920,7 @@ static void ath12k_mac_update_vif_offloa
+@@ -10927,7 +10927,7 @@ static void ath12k_mac_update_vif_offloa
  					IEEE80211_OFFLOAD_DECAP_ENABLED);
  
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
@@ -174,7 +174,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags) &&
  	    vif->type == NL80211_IFTYPE_AP)
  		vif->offload_flags |= (IEEE80211_OFFLOAD_ENCAP_ENABLED |
-@@ -11502,8 +11502,14 @@ static int ath12k_mac_op_add_interface(s
+@@ -11509,8 +11509,14 @@ static int ath12k_mac_op_add_interface(s
  	 * and ppe_vp_num is maintained in sdata. Cleanup this with DS enablement in
  	 * WDS mode.
  	 */
@@ -190,7 +190,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  	if (ppe_vp_type != ATH12K_INVALID_PPE_VP_TYPE) {
  		if (ppe_vp_num == ATH12K_INVALID_PPE_VP_NUM) {
-@@ -13756,6 +13762,10 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13763,6 +13769,10 @@ ath12k_mac_op_assign_vif_chanctx(struct
  
  	ab = ar->ab;
  
@@ -201,7 +201,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	mutex_lock(&ar->conf_mutex);
  
  	ath12k_dbg(ab, ATH12K_DBG_MAC,
-@@ -14079,6 +14089,9 @@ stop_primary:
+@@ -14086,6 +14096,9 @@ stop_primary:
  	}
  
  	mutex_unlock(&ar->conf_mutex);
@@ -662,7 +662,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (!ret)
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
-@@ -94,11 +94,8 @@ void ath12k_dp_ppeds_stop(struct ath12k_
+@@ -50,6 +50,7 @@ struct ath12k_ppeds_stats {
+ 	u32 release_rx_desc_cnt;
+ 	u32 num_rx_desc_freed;
+ 	u32 num_rx_desc_realloc;
++	u32 tqm_rel_reason[HAL_WBM_TQM_REL_REASON_MAX];
+ };
+ 
+ struct ath12k_ppeds_napi {
+@@ -94,11 +95,8 @@ void ath12k_dp_ppeds_stop(struct ath12k_
  int ath12k_dp_ppeds_start(struct ath12k_base *ab);
  int ath12k_ppeds_detach( struct ath12k_base *ab);
  int ath12k_ppeds_attach( struct ath12k_base *ab);
@@ -676,7 +684,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  void ath12k_dp_peer_ppeds_route_setup(struct ath12k *ar, struct ath12k_link_vif *arvif,
  				      struct ath12k_link_sta *arsta);
  int ath12k_ppeds_get_handle(struct ath12k_base *ab);
-@@ -154,15 +151,12 @@ int ath12k_ppeds_attach( struct ath12k_b
+@@ -154,15 +152,12 @@ int ath12k_ppeds_attach( struct ath12k_b
  	return 0;
  }
  
@@ -716,3 +724,210 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  struct wmi_peer_set_intra_bss_cmd {
  	__le32 tlv_header;
  	struct wmi_mac_addr peer_macaddr;
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -2780,17 +2780,96 @@ void ath12k_fst_debugfs_init(struct ath1
+ 			    &fops_fse);
+ }
+ 
++static inline char *get_ppe_str(int ppe_vp_type)
++{
++	char *type = NULL;
++
++	switch (ppe_vp_type) {
++	case PPE_VP_USER_TYPE_PASSIVE:
++		type = "passive";
++		break;
++	case PPE_VP_USER_TYPE_ACTIVE:
++		type = "active";
++		break;
++	case PPE_VP_USER_TYPE_DS:
++		type = "ds";
++		break;
++	default:
++		type = "unassigned";
++		break;
++	}
++	return type;
++}
++
++int ath12k_print_arvif_link_stats(struct ath12k_vif *ahvif,
++				      struct wireless_dev *wdev,
++				      struct ath12k_link_vif *arvif,
++				      struct ath12k_base *current_ab,
++				      int link_id,
++				      char *buf, int size)
++{
++	int len = 0;
++	bool is_mldev;
++
++	is_mldev = (hweight16(ahvif->vif->valid_links) > 1) ? true : false;
++
++	len += scnprintf(buf + len, size - len, "%s netdev: %s vp_num %d vptype %s core_mask 0x%x freq %d addr %pM\n",
++			is_mldev ? "ML" : "",
++			wdev->netdev->name, ahvif->ppe_vp_num,
++			get_ppe_str(ahvif->ppe_vp_type), ahvif->ppe_core_mask,
++			arvif->chanctx.def.chan->center_freq, arvif->addr);
++
++	if (is_mldev)
++		len += scnprintf(buf + len, size - len, "Link ID:  %d %s\n",
++				 link_id,
++				 (arvif->ar->ab == current_ab) ? "current band" : "other band" );
++
++	len += scnprintf(buf + len, size - len, "\ttx_dropped: %d\n",
++			arvif->link_stats.tx_dropped);
++	len += scnprintf(buf + len, size - len, "\ttx_errors: %d\n",
++			arvif->link_stats.tx_errors);
++	len += scnprintf(buf + len, size - len, "\ttx_enqueued: %d\n",
++			arvif->link_stats.tx_enqueued);
++	len += scnprintf(buf + len, size - len, "\ttx_completed: %d\n",
++			arvif->link_stats.tx_completed);
++	len += scnprintf(buf + len, size - len, "\ttx_bcast_mcast: %d\n",
++			arvif->link_stats.tx_bcast_mcast);
++	len += scnprintf(buf + len, size - len, "\ttx_encap_type: %d %d %d\n",
++			arvif->link_stats.tx_encap_type[0],
++			arvif->link_stats.tx_encap_type[1],
++			arvif->link_stats.tx_encap_type[2]);
++	len += scnprintf(buf + len, size - len, "\ttx_desc_type: %d %d\n",
++			arvif->link_stats.tx_desc_type[0],
++			arvif->link_stats.tx_desc_type[1]);
++	len += scnprintf(buf + len, size - len, "\trx_dropped: %d\n",
++			arvif->link_stats.rx_dropped);
++	len += scnprintf(buf + len, size - len, "\trx_errors: %d\n\n",
++			arvif->link_stats.rx_errors);
++	return len;
++}
++
++
+ #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+ static ssize_t ath12k_debugfs_dump_ppeds_stats(struct file *file,
+-						const char __user *user_buf,
+-						size_t count, loff_t *ppos)
++					       const char __user *user_buf,
++					       size_t count, loff_t *ppos)
+ {
+ 	struct ath12k_base *ab = file->private_data;
++	struct ath12k_dp *dp = &ab->dp;
++	struct hal_srng *srng;
++	struct ath12k_vif *ahvif;
++	struct ath12k_link_vif *arvif, *arvif_partner;
++	u8 i, j, link_id, index;
++	bool interface_found;
++	int printed_if[TARGET_NUM_VDEVS * ATH12K_MAX_SOCS], printedindex = 0;
++	struct ath12k *ar;
++	struct wireless_dev *wdev;
+ 	struct ath12k_ppeds_stats *ppeds_stats = &ab->ppe.ppeds_stats;
+ 	int len = 0,  retval;
+-	const int size = 4096;
++	const int size = PAGE_SIZE;
+ 	char *buf;
+ 
++	memset(printed_if, 0, sizeof(printed_if));
+ 	buf = kzalloc(size, GFP_KERNEL);
+ 	if (!buf)
+ 		return -ENOMEM;
+@@ -2825,6 +2904,93 @@ static ssize_t ath12k_debugfs_dump_ppeds
+ 			 ppeds_stats->num_rx_desc_freed);
+ 	len += scnprintf(buf + len, size - len, "num_rx_desc_realloc %u\n",
+ 			 ppeds_stats->num_rx_desc_realloc);
++	len += scnprintf(buf + len, size - len,
++			 "\ntqm_rel_reason: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u 8:%u 9:%u 10:%u 11:%u 12:%u 13:%u 14:%u\n",
++			 ppeds_stats->tqm_rel_reason[0],
++			 ppeds_stats->tqm_rel_reason[1],
++			 ppeds_stats->tqm_rel_reason[2],
++			 ppeds_stats->tqm_rel_reason[3],
++			 ppeds_stats->tqm_rel_reason[4],
++			 ppeds_stats->tqm_rel_reason[5],
++			 ppeds_stats->tqm_rel_reason[6],
++			 ppeds_stats->tqm_rel_reason[7],
++			 ppeds_stats->tqm_rel_reason[8],
++			 ppeds_stats->tqm_rel_reason[9],
++			 ppeds_stats->tqm_rel_reason[10],
++			 ppeds_stats->tqm_rel_reason[11],
++			 ppeds_stats->tqm_rel_reason[12],
++			 ppeds_stats->tqm_rel_reason[13],
++			 ppeds_stats->tqm_rel_reason[14]);
++
++	len += scnprintf(buf + len, size - len, "SRNG Ring index Dump:\n");
++
++	srng = &ab->hal.srng_list[dp->ppe2tcl_ring.ring_id];
++	if (srng) {
++		len += scnprintf(buf + len, size - len, "ppe2tcl hp 0x%x\n",
++				srng->u.src_ring.hp);
++		len += scnprintf(buf + len, size - len, "ppe2tcl tp 0x%x\n",
++				 *(volatile u32 *)(srng->u.src_ring.tp_addr));
++	}
++
++	srng = &ab->hal.srng_list[dp->reo2ppe_ring.ring_id];
++	if (srng) {
++		len += scnprintf(buf + len, size - len, "reo2ppe hp 0x%x\n",
++				 *(volatile u32 *)(srng->u.dst_ring.hp_addr));
++		len += scnprintf(buf + len, size - len, "reo2ppe tp 0x%x\n",
++				 srng->u.dst_ring.tp);
++	}
++
++	for (i = 0; i < ab->num_radios; i++) {
++		ar = ab->pdevs[i].ar;
++		mutex_lock(&ar->ah->conf_mutex);
++		mutex_lock(&ar->conf_mutex);
++		list_for_each_entry(arvif, &ar->arvifs, list) {
++			interface_found = false;
++			ahvif = arvif->ahvif;
++			wdev = ieee80211_vif_to_wdev(ahvif->vif);
++
++			index = wdev->netdev->ifindex;
++
++			/* Skip a netdevice if its information is already
++			 * printed
++			 */
++			for (j = 0; j < printedindex; j++) {
++				if (index == printed_if[j])
++					interface_found = true;
++			}
++
++			if (interface_found)
++				continue;
++
++			printed_if[printedindex++] = index;
++			if (hweight16(ahvif->vif->valid_links) <= 1)  {
++				len += ath12k_print_arvif_link_stats(ahvif, wdev, arvif,
++								     ab, 0, buf + len, size - len);
++			} else {
++				for (link_id = 0; link_id < IEEE80211_MLD_MAX_NUM_LINKS; link_id++) {
++					arvif_partner = ahvif->link[link_id];
++					if (!arvif_partner)
++						continue;
++
++					if (arvif_partner->ar->ah != arvif->ar->ah) {
++						mutex_lock(&arvif_partner->ar->ah->conf_mutex);
++						mutex_lock(&arvif_partner->ar->conf_mutex);
++					}
++
++					len += ath12k_print_arvif_link_stats(ahvif, wdev, arvif_partner,
++									     ab, link_id,
++									     buf + len,
++									     size - len);
++					if (arvif_partner->ar->ah != arvif->ar->ah) {
++						mutex_unlock(&arvif_partner->ar->conf_mutex);
++						mutex_unlock(&arvif_partner->ar->ah->conf_mutex);
++					}
++				}
++			}
++		}
++		mutex_unlock(&ar->conf_mutex);
++		mutex_unlock(&ar->ah->conf_mutex);
++	}
+ 
+ 	if (len > size)
+ 		len = size;
+--- a/drivers/net/wireless/ath/ath12k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
+@@ -1325,6 +1325,8 @@ static void ath12k_ppeds_tx_update_stats
+ 					  ts.ack_rssi;
+ 		info->status.flags = IEEE80211_TX_STATUS_ACK_SIGNAL_VALID;
+ 	}
++	
++	ab->ppe.ppeds_stats.tqm_rel_reason[ts.status]++;
+ 
+ 	if (ts.status == HAL_WBM_TQM_REL_REASON_CMD_REMOVE_TX &&
+ 	    (info->flags & IEEE80211_TX_CTL_NO_ACK))
