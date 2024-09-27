@@ -1262,7 +1262,7 @@ mac80211_prepare_vif() {
 	if_idx=$((${if_idx:-0} + 1))
 	[ -z $ppe_vp ] && ppe_vp="ds"
 
-	if [ $mode == "mesh" ]; then
+	if [ $mode == "mesh" ] && [ $ppe_vp == "ds" ]; then
 		ppe_vp="passive"
 	fi
 
