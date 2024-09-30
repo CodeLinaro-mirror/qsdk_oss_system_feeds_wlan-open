@@ -1251,18 +1251,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	*fast_rx = false;
  
  	err_bitmap = ath12k_dp_rx_h_mpdu_err(ab, rx_desc);
-@@ -3348,8 +3372,9 @@ int ath12k_dp_rx_pkt_type_filter(struct
- 	struct ath12k_wmi_pkt_route_param param;
- 	int ret;
- 
--	/* Routing Eapol packets to CCE is only allowed now */
--	if (pkt_type != ATH12K_PKT_TYPE_EAP)
-+	/* Routing Eapol/ARP packets to CCE is only allowed now */
-+	if (pkt_type != ATH12K_PKT_TYPE_EAP &&
-+	    pkt_type != ATH12K_PKT_TYPE_ARP_IPV4)
- 		return -EINVAL;
- 
- 	param.opcode = ATH12K_WMI_PKTROUTE_ADD;
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
 @@ -272,6 +272,7 @@ int ath12k_dp_tx_direct(struct ath12k_li
@@ -1514,34 +1502,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	}
  
  	tlv_filter.offset_valid = false;
-@@ -9112,15 +9149,24 @@ static int ath12k_mac_radio_start(struct
- 		}
- 	}
- 
--	/* PPE DS requires eapol packets to be routed to wbm release ring */
--	if (test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ar->ab->dev_flags)) {
-+#ifdef CPTCFG_ATH12K_BONDED_DS_SUPPORT
-+	/* program CCE rule for eapol packets to be routed to wbm release ring */
-+	if (g_bonded_interface_model) {
- 		ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_EAP,
- 						   ATH12K_ROUTE_EAP_METADATA);
- 		if (ret) {
- 			ath12k_err(ar->ab, "failed to configure EAP pkt route: %d\n", ret);
- 			goto err;
- 		}
-+
-+		ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_ARP_IPV4,
-+						   ATH12K_ROUTE_ARP_METADATA);
-+		if (ret) {
-+			ath12k_err(ar->ab, "failed to configure ARP pkt route: %d\n", ret);
-+			goto err;
-+		}
- 	}
-+#endif
- 
- 	__ath12k_set_antenna(ar, ar->cfg_tx_chainmask, ar->cfg_rx_chainmask);
- 
-@@ -9508,6 +9554,13 @@ static void ath12k_mac_update_vif_offloa
+@@ -9498,6 +9535,13 @@ static void ath12k_mac_update_vif_offloa
  		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
  					IEEE80211_OFFLOAD_DECAP_ENABLED);
  
@@ -1555,7 +1516,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
  		ahvif->tx_encap_type = ATH12K_HW_TXRX_ETHERNET;
  	else if (test_bit(ATH12K_FLAG_RAW_MODE, &ag->dev_flags))
-@@ -9618,6 +9671,11 @@ static int ath12k_mac_vdev_create(struct
+@@ -9608,6 +9652,11 @@ static int ath12k_mac_vdev_create(struct
  	struct ath12k_wmi_peer_create_arg peer_param = {0};
  	struct ieee80211_bss_conf *link_conf;
  	u32 param_id, param_value;
@@ -1567,7 +1528,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	u16 nss;
  	int i;
  	int ret, fbret, vdev_id;
-@@ -9684,6 +9742,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9674,6 +9723,16 @@ static int ath12k_mac_vdev_create(struct
  	arvif->dp = &ab->dp;
  	arvif->dev = ab->dev;
  	arvif->pdev_idx = ar->pdev_idx;
@@ -1584,7 +1545,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	switch (vif->type) {
  	case NL80211_IFTYPE_UNSPECIFIED:
-@@ -9775,6 +9843,20 @@ static int ath12k_mac_vdev_create(struct
+@@ -9765,6 +9824,20 @@ static int ath12k_mac_vdev_create(struct
  				    arvif->vdev_id, ret);
  			goto err_peer_del;
  		}
@@ -1605,7 +1566,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		break;
  	case WMI_VDEV_TYPE_STA:
  		param_id = WMI_STA_PS_PARAM_RX_WAKE_POLICY;
-@@ -9843,6 +9925,16 @@ static int ath12k_mac_vdev_create(struct
+@@ -9833,6 +9906,16 @@ static int ath12k_mac_vdev_create(struct
  	    test_bit(MONITOR_CONF_ENABLED, &ar->monitor_flags))
  		ath12k_mac_monitor_vdev_create(ar);
  
@@ -1622,7 +1583,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	ret = ath12k_debugfs_add_interface(arvif);
  	if (ret)
  		goto err_peer_del;
-@@ -10362,15 +10454,17 @@ static int ath12k_mac_op_ampdu_action(st
+@@ -10352,15 +10435,17 @@ static int ath12k_mac_op_ampdu_action(st
  	return ret;
  }
  
@@ -1644,7 +1605,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  static int ath12k_mac_op_add_chanctx(struct ieee80211_hw *hw,
  				     struct ieee80211_chanctx_conf *ctx)
-@@ -12188,6 +12282,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -12178,6 +12263,7 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	if (!arvif) {
  		ath12k_err(NULL, "unable to allocate link vif\n");
@@ -1652,7 +1613,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  		return -ENOMEM;
  	}
  
-@@ -14208,10 +14303,6 @@ static const struct ieee80211_ops ath12k
+@@ -14198,10 +14284,6 @@ static const struct ieee80211_ops ath12k
  #endif
  	.get_txpower			= ath12k_mac_op_get_txpower,
  	.set_radar_background		= ath12k_mac_op_set_radar_background,
@@ -1663,7 +1624,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  };
  
  static void ath12k_mac_update_ch_list(struct ath12k *ar,
-@@ -15403,6 +15494,9 @@ int ath12k_mac_allocate(struct ath12k_hw
+@@ -15393,6 +15475,9 @@ int ath12k_mac_allocate(struct ath12k_hw
  			goto err_mac_destroy;
  		}
  
