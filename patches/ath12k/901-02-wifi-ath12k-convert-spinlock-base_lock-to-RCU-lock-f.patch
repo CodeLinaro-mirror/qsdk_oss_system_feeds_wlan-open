@@ -718,30 +718,51 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		kfree(peer);
  	}
  	spin_unlock_bh(&ab->base_lock);
-@@ -7266,13 +7272,12 @@ static void ath12k_mac_station_post_remo
+@@ -7266,14 +7272,14 @@ static void ath12k_mac_station_post_remo
  					   struct ath12k_link_vif *arvif,
  					   struct ath12k_link_sta *arsta)
  {
 -	struct ath12k_base *ab = ar->ab;
  	struct ath12k_peer *peer;
  	struct ath12k_sta *ahsta = arsta->ahsta;
++	struct ath12k_base *ab = ar->ab;
  	struct ieee80211_sta *sta;
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_vif *vif = ahvif->vif;
 -	u16 peer_id, ml_peer_id;
-+	u16 peer_id;
- 	bool skip_peer_delete;
+-	bool skip_peer_delete;
++	u16 ml_peer_id;
++	bool skip_peer_delete, skip_sync_rcu = true;
  
  	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
-@@ -7291,7 +7296,6 @@ static void ath12k_mac_station_post_remo
+ 
+@@ -7288,10 +7294,23 @@ static void ath12k_mac_station_post_remo
+ 	if (skip_peer_delete && peer) {
+ 		peer->sta = NULL;
+ 	} else if (peer && peer->sta == sta) {
++		ml_peer_id = peer->ml_peer_id & ~ATH12K_ML_PEER_ID_VALID;
++		rcu_assign_pointer(ab->peer_list[peer->peer_id], NULL);
++		if (peer->mlo)
++			rcu_assign_pointer(ab->ml_peer_list[ml_peer_id][peer->pdev_idx],
++					   NULL);
++		skip_sync_rcu = false;
++	}
++	spin_unlock_bh(&ar->ab->base_lock);
++
++	if (!skip_sync_rcu)
++		synchronize_rcu();
++
++	spin_lock_bh(&ar->ab->base_lock);
++	peer = ath12k_peer_find(ar->ab, arvif->vdev_id, arsta->addr);
++	if (!skip_peer_delete && peer && peer->sta == sta) {
  		ath12k_warn(ar->ab, "Found peer entry %pM n vdev %i after it was supposedly removed\n",
  			    arsta->addr, arvif->vdev_id);
- 		peer_id = peer->peer_id;
+-		peer_id = peer->peer_id;
 -		ml_peer_id = peer->ml_peer_id & ~ATH12K_ML_PEER_ID_VALID;
  		ath12k_peer_rhash_delete(ar->ab, peer);
  		peer->sta = NULL;
  		list_del(&peer->list);
-@@ -7299,11 +7303,6 @@ static void ath12k_mac_station_post_remo
+@@ -7299,11 +7318,6 @@ static void ath12k_mac_station_post_remo
  		if (peer->sawf_ctx_peer.telemetry_peer_ctx)
  			ath12k_telemetry_peer_ctx_free(peer->sawf_ctx_peer.telemetry_peer_ctx);
  #endif
