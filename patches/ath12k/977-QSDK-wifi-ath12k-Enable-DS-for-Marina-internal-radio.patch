@@ -1,4 +1,4 @@
-From 5edd9ec6419bf6ac5ff773f6fb33699cfe50a6e0 Mon Sep 17 00:00:00 2001
+From 14dc8e3f99a045dbb7c025f52b1d9382d03b090c Mon Sep 17 00:00:00 2001
 From: Nithyanantham Paramasivam <quic_nithp@quicinc.com>
 Date: Sat, 14 Sep 2024 01:07:53 +0530
 Subject: [PATCH] QSDK: wifi: ath12k: Enable DS for Marina internal radio
@@ -10,16 +10,16 @@ ppe2tcl, ppe_wbm_rel rings.
 Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
 Signed-off-by: Nithyanantham Paramasivam <quic_nithp@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/ahb.c  | 135 ++++++++++++++++++++++++-
+ drivers/net/wireless/ath/ath12k/ahb.c  | 130 ++++++++++++++++++++++++-
  drivers/net/wireless/ath/ath12k/core.c |   4 +-
  drivers/net/wireless/ath/ath12k/core.h |   2 +-
  drivers/net/wireless/ath/ath12k/dp.c   |  12 ++-
  drivers/net/wireless/ath/ath12k/hw.c   |  12 +++
  drivers/net/wireless/ath/ath12k/hw.h   |   1 +
- 6 files changed, 159 insertions(+), 7 deletions(-)
+ 6 files changed, 154 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/net/wireless/ath/ath12k/ahb.c b/drivers/net/wireless/ath/ath12k/ahb.c
-index a54706f..8786255 100644
+index a54706f..a6bcb37 100644
 --- a/drivers/net/wireless/ath/ath12k/ahb.c
 +++ b/drivers/net/wireless/ath/ath12k/ahb.c
 @@ -34,7 +34,8 @@ static const struct of_device_id ath12k_ahb_of_match[] = {
@@ -54,7 +54,7 @@ index a54706f..8786255 100644
  };
  
  static inline u32 ath12k_ahb_get_cmem_base(struct ath12k_base *ab)
-@@ -768,7 +775,123 @@ static int ath12k_ahb_ssr_notifier_unreg(struct ath12k_base *ab)
+@@ -768,7 +775,118 @@ static int ath12k_ahb_ssr_notifier_unreg(struct ath12k_base *ab)
  	return ath12k_rproc_unregister_subsys_notifier(ab);
  }
  
@@ -83,11 +83,11 @@ index a54706f..8786255 100644
 +		}
 +		ab->irq_num[irq_idx] = irq;
 +		irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
-+		snprintf(&ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL], 
++		snprintf(&ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL],
 +			 sizeof(ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL]),
 +			 "ppe_wbm_rel_%d", ab->ppe.ds_node_id);
 +		ret = devm_request_irq(&pdev->dev, irq,  ath12k_dp_ppeds_handle_tx_comp,
-+				  	IRQF_NO_AUTOEN | IRQF_NO_SUSPEND,
++					IRQF_NO_AUTOEN | IRQF_NO_SUSPEND,
 +					ab->dp.ppeds_irq_name[PPEDS_IRQ_PPE_WBM2SW_REL],
 +					(void *)ab);
 +
@@ -165,13 +165,8 @@ index a54706f..8786255 100644
 +void ath12k_ahb_ppeds_free_interrupts(struct ath12k_base *ab)
 +{
 +	disable_irq_nosync(ab->dp.ppeds_irq[PPEDS_IRQ_PPE2TCL]);
-+	free_irq(ab->dp.ppeds_irq[PPEDS_IRQ_PPE2TCL], ath12k_dp_get_ppe_ds_ctxt(ab));
-+
 +	disable_irq_nosync(ab->dp.ppeds_irq[PPEDS_IRQ_REO2PPE]);
-+	free_irq(ab->dp.ppeds_irq[PPEDS_IRQ_REO2PPE], ath12k_dp_get_ppe_ds_ctxt(ab));
-+
 +	disable_irq_nosync(ab->dp.ppeds_irq[PPEDS_IRQ_PPE_WBM2SW_REL]);
-+	free_irq(ab->dp.ppeds_irq[PPEDS_IRQ_PPE_WBM2SW_REL], ab);
 +}
 +#endif
 +
@@ -179,7 +174,7 @@ index a54706f..8786255 100644
  	.start = ath12k_ahb_start,
  	.stop = ath12k_ahb_stop,
  	.read32 = ath12k_ahb_read32,
-@@ -786,6 +909,12 @@ static const struct ath12k_hif_ops ath12k_ahb_hif_ops = {
+@@ -786,6 +904,12 @@ static const struct ath12k_hif_ops ath12k_ahb_hif_ops = {
  	.dp_umac_reset_irq_config = ath12k_ahb_dp_umac_config_irq,
  	.dp_umac_reset_enable_irq = ath12k_ahb_dp_umac_reset_enable_irq,
  	.dp_umac_reset_free_irq = ath12k_ahb_dp_umac_reset_free_irq,
@@ -193,7 +188,7 @@ index a54706f..8786255 100644
  
  static const struct ath12k_hif_ops ath12k_ahb_hif_ops_qcn6432 = {
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index 2201c09..1faba60 100644
+index faa6500..97a5032 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -1861,8 +1861,8 @@ int ath12k_core_qmi_firmware_ready(struct ath12k_base *ab)
@@ -208,7 +203,7 @@ index 2201c09..1faba60 100644
  #endif
  
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 2c3226f..6cb21ff 100644
+index 8d159ad..05b5498 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -189,7 +189,7 @@ enum ath12k_firmware_mode {
@@ -221,7 +216,7 @@ index 2c3226f..6cb21ff 100644
  #define ATH12K_MAX_TCL_RING_NUM 3
  
 diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
-index f0b8b39..9c1cb35 100644
+index 0138159..6311f1e 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
 @@ -308,7 +308,7 @@ static void ath12k_dp_srng_msi_setup(struct ath12k_base *ab,
@@ -271,7 +266,7 @@ index f0b8b39..9c1cb35 100644
  	case HAL_REO_DST:
  	case HAL_REO2PPE:
 diff --git a/drivers/net/wireless/ath/ath12k/hw.c b/drivers/net/wireless/ath/ath12k/hw.c
-index bd38902..a7000be 100644
+index 84f0857..e8baed1 100644
 --- a/drivers/net/wireless/ath/ath12k/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/hw.c
 @@ -1563,6 +1563,12 @@ const struct ath12k_hw_regs ipq5424_hw_regs = {
