@@ -1590,6 +1590,7 @@ enable_affinity_mr02() {
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
         if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
                 echo "Configure Affinity for PPE DS for mr01_2" > /dev/ttyMSM0
 
@@ -1651,6 +1652,117 @@ enable_affinity_mr02() {
 
         fi
 }
+
+enable_affinity_mr03() {
+
+	#IPQ5424 2G radio
+	#assign 4 rx interrupts to each cores
+	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        #assign 4 tcl completions to last 4 CPUs
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'wbm2host-tx-completions-ring1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        #assign err,release interrupts to core 3
+	irq_affinity_num=`grep -E -m1 'reo2ost-exception' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'wbm2host-rx-release' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'reo2host-status' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        #QCN9274 WKK 5G radio
+        #assign 4 rx interrupts to each cores from reverse
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        #assign 3 tcl completions to last 3 CPUs
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        #assign 4th tcl completion ring and
+        #lmac,reo err,release interrupts are mapped to core 3
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+        # assign 4th tcl completion ring interrupt to core 3
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_11' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	#assign monitor interrupt to each core
+	irq_affinity_num=`grep -E -m1 'rxdma2host-monitor-destination-mac1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	enable_affinity_for_ds=$(cat /sys/module/ath12k/parameters/ppe_ds_enable)
+        if [ -n "$enable_affinity_for_ds" ] && [ $enable_affinity_for_ds == '1' ]; then
+                echo "Configure Affinity for PPE DS for mr01_2" > /dev/ttyMSM0
+
+                # For Marina Board (RDP 487) - Assign 2G to core 1 and
+                #Assign pci2(5G) to core 2
+                ############## affinity for Marina - 2G ########################
+                irq_num=`grep ppe2tcl_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep reo2ppe_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep ppe_wbm_rel_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+                ##use same affinity to Node corresponding edma_ppeds interrupts
+                irq_num=`grep edma_ppeds_rxfill_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep edma_ppeds_txcmpl_0 /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 2 > /proc/irq/$irq_num/smp_affinity
+
+
+                ############## affinity for pci2 - 5G ########################
+                irq_num=`grep pci2_ppe2tcl /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep pci2_reo2ppe /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep pci2_ppe_wbm_rel /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+                ##Extract the ppeds Node seq number and use same affinity to Node corresponding edma_ppeds interrupts
+                ppeds_node=`grep pci2_reo2ppe_ /proc/interrupts | sed -n 's/.*pci2_reo2ppe_\([0-9]*\).*/\1/p'`
+                irq_num=`grep edma_ppeds_rxfill_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+                irq_num=`grep edma_ppeds_txcmpl_$ppeds_node /proc/interrupts | cut -d ':' -f 1 | tr -d ' '`
+                [ -n "$irq_num" ] && echo 4 > /proc/irq/$irq_num/smp_affinity
+
+        fi
+}
+
 
 ce_interrupt_affinity() {
         i=0
@@ -1773,6 +1885,10 @@ enable_smp_affinity_wifi() {
 			rdp466)
 					#for RDP466 (IPQ5424(2.4GHz) + QCN9274(5 GHz) + QCN9274(6GHz))
 					enable_affinity_mr02
+					;;
+			rdp487)
+					#for RDP487 (IPQ5424(2.4GHz) + QCN9274(5 GHz))
+					enable_affinity_mr03
 					;;
 			*)
 					#no affinity settings
