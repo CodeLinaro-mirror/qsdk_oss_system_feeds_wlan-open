@@ -1063,7 +1063,8 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
-			rdp466)
+			rdp466 | \
+			rdp466-c2)
 				ethtool -K eth0 gro off
 				ethtool -K eth0 gso off
 				ethtool -K eth1 gro off
@@ -1120,7 +1121,8 @@ boost_performance() {
 				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/trace_qdss
 				echo 0 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/trace_qdss
 				;;
-			rdp487)
+			rdp487 | \
+			rdp487-c2)
 				ethtool -K eth0 gro off
 				ethtool -K eth0 gso off
 				ethtool -K eth1 gro off

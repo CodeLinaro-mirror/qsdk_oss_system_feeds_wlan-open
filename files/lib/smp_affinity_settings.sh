@@ -2055,11 +2055,13 @@ enable_smp_affinity_wifi() {
                         		#for RDP479 (IPQ5332(2.4GHz) + QCN9274(5 GHz) + QCN6432(6 GHz))
                                         enable_affinity_mi01_12
                                         ;;
-			rdp466)
+			rdp466 | \
+			rdp466-c2)
 					#for RDP466 (IPQ5424(2.4GHz) + QCN9274(5 GHz) + QCN9274(6GHz))
 					enable_affinity_mr02
 					;;
-			rdp487)
+			rdp487 | \
+			rdp487-c2)
 					#for RDP487 (IPQ5424(2.4GHz) + QCN9274(5 GHz))
 					enable_affinity_mr03
 					;;
