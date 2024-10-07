@@ -250,6 +250,8 @@ boost_performance() {
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#case for rdp433 (QCN9274 2.4, 5, 6 GHz)
 
 				;;
@@ -342,6 +344,8 @@ boost_performance() {
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#case for rdp467 (QCN9274 2.4, 5GL, 5GH, 6 GHz)
 
 				;;
@@ -425,6 +429,8 @@ boost_performance() {
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				;;
 			ap-al02-c9)
 				#case for rdp454 (QCN9274 (2.4 and 5 Low) + QCN9274 (5 High and 6 GHz))
@@ -505,6 +511,8 @@ boost_performance() {
 				tc qdisc replace dev wlan2 root noqueue
 				tc qdisc replace dev wlan3 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 
 				;;
 			ap-mi01.2 | \
@@ -579,6 +587,8 @@ boost_performance() {
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			ap-mi01.3 | \
@@ -636,6 +646,8 @@ boost_performance() {
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
                                 echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
 					tc qdisc replace dev wlan0_b root noqueue
 					tc qdisc replace dev wlan0_l0 root noqueue
@@ -720,6 +732,8 @@ boost_performance() {
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
                                 #no settings
                                 ;;
 			ap-mi01.9)
@@ -785,6 +799,8 @@ boost_performance() {
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				;;
 			ap-mi01.3-c2 | \
 			ap-mi04.1-c2 | \
@@ -852,6 +868,8 @@ boost_performance() {
 				tc qdisc replace dev wlan1 root noqueue
 				tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			ap-mi01.14)
@@ -925,6 +943,8 @@ boost_performance() {
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			ap-mi01.12)
@@ -998,6 +1018,8 @@ boost_performance() {
                                 tc qdisc replace dev wlan1 root noqueue
                                 tc qdisc replace dev wlan2 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			ap-mi01.03-c3)
@@ -1061,6 +1083,8 @@ boost_performance() {
 				tc qdisc replace dev wlan0 root noqueue
 				tc qdisc replace dev wlan1 root noqueue
 				echo "16384" > /proc/net/skb_recycler/max_skbs
+				#Reduce Max skb recycler buffer count per CPU pool for 512M profile to 2048
+				[ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
 			*)
