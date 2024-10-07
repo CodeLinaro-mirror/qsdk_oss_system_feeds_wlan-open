@@ -600,42 +600,40 @@ post_mac80211() {
 mac80211_validate_num_channels() {
 	dev=$1
 	n_hw_idx=$2
-	efreq=$3
-	match_found=0
-	bandidx=$4
 	sub_matched=0
 	i=0
 
-	#fetch the band channel list
-	band_nchans=$(eval ${3} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
-	band_first_chan=$(echo $band_nchans | awk '{print $1}')
-
-	#entire band channel list without any separator
-	band_nchans=$(echo $band_nchans | tr -d ' ')
-
 	while [ $i -lt $n_hw_idx ]; do
 
-		#fetch the hw idx channel list
-		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
-		first_chan=$(echo $hw_nchans | awk '{print $1}')
-		hw_nchans=$(echo $hw_nchans | tr -d ' ')
+		start_freq=$(iw phy ${dev} info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 3)
+		end_freq=$(iw phy ${dev} info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 6)
+		start_freq=$((start_freq+10))
+		end_freq=$((end_freq-10))
+		first_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
 
-		if [ "$band_nchans" = "$hw_nchans" ]; then
-			match_found=1
-		else
-			#check if subchannels matches
-			if echo "$band_nchans" | grep -q "${hw_nchans}";
-			then
-				sub_matched=$((sub_matched+1))
-				append chans $first_chan
-			fi
+		if [ $end_chan = 177 ] && [ $_mode_band = "5g" ]; then
+			sub_matched=$((sub_matched+1))
+			append chans $first_chan
 		fi
+		if [ $end_chan = 233 ] && [ $_mode_band = "6g" ]; then
+			sub_matched=$((sub_matched+1))
+			append chans $first_chan
+		fi
+		if [ $end_chan = 64 ] && [ $_mode_band = "5g" ]; then
+			sub_matched=$((sub_matched+1))
+			append chans $first_chan
+		fi
+		if [ $end_chan = 93 ] && [ $_mode_band = "6g" ]; then
+			sub_matched=$((sub_matched+1))
+			append chans $first_chan
+		fi
+
 		i=$((i+1))
 	done
-	if [ $match_found -eq 0 ]; then
-		if [ $sub_matched -gt 1 ]; then
-                        echo "$chans"
-		fi
+
+	if [ $sub_matched -gt 1 ]; then
+		echo "$chans"
 	else
 		echo ""
 	fi
@@ -649,29 +647,80 @@ mac80211_get_channel_list() {
 	match_found=0
 
 	while [ $i -lt $n_hw_idx ]; do
-		hw_nchans=$(iw phy ${dev} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
-		first_chan=$(echo $hw_nchans | awk '{print $1}')
-		higest_chan=$first_chan
-		for chidx in $hw_nchans; do
-			if [ $chidx -gt $higest_chan ]; then
-				higest_chan=$chidx;
-			fi
-			if [ "$chidx" == "$chan" ]; then
-				match_found=1
-			fi
-		done
-		if [ $match_found -eq 1 ]; then
+		start_freq=$(iw phy ${dev} info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 3)
+		end_freq=$(iw phy ${dev} info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 6)
+		start_freq=$((start_freq+10))
+		end_freq=$((end_freq-10))
+		first_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		if [ $end_chan = 14 ] && [ $_mode_band = "2g" ]; then
+			match_found=1
 			break;
 		fi
+		if [ $first_chan -le $chan ] && [ $end_chan = 64 ] && [ $_mode_band = "5g" ]; then
+			match_found=1
+			break;
+		fi
+		if [ $first_chan -le $chan ] && [ $end_chan = 177 ] && [ $_mode_band = "5g" ]; then
+			match_found=1
+			break;
+		fi
+		if [ $first_chan -le $chan ] && [ $end_chan = 93 ] && [ $_mode_band = "6g" ]; then
+			match_found=1
+			break;
+		fi
+		if [ $first_chan -le $chan ] && [ $end_chan = 233 ] && [ $_mode_band = "6g" ]; then
+			match_found=1
+			break;
+		fi
+
 		i=$((i+1))
 	done
 
 	if [ $match_found -eq 1 ]; then
-		echo "$first_chan-$higest_chan";
+		echo "$first_chan-$end_chan";
 	else
 		echo ""
 	fi
 }
+
+mac80211_freq_to_channel() {
+	local freq=$1
+
+	if [ "$freq" -lt 1000 ]; then
+		echo 0
+		return
+	fi
+	if [ "$freq" -eq 2484 ]; then
+		echo 14
+		return
+	fi
+	if [ "$freq" -eq 5935 ]; then
+		echo 2
+		return
+	fi
+	if [ "$freq" -lt 2484 ]; then
+		echo $(((freq-2407)/5))
+		return
+	fi
+	if [ "$freq" -ge 4910 ] && [ "$freq" -le 4980 ]; then
+		echo $(((freq-4000)/5))
+		return
+	fi
+	if [ "$freq" -lt 5950 ]; then
+		echo $(((freq-5000)/5))
+		return
+	fi
+	if [ "$freq" -le 45000 ]; then
+		echo $(((freq-5950)/5))
+		return
+	fi
+	if [ "$freq" -ge 58320 ] && [ "$freq" -le 70200 ]; then
+		echo $(((freq-56160)/5))
+		return
+	fi
+}
+
 generate_5g_6g_split_phy_config() {
 	splitphy=1
 	for chan in ${need_extraconfig}
@@ -761,7 +810,7 @@ detect_mac80211() {
 		if [ $total_bands -gt 1 ]; then
 			is_swiphy=1
 		fi
-		no_hw_idx=$(iw phy ${dev} info | grep -e "channel list" | wc -l)
+		no_hw_idx=$(iw phy ${dev} info | grep -e "Idx" | wc -l)
 
 		get_band_defaults "$dev"
 
@@ -813,7 +862,7 @@ detect_mac80211() {
 
 			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
 			if [ $no_hw_idx -gt $total_bands ]; then
-				need_extraconfig=$(mac80211_validate_num_channels $dev $no_hw_idx "$expr_freq")
+				need_extraconfig=$(mac80211_validate_num_channels $dev $no_hw_idx)
 				need_extraconfig=$(eval echo "${need_extraconfig}" | tr ' ' '\n' | sort -n)
 			fi
 

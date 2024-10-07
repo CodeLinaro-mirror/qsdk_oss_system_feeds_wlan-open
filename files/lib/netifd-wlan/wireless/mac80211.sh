@@ -906,21 +906,19 @@ mac80211_get_addr() {
 mac80211_hwidx_from_channel_list() {
 	local phy="$1"
 	local i=0
-	local first_chan highest_chan chidx hw_nchans n_hw_idx
+	local first_chan end_chan n_hw_idx start_freq end_freq
 
-	n_hw_idx=$(iw phy "${phy}" info | grep -e "channel list" | wc -l)
+	n_hw_idx=$(iw phy "${phy}" info | grep -e "Idx" | wc -l)
 
 	while [ "$i" -lt "$n_hw_idx" ]; do
-		hw_nchans=$(iw phy "${phy}" info | awk -v p1="$i channel list" \
-			-v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
-		first_chan=$(echo $hw_nchans | awk '{print $1}')
-		highest_chan=$first_chan
-		for chidx in $hw_nchans; do
-			if [ "$chidx" -gt "$highest_chan" ]; then
-				highest_chan=$chidx;
-			fi
-		done
-		if [ "$2" == "$first_chan-$highest_chan" ]; then
+		start_freq=$(iw phy "${phy}" info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 3)
+		end_freq=$(iw phy "${phy}" info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 6)
+		start_freq=$((start_freq+10))
+		end_freq=$((end_freq-10))
+		first_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+
+		if [ "$2" == "$first_chan-$end_chan" ]; then
 			break;
 		fi
 		i=$((i+1))
@@ -959,7 +957,7 @@ mac80211_generate_mac() {
 	}
 
 	if [ "$is_sphy_mband" -eq 1 ]; then
-		n_hwidx=$(iw phy "${phy}" info | grep -e "channel list" | wc -l)
+		n_hwidx=$(iw phy "${phy}" info | grep -e "Idx" | wc -l)
 		if [ -n "$channel_list" ] && \
 		[ "$(wc -l < /sys/class/ieee80211/"${phy}"/addresses)" == "$n_hwidx" ]; then
 			hw_idx="$(mac80211_hwidx_from_channel_list "$phy" "$channel_list")"
@@ -2643,8 +2641,9 @@ get_sta_freq_list() {
 
 	phy=$1
 	sta_freq=$2
+	local start_freq end_freq
 
-	hw_indices=$(iw phy "${phy}" info | grep -e "channel list" | cut -d' ' -f 2)
+	hw_indices=$(iw phy "${phy}" info | grep -e "Idx" | cut -d' ' -f 3)
 
 	if [ -z "$hw_indices" ]; then
 		#non-single wiphy arch doesn't need freq list
@@ -2653,40 +2652,30 @@ get_sta_freq_list() {
 
 	for i in $hw_indices
 	do
-		#fetch hw idx channels from phy info
-		hw_nchans=$(iw phy ${phy} info | awk -v p1="$i channel list" -v p2="$((i+1)) channel list"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f')
-
+		start_freq=$(iw phy "${phy}" info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 3)
+		end_freq=$(iw phy "$phy" info | awk -v p1="Idx $i" -v p2="Radio's valid interface combinations"  ' $0 ~ p1{f=1;next} $0 ~ p2 {f=0} f'| cut -d " " -f 6)
+		start_freq=$((start_freq+10))
+		end_freq=$((end_freq-10))
 		for _b in `iw phy "$phy" info | grep 'Band ' | cut -d' ' -f 2`; do
 			expr="iw phy ${phy} info | awk  '/Band ${_b}/{ f = 1; next } /Band /{ f = 0 } f'"
 			expr_freq="$expr | awk '/Frequencies/,/valid /f'"
-			band_freq=$(eval ${expr_freq} | awk '{ print $2 }' | sed -e "s/\[//g" | sed -e "s/\]//g")
+			band_freq=$(eval ${expr_freq} | awk '{ print $2 }' | sed -e "s/\[//g" | sed -e "s/\]//g" | cut -f1 -d".")
 
 			# band_freq list has the sta freq in it
 			if [[ "$band_freq" =~ "${sta_freq}" ]]; then
 				sta_chan=$(eval $expr_freq | grep -E -m1 "(\* ${sta_freq:-....}.0 MHz${sta_freq:+|\\[$sta_freq\\]})" | grep MHz | awk '{print $4}' | sed -e "s/\[//g" | sed -e "s/\]//g")
 
-				#fetch band channels from phy info
-				band_nchans=$(echo $(eval ${expr_freq} | awk '{ print $4 }' | sed -e "s/\[//g" | sed -e "s/\]//g") | tr -d ' ')
-				hw_chans=$(echo $hw_nchans | tr -d ' ')
-
-				#check if the list is present in band info
-				if echo "$band_nchans" | grep -q "${hw_chans}";
+				if [ "$sta_freq" -ge "$start_freq" ] && [ "$sta_freq" -le "$end_freq" ];
 				then
-					found=false
-					for chan in $hw_nchans
-					do
-						if [[ "$chan" == "$sta_chan" ]]; then
-							found=true
-						fi
+					sta_freq_list=""
+					iter_freq=$((start_freq))
+					while [ "$iter_freq" -lt "$end_freq" ]; do
+						frqs=$(iw phy "$phy" info | grep -E -m1 "(\* ${iter_freq}.0 MHz)" | grep MHz | awk '{print $2}' | cut -f1 -d".")
+						sta_freq_list="${sta_freq_list}${frqs} "
+						iter_freq=$((iter_freq+5))
 					done
-					if [[ "$found" == "true" ]]; then
-						sta_freq_list=""
-						for chidx in ${hw_nchans}; do
-							frqs=$(eval $expr_freq | grep -E -m1 "(\* ${chidx:-....} MHz${chidx:+|\\[$chidx\\]})" | grep MHz | awk '{print $2}' | cut -f1 -d".")
-							sta_freq_list="${sta_freq_list}${frqs} "
-							done
-							echo $sta_freq_list
-					fi
+					sta_freq_list="${sta_freq_list}${end_freq} "
+					echo $sta_freq_list
 				fi
 			else
 				continue;
