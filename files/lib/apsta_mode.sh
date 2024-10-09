@@ -366,25 +366,16 @@ hostapd_adjust_config() {
 
 get_link_ids() {
 	ifname=$1
-	link=$(iw dev $ifname info | grep link | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
 
-	if [ -n "$link" ]; then
-		echo "$link"
-		return
-	else
-		#when interface is in disable state, we might not find link from iw, hence, use control
-		#interface file names to find the link id
-
-		ctrl_iface=$(ls /var/run/hostapd/${ifname}*)
-		if [ -n "$ctrl_iface" ]; then
-			def_ctrl_iface_path=$(ls /var/run/hostapd/$ifname* | head -n 1)
-			#Try to return links only if has link control interface
-			if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
-				links=$(ls /var/run/hostapd/$ifname* | awk '{print substr($0,length,1)}')
-				if [ -n "$links" ]; then
-					echo "$links"
-					return
-				fi
+	ctrl_iface=$(ls /var/run/hostapd/${ifname}_*)
+	if [ -n "$ctrl_iface" ]; then
+		def_ctrl_iface_path=$(ls /var/run/hostapd/${ifname}_* | head -n 1)
+		#Try to return links only if has link control interface
+		if [[ "$def_ctrl_iface_path" == *"link"* ]]; then
+			links=$(ls /var/run/hostapd/${ifname}_* | awk '{print substr($0,length,1)}')
+			if [ -n "$links" ]; then
+				echo "$links"
+				return
 			fi
 		fi
 	fi
