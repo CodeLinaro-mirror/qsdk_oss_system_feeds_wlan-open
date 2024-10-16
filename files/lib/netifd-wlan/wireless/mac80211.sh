@@ -719,7 +719,7 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$is_6ghz" == "1" ]; then
 			if [ -z "$multiple_bssid" ] && [ "$has_ap" -gt 1 ]; then
-				multiple_bssid=2
+				multiple_bssid=3
 			fi
 		fi
 
