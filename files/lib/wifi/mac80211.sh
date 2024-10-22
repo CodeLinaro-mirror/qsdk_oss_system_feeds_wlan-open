@@ -653,23 +653,23 @@ mac80211_get_channel_list() {
 		end_freq=$((end_freq-10))
 		first_chan=$(mac80211_freq_to_channel $start_freq)
 		end_chan=$(mac80211_freq_to_channel $end_freq)
-		if [ $end_chan = 14 ] && [ $_mode_band = "2g" ]; then
+		if [ "$end_chan" = "14" ] && [ "$_mode_band" = "2g" ]; then
 			match_found=1
 			break;
 		fi
-		if [ $first_chan -le $chan ] && [ $end_chan = 64 ] && [ $_mode_band = "5g" ]; then
+		if [ "$first_chan" -le "$chan" ] && [ "$end_chan" = "64" ] && [ "$end_chan" -ge "$chan" ] && [ "$_mode_band" = "5g" ]; then
 			match_found=1
 			break;
 		fi
-		if [ $first_chan -le $chan ] && [ $end_chan = 177 ] && [ $_mode_band = "5g" ]; then
+		if [ "$first_chan" -le "$chan" ] && [ "$end_chan" = "177" ] && [ "$end_chan" -ge "$chan" ] && [ "$_mode_band" = "5g" ]; then
 			match_found=1
 			break;
 		fi
-		if [ $first_chan -le $chan ] && [ $end_chan = 93 ] && [ $_mode_band = "6g" ]; then
+		if [ "$first_chan" -le "$chan" ] && [ "$end_chan" = "93" ] && [ "$end_chan" -ge "$chan" ] && [ "$_mode_band" = "6g" ]; then
 			match_found=1
 			break;
 		fi
-		if [ $first_chan -le $chan ] && [ $end_chan = 233 ] && [ $_mode_band = "6g" ]; then
+		if [ "$first_chan" -le "$chan" ] && [ "$end_chan" = "233" ] && [ "$end_chan" -ge "$chan" ] && [ "$_mode_band" = "6g" ]; then
 			match_found=1
 			break;
 		fi
@@ -677,7 +677,7 @@ mac80211_get_channel_list() {
 		i=$((i+1))
 	done
 
-	if [ $match_found -eq 1 ]; then
+	if [ "$match_found" -eq "1" ]; then
 		echo "$first_chan-$end_chan";
 	else
 		echo ""
