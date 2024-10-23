@@ -2281,73 +2281,79 @@ drv_mac80211_setup() {
 			if [ -f "/var/run/wifi-$phy.pid" ]; then
 				return
 			fi
-			touch /var/run/hostapd-"$device"-updated-cfg
-			hostapd_cfg_updated=$(ls /var/run/hostapd-*-updated-cfg | wc -l)
+			[ -f "/var/run/hostapd-updated-cfg" ] || touch -f "/var/run/hostapd-updated-cfg"
+			if [ -f "/var/run/hostapd-updated-cfg" ]; then
+				exec 200>"/var/run/hostapd-updated-cfg"
+				flock 200
+				touch /var/run/hostapd-$device-updated-cfg
+				hostapd_cfg_updated=$(ls /var/run/hostapd-*-updated-cfg | wc -l)
 
-			if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
-				bands_info=$(ls /var/run/hostapd*updated-cfg | grep -o band.)
-				for __band in $bands_info
-				do
-					append  config_files /var/run/hostapd-phy"${phy#phy}"_"${__band}".conf
-				done
-				#MLO vaps, single instance of hostapd is started
-				/usr/sbin/hostapd -B -P /var/run/wifi-"$phy".pid $config_files
-				ret="$?"
-
-				if [ "$band" = "5g" ]; then
-					interf_dfs="$(cat /var/run/hostapd-"${phy}"_band"${device:11:1}".conf | grep interface | grep wlan | cut -d'=' -f 2 )"
-					iw dev "$interf_dfs" info 2> /dev/null
-					ifret="$?"
-				fi
-				if ([ "$band" = "5g" ] && [ "$ifret" -eq 0 ]); then
-					config_get ht_mode "$device" htmode
-
-					if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]); then
-						#Wait until link ids are filled, hostapd_cli command can give empty output in starting.
-						while [ -z "$link_ids" ]; do
-							link_ids="$(hostapd_cli -i "$interf_dfs" status | grep link_id= | cut -d'=' -f 2)"
-						done
-					fi
-					if [ -n "$link_ids" ]; then
-						for i in $link_ids
-						do
-							interf_state="$(hostapd_cli -i $interf_dfs -l $i status | grep state | cut -d'=' -f 2)"
-							if [ "$interf_state" = "DFS" ]; then
-								link=$i
-							fi
-						done
-					fi
-					while true;
+				if [ "$hostapd_cfg_updated" = "$radio_up_count" ]; then
+					bands_info=$(ls /var/run/hostapd*updated-cfg | grep -o band.)
+					for __band in $bands_info
 					do
-						if [ -n "$link" ]; then
-							hostapd_state="$(hostapd_cli -i "$interf_dfs" -l "$link" status 2> /dev/null | grep state | cut -d'=' -f 2)"
-						else
-							hostapd_state="$(hostapd_cli -i "$interf_dfs" status 2> /dev/null | grep state | cut -d'=' -f 2)"
+						append  config_files /var/run/hostapd-phy"${phy#phy}"_"${__band}".conf
+					done
+					#MLO vaps, single instance of hostapd is started
+					/usr/sbin/hostapd -B -P /var/run/wifi-"$phy".pid $config_files
+					ret="$?"
+
+					if [ "$band" = "5g" ]; then
+						interf_dfs="$(cat /var/run/hostapd-"${phy}"_band"${device:11:1}".conf | grep interface | grep wlan | cut -d'=' -f 2 )"
+						iw dev "$interf_dfs" info 2> /dev/null
+						ifret="$?"
+					fi
+					if ([ "$band" = "5g" ] && [ "$ifret" -eq 0 ]); then
+						config_get ht_mode "$device" htmode
+
+						if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]); then
+							#Wait until link ids are filled, hostapd_cli command can give empty output in starting.
+							while [ -z "$link_ids" ]; do
+								link_ids="$(hostapd_cli -i "$interf_dfs" status | grep link_id= | cut -d'=' -f 2)"
+							done
 						fi
-						if [ "$hostapd_state" = "ENABLED" ]; then
-							wireless_add_process "$(cat /var/run/wifi-"$phy".pid)" "/usr/sbin/hostapd" 1
-							[ "$ret" != 0 ] && {
+						if [ -n "$link_ids" ]; then
+							for i in $link_ids
+							do
+								interf_state="$(hostapd_cli -i $interf_dfs -l $i status | grep state | cut -d'=' -f 2)"
+								if [ "$interf_state" = "DFS" ]; then
+									link=$i
+								fi
+							done
+						fi
+						while true;
+						do
+							if [ -n "$link" ]; then
+								hostapd_state="$(hostapd_cli -i "$interf_dfs" -l "$link" status 2> /dev/null | grep state | cut -d'=' -f 2)"
+							else
+								hostapd_state="$(hostapd_cli -i "$interf_dfs" status 2> /dev/null | grep state | cut -d'=' -f 2)"
+							fi
+							if [ "$hostapd_state" = "ENABLED" ]; then
+								wireless_add_process "$(cat /var/run/wifi-"$phy".pid)" "/usr/sbin/hostapd" 1
+								[ "$ret" != 0 ] && {
+								wireless_setup_failed HOSTAPD_START_FAILED
+								return
+								}
+								update_primary_link
+								break;
+							fi
+
+						done
+					else
+						wireless_add_process "$(cat /var/run/wifi-"$phy".pid)" "/usr/sbin/hostapd" 1
+						[ "$ret" != 0 ] && {
 							wireless_setup_failed HOSTAPD_START_FAILED
 							return
-							}
-							update_primary_link
-							break;
-						fi
-
-					done
+						}
+						update_primay_link
+					fi
 				else
-					wireless_add_process "$(cat /var/run/wifi-"$phy".pid)" "/usr/sbin/hostapd" 1
-					[ "$ret" != 0 ] && {
-						wireless_setup_failed HOSTAPD_START_FAILED
-						return
-					}
-					update_primay_link
+					hostapd_started=0
 				fi
-			else
-				hostapd_started=0
+				flock -u 200
 			fi
+			hostapd_dpp_action "$ifname"
 		fi
-		hostapd_dpp_action "$ifname"
 
 	}
 	uci -q -P /var/state set wireless."${device}".aplist="${NEWAPLIST}"
