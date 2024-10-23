@@ -27,7 +27,16 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -5324,7 +5324,7 @@ ath12k_mac_find_link_id_by_freq(struct i
+@@ -5327,14 +5327,15 @@ static int ath12k_mac_vdev_stop(struct a
+ }
+ 
+ static int
+-ath12k_mac_find_link_id_by_freq(struct ieee80211_vif *vif, struct ath12k *ar, u32 freq)
++ath12k_mac_find_link_id_by_freq(struct ieee80211_vif *vif, struct ath12k *ar,
++				u32 freq, bool split_scan)
+ {
+ 	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+ 	u16 link_id;
  
  	lockdep_assert_held(&ahvif->ah->conf_mutex);
  
@@ -36,7 +45,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		return 0;
  
  	for (link_id = 0; link_id < IEEE80211_MLD_MAX_NUM_LINKS; link_id++) {
-@@ -5336,6 +5336,13 @@ ath12k_mac_find_link_id_by_freq(struct i
+@@ -5346,6 +5347,16 @@ ath12k_mac_find_link_id_by_freq(struct i
  			return link_id;
  	}
  
@@ -44,13 +53,16 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
 +	* There is cases where single scan req needs to be split in driver
 +	* and initiate seperate scan requests to firmware based on device.
 +	*/
-+	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA)
++	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
++		if (!split_scan)
++			return 0;
 +		return ffs(~ahvif->links_map) - 1;
++	}
 +
  	/* Use a default link for scan purpose in driver if the request
  	 * cannot be mapped to any of the active links(channel assigned)
  	 */
-@@ -5371,7 +5378,7 @@ ath12k_mac_assign_link_vif( struct ath12
+@@ -5381,7 +5392,7 @@ ath12k_mac_assign_link_vif( struct ath12
  		return ahvif->link[link_id];
  
  	/* Not a ML vif */
@@ -59,7 +71,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		link_id = 0;
  		arvif =  &ahvif->deflink;
  	} else {
-@@ -5459,6 +5466,38 @@ ath12k_mac_select_scan_device(struct iee
+@@ -5469,6 +5480,38 @@ ath12k_mac_select_scan_device(struct iee
  	return NULL;
  }
  
@@ -98,7 +110,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  void __ath12k_mac_scan_finish(struct ath12k *ar)
  {
  	struct ath12k_hw *ah = ar->ah;
-@@ -5482,7 +5521,7 @@ void __ath12k_mac_scan_finish(struct ath
+@@ -5492,11 +5535,12 @@ void __ath12k_mac_scan_finish(struct ath
  					 ATH12K_SCAN_STARTING))
  			};
  
@@ -107,7 +119,12 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		}
  		ar->scan.state = ATH12K_SCAN_IDLE;
  		ar->scan_channel = NULL;
-@@ -5676,31 +5715,24 @@ static int ath12k_start_scan(struct ath1
+ 		ar->scan.roc_freq = 0;
++		ar->scan.is_split_scan = false;
+ 		cancel_delayed_work(&ar->scan.timeout);
+ 		complete(&ar->scan.completed);
+ 		if (ar->scan.no_of_active_scans > 0)
+@@ -5683,31 +5727,25 @@ static int ath12k_start_scan(struct ath1
  	return 0;
  }
  
@@ -118,7 +135,8 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
 +				       struct ieee80211_vif *vif,
 +				       struct ieee80211_scan_request *hw_req,
 +				       struct ath12k *ar,
-+				       u8 from_index, u8 to_index)
++				       u8 from_index, u8 to_index,
++				       bool split_scan)
  {
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
  	struct ath12k_hw *ah = hw->priv;
@@ -146,16 +164,17 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  
  	if (unlikely(test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags))) {
  		mutex_unlock(&ah->conf_mutex);
-@@ -5708,7 +5740,7 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5715,7 +5753,8 @@ static int ath12k_mac_op_hw_scan(struct
  	}
  
  	link_id = ath12k_mac_find_link_id_by_freq(vif, ar,
 -						  hw_req->req.channels[0]->center_freq);
-+						  hw_req->req.channels[from_index]->center_freq);
++						  hw_req->req.channels[from_index]->center_freq,
++						  split_scan);
  
  	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
  	/* If the vif is already assigned to a specific vdev of an ar,
-@@ -5758,10 +5790,12 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5765,10 +5804,12 @@ static int ath12k_mac_op_hw_scan(struct
  		     !is_zero_ether_addr(req->bssid)))
  			memcpy(arvif->addr, req->bssid, ETH_ALEN);
  
@@ -168,7 +187,18 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  			mutex_unlock(&ah->conf_mutex);
  			ath12k_warn(ar->ab, "unable to create scan vdev %d\n", ret);
  			return -EINVAL;
-@@ -5815,8 +5849,8 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5788,6 +5829,10 @@ static int ath12k_mac_op_hw_scan(struct
+ 		ar->scan.state = ATH12K_SCAN_STARTING;
+ 		ar->scan.is_roc = false;
+ 		ar->scan.vdev_id = arvif->vdev_id;
++		if (split_scan) {
++			ar->scan.is_split_scan = true;
++			memcpy(ar->scan.split_scan_mac, arvif->addr, ETH_ALEN);
++		}
+ 		ret = 0;
+ 		break;
+ 	case ATH12K_SCAN_STARTING:
+@@ -5822,8 +5867,8 @@ static int ath12k_mac_op_hw_scan(struct
  		arg.scan_flags |= WMI_SCAN_FLAG_PASSIVE;
  	}
  
@@ -179,7 +209,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		arg.chan_list = kcalloc(arg.num_chan, sizeof(*arg.chan_list),
  					GFP_KERNEL);
  
-@@ -5826,7 +5860,7 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5833,7 +5878,7 @@ static int ath12k_mac_op_hw_scan(struct
  		}
  
  		for (i = 0; i < arg.num_chan; i++)
@@ -188,7 +218,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  	}
  	/* if duration is set, default dwell times will be overwritten */
  	if (req->duration) {
-@@ -5876,6 +5910,51 @@ exit:
+@@ -5883,6 +5928,56 @@ exit:
  	return ret;
  }
  
@@ -199,6 +229,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
 +	struct ath12k_hw *ah = hw->priv;
 +	struct ath12k *ar, *prev_ar;
 +	int i, from_index, to_index;
++	bool split_scan = false;
 +
 +	mutex_lock(&ah->conf_mutex);
 +
@@ -228,19 +259,23 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
 +			continue;
 +
 +		to_index = i;
-+		ath12k_mac_initiate_hw_scan(hw, vif, hw_req, prev_ar, from_index, to_index);
++		split_scan = true;
++		hw_req->req.flags |= NL80211_SCAN_FLAG_RANDOM_ADDR;
++		ath12k_mac_initiate_hw_scan(hw, vif, hw_req, prev_ar, from_index,
++					    to_index, split_scan);
 +		mutex_lock(&ah->conf_mutex);
 +		from_index = to_index;
 +		prev_ar = ar;
 +	}
 +
-+	return ath12k_mac_initiate_hw_scan(hw, vif, hw_req, prev_ar, from_index, i);
++	return ath12k_mac_initiate_hw_scan(hw, vif, hw_req, prev_ar, from_index,
++					   i, split_scan);
 +}
 +
  static void ath12k_mac_op_cancel_hw_scan(struct ieee80211_hw *hw,
  					 struct ieee80211_vif *vif)
  {
-@@ -11075,7 +11154,7 @@ static void ath12k_update_obss_color_not
+@@ -11067,12 +11162,13 @@ static void ath12k_update_obss_color_not
  	struct ieee80211_hw *hw = ar->ah->hw;
  	struct ath12k_wmi_vdev_create_arg vdev_arg = {0};
  	struct ath12k_wmi_peer_create_arg peer_param = {0};
@@ -249,7 +284,13 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  	u32 param_id, param_value;
  	u16 nss;
  	int i;
-@@ -11097,9 +11176,10 @@ static void ath12k_update_obss_color_not
+ 	int ret, fbret, vdev_id;
+ 	u8 link_addr[ETH_ALEN];
++	u8 mask[ETH_ALEN] = {0xFF, 0xFF, 0xFF};
+ 	int txpower;
+ 	u8 link_id;
+ 
+@@ -11089,9 +11185,10 @@ static void ath12k_update_obss_color_not
  
  	rcu_read_lock();
  
@@ -262,7 +303,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		rcu_read_unlock();
  		return -EINVAL;
  	}
-@@ -11107,12 +11187,18 @@ static void ath12k_update_obss_color_not
+@@ -11099,12 +11196,18 @@ static void ath12k_update_obss_color_not
  	if (arvif->link_id == ATH12K_DEFAULT_SCAN_LINK &&
  	    !is_zero_ether_addr(arvif->addr)) {
  		memcpy(link_addr, arvif->addr, ETH_ALEN);
@@ -271,7 +312,7 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  		memcpy(link_addr, link_conf->addr, ETH_ALEN);
  		memcpy(arvif->addr, link_conf->addr, ETH_ALEN);
 +	} else {
-+		eth_random_addr(link_addr);
++		get_random_mask_addr(link_addr, ar->mac_addr, mask);
 +		memcpy(arvif->addr, link_addr, ETH_ALEN);
  	}
  
@@ -283,3 +324,40 @@ Signed-off-by: Vignesh C <quic_vignc@quicinc.com>
  	rcu_read_unlock();
  
  	/* Send vdev stats offload commands to firmware before first vdev
+@@ -16016,7 +16119,7 @@ static int ath12k_mac_op_remain_on_chann
+ 	}
+ 
+ 	link_id = ath12k_mac_find_link_id_by_freq(vif, ar,
+-						  chan->center_freq);
++						  chan->center_freq, false);
+ 
+ 	arvif = ath12k_mac_assign_link_vif(ah, vif, link_id);
+ 
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -956,6 +956,8 @@ struct ath12k {
+ 		int roc_freq;
+ 		bool roc_notify;
+ 		struct work_struct vdev_del_wk;
++		bool is_split_scan;
++		u8 split_scan_mac[ETH_ALEN];
+ 	} scan;
+ 
+ 	struct {
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -11987,6 +11987,14 @@ static void ath12k_mgmt_rx_event(struct
+ 
+ skip_mgmt_stats:
+ 
++	if (!peer && ieee80211_is_probe_resp(hdr->frame_control) &&
++	    ar->scan.is_split_scan) {
++		if (!ether_addr_equal(hdr->addr1, ar->scan.split_scan_mac)) {
++			dev_kfree_skb(skb);
++			goto exit;
++		}
++	}
++
+ 	/* Firmware is guaranteed to report all essential management frames via
+ 	 * WMI while it can deliver some extra via HTT. Since there can be
+ 	 * duplicates split the reporting wrt monitor/sniffing.
