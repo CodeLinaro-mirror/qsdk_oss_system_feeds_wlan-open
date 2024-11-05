@@ -1,0 +1,148 @@
+From 516f8cd8b58d1cf370513e50e9218213afc3f6c7 Mon Sep 17 00:00:00 2001
+From: Balaganapathy Palanisamy <quic_bpalanis@quicinc.com>
+Date: Tue, 5 Nov 2024 13:16:21 +0530
+Subject: [PATCH] ath12k: Add ftm responder support
+
+Fine Timing Measurement support is used to measure round
+trip time between two nodes. Currently ath12k support
+ftm responder in ap mode. This is completely fw offloaded.
+Ath12k enables and disables ftm responder based on user
+configuration, also added support for advertising the same
+in ext caps.
+
+Signed-off-by: Balaganapathy Palanisamy <quic_bpalanis@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/core.h |  1 +
+ drivers/net/wireless/ath/ath12k/hw.c   |  6 ++++++
+ drivers/net/wireless/ath/ath12k/hw.h   |  1 +
+ drivers/net/wireless/ath/ath12k/mac.c  | 17 +++++++++++++++++
+ drivers/net/wireless/ath/ath12k/wmi.h  |  1 +
+ 5 files changed, 26 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
+index 5299227..6ea53d7 100644
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -428,6 +428,7 @@ struct ath12k_link_vif {
+ 	bool is_started;
+ 	bool is_scan_vif;
+ 	bool is_up;
++	bool ftm_responder;
+ 	bool pending_up;
+ 	bool pending_stop;
+ 	bool spectral_enabled;
+diff --git a/drivers/net/wireless/ath/ath12k/hw.c b/drivers/net/wireless/ath/ath12k/hw.c
+index 5652f14..ff1173d 100644
+--- a/drivers/net/wireless/ath/ath12k/hw.c
++++ b/drivers/net/wireless/ath/ath12k/hw.c
+@@ -1922,6 +1922,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_QCN9274 *4) +
+ 					CFR_DATA_MAX_LEN_QCN9274,
++		.ftm_responder = true,
+ 	},
+ 	{
+ 		.name = "wcn7850 hw2.0",
+@@ -2008,6 +2009,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_WCN7850 *4) +
+ 					CFR_DATA_MAX_LEN_WCN7850,
++		.ftm_responder = false,
+ 	},
+ 	{
+ 		.name = "qcn9274 hw2.0",
+@@ -2107,6 +2109,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_QCN9274 *4) +
+ 					CFR_DATA_MAX_LEN_QCN9274,
++		.ftm_responder = true,
+ 	},
+ 	{
+ 		.name = "ipq5332 hw1.0",
+@@ -2210,6 +2213,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_IPQ5332 *4) +
+ 					CFR_DATA_MAX_LEN_IPQ5332,
++		.ftm_responder = false,
+ 	},
+ 	{
+ 		.name = "qcn6432 hw1.0",
+@@ -2306,6 +2310,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_QCN6432 *4) +
+ 					CFR_DATA_MAX_LEN_QCN6432,
++		.ftm_responder = true,
+ 	},
+ 	{
+ 		.name = "ipq5424 hw1.0",
+@@ -2404,6 +2409,7 @@ static struct ath12k_hw_params ath12k_hw_params[] = {
+ 		.cfr_stream_buf_size = sizeof(struct ath12k_csi_cfr_header) +
+ 					(CFR_HDR_MAX_LEN_WORDS_QCN6432 * 4) +
+ 					CFR_DATA_MAX_LEN_QCN6432,
++		.ftm_responder = false,
+ 	},
+ };
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/hw.h b/drivers/net/wireless/ath/ath12k/hw.h
+index 1607e2d..bdab6b3 100644
+--- a/drivers/net/wireless/ath/ath12k/hw.h
++++ b/drivers/net/wireless/ath/ath12k/hw.h
+@@ -282,6 +282,7 @@ struct ath12k_hw_params {
+ 	u32 cfr_dma_hdr_size;
+ 	u32 cfr_num_stream_bufs;
+ 	u32 cfr_stream_buf_size;
++	bool ftm_responder;
+ };
+ 
+ struct ath12k_hw_ops {
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 00feca9..c8b5f0b 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -5042,6 +5042,20 @@ void ath12k_mac_bss_info_changed(struct ath12k *ar,
+ 		}
+ 	}
+ 
++	if (changed & BSS_CHANGED_FTM_RESPONDER &&
++	    arvif->ftm_responder != info->ftm_responder &&
++	    (vif->type == NL80211_IFTYPE_AP ||
++	     vif->type == NL80211_IFTYPE_MESH_POINT)) {
++		param_id = WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_RESPONDER_ROLE;
++		ret =  ath12k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id, param_id,
++						     info->ftm_responder);
++		if (ret)
++			ath12k_warn(ar->ab, "Failed to set ftm responder %i: %d\n",
++				    arvif->vdev_id, ret);
++		else
++			arvif->ftm_responder = info->ftm_responder;
++	}
++
+ 	if (changed & BSS_CHANGED_BEACON_INT) {
+ 		arvif->beacon_interval = info->beacon_int;
+ 
+@@ -18634,6 +18648,10 @@ static int __ath12k_mac_register(struct ath12k *ar)
+ 	wiphy_ext_feature_set(hw->wiphy,
+ 			      NL80211_EXT_FEATURE_BEACON_RATE_LEGACY);
+ 
++	if (ar->ab->hw_params->ftm_responder)
++		wiphy_ext_feature_set(hw->wiphy,
++				      NL80211_EXT_FEATURE_ENABLE_FTM_RESPONDER);
++
+ 	if (ar->pdev->cap.supported_bands & WMI_HOST_WLAN_5G_CAP) {
+ 		if (test_bit(ar->cfg_rx_chainmask, &cap->adfs_chain_mask)) {
+ 			wiphy_ext_feature_set(hw->wiphy,
+diff --git a/drivers/net/wireless/ath/ath12k/wmi.h b/drivers/net/wireless/ath/ath12k/wmi.h
+index a2bfacc..5e2becb 100644
+--- a/drivers/net/wireless/ath/ath12k/wmi.h
++++ b/drivers/net/wireless/ath/ath12k/wmi.h
+@@ -1364,6 +1364,7 @@ enum wmi_tlv_vdev_param {
+ 	WMI_VDEV_PARAM_ENABLE_BCAST_PROBE_RESPONSE,
+ 	WMI_VDEV_PARAM_FILS_MAX_CHANNEL_GUARD_TIME,
+ 	WMI_VDEV_PARAM_HE_LTF = 0x74,
++	WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_RESPONDER_ROLE = 0x7d,
+ 	WMI_VDEV_PARAM_BA_MODE = 0x7e,
+ 	WMI_VDEV_PARAM_AUTORATE_MISC_CFG = 0x80,
+ 	WMI_VDEV_PARAM_SET_HE_SOUNDING_MODE = 0x87,
+-- 
+2.34.1
+
