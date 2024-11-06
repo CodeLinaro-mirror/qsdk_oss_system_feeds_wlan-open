@@ -1063,6 +1063,73 @@ boost_performance() {
 				echo "16384" > /proc/net/skb_recycler/max_skbs
 				#no settings
 				;;
+			rdp464 | \
+			rdp464-c2)
+				ethtool -K eth0 gro off
+				ethtool -K eth0 gso off
+				ethtool -K eth1 gro off
+				ethtool -K eth1 gso off
+
+				ssdk_sh fdb learnCtrl set disable
+				ssdk_sh fdb entry flush 1
+
+				sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+				sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+				echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+
+				/etc/init.d/firewall stop
+
+				echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+				echo "performance" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+
+				#5G High reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix3
+
+				#For 6G reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix3
+
+				#5G Low reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+				#For 2G reo queues
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix2
+				echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix3
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/stats_disable
+
+				echo 0 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/stats_disable
+				echo 1 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/stats_disable
+
+				echo 0 > /sys/class/net/wlan0/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan1/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan2/queues/rx-0/rps_cpus
+				echo 0 > /sys/class/net/wlan3/queues/rx-0/rps_cpus
+
+				if [ $(cat /sys/module/ath12k/parameters/ppe_ds_enable) -eq 1 ]; then
+					echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+					echo f > /proc/net/nf_conntrack
+				fi
+
+				echo "16384" > /proc/net/skb_recycler/max_skbs
+
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/trace_qdss
+				echo 0 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/trace_qdss
+				;;
 			rdp466 | \
 			rdp466-c2)
 				ethtool -K eth0 gro off
