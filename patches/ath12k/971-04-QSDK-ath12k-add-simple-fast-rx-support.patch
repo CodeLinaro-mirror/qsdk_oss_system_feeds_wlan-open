@@ -41,7 +41,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	u8 hw_link_id:4,
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2610,7 +2610,12 @@ static ssize_t ath12k_write_stats_disabl
+@@ -2619,7 +2619,12 @@ static ssize_t ath12k_write_stats_disabl
  		list_for_each_entry(peer, &ab->peers, list) {
  			if ((peer->vif->type == NL80211_IFTYPE_AP) ||
  			    (peer->vif->type == NL80211_IFTYPE_STATION)) {
@@ -54,10 +54,10 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +						ATH12K_PEER_STATS_DSBL_SFE;
  			}
  		}
- 		spin_unlock_bh(&ab->base_lock);
+ 		if (ath12k_mesh_metric_offload) {
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -2814,7 +2814,7 @@ static bool ath12k_dp_rx_check_fast_rx(s
+@@ -2997,7 +2997,7 @@ static bool ath12k_dp_rx_check_fast_rx(s
  
  	rxcb = ATH12K_SKB_RXCB(msdu);
  
@@ -66,7 +66,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	    decap != DP_RX_DECAP_TYPE_ETHERNET2_DIX))
  		return false;
  
-@@ -3427,6 +3427,32 @@ static void ath12k_soc_dp_rx_stats(struc
+@@ -3608,6 +3608,32 @@ static void ath12k_soc_dp_rx_stats(struc
  	}
  }
  
@@ -99,7 +99,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  int ath12k_dp_rx_process(struct ath12k_base *ab, int ring_id,
  			 struct napi_struct *napi, int budget)
  {
-@@ -3442,13 +3468,14 @@ int ath12k_dp_rx_process(struct ath12k_b
+@@ -3623,13 +3649,14 @@ int ath12k_dp_rx_process(struct ath12k_b
  	int total_msdu_reaped = 0;
  	struct hal_srng *srng;
  	struct sk_buff *msdu, *next_msdu;
@@ -116,7 +116,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	int valid_entries, ret;
  	struct list_head rx_desc_used_list[ATH12K_MAX_SOCS];
  
-@@ -3547,16 +3574,14 @@ try_again:
+@@ -3728,16 +3755,14 @@ try_again:
  			continue;
  		}
  
@@ -138,7 +138,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  		if (unlikely(!ab->stats_disable)) {
  			rxcb->tid = le32_get_bits(desc.rx_mpdu_info.info0,
  						  RX_MPDU_DESC_INFO0_TID);
-@@ -3628,14 +3653,79 @@ try_again:
+@@ -3809,14 +3834,81 @@ try_again:
  		next_msdu = msdu_list.next;
  		if (likely(next_msdu)) {
  			prefetch(next_msdu);
@@ -147,6 +147,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 -			prefetch(next_msdu);
 -			prefetch(next_msdu + 64);
 -			prefetch(next_msdu + 128);
++			prefetch(&next_msdu->_skb_refdst);
 +			prefetch(&next_msdu->protocol);
 +			prefetch(&next_msdu->data);
 +			prefetch(next_msdu->data + 128);
@@ -197,6 +198,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
 +						 CHECKSUM_NONE : CHECKSUM_UNNECESSARY;
 +					msdu->protocol = eth_type_trans(msdu, peer->dev);
 +					rcu_read_unlock();
++					prefetch(skb_shinfo(msdu));
 +					netif_receive_skb(msdu);
 +					ab->soc_stats.fast_rx[ring_id][ab->chip_id]++;
 +					continue;
@@ -243,7 +245,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #endif /* ATH12K_DP_RX_H */
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -7773,7 +7773,10 @@ static void ath12k_sta_set_4addr_wk(stru
+@@ -7789,7 +7789,10 @@ static void ath12k_sta_set_4addr_wk(stru
  			if ((ar->ab->stats_disable) &&
  			    ((peer->vif->type == NL80211_IFTYPE_AP) ||
  			     (peer->vif->type == NL80211_IFTYPE_STATION))) {
@@ -255,7 +257,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  			}
  
  			spin_unlock_bh(&ar->ab->base_lock);
-@@ -11304,6 +11307,13 @@ int ath12k_mac_radio_start(struct ath12k
+@@ -11344,6 +11347,13 @@ int ath12k_mac_radio_start(struct ath12k
  		}
  	}
  
@@ -271,7 +273,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  	/* TODO: Do we need to enable ANI? */
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -863,11 +863,6 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -874,11 +874,6 @@ int ath12k_peer_create(struct ath12k *ar
  	if (wdev)
  		peer->dev = wdev->netdev;
  
@@ -283,7 +285,7 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	/* Do not deliver frames to PPE in fast rx incase of RFS
  	 * RFS is supported only in SFE Mode
-@@ -880,6 +875,14 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -891,6 +886,14 @@ int ath12k_peer_create(struct ath12k *ar
  		peer->ppe_vp_num = arvif->ahvif->ppe_vp_num;
  #endif
  
