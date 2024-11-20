@@ -135,7 +135,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
 +	struct ieee80211_chanctx_conf *bridge_ctx = NULL;
 +	int ret;
-+	u32 device_idx;
++	u32 device_idx = 0;
 +	u16 bridge_bitmap = 0;
 +	u8 bridge_ar_link_idx;
 +
@@ -196,3 +196,72 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  		ret = ath12k_mac_get_link_idx_for_bridge(hw, &link_idx_bmp);
  		if (ret) {
  			ath12k_dbg(NULL, ATH12K_DBG_MAC,
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -2758,6 +2758,7 @@ static int ath12k_mlo_recovery_link_vif_
+ 	struct wmi_wmm_params_arg *p = NULL;
+ 	struct ieee80211_bss_conf *info;
+ 	u64 changed = 0;
++	bool bridge_vdev;
+ 
+ 	switch (vif->type) {
+ 	case NL80211_IFTYPE_AP_VLAN:
+@@ -2820,7 +2821,9 @@ static int ath12k_mlo_recovery_link_vif_
+ 		  BSS_CHANGED_TXPOWER |
+ 		  BSS_CHANGED_MCAST_RATE;
+ 
+-	if (link_conf->mu_mimo_owner)
++	bridge_vdev = ath12k_mac_is_bridge_vdev(arvif);
++
++	if (!bridge_vdev && link_conf->mu_mimo_owner)
+ 		changed |= BSS_CHANGED_MU_GROUPS;
+ 
+ 	switch (vif->type) {
+@@ -2857,13 +2860,15 @@ static int ath12k_mlo_recovery_link_vif_
+ 		arvif->is_up = false;
+ 		ath12k_mac_bss_info_changed(ar, arvif, link_conf, changed);
+ 		if (vif->valid_links) {
+-			info = vif->link_conf[link_id];
+-			if (vif->cfg.assoc) {
+-				if (info)
+-					ath12k_bss_assoc(ar, arvif, info);
+-			} else {
++			if (bridge_vdev)
++				info = NULL;
++			else
++				info = vif->link_conf[link_id];
++
++			if (vif->cfg.assoc)
++				ath12k_bss_assoc(ar, arvif, info);
++			else
+ 				ath12k_bss_disassoc(ar, arvif, false);
+-			}
+ 		}
+ 		mutex_unlock(&ar->conf_mutex);
+ 		break;
+@@ -3262,7 +3267,16 @@ int ath12k_mode1_recovery_reconfig(struc
+ 				continue;
+ 
+ 			if (ath12k_mac_is_bridge_vdev(arvif)) {
+-				ath12k_mac_bridge_vdev_up(arvif);
++				switch (ahvif->vdev_type) {
++				case WMI_VDEV_TYPE_AP:
++					ath12k_mac_bridge_vdev_up(arvif);
++					break;
++				case WMI_VDEV_TYPE_STA:
++					link = NULL;
++					goto skip_link_info;
++				default:
++					break;
++				}
+ 				continue;
+ 			}
+ 
+@@ -3275,6 +3289,7 @@ int ath12k_mode1_recovery_reconfig(struc
+ 			}
+ 			rcu_read_unlock();
+ 
++skip_link_info:
+ 			/* unlock ar mutex here since we will take ah mutex in
+ 			 * the reconfig link API thus maintaining same order
+ 			 * as we use in other places.
