@@ -47,13 +47,58 @@ hostapd.data.bss_info_fields = {
 	ieee80211w: true,
 };
 
-function iface_remove(cfg)
+//check if any ml bss is present on other radios
+function is_ml_bss(bss_name, radio_id) {
+	if (radio_id == -1)
+		return false;
+
+        for (let phy, config in hostapd.data.config) {
+                if (!config || config.radio_idx == null)
+                        continue;
+
+                if (config.radio_idx == radio_id)
+                        continue;
+
+                for (let bss in config.bss) {
+                       if (!bss.mld_ap)
+                               continue;
+                        if (bss.ifname == bss_name) {
+                                hostapd.printf(`[debug] confirmed ml vap ${bss.created} mld_ap : ${bss.mld_ap} in ${config.radio_idx} checked for ${radio_id}`);
+                               return bss.created;
+                       }
+               }
+        }
+
+       return false;
+}
+
+function update_bss(cfg)
+{
+	let flag;
+
+	if (!cfg || !cfg.bss || !cfg.bss[0] || !cfg.bss[0].ifname)
+		return;
+
+	if (cfg.bss[0].created)
+		flag = true;
+
+	for (let bss in cfg.bss) {
+		bss.created = true;
+	}
+}
+
+function iface_remove(cfg, radio)
 {
 	if (!cfg || !cfg.bss || !cfg.bss[0] || !cfg.bss[0].ifname)
 		return;
 
-	for (let bss in cfg.bss)
-		wdev_remove(bss.ifname);
+	for (let bss in cfg.bss) {
+		if (!is_ml_bss(bss.ifname, radio)) {
+			hostapd.printf(`[debug] removing ${bss.ifname}`);
+			wdev_remove(bss.ifname);
+			bss.created = false;
+		}
+	}
 }
 
 function iface_gen_config(config, start_disabled)
@@ -100,7 +145,7 @@ function iface_freq_info(iface, config, params)
 			continue;
 		}
 
-		let val = match(line, /^(vht_oper_chwidth|he_oper_chwidth)=(\d+)/);
+		let val = match(line, /^(vht_oper_chwidth|he_oper_chwidth|eht_oper_chwidth)=(\d+)/);
 		if (!val)
 			continue;
 
@@ -119,9 +164,15 @@ function iface_freq_info(iface, config, params)
 function iface_add(phy, config, phy_status)
 {
 	let config_inline = iface_gen_config(config, !!phy_status);
-
+	let id;
 	let bss = config.bss[0];
-	let ret = hostapd.add_iface(`bss_config=${phy}:${config_inline}`);
+
+	if (config.radio_idx == null)
+		id = -1;
+	else
+		id = config.radio_idx;
+
+	let ret = hostapd.add_iface(`bss_config=${phy}:${config_inline}`, id, bss.ifname);
 	if (ret < 0)
 		return false;
 
@@ -176,14 +227,20 @@ function __iface_pending_next(pending, state, ret, data)
 		iface_update_supplicant_macaddr(phydev, config);
 		return "create_bss";
 	case "create_bss":
-		let err = phydev.wdev_add(bss.ifname, {
-			mode: "ap",
-			radio: phydev.radio,
-		});
-		if (err) {
-			hostapd.printf(`Failed to create ${bss.ifname} on phy ${phy}: ${err}`);
-			return null;
+		hostapd.printf(`[debug] create ${bss.ifname} on phy ${phy}`);
+		let skip_wdev_add = is_ml_bss(bss.ifname, config.radio_idx);
+		if (!skip_wdev_add) {
+			let err = phydev.wdev_add(bss.ifname, {
+				mode: "ap",
+				radio: phydev.radio,
+			});
+			if (err) {
+				hostapd.printf(`Failed to create ${bss.ifname} on phy ${phy}: ${err}`);
+				return null;
+			}
 		}
+		bss.created = true;
+		update_bss(config);
 
 		pending.call("wpa_supplicant", "phy_status", {
 			phy: phydev.phy,
@@ -293,9 +350,9 @@ function iface_restart(phydev, config, old_config)
 	if (pending)
 		pending.abort();
 
-	hostapd.remove_iface(phy);
-	iface_remove(old_config);
-	iface_remove(config);
+	hostapd.remove_iface(phy, phydev.radio);
+	iface_remove(old_config,  phydev.radio);
+	iface_remove(config,  phydev.radio);
 
 	if (!config.bss || !config.bss[0]) {
 		hostapd.printf(`No bss for phy ${phy}`);
@@ -662,15 +719,21 @@ function iface_reload_config(name, phydev, config, old_config)
 	return true;
 }
 
-function iface_set_config(name, config)
+function iface_set_config(name, radio, config)
 {
 	let old_config = hostapd.data.config[name];
+	let id;
 
 	hostapd.data.config[name] = config;
 
 	if (!config) {
-		hostapd.remove_iface(name);
-		return iface_remove(old_config);
+		hostapd.printf(`mac80211_reset_config: remove iface ${name} ${radio}`);
+		if (radio == null)
+			id = -1;
+		else
+			id = radio;
+		hostapd.remove_iface(name, -1);
+		return iface_remove(old_config, id);
 	}
 
 	let phy = config.phy;
@@ -766,6 +829,10 @@ function iface_load_config(phy, radio, filename)
 			continue;
 		}
 
+		if (val[0] == "mld_ap" ) {
+			bss.mld_ap = lc(val[1]);
+		}
+
 		if (val[0] == "nas_identifier")
 			bss.nasid = val[1];
 
@@ -829,7 +896,7 @@ let main_obj = {
 			for (let phy_name in phy_list) {
 				let phy = hostapd.data.config[phy_name];
 				let config = iface_load_config(phy.phy, radio, phy.orig_file);
-				iface_set_config(phy_name, config);
+				iface_set_config(phy_name, req.args.radio, config);
 			}
 
 			return 0;
@@ -935,7 +1002,7 @@ let main_obj = {
 			let config = iface_load_config(phy, radio, file);
 
 			hostapd.printf(`Set new config for phy ${name}: ${file}`);
-			iface_set_config(name, config);
+			iface_set_config(name, radio, config);
 
 			if (hostapd.data.auth_obj)
 				hostapd.data.auth_obj.notify("reload", { phy, radio });
@@ -954,7 +1021,7 @@ let main_obj = {
 			if (!req.args.iface || !req.args.config)
 				return libubus.STATUS_INVALID_ARGUMENT;
 
-			if (hostapd.add_iface(`bss_config=${req.args.iface}:${req.args.config}`) < 0)
+			if (hostapd.add_iface(`bss_config=${req.args.iface}:${req.args.config}`, -1, null) < 0)
 				return libubus.STATUS_INVALID_ARGUMENT;
 
 			return {
@@ -970,7 +1037,7 @@ let main_obj = {
 			if (!req.args.iface)
 				return libubus.STATUS_INVALID_ARGUMENT;
 
-			hostapd.remove_iface(req.args.iface);
+			hostapd.remove_iface(req.args.iface, -1);
 			return 0;
 		})
 	},
