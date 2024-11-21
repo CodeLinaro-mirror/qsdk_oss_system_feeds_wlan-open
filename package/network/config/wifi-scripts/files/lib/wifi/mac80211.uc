@@ -145,6 +145,11 @@ set ${s}.band='${lc(band_name)}'
 set ${s}.channel='${channel}'
 `);
 
+if (radio_idx != null) {
+	print(`set ${s}.radio='${radio_idx.idx}'
+`);
+}
+
 if (channels)
 	print(`set ${s}.channels='${channels}'`);
 
