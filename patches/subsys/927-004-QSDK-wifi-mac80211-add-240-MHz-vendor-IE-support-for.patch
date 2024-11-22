@@ -25,7 +25,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
 
 --- a/include/linux/ieee80211.h
 +++ b/include/linux/ieee80211.h
-@@ -2165,6 +2165,11 @@ struct ieee80211_eht_operation_info {
+@@ -2287,6 +2287,11 @@ struct ieee80211_eht_operation_info {
  	u8 optional[];
  } __packed;
  
@@ -37,7 +37,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  struct ieee80211_240mhz_vendor_oper {
  	u8 ccfs1;
  	u8 ccfs0;
-@@ -4114,6 +4119,8 @@ struct ieee80211_multiple_bssid_configur
+@@ -4242,6 +4247,8 @@ struct ieee80211_multiple_bssid_configur
  
  #define WLAN_OUI_QCN                           0x8CFDF0
  #define WLAN_OUI_QCN_TYPE_1                    1
@@ -48,7 +48,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  #define IEEE80211_EHT_OPER_CTRL_CHANWIDTH_20MHZ        0
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -128,6 +128,9 @@ struct ieee80211_bss {
+@@ -129,6 +129,9 @@ struct ieee80211_bss {
  
  	/* Keep track of what bits of information we have valid info for. */
  	u8 valid_data;
@@ -58,7 +58,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  };
  
  /**
-@@ -2602,6 +2605,8 @@ void ieee80211_add_s1g_capab_ie(struct i
+@@ -2598,6 +2601,8 @@ void ieee80211_add_s1g_capab_ie(struct i
  void ieee80211_add_aid_request_ie(struct ieee80211_sub_if_data *sdata,
  				  struct sk_buff *skb);
  u8 *ieee80211_ie_build_s1g_cap(u8 *pos, struct ieee80211_sta_s1g_cap *s1g_cap);
@@ -87,27 +87,42 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		support_160 =
  			he_phy_cap &
  			IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_160MHZ_IN_5G;
-@@ -428,6 +428,19 @@ ieee80211_determine_chantype(struct ieee
- 					   support_320,
- 					   &eht_chandef);
+@@ -447,6 +447,34 @@ ieee80211_determine_chantype(struct ieee
+ 		*chandef = eht_chandef;
+ 	}
  
-+		if (eht_240mhz_capab && eht_chandef.width == NL80211_CHAN_WIDTH_160) {
-+			eht_chandef.width = NL80211_CHAN_WIDTH_320;
-+			eht_chandef.center_freq1 =
-+				ieee80211_channel_to_frequency(eht_240mhz_capab->ccfs0,
-+							       chandef->chan->band);
-+			eht_chandef.ru_punct_bitmap = eht_240mhz_capab->ru_punct_bitmap;
++	if (eht_oper && eht_240mhz_capab && chandef->width == NL80211_CHAN_WIDTH_160) {
++		struct cfg80211_chan_def eht_chandef = *chandef;
 +
-+			if (!cfg80211_ru_punct_bitmap_valid(chandef)) {
-+				eht_chandef.ru_punct_bitmap = 0;
-+				goto out;
-+			}
++		eht_chandef.width = NL80211_CHAN_WIDTH_320;
++		eht_chandef.center_freq1 =
++			ieee80211_channel_to_frequency(eht_240mhz_capab->ccfs0,
++						       chandef->chan->band);
++
++		eht_chandef.ru_punct_bitmap = eht_240mhz_capab->ru_punct_bitmap;
++		if (!cfg80211_chandef_valid(&eht_chandef)) {
++			if (!(conn_flags & IEEE80211_CONN_DISABLE_EHT))
++				sdata_info(sdata,
++					   "AP EHT 240 MHz information is invalid, disabling EHT\n");
++			ret = IEEE80211_CONN_DISABLE_EHT;
++			goto out;
 +		}
 +
- 		if (!cfg80211_chandef_valid(&eht_chandef)) {
- 			if (!(conn_flags & IEEE80211_CONN_DISABLE_EHT))
- 				sdata_info(sdata,
-@@ -506,7 +519,9 @@ out:
++		if (!cfg80211_chandef_compatible(chandef, &eht_chandef)) {
++			if (!(conn_flags & IEEE80211_CONN_DISABLE_EHT))
++				sdata_info(sdata,
++					   "AP EHT 240 MHz information is incompatible, disabling EHT\n");
++			ret = IEEE80211_CONN_DISABLE_EHT;
++			goto out;
++		}
++
++		*chandef = eht_chandef;
++	}
++
+ 	ret = 0;
+ 
+ out:
+@@ -506,7 +534,9 @@ out:
  						  IEEE80211_CHAN_NO_EHT))
  		ret |= IEEE80211_CONN_DISABLE_EHT;
  
@@ -118,7 +133,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		sdata_info(sdata,
  			   "capabilities/regulatory prevented using AP HT/VHT configuration, downgraded\n");
  
-@@ -522,6 +537,7 @@ static int ieee80211_config_bw(struct ie
+@@ -522,6 +552,7 @@ static int ieee80211_config_bw(struct ie
  			       const struct ieee80211_he_operation *he_oper,
  			       const struct ieee80211_eht_operation *eht_oper,
  			       const struct ieee80211_s1g_oper_ie *s1g_oper,
@@ -126,7 +141,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  			       const u8 *bssid, u64 *changed)
  {
  	struct ieee80211_sub_if_data *sdata = link->sdata;
-@@ -575,7 +591,7 @@ static int ieee80211_config_bw(struct ie
+@@ -575,7 +606,7 @@ static int ieee80211_config_bw(struct ie
  					     sband, chan, vht_cap_info,
  					     ht_oper, vht_oper,
  					     he_oper, eht_oper,
@@ -135,7 +150,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	/*
  	 * Downgrade the new channel if we associated with restricted
-@@ -834,7 +850,8 @@ static void ieee80211_add_he_ie(struct i
+@@ -834,7 +865,8 @@ static void ieee80211_add_he_ie(struct i
  
  static void ieee80211_add_eht_ie(struct ieee80211_sub_if_data *sdata,
  				 struct sk_buff *skb,
@@ -145,7 +160,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  {
  	u8 *pos;
  	const struct ieee80211_sta_he_cap *he_cap;
-@@ -861,6 +878,9 @@ static void ieee80211_add_eht_ie(struct
+@@ -861,6 +893,9 @@ static void ieee80211_add_eht_ie(struct
  	pos = skb_put(skb, eht_cap_size);
  	ieee80211_ie_build_eht_cap(pos, he_cap, eht_cap, pos + eht_cap_size,
  				   false);
@@ -155,7 +170,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  }
  
  static void ieee80211_assoc_add_rates(struct sk_buff *skb,
-@@ -1067,6 +1087,7 @@ static size_t ieee80211_assoc_link_elems
+@@ -1067,6 +1102,7 @@ static size_t ieee80211_assoc_link_elems
  	struct ieee80211_if_managed *ifmgd = &sdata->u.mgd;
  	struct ieee80211_mgd_assoc_data *assoc_data = ifmgd->assoc_data;
  	struct cfg80211_bss *cbss = assoc_data->link[link_id].bss;
@@ -163,7 +178,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	struct ieee80211_channel *chan = cbss->channel;
  	const struct ieee80211_sband_iftype_data *iftd;
  	struct ieee80211_local *local = sdata->local;
-@@ -1229,7 +1250,8 @@ static size_t ieee80211_assoc_link_elems
+@@ -1229,7 +1265,8 @@ static size_t ieee80211_assoc_link_elems
  	present_elems = NULL;
  
  	if (!(assoc_data->link[link_id].conn_flags & IEEE80211_CONN_DISABLE_EHT))
@@ -173,7 +188,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
  	if (sband->band == NL80211_BAND_S1GHZ) {
  		ieee80211_add_aid_request_ie(sdata, skb);
-@@ -1450,6 +1472,7 @@ static int ieee80211_send_assoc(struct i
+@@ -1450,6 +1487,7 @@ static int ieee80211_send_assoc(struct i
  
  	for (link_id = 0; link_id < IEEE80211_MLD_MAX_NUM_LINKS; link_id++) {
  		struct cfg80211_bss *cbss = assoc_data->link[link_id].bss;
@@ -181,7 +196,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  		const struct ieee80211_sband_iftype_data *iftd;
  		struct ieee80211_supported_band *sband;
  
-@@ -1493,6 +1516,11 @@ static int ieee80211_send_assoc(struct i
+@@ -1493,6 +1531,11 @@ static int ieee80211_send_assoc(struct i
  		/* should be the same across all BSSes */
  		if (cbss->capability & WLAN_CAPABILITY_PRIVACY)
  			capab |= WLAN_CAPABILITY_PRIVACY;
@@ -193,7 +208,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	}
  
  	if (ieee80211_vif_is_mld(&sdata->vif)) {
-@@ -4045,6 +4073,7 @@ static bool ieee80211_assoc_config_link(
+@@ -4045,6 +4088,7 @@ static bool ieee80211_assoc_config_link(
  	struct ieee80211_sub_if_data *sdata = link->sdata;
  	struct ieee80211_mgd_assoc_data *assoc_data = sdata->u.mgd.assoc_data;
  	struct ieee80211_bss_conf *bss_conf = link->conf;
@@ -201,7 +216,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  	struct ieee80211_local *local = sdata->local;
  	unsigned int link_id = link->link_id;
  	struct ieee80211_elems_parse_params parse_params = {
-@@ -4274,7 +4303,8 @@ static bool ieee80211_assoc_config_link(
+@@ -4297,7 +4341,8 @@ static bool ieee80211_assoc_config_link(
  							    elems->he_cap_len,
  							    elems->eht_cap,
  							    elems->eht_cap_len,
@@ -211,7 +226,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  							    link_sta);
  
  			bss_conf->eht_support = link_sta->pub->eht_cap.has_eht;
-@@ -5020,7 +5050,7 @@ static int ieee80211_prep_channel(struct
+@@ -5043,7 +5088,7 @@ static int ieee80211_prep_channel(struct
  					     bss->vht_cap_info,
  					     ht_oper, vht_oper,
  					     he_oper, eht_oper,
@@ -220,7 +235,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  					     &chandef, false);
  
  	if (link)
-@@ -6192,8 +6222,8 @@ static void ieee80211_rx_mgmt_beacon(str
+@@ -6245,8 +6290,8 @@ static void ieee80211_rx_mgmt_beacon(str
  	if (ieee80211_config_bw(link, elems->ht_cap_elem,
  				elems->vht_cap_elem, elems->ht_operation,
  				elems->vht_operation, elems->he_operation,
@@ -249,7 +264,7 @@ Signed-off-by: Aloka Dixit <quic_alokad@quicinc.com>
  
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -5787,6 +5787,50 @@ u8 *ieee80211_add_wmm_info_ie(u8 *buf, u
+@@ -5786,6 +5786,50 @@ u8 *ieee80211_add_wmm_info_ie(u8 *buf, u
  	return buf;
  }
  
