@@ -17,11 +17,9 @@ Signed-off-by: P Praneesh <quic_ppranees@quicinc.com>
  drivers/net/wireless/ath/ath12k/hal.h   |  2 ++
  3 files changed, 70 insertions(+), 4 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index 9d68295..b9cbdbb 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -3500,11 +3500,47 @@ int ath12k_dp_rx_pkt_type_filter(struct ath12k *ar,
+@@ -3662,11 +3662,48 @@ int ath12k_dp_rx_pkt_type_filter(struct
  	return ret;
  }
  
@@ -42,7 +40,7 @@ index 9d68295..b9cbdbb 100644
 +	if (l_pf_reo_desc) {
 +		desc_va_next = ((u64)le32_to_cpu(l_pf_reo_desc->buf_va_hi) << 32 |
 +				le32_to_cpu(l_pf_reo_desc->buf_va_lo));
-+		prefetch(desc_va_next);
++		prefetch((void *)(uintptr_t)desc_va_next);
 +		*l_pf_sw_desc = (struct ath12k_rx_desc_info *)((unsigned long)desc_va_next);
 +
 +	        if (srng_tp == srng_cached_hp) {
@@ -53,7 +51,8 @@ index 9d68295..b9cbdbb 100644
 +				tp = 0;
 +
 +			if (tp != srng_cached_hp)
-+				l_pf_reo_desc = srng->ring_base_vaddr + tp;
++				l_pf_reo_desc =
++					(struct hal_reo_dest_ring *)srng->ring_base_vaddr + tp;
 +
 +			if (!IS_ALIGNED((unsigned long)l_pf_reo_desc, 64))
 +				prefetch(l_pf_reo_desc);
@@ -66,11 +65,11 @@ index 9d68295..b9cbdbb 100644
  {
  	struct ath12k_base *src_ab;
 -	struct ath12k_rx_desc_info *desc_info;
-+	struct ath12k_rx_desc_info *desc_info, **l_pf_sw_desc = NULL;
++	struct ath12k_rx_desc_info *desc_info, *l_pf_sw_desc = NULL;
  	struct ath12k_dp *dp = &ab->dp;
  	struct dp_rxdma_ring *rx_ring = &dp->rx_refill_buf_ring;
  	struct ieee80211_rx_status rx_status = {0};
-@@ -3525,6 +3561,7 @@ int ath12k_dp_rx_process(struct ath12k_base *ab, int ring_id,
+@@ -3687,6 +3724,7 @@ int ath12k_dp_rx_process(struct ath12k_b
  	u8 ip_csum_fail, l4_csum_fail, l3_pad;
  	int valid_entries, ret;
  	struct list_head rx_desc_used_list[ATH12K_MAX_SOCS];
@@ -78,7 +77,7 @@ index 9d68295..b9cbdbb 100644
  
  	__skb_queue_head_init(&msdu_list);
  
-@@ -3542,6 +3579,8 @@ try_again:
+@@ -3704,6 +3742,8 @@ try_again:
  	}
  	ath12k_hal_srng_dst_invalidate_entry(ab, srng, valid_entries);
  
@@ -87,7 +86,7 @@ index 9d68295..b9cbdbb 100644
  	while (likely((rx_desc = ath12k_hal_srng_dst_get_next_cache_entry(ab, srng)))) {
  		struct hal_reo_dest_ring desc = *(struct hal_reo_dest_ring *)rx_desc;
  		u32 cookie;
-@@ -3589,9 +3628,7 @@ try_again:
+@@ -3751,9 +3791,7 @@ try_again:
  
  		msdu = desc_info->skb;
  
@@ -98,11 +97,9 @@ index 9d68295..b9cbdbb 100644
  
  		if (unlikely(desc_info->magic != ATH12K_DP_RX_DESC_MAGIC))
  			ath12k_warn(ab, "Check HW CC implementation");
-diff --git a/drivers/net/wireless/ath/ath12k/hal.c b/drivers/net/wireless/ath/ath12k/hal.c
-index ca9e0a0..f10cc38 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
-@@ -1870,6 +1870,33 @@ void *ath12k_hal_srng_dst_get_next_entry(struct ath12k_base *ab,
+@@ -1870,6 +1870,33 @@ void *ath12k_hal_srng_dst_get_next_entry
  	return desc;
  }
  
@@ -136,17 +133,12 @@ index ca9e0a0..f10cc38 100644
  u32 *ath12k_hal_srng_dst_get_next_cache_entry(struct ath12k_base *ab,
                                                struct hal_srng *srng)
  {
-diff --git a/drivers/net/wireless/ath/ath12k/hal.h b/drivers/net/wireless/ath/ath12k/hal.h
-index d0636fd..2587914 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.h
 +++ b/drivers/net/wireless/ath/ath12k/hal.h
-@@ -1371,4 +1371,6 @@ void ath12k_hal_srng_access_lmac_src_ring_end_nolock(struct hal_srng *srng)
+@@ -1371,4 +1371,6 @@ void ath12k_hal_srng_access_lmac_src_rin
  
  
  ssize_t ath12k_debugfs_hal_dump_srng_stats(struct ath12k_base *ab, char *buf, int size);
 +struct hal_reo_dest_ring *
 +ath12k_hal_srng_dst_prefetch_reo_desc(struct hal_srng *srng);
  #endif
--- 
-2.34.1
-
