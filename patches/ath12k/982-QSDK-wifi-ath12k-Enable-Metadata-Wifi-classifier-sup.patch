@@ -441,110 +441,44 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -11201,52 +11201,48 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11188,7 +11188,7 @@ static void ath12k_mac_op_tx(struct ieee
+ 	info = IEEE80211_SKB_CB(skb);
+ 	vif = info->control.vif;
+ 	info_flags = info->flags;
+-
++	link = u32_get_bits(info->control.flags, IEEE80211_TX_CTRL_MLO_LINK);
+ 	ahvif = ath12k_vif_to_ahvif(vif);
+ 
+ 	if (ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
+@@ -11201,12 +11201,11 @@ static void ath12k_mac_op_tx(struct ieee
  	memset(skb_cb, 0, sizeof(*skb_cb));
  	skb_cb->vif = vif;
  
 -	if (control)
--                sta = control->sta;
--
--	/* handle only for MLO case, use deflink for non MLO case */
--	if (vif->valid_links) {
++        if (control)
+                 sta = control->sta;
+ 
+ 	/* handle only for MLO case, use deflink for non MLO case */
+ 	if (vif->valid_links) {
 -		link = u32_get_bits(info->control.flags, IEEE80211_TX_CTRL_MLO_LINK);
--		link = ath12k_mac_get_tx_link(sta, vif, link, skb, info_flags);
--
--		if (link >= ATH12K_NUM_MAX_LINKS ||
--		    link == IEEE80211_MLD_MAX_NUM_LINKS) {
--			ieee80211_free_txskb(hw, skb);
--			return;
--		}
--	} else {
--		link = 0;
--	}
--
--	/* TODO: Holding RCU lock for such a big function is not required, may
--	 * have some performance impact when high throughput is expected.
--	 * One possible improvement:
--	 * For arvif: Few members are accessed in this path
--	 * - False Sharing
--	 * - Optimize the arvif structure for cache alignment
--	 *   Create a new structure for frequently accessed members
--	 *   Align this new structure to a cache line
--	 *   Place this structure as the first member of arvif.
--	 *   For example,
--	 *   struct ath12k_link_vif_fast {
+ 		link = ath12k_mac_get_tx_link(sta, vif, link, skb, info_flags);
+ 
+ 		if (link >= ATH12K_NUM_MAX_LINKS ||
+@@ -11229,10 +11228,10 @@ static void ath12k_mac_op_tx(struct ieee
+ 	 *   Place this structure as the first member of arvif.
+ 	 *   For example,
+ 	 *   struct ath12k_link_vif_fast {
 -	 *   	u8 addr[ETH_LEN];
 -	 *   	u8 pad[2];
 -	 *   	u64 tbtt_offset;
 -	 *	Ensure the total size is a multiple of typical cache line size, 64
--	 *   } ____cacheline_aligned;
--	 */
--	rcu_read_lock();
--	arvif = rcu_dereference(ahvif->link[link]);
--	skb_cb->link_id = link;
--
--	if (!arvif || !arvif->ar) {
--		rcu_read_unlock();
--		ieee80211_free_txskb(hw, skb);
--		return;
--	}
--
--	ar = arvif->ar;
-+	/* handle only for MLO case, use deflink for non MLO case */
-+	if (vif->valid_links) {
-+		link = ath12k_mac_get_tx_link(sta, vif, link, skb, info_flags);
-+
-+		if (link >= ATH12K_NUM_MAX_LINKS ||
-+		    link == IEEE80211_MLD_MAX_NUM_LINKS) {
-+			ieee80211_free_txskb(hw, skb);
-+			return;
-+		}
-+	} else {
-+		link = 0;
-+	}
-+
-+	/* TODO: Holding RCU lock for such a big function is not required, may
-+	 * have some performance impact when high throughput is expected.
-+	 * One possible improvement:
-+	 * For arvif: Few members are accessed in this path
-+	 * - False Sharing
-+	 * - Optimize the arvif structure for cache alignment
-+	 *   Create a new structure for frequently accessed members
-+	 *   Align this new structure to a cache line
-+	 *   Place this structure as the first member of arvif.
-+	 *   For example,
-+	 *   struct ath12k_link_vif_fast {
 +	 *      u8 addr[ETH_LEN];
 +	 *      u8 pad[2];
 +	 *      u64 tbtt_offset;
 +	 *      Ensure the total size is a multiple of typical cache line size, 64
-+	 *   } ____cacheline_aligned;
-+	 */
-+	rcu_read_lock();
-+	arvif = rcu_dereference(ahvif->link[link]);
-+	skb_cb->link_id = link;
-+
-+	if (!arvif || !arvif->ar) {
-+		rcu_read_unlock();
-+		ieee80211_free_txskb(hw, skb);
-+		return;
-+	}
- 
-+	ar = arvif->ar;
-+
- 	if (unlikely(test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags))) {
- 		rcu_read_unlock();
- 		ieee80211_free_txskb(hw, skb);
-@@ -11297,6 +11293,9 @@ static void ath12k_mac_op_tx(struct ieee
- 	}
- #endif
- 
-+	if (control)
-+		sta = control->sta;
-+
- 	if (key) {
- 		skb_cb->cipher = key->cipher;
- 		skb_cb->flags |= ATH12K_SKB_CIPHER_SET;
+ 	 *   } ____cacheline_aligned;
+ 	 */
+ 	rcu_read_lock();
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -57,6 +57,7 @@ struct ath12k_ppeds_stats {
