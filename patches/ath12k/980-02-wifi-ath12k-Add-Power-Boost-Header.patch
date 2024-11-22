@@ -1,4 +1,4 @@
-From 46728368f510508fb572fb2115a2131165c8c385 Mon Sep 17 00:00:00 2001
+From cb6f536d9b783815b4764e5a2ab150f8c0c9c001 Mon Sep 17 00:00:00 2001
 From: Thomas Wu <quic_wthomas@quicinc.com>
 Date: Wed, 9 Oct 2024 13:22:43 -0700
 Subject: [PATCH 2/6] wifi: ath12k: Add Power Boost - Header
@@ -9,13 +9,13 @@ and share memory pool.
 
 Signed-off-by: Thomas Wu <quic_wthomas@quicinc.com>
 ---
- drivers/net/wireless/ath/ath12k/core.h        |  5 +
- drivers/net/wireless/ath/ath12k/power_boost.h | 98 +++++++++++++++++++
- 2 files changed, 103 insertions(+)
+ drivers/net/wireless/ath/ath12k/core.h        |   7 ++
+ drivers/net/wireless/ath/ath12k/power_boost.h | 101 ++++++++++++++++++
+ 2 files changed, 108 insertions(+)
  create mode 100644 drivers/net/wireless/ath/ath12k/power_boost.h
 
 diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 05b5498..4277ad5 100644
+index 240c6ca..e3d4b0c 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -31,6 +31,7 @@
@@ -26,7 +26,7 @@ index 05b5498..4277ad5 100644
  #include "hal_rx.h"
  #include "ppe.h"
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
-@@ -1131,6 +1132,9 @@ struct ath12k {
+@@ -1133,6 +1134,9 @@ struct ath12k {
  #endif
  #ifdef CPTCFG_ATH12K_CFR
  	struct ath12k_cfr cfr;
@@ -36,7 +36,16 @@ index 05b5498..4277ad5 100644
  #endif
  	bool dfs_block_radar_events;
  	struct ath12k_thermal thermal;
-@@ -1737,6 +1741,7 @@ struct ath12k_base {
+@@ -1492,6 +1496,8 @@ struct ath12k_hw_group {
+ 	u8 dbs_power_reduction;
+ 	u8 eth_power_reduction;
+ #endif
++	struct rchan *pb_rfs_capture;
++	char pb_rfs_path[100];
+ 	u8 id;
+ 	u8 num_chip;
+ 	u8 num_probed;
+@@ -1746,6 +1752,7 @@ struct ath12k_base {
  
  	bool ce_pipe_init_done;
  	bool rxgainlut_support;
@@ -46,10 +55,10 @@ index 05b5498..4277ad5 100644
  	u32 dp_mon_alloc_cnt;
 diff --git a/drivers/net/wireless/ath/ath12k/power_boost.h b/drivers/net/wireless/ath/ath12k/power_boost.h
 new file mode 100644
-index 0000000..4f5f697
+index 0000000..dd5bfd2
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/power_boost.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,101 @@
 +/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 +/*
 + * Copyright (c) 2020 The Linux Foundation. All rights reserved.
@@ -66,7 +75,7 @@ index 0000000..4f5f697
 +#define ATH12K_POWER_BOOST_END_MAGIC 0xBEAFDEAD
 +
 +#define ATH12K_POWER_BOOST_RELAY_NUM_SUB_BUFS 3
-+#define ATH12K_POWER_BOOST_RELAY_SUB_BUFS_SZ 100256
++#define ATH12K_POWER_BOOST_RELAY_SUB_BUFS_SZ 100512
 +
 +#define ATH12K_POWER_BOOST_SHMEM_SZ	     100000
 +#define ATH12K_POWER_BOOST_SHMEM_ALIGN	     8
@@ -104,9 +113,7 @@ index 0000000..4f5f697
 +	/* Protects enabled for ath12k_pb */
 +	spinlock_t lock;
 +	bool pb_enabled;
-+	struct rchan *rfs_pb_capture;
 +	u32 num_subbufs;
-+	char rchan_path[100];
 +	u32 subbuf_size;
 +	struct ath12k_power_boost_telemetry_agent_header tah;
 +	struct ath12k_power_boost_meta_header meta;
@@ -116,7 +123,10 @@ index 0000000..4f5f697
 +extern bool ath12k_power_boost_enabled;
 +int ath12k_power_boost_cmd_status(struct ath12k *ar,
 +				  enum wmi_pdev_power_boost_status_type status);
-+int ath12k_power_boost_cmd_estimated_data(struct ath12k *ar, u32 tx_evm, u32 tx_mask_margin);
++int ath12k_power_boost_cmd_estimated_data(struct ath12k *ar,
++					  u32 training_stage,
++					  u32 mcs, u32 bandwidth,
++					  u32 tx_evm, u32 tx_mask_margin);
 +void ath12k_power_boost_send_event_data(struct ath12k *ar,
 +					struct ath12k_wmi_pdev_power_boost_event *ev);
 +void ath12k_power_boost_init(struct ath12k_base *ab);
@@ -129,6 +139,8 @@ index 0000000..4f5f697
 +}
 +
 +static inline int ath12k_power_boost_cmd_estimated_data(struct ath12k *ar,
++							u32 training_stage,
++							u32 mcs, u32 bandwidth,
 +							u32 tx_evm, u32 tx_mask_margin)
 +{
 +	return 0;
