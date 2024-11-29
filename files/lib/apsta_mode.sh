@@ -691,30 +691,35 @@ do
 				ap_status=$(hostapd_get_ap_status $ap_intf)
 				if [ "$ap_status" = "DISABLED" -o "$ap_status" = "FAIL" ] &&
 				   [ $(wpa_cli -i $sta_intf status 2> /dev/null | grep wpa_state | cut -d'=' -f 2) = "COMPLETED" ]; then
-					echo "REPEATER AP $ap_intf failed bring-up, status $ap_status exiting" > /dev/ttyMSM0
-					logread > /tmp/logread_AP_failure.log
-					echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
-					echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
-					date >> /tmp/apsta_debug.log
-					iw dev >> /tmp/apsta_debug.log
-					iw dev $ap_intf info >> /tmp/apsta_debug.log
-					ap_link=$(get_link_ids $ap_intf)
-					if [ -n "$ap_link" ]; then
-						for i in $ap_link
-						do
-							hostapd_cli -i $ap_intf -l $i status>> /tmp/apsta_debug.log
-						done
-					else
-						hostapd_cli -i $ap_intf status>> /tmp/apsta_debug.log
-					fi
-					wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
-					wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
-					wpa_cli -i $sta_intf mlo_status >> /tmp/apsta_debug.log
-					wpa_cli -i $sta_intf list_n >> /tmp/apsta_debug.log
-					wpa_cli -i $sta_intf all_bss >> /tmp/apsta_debug.log
-					date >> /tmp/apsta_debug.log
+					echo "REPEATER AP $ap_intf failed bring-up, status $ap_status recovering" > /dev/ttyMSM0
+
+					# Below log dump should be enable for debugging purposes.
+
+					#logread > /tmp/logread_AP_failure.log
+					#echo "Collect if any core present in /tmp/ and output of /tmp/logread_AP_failure.log" > /dev/console
+					#echo "Hostapd enable failed, exiting" >> /tmp/apsta_debug.log
+					#date >> /tmp/apsta_debug.log
+					#iw dev >> /tmp/apsta_debug.log
+					#iw dev $ap_intf info >> /tmp/apsta_debug.log
+					#ap_link=$(get_link_ids $ap_intf)
+					#if [ -n "$ap_link" ]; then
+					#	for i in $ap_link
+					#	do
+					#		hostapd_cli -i $ap_intf -l $i status>> /tmp/apsta_debug.log
+					#	done
+					#else
+					#	hostapd_cli -i $ap_intf status>> /tmp/apsta_debug.log
+					#fi
+					#wpa_cli -i $sta_intf signal_poll >> /tmp/apsta_debug.log
+					#wpa_cli -i $sta_intf status >> /tmp/apsta_debug.log
+					#wpa_cli -i $sta_intf mlo_status >> /tmp/apsta_debug.log
+					#wpa_cli -i $sta_intf list_n >> /tmp/apsta_debug.log
+					#wpa_cli -i $sta_intf all_bss >> /tmp/apsta_debug.log
+					#date >> /tmp/apsta_debug.log
+
 					wifi down
-					exit
+					sleep 4
+					wifi up
 				fi
 			done
 		fi
