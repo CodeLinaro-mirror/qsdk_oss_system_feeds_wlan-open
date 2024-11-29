@@ -78,7 +78,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  static const char *irq_name[ATH12K_IRQ_NUM_MAX] = {
  	"misc-pulse1",
  	"misc-latch",
-@@ -427,21 +435,176 @@ static void ath12k_ahb_stop(struct ath12
+@@ -427,21 +435,190 @@ static void ath12k_ahb_stop(struct ath12
  static int ath12k_ahb_power_up(struct ath12k_base *ab)
  {
  	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
@@ -186,7 +186,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +			goto err_fw2;
 +		}
 +	}
- 
++
 +	/* Instruct Q6 to spawn userPD thread */
 +	ret = qcom_smem_state_update_bits(ab_ahb->spawn_state, BIT(ab_ahb->spawn_bit),
 +					  BIT(ab_ahb->spawn_bit));
@@ -194,7 +194,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +		ath12k_err(ab, "Failed to update spawn state %d\n", ret);
 +		goto err_fw2;
 +	}
-+
+ 
 +	time_left = wait_for_completion_timeout(&ab_ahb->userpd_spawned,
 +						ATH12K_USERPD_SPAWN_TIMEOUT);
 +	if (!time_left) {
@@ -212,6 +212,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +	}
 +
 +	ath12k_info(ab, "UserPD%d is now UP\n", ab_ahb->userpd_id);
++	ab->ag->num_userpd_started++;
 +
 +reset_spawn:
 +	qcom_smem_state_update_bits(ab_ahb->spawn_state, BIT(ab_ahb->spawn_bit), 0);
@@ -257,10 +258,23 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +			ath12k_err(ab, "scm pas shutdown failed for userPD%d\n",
 +				   ab_ahb->userpd_id);
 +	}
++
++	ab->ag->num_userpd_started--;
++
++	/* Turn off rootPD during rmmod and shutdown only. RootPD is handled
++	 * by RProc driver in case of recovery
++	 */
++
++	if (!ab->ag->num_userpd_started &&
++	    test_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags)) {
++		ret = rproc_shutdown(ab_ahb->tgt_rproc);
++		if (ret < 0)
++			ath12k_err(ab, "RootPD shutdown failed\n");
++	}
  }
  
  static void ath12k_ahb_init_qmi_ce_config(struct ath12k_base *ab)
-@@ -942,27 +1105,133 @@ static const struct ath12k_hif_ops ath12
+@@ -942,27 +1119,133 @@ static const struct ath12k_hif_ops ath12
  	.dp_umac_reset_free_irq = ath12k_ahb_dp_umac_reset_free_irq,
  };
  
@@ -285,15 +299,11 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +}
 +
 +static int ath12k_ahb_config_rproc_irq(struct ath12k_base *ab)
- {
--	struct device *rproc_dev;
--	struct rproc *rproc_pd;
++{
 +	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
 +	int i, ret;
 +	char *upd_irq_name;
- 
--	rproc_dev = rproc->dev.parent;
--	rproc_pd = dev_get_drvdata(rproc_dev->parent);
++
 +	for (i = 0; i < ATH12K_USERPD_MAX_IRQ; i++) {
 +		ab_ahb->userpd_irq_num[i] = platform_get_irq_byname(ab->pdev,
 +								    ath12k_userpd_irq[i]);
@@ -307,10 +317,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +					    GFP_KERNEL);
 +		if (!upd_irq_name)
 +			return -ENOMEM;
- 
--	if (!rproc_pd)
--		ath12k_err(NULL, "failed to get parent of rproc:%s\n",
--			   rproc->name);
++
 +		scnprintf(upd_irq_name, ATH12K_UPD_IRQ_WRD_LEN, "UserPD%u-%s",
 +			  ab_ahb->userpd_id, ath12k_userpd_irq[i]);
 +		ret = devm_request_threaded_irq(&ab->pdev->dev, ab_ahb->userpd_irq_num[i],
@@ -323,8 +330,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +			return ret;
 +		}
 +	}
- 
--	return rproc_pd;
++
 +	ab_ahb->spawn_state = devm_qcom_smem_state_get(&ab->pdev->dev, "spawn",
 +						       &ab_ahb->spawn_bit);
 +	if (IS_ERR(ab_ahb->spawn_state)) {
@@ -343,23 +349,30 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +	init_completion(&ab_ahb->userpd_ready);
 +	init_completion(&ab_ahb->userpd_stopped);
 +	return 0;
- }
- 
--static int ath12k_core_get_rproc(struct ath12k_base *ab)
++}
++
 +static int ath12k_ahb_root_pd_state_notifier(struct notifier_block *nb,
 +					     const unsigned long event, void *data)
-+{
+ {
+-	struct device *rproc_dev;
+-	struct rproc *rproc_pd;
 +	struct ath12k_ahb *ab_ahb = container_of(nb, struct ath12k_ahb, rpd_nb);
 +	struct ath12k_base *ab = ab_ahb->ab;
-+
+ 
+-	rproc_dev = rproc->dev.parent;
+-	rproc_pd = dev_get_drvdata(rproc_dev->parent);
 +	if (event == ATH12K_ROOTPD_AFTER_POWERUP) {
 +		ath12k_dbg(ab, ATH12K_DBG_AHB, "Root PD is UP\n");
 +		complete(&ab_ahb->rootpd_ready);
 +	}
-+
+ 
+-	if (!rproc_pd)
+-		ath12k_err(NULL, "failed to get parent of rproc:%s\n",
+-			   rproc->name);
 +	return 0;
 +}
-+
+ 
+-	return rproc_pd;
 +static int ath12k_ahb_register_rproc_notifier(struct ath12k_base *ab)
 +{
 +	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
@@ -378,8 +391,9 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +		return -EINVAL;
 +
 +	return 0;
-+}
-+
+ }
+ 
+-static int ath12k_core_get_rproc(struct ath12k_base *ab)
 +static void ath12k_ahb_unregister_rproc_notifier(struct ath12k_base *ab)
 +{
 +	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
@@ -406,7 +420,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  
  	if (of_property_read_u32(dev->of_node, "qcom,rproc", &rproc_phandle)) {
  		ath12k_err(ab, "failed to get q6_rproc handle\n");
-@@ -975,54 +1244,64 @@ static int ath12k_core_get_rproc(struct
+@@ -975,54 +1258,64 @@ static int ath12k_core_get_rproc(struct
  		return -EINVAL;
  	}
  	ab_ahb->tgt_rproc = prproc;
@@ -425,8 +439,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
 +	unsigned long time_left;
 +	int ret;
- 
--	ab->multi_pd_arch = of_property_read_bool(dev->of_node, "qcom,multipd_arch");
++
 +	ath12k_dbg(ab, ATH12K_DBG_AHB, "Booting RootPD\n");
 +	ret = rproc_boot(ab_ahb->tgt_rproc);
 +	if (ret < 0) {
@@ -434,10 +447,14 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +		return ret;
 +	}
  
--	if (!ab->multi_pd_arch)
--		return 0;
+-	ab->multi_pd_arch = of_property_read_bool(dev->of_node, "qcom,multipd_arch");
 +	time_left = wait_for_completion_timeout(&ab_ahb->rootpd_ready,
 +						ATH12K_ROOTPD_READY_TIMEOUT);
+ 
+-	if (!ab->multi_pd_arch)
+-		return 0;
++	return time_left ? 0 : -ETIMEDOUT;
++}
  
 -	rproc_pd = ath12k_core_get_parent_of_rproc_node(prproc);
 -	if (rproc_pd) {
@@ -462,18 +479,15 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 -			ath12k_err(ab, "failed to get q6_root_pd_rproc handle\n");
 -			return -ENOENT;
 -		}
-+	return time_left ? 0 : -ETIMEDOUT;
-+}
++static int ath12k_ahb_configure_rproc(struct ath12k_base *ab)
++{
++	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
++	int ret;
  
 -		rproc_pd = rproc_get_by_phandle(rproc_rpd_node);
 -		if (!rproc_pd) {
 -			ath12k_err(ab, "failed to get root pd rproc\n");
 -			return -EINVAL;
-+static int ath12k_ahb_configure_rproc(struct ath12k_base *ab)
-+{
-+	struct ath12k_ahb *ab_ahb = ath12k_ahb_priv(ab);
-+	int ret;
-+
 +	ret = ath12k_ahb_get_rproc(ab);
 +	if (ret < 0) {
 +		ath12k_err(ab, "failed to get rproc: %d\n", ret);
@@ -511,7 +525,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  }
  
  static int ath12k_ahb_setup_smp2p_handle(struct ath12k_base *ab)
-@@ -1279,6 +1558,7 @@ static int ath12k_ahb_probe(struct platf
+@@ -1279,6 +1572,7 @@ static int ath12k_ahb_probe(struct platf
  	const struct of_device_id *of_id;
  	const struct ath12k_hif_ops *hif_ops;
  	struct device *dev = &pdev->dev;
@@ -519,7 +533,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	enum ath12k_hw_rev hw_rev;
  	const struct ath12k_bus_params *bus_params;
  	int ret, userpd_id, bus_type;
-@@ -1294,8 +1574,10 @@ static int ath12k_ahb_probe(struct platf
+@@ -1294,8 +1588,10 @@ static int ath12k_ahb_probe(struct platf
  	hw_rev = (enum ath12k_hw_rev)of_id->data;
  
  	switch (hw_rev) {
@@ -531,7 +545,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  		hif_ops = &ath12k_ahb_hif_ops;
  		bus_params = &ath12k_ahb_bus_params;
  		bus_type = ATH12K_BUS_AHB;
-@@ -1327,7 +1609,25 @@ static int ath12k_ahb_probe(struct platf
+@@ -1327,7 +1623,25 @@ static int ath12k_ahb_probe(struct platf
  	ab->pdev = pdev;
  	ab->hw_rev = hw_rev;
  	platform_set_drvdata(pdev, ab);
@@ -557,7 +571,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  
  	ret = ath12k_core_pre_init(ab);
  	if (ret)
-@@ -1401,9 +1701,9 @@ static int ath12k_ahb_probe(struct platf
+@@ -1401,9 +1715,9 @@ static int ath12k_ahb_probe(struct platf
  
  	ath12k_ahb_init_qmi_ce_config(ab);
  
@@ -569,7 +583,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  		goto err_ce_free;
  	}
  
-@@ -1446,6 +1746,7 @@ static void ath12k_ahb_remove_prepare(st
+@@ -1446,6 +1760,7 @@ static void ath12k_ahb_remove_prepare(st
  	set_bit(ATH12K_FLAG_UNREGISTERING, &ab->ag->dev_flags);
  	cancel_work_sync(&ab->restart_work);
  	cancel_work_sync(&ab->qmi.event_work);
@@ -631,9 +645,9 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
 +	struct completion userpd_ready;
 +	struct completion userpd_stopped;
 +	int (*ath12k_mdt_load)(struct device *dev, const struct firmware *fw,
-+				const char *firmware, int pas_id, void *mem_region,
-+				phys_addr_t mem_phys, size_t mem_size,
-+				phys_addr_t *reloc_base);
++			       const char *firmware, int pas_id, void *mem_region,
++			       phys_addr_t mem_phys, size_t mem_size,
++			       phys_addr_t *reloc_base);
 +	u32 userpd_id;
 +	u32 spawn_bit;
 +	u32 stop_bit;
@@ -652,6 +666,17 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  #include <linux/panic_notifier.h>
  #include <linux/of.h>
  #include <linux/of_platform.h>
+@@ -1557,10 +1556,6 @@ static int ath12k_core_start(struct ath1
+ 		goto err_reo_cleanup;
+ 	}
+ 
+-	/* Indicate the userpd count for the group */
+-	if (ab->multi_pd_arch)
+-		ab->ag->num_userpd_started++;
+-
+ 	ath12k_dp_rx_fst_init(ab);
+ 	/* Indicate the core start in the appropriate group */
+ 	ab->ag->num_started++;
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
 @@ -13,6 +13,7 @@
