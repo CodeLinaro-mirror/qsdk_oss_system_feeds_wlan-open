@@ -1131,7 +1131,10 @@ boost_performance() {
 				echo 0 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/trace_qdss
 				;;
 			rdp466 | \
-			rdp466-c2)
+			rdp466-c2 | \
+			rdp496 | \
+			rdp485 | \
+			rdp485-c2)
 				ethtool -K eth0 gro off
 				ethtool -K eth0 gso off
 				ethtool -K eth1 gro off
