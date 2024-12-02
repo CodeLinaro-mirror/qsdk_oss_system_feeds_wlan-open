@@ -184,23 +184,142 @@ get_ap_ht_capab() {
         done
 }
 
+hostapd_set_op_class() {
+    local freq=$1
+    local channel=$2
+    local width=$3
+    local intf=$4
+    local sec_channel=0
+    local vht_he_opclass=0
+
+    centre_freq=$(iw dev $intf info | grep $freq | awk '{print $9}')
+
+    # Determine sec_channel based on ap_ht_mode if width is 40
+    if [ "$width" -eq 40 ]; then
+	    if [ "$centre_freq" -gt "$freq" ]; then
+		    sec_channel=1
+	    elif [ "$centre_freq" -lt "$freq" ]; then
+		    sec_channel=-1
+	    else
+		    sec_channel=0
+	    fi
+    fi
+
+    # 2.4 GHz frequency range
+    if [ "$freq" -ge 2412 ] && [ "$freq" -le 2484 ]; then
+        if [ "$width" -eq 40 ]; then
+            case "$sec_channel" in
+                1) op_class=83 ;;
+                -1) op_class=84 ;;
+                *) op_class=81 ;;
+            esac
+        elif [ "$width" -eq 20 ]; then
+            if [ "$freq" -eq 2484 ]; then
+                op_class=82
+            else
+                op_class=81
+            fi
+        fi
+    fi
+
+    # 5 GHz frequency range
+    if [ "$freq" -ge 5180 ] && [ "$freq" -le 5885 ]; then
+        case "$width" in
+            80) vht_he_opclass=128 ;;  # 80 MHz
+            160) vht_he_opclass=129 ;;  # 160 MHz
+            "80+80") vht_he_opclass=130 ;;  # 80+80 MHz
+            320) vht_he_opclass=129 ;;  # 320 MHz
+            *)
+        esac
+
+        if [ "$freq" -ge 5180 ] && [ "$freq" -le 5240 ]; then
+            if [ "$vht_he_opclass" -ne 0 ]; then
+                op_class=$vht_he_opclass
+            else
+                case "$sec_channel" in
+                    1) op_class=116 ;;
+                    -1) op_class=117 ;;
+                    *) op_class=115 ;;
+                esac
+            fi
+        elif [ "$freq" -ge 5260 ] && [ "$freq" -le 5320 ]; then
+            if [ "$vht_he_opclass" -ne 0 ]; then
+                op_class=$vht_he_opclass
+            else
+                case "$sec_channel" in
+                    1) op_class=119 ;;
+                    -1) op_class=120 ;;
+                    *) op_class=118 ;;
+                esac
+            fi
+        elif [ "$freq" -ge 5745 ] && [ "$freq" -le 5885 ]; then
+            if [ "$vht_he_opclass" -ne 0 ]; then
+                op_class=$vht_he_opclass
+            else
+                case "$sec_channel" in
+                    1) op_class=126 ;;
+                    -1) op_class=127 ;;
+                    *) op_class=125 ;;
+                esac
+            fi
+        elif [ "$freq" -ge 5500 ] && [ "$freq" -le 5720 ]; then
+            if [ "$vht_he_opclass" -ne 0 ] || [ "$width" -eq 320 ]; then
+                op_class=$vht_he_opclass
+            else
+                case "$sec_channel" in
+                    1) op_class=122 ;;
+                    -1) op_class=123 ;;
+                    *) op_class=121 ;;
+                esac
+            fi
+        fi
+
+    fi
+
+    # 6 GHz frequency range
+    if [ "$freq" -ge 5950 ] && [ "$freq" -le 7115 ]; then
+        case "$width" in
+            80) op_class=133 ;;  # 80 MHz
+            160) op_class=134 ;;  # 160 MHz
+            "80+80") op_class=135 ;;  # 80+80 MHz
+            320) op_class=137 ;;  # 320 MHz
+            *)
+		    if [ "$sec_channel" -ne 0 ]; then
+			    op_class=132
+		    else
+			    op_class=131
+		    fi
+		    ;;
+        esac
+    fi
+
+    if [ "$freq" -eq 5950 ];then
+	    op_class=136
+    fi
+    if [ "$freq" -ge 5500 ] && [ "$freq" -le 5720 ]; then
+	    if [ "$width" -eq 320 ]; then
+		return
+	    fi
+    fi
+
+	hostapd_cli -i $ap_intf $ml_link set op_class $op_class> /dev/null
+}
 
 # STA association is completed, hence adjusting hostapd running config
 hostapd_adjust_config() {
-	sta_freq=$1
-	sta_channel=$(iw $phy channels | grep $sta_freq |  awk '{print $4}' |  sed -e "s/\[//g" | sed -e "s/\]//g")
-	sta_width=$(iw dev $sta_intf info | grep $sta_freq | awk '{print $6}')
-	wifi_gen=$(wpa_cli -i $sta_intf status 2> /dev/null | grep wifi_generation | cut -d'=' -f 2)
-	ieee80211ac=$(wpa_cli -i $sta_intf status 2> /dev/null | grep ieee80211ac | cut -d'=' -f 2)
-	ap_intf=$2
-	wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
-	wifi_5gband=$(hostapd_is_5ghz_band $sta_freq)
+        sta_freq=$1
+        sta_channel=$(iw $phy channels | grep $sta_freq |  awk '{print $4}' |  sed -e "s/\[//g" | sed -e "s/\]//g")
+        sta_width=$(iw dev $sta_intf info | grep $sta_freq | awk '{print $6}')
+        wifi_gen=$(wpa_cli -i $sta_intf status 2> /dev/null | grep wifi_generation | cut -d'=' -f 2)
+        ieee80211ac=$(wpa_cli -i $sta_intf status 2> /dev/null | grep ieee80211ac | cut -d'=' -f 2)
+        ap_intf=$2
+        wifi_6gband=$(hostapd_is_6ghz_band $sta_freq)
+        wifi_5gband=$(hostapd_is_5ghz_band $sta_freq)
 
 	if [ -z $ieee80211ac ]; then
 		ieee80211ac=0
 	fi
 
-	echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, AP $ap_intf link $ml_link" > /dev/ttyMSM0
 
 	hostapd_cli -i $ap_intf $ml_link set channel $sta_channel 2> /dev/null
 	if [ "$wifi_5gband" == "true" ] || [ "$wifi_6gband" == "true" ]; then
@@ -310,6 +429,8 @@ hostapd_adjust_config() {
                         hostapd_ht40_mode "$sta_channel"
                 fi
 	fi
+	hostapd_set_op_class $sta_freq $sta_channel $sta_width $sta_intf
+	echo "STA associated in Channel $sta_channel, Width $sta_width MHz, Wifi Gen $wifi_gen, AP $ap_intf link $ml_link op_class $op_class" > /dev/ttyMSM0
 }
 
 get_link_ids() {
