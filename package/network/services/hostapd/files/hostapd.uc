@@ -163,7 +163,6 @@ function iface_freq_info(iface, config, params)
 
 function iface_add(phy, config, phy_status)
 {
-	let config_inline = iface_gen_config(config, !!phy_status);
 	let id;
 	let bss = config.bss[0];
 
@@ -172,7 +171,8 @@ function iface_add(phy, config, phy_status)
 	else
 		id = config.radio_idx;
 
-	let ret = hostapd.add_iface(`bss_config=${phy}:${config_inline}`, id, bss.ifname);
+	hostapd.printf(`iface_add phy ${phy} id ${id}`);
+	let ret = hostapd.add_iface(`bss_config=${phy}:/var/run/hostapd-${phy}.conf`, id, bss.ifname);
 	if (ret < 0)
 		return false;
 
