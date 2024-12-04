@@ -2263,7 +2263,10 @@ enable_smp_affinity_wifi() {
 					enable_affinity_mr01
 					;;
 			rdp466 | \
-			rdp466-c2)
+			rdp466-c2 | \
+			rdp496 | \
+			rdp485 | \
+			rdp485-c2)
 					#for RDP466 (IPQ5424(2.4GHz) + QCN9274(5 GHz) + QCN9274(6GHz))
 					enable_affinity_mr02
 					;;
