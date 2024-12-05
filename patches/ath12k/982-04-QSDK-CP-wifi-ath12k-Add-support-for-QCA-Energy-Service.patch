@@ -307,23 +307,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	} else {
  		tlv_filter.rxmon_disable = true;
-@@ -12079,6 +12266,7 @@ static int ath12k_mac_op_start(struct ie
- 		ar++;
- 	}
- 
-+	ath12k_rm_init();
- 	mutex_unlock(&ah->conf_mutex);
- 	return 0;
- 
-@@ -12112,6 +12300,7 @@ static void ath12k_mac_op_stop(struct ie
- 		ar--;
- 	}
- 
-+	ath12k_rm_deinit();
- 	mutex_unlock(&ah->conf_mutex);
- }
- 
-@@ -18140,6 +18329,9 @@ void ath12k_mac_ap_ps_recalc(struct ath1
+@@ -18140,6 +18327,9 @@ void ath12k_mac_ap_ps_recalc(struct ath1
  		}
  	}
  
@@ -333,7 +317,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (!allow_ap_ps)
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "ap ps is not"
  			   "allowed\n");
-@@ -20554,3 +20746,21 @@ void ath12k_mac_background_dfs_event(str
+@@ -20554,3 +20744,21 @@ void ath12k_mac_background_dfs_event(str
  		ar->agile_chandef.chan = NULL;
  	}
  }
@@ -376,7 +360,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #endif
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/rm.c
-@@ -0,0 +1,822 @@
+@@ -0,0 +1,829 @@
 +
 +#include "core.h"
 +#include "rm.h"
@@ -721,9 +705,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		}
 +
 +		ath12k_vendor_put_ab_soc_id(vendor_event, ab);
-+		ath12k_vendor_put_ab_num_links(vendor_event, ab);
-+
-+		num_hw_links = ab->num_radios;
 +
 +		link_info = nla_nest_start(vendor_event,
 +					   QCA_WLAN_VENDOR_ATTR_SOC_DEVICE_LINK_INFO);
@@ -733,29 +714,39 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			return -1;
 +		}
 +
-+		for (hw_link_id = 0; hw_link_id < num_hw_links; hw_link_id++) {
++		num_hw_links = 0;
++		for (hw_link_id = 0; hw_link_id < ab->num_radios; hw_link_id++) {
 +			ar = ab->pdevs[hw_link_id].ar;
-+			if (ar->num_started_vdevs == 0)
++			if (!ar)
 +				continue;
++
++			mutex_lock(&ar->conf_mutex);
++			if (ar->num_started_vdevs == 0) {
++				mutex_unlock(&ar->conf_mutex);
++				continue;
++			}
 +			per_link_info = nla_nest_start(vendor_event,
 +						       hw_link_id);
 +			if (!per_link_info) {
 +				ath12k_err(ab, "Fails to put per link info :%d for soc:%d",
 +					   ar->pdev->hw_link_id, ab->chip_id);
++				mutex_unlock(&ar->conf_mutex);
 +				return -1;
 +			}
 +			ath12k_vendor_put_ar_hw_link_id(vendor_event, ar);
 +			ath12k_vendor_put_ar_link_mac_addr(vendor_event, ar);
 +			ath12k_vendor_put_ar_chan_info(vendor_event, ar);
 +			ath12k_vendor_put_ar_nss_chains(vendor_event, ar);
++			mutex_unlock(&ar->conf_mutex);
 +			nla_nest_end(vendor_event, per_link_info);
++			num_hw_links++;
 +		}
 +		nla_nest_end(vendor_event, link_info);
++		ath12k_vendor_put_ab_num_links(vendor_event, ab, num_hw_links);
 +		nla_nest_end(vendor_event, per_soc_info);
 +	}
 +	nla_nest_end(vendor_event, soc_info);
 +
-+	//ath12k_vendor_put_ag_num_socs(vendor_event, ag);
 +	ATH12K_VENDOR_PUT(vendor_event, u8,
 +			  QCA_WLAN_VENDOR_ATTR_RM_GENERIC_NUM_SOC_DEVICES,
 +			  num_socs);
@@ -1573,7 +1564,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	}
  
  	return ret;
-@@ -3833,6 +4004,177 @@ static int ath12k_vendor_dcs_handler(str
+@@ -3833,6 +4004,172 @@ static int ath12k_vendor_dcs_handler(str
  	return 0;
  }
  
@@ -1653,13 +1644,10 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +	struct ieee80211_chanctx_conf *ctx = NULL;
 +	struct ath12k_link_vif *arvif;
 +
-+	mutex_lock(&ar->conf_mutex);
-+
 +	arvif = ath12k_vendor_get_non_scan_arvif(ar);
 +	ctx = &arvif->chanctx;
 +
 +	if (!arvif || !ctx) {
-+		mutex_unlock(&ar->conf_mutex);
 +		return -1;
 +	}
 +
@@ -1670,7 +1658,6 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +		       ath12k_nl_chan_bw_to_qca_vendor_chan_bw(ctx->def.width))) {
 +		ath12k_err(ar->ab, "Fails to put chan bw for hw link id :%d soc:%d",
 +			   ar->pdev->hw_link_id, ar->ab->chip_id);
-+		mutex_unlock(&ar->conf_mutex);
 +		return -1;
 +	}
 +
@@ -1678,10 +1665,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +			ctx->def.chan->center_freq)) {
 +		ath12k_err(ar->ab, "Fails to put chan center freq for hw link id :%d soc:%d",
 +			   ar->pdev->hw_link_id, ar->ab->chip_id);
-+		mutex_unlock(&ar->conf_mutex);
 +		return -1;
 +	}
-+	mutex_unlock(&ar->conf_mutex);
 +
 +	return 0;
 +}
@@ -1721,11 +1706,12 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +}
 +
 +int ath12k_vendor_put_ab_num_links(struct sk_buff *vendor_event,
-+				   struct ath12k_base *ab)
++				   struct ath12k_base *ab,
++				   const int num_active_links)
 +{
 +	if (nla_put_u8(vendor_event,
 +		       QCA_WLAN_VENDOR_ATTR_SOC_DEVICE_NUM_LINKS,
-+		       ab->num_radios)) {
++		       num_active_links)) {
 +		ath12k_err(ab, "Fails to put number of hw links for soc:%d",
 +			   ab->chip_id);
 +		return -1;
@@ -1816,7 +1802,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  /**
   * enum qca_wlan_vendor_attr_rm_generic - Attributes required for vendor
   * command %QCA_NL80211_VENDOR_SUBCMD_RM_GENERIC to register a Resource Manager
-@@ -1495,4 +1521,321 @@ enum qca_wlan_vendor_wlan_interference_a
+@@ -1495,4 +1521,322 @@ enum qca_wlan_vendor_wlan_interference_a
  	QCA_WLAN_VENDOR_ATTR_WLAN_INTERFERENCE_PARAM_MAX =
  		QCA_WLAN_VENDOR_ATTR_WLAN_INTERFERENCE_PARAM_LAST - 1,
  };
@@ -2133,7 +2119,8 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
 +int ath12k_vendor_put_ab_soc_id(struct sk_buff *vendor_event,
 +				struct ath12k_base *ab);
 +int ath12k_vendor_put_ab_num_links(struct sk_buff *vendor_event,
-+				   struct ath12k_base *ab);
++				   struct ath12k_base *ab,
++				   const int num_active_links);
 +int ath12k_vendor_put_ag_num_socs(struct sk_buff *vendor_event,
 +				  struct ath12k_hw_group *ag);
 +
@@ -2589,7 +2576,15 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  #endif /* ATH12K_TELEMETRY_AGENT_IF_H */
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -4300,6 +4300,32 @@ struct ath12k_base *ath12k_core_get_ab_b
+@@ -2348,6 +2348,7 @@ void ath12k_core_halt(struct ath12k *ar)
+ 	if (ag->recovery_mode == ATH12K_MLO_RECOVERY_MODE0)
+ 		ath12k_mac_peer_ab_disassoc(ab);
+ 
++	ath12k_telemetry_destroy_ab_peer_agent(ab);
+ 	ath12k_mac_peer_cleanup_all(ar);
+ 	ath12k_dcs_wlan_intf_cleanup(ar);
+ 	cancel_work_sync(&ar->regd_update_work);
+@@ -4300,6 +4301,32 @@ struct ath12k_base *ath12k_core_get_ab_b
  	return NULL;
  }
  
