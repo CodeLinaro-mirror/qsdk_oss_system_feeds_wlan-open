@@ -14,8 +14,10 @@ ifeq ($(DUMP),)
   define BuildTarget/ipkg-prebuilt
     ifeq ($(PKG_FORCE_PREBUILT)$(wildcard $(PREBUILT_DIR)/$(1)_$(VERSION)_$(PKGARCH).ipk),)
       $(BuildTarget/ipkg)
+    else ifeq ($(PKG_FORCE_PREBUILT)$(wildcard $(PREBUILT_DIR)/$(1)_$(PKGARCH).ipk),)
+      $(BuildTarget/ipkg)
     else
-      PKG_$(1):=$(1)_$(VERSION)_$(PKGARCH).ipk
+      PKG_$(1):=$(1)_$(PKGARCH).ipk
       PDIR_$(1):=$(call FeedPackageDir,$(1))
       PRE_$(1):=$(PREBUILT_DIR)/$$(PKG_$(1))
       IPKG_$(1):=$$(PDIR_$(1))/$$(PKG_$(1))
