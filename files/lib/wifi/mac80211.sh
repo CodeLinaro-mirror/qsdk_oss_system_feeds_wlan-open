@@ -553,6 +553,13 @@ check_devidx() {
 	esac
 }
 
+restart_rsrcmgr() {
+        [ -f /tmp/rsrcmgr.log ] && {
+                rm -rf /tmp/rsrcmgr.log
+        }
+        /etc/init.d/rsrcmgr restart
+}
+
 pre_mac80211() {
 	local action=${1}
 	case "${action}" in
@@ -575,6 +582,9 @@ pre_mac80211() {
 				kill -15 $pid 2>/dev/null
 				rm /tmp/apsta_mode.pid 2>/dev/null
 			fi
+		;;
+		enable)
+			restart_rsrcmgr
 		;;
 	esac
 	return 0
