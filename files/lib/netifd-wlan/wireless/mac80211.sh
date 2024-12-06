@@ -2297,7 +2297,7 @@ drv_mac80211_setup() {
 						append  config_files /var/run/hostapd-phy"${phy#phy}"_"${__band}".conf
 					done
 					#MLO vaps, single instance of hostapd is started
-					/usr/sbin/hostapd -B -P /var/run/wifi-"$phy".pid $config_files
+					/usr/sbin/hostapd -B -s -P /var/run/wifi-"$phy".pid $config_files
 					ret="$?"
 
 					if [ "$band" = "5g" ]; then
