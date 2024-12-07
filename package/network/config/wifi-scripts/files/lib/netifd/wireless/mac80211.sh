@@ -1273,6 +1273,96 @@ mac80211_setup_mesh() {
 	json_set_namespace "$prev"
 }
 
+mac80211_get_seg0() {
+        local ht_mode="$1"
+        local seg0=0
+
+        case "$ht_mode" in
+                40)
+                        if [ "$freq" -gt 5950 ] && [ "$freq" -le 7115 ]; then
+                                case "$(( (channel / 4) % 2 ))" in
+                                        1) seg0=$((channel - 2));;
+                                        0) seg0=$((channel + 2));;
+                                esac
+                        elif [ "$freq" -lt 2484 ]; then
+                                if [ "$channel" -lt 7 ]; then
+                                        seg0=$((channel + 2))
+                                else
+                                        seg0=$((channel - 2))
+                                fi
+                        elif [ "$freq" != 5935 ]; then
+                                case "$(( (channel / 4) % 2 ))" in
+                                        1) seg0=$((channel + 2));;
+                                        0) seg0=$((channel - 2));;
+                                esac
+                        fi
+                ;;
+		80)
+                        if [ "$freq" -gt 5950 ] && [ "$freq" -le 7115 ]; then
+                                case "$(( (channel / 4) % 4 ))" in
+                                        0) seg0=$((channel + 6));;
+                                        1) seg0=$((channel + 2));;
+                                        2) seg0=$((channel - 2));;
+                                        3) seg0=$((channel - 6));;
+                                esac
+                        elif [ "$freq" != 5935 ]; then
+                                case "$(( (channel / 4) % 4 ))" in
+                                        1) seg0=$((channel + 6));;
+                                        2) seg0=$((channel + 2));;
+                                        3) seg0=$((channel - 2));;
+                                        0) seg0=$((channel - 6));;
+                                esac
+                        fi
+                ;;
+		160)
+                        if [ "$freq" -gt 5950 ] && [ "$freq" -le 7115 ]; then
+                                case "$channel" in
+                                        1|5|9|13|17|21|25|29) seg0=15;;
+                                        33|37|41|45|49|53|57|61) seg0=47;;
+                                        65|69|73|77|81|85|89|93) seg0=79;;
+                                        97|101|105|109|113|117|121|125) seg0=111;;
+                                        129|133|137|141|145|149|153|157) seg0=143;;
+                                        161|165|169|173|177|181|185|189) seg0=175;;
+                                        193|197|201|205|209|213|217|221) seg0=207;;
+                                esac
+                        elif [ "$freq" != 5935 ]; then
+                                case "$channel" in
+                                        36|40|44|48|52|56|60|64) seg0=50;;
+                                        100|104|108|112|116|120|124|128) seg0=114;;
+                                        149|153|157|161|165|169|173|177) seg0=163;;
+                                esac
+                        fi
+                ;;
+		320)
+                        if [ "$freq" -ge 5955 ] && [ "$freq" -le 7115 ]; then
+                                case "$channel" in
+                                        1|5|9|13|17|21|25|29|33|37|41|45) seg0=31;;
+                                        49|53|57|61|65|69|73|77) seg0=63;;
+                                        81|85|89|93|97|101|105|109) seg0=95;;
+                                        113|117|121|125|129|133|137|141) seg0=127;;
+                                        145|149|153|157|161|165|169|173) seg0=159;;
+                                        177|181|185|189|193|197|201|205|209|213|217|221) seg0=191;;
+                                esac
+                        elif [ "$freq" -ge 5500 ] && [ "$freq" -le 5730 ]; then
+                                seg0=130
+                        fi
+                ;;
+                esac
+                printf "$seg0"
+}
+
+get_seg0_freq() {
+        local ctrl_freq="$1"
+        local ctrl_chan="$2"
+        local seg0_chan="$3"
+
+        if [ $((seg0_chan)) -gt $((ctrl_chan)) ]; then
+                printf $(($ctrl_freq + (($seg0_chan - $ctrl_chan) * 5)))
+        else
+                printf $(($ctrl_freq - (($ctrl_chan - $seg0_chan) * 5)))
+        fi
+}
+
 mac80211_setup_monitor() {
 	local prev
 	json_set_namespace wdev_uc prev
@@ -1280,7 +1370,30 @@ mac80211_setup_monitor() {
 	json_add_object "$ifname"
 	json_add_string mode monitor
 	[ -n "$freq" ] && json_add_string freq "$freq"
-	json_add_string htmode "$iw_htmode"
+	json_add_string htmode "$htmode"
+	case "$htmode" in
+                VHT20|HT20|HE20|EHT20)
+                        bw=20
+                        ;;
+                HT40*|VHT40|HE40|EHT40)
+                        bw=40
+			center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 40)")
+                        ;;
+                VHT80|HE80|EHT80)
+                        bw=80
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 80)")
+                        ;;
+                VHT160|HE160|EHT160)
+                        bw=160
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
+                        ;;
+        esac
+
+        if [ $is_wiphy_multi_radio -eq 1 ]; then
+                json_add_boolean is_multi_radio 1
+                [ -n "$center_freq" ] && json_add_string center_freq "$center_freq"
+                json_add_string bw "$bw"
+        fi
 	json_close_object
 
 	json_set_namespace "$prev"
