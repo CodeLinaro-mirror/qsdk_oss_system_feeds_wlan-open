@@ -603,7 +603,7 @@ hostapd_set_bss_options() {
 
 	set_default fils 0
 	set_default isolate 0
-	set_default maxassoc 128
+	set_default maxassoc 512
 	set_default max_inactivity 0
 	set_default short_preamble 1
 	set_default disassoc_low_ack 1
