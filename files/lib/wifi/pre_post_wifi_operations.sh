@@ -16,6 +16,52 @@
 
 append DRIVERS "mac80211"
 
+mac80211_update_mld_iface_config() {
+	vif_name=$1
+	mld_name=$2
+	# Get the following from section wifi-mld
+	config_get mld_ssid "$mld_name" ssid
+	config_get mld_encryption "$mld_name" encryption
+	config_get mld_key "$mld_name" key
+	config_get mld_sae "$mld_name" sae_pwe
+	config_get mld_vp "$mld_name" ppe_vp
+	if [ -n "$mld_ssid" ]; then
+		uci_set wireless "$vif_name" ssid "$mld_ssid"
+	fi
+	if [ -n "$mld_encryption" ]; then
+		uci_set wireless "$vif_name" encryption "$mld_encryption"
+	fi
+	if [ -n "$mld_key" ]; then
+		uci_set wireless "$vif_name" key "$mld_key"
+	fi
+	if [ -n "$mld_sae" ]; then
+		uci_set wireless "$vif_name" sae_pwe "$mld_sae"
+	fi
+	if [ -n "$mld_vp" ]; then
+		uci_set wireless "$vif_name" ppe_vp "$mld_vp"
+	fi
+	uci commit wireless
+}
+
+mac80211_update_mld_configs() {
+	local iflist
+	config_load wireless
+	mac80211_update_mld_cfg() {
+		append iflist "$1"
+	}
+	config_foreach mac80211_update_mld_cfg wifi-iface
+	for name in $iflist
+	do
+		config_get mld_name "$name" mld
+		config_get ml_device "$name" device
+		config_get ht_mode "$ml_device" htmode
+		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]  && [ -n "$mld_name" ]); then
+			append mld_names "$mld_name"
+			mac80211_update_mld_iface_config "$name" "$mld_name"
+		fi
+	done
+}
+
 mlo_add_link() {
 	local data
 	local link
@@ -177,11 +223,8 @@ configure_service_param() {
 
 		eval $cmd
 	elif [ $enable_service -eq 0 ]; then
-		check_svc_id=$(iw $phy service_class view $svc_id | grep "Service ID" | cut -d ":" -f2)
-		if [ ! -z "$check_svc_id" ] && [ $check_svc_id -eq $svc_id ]; then
-			cmd="iw $phy service_class disable $svc_id"
-			eval $cmd
-		fi
+		cmd="iw $phy service_class disable $svc_id"
+		eval $cmd
 	fi
 }
 
@@ -328,6 +371,7 @@ configure_telemetry_sla_samples() {
 }
 
 pre_wifi_updown() {
+	mac80211_update_mld_configs
 	:
 }
 
@@ -356,8 +400,10 @@ pre_mac80211() {
 				rm -rf $MLD_VAP_DETAILS
 			fi
 			sawf_supp="/sys/module/ath12k/parameters/sawf"
-			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
+			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ] && \
+			   [ -f "/tmp/svc_configured" ]; then
 				configure_service_class 0
+				rm /tmp/svc_configured
 			fi
 			if [ -f "/tmp/apsta_mode.pid" ]; then
 				pid=$(cat /tmp/apsta_mode.pid)
@@ -380,6 +426,7 @@ post_mac80211() {
 			sawf_supp="/sys/module/ath12k/parameters/sawf"
 			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
 				configure_service_class 1
+				touch /tmp/svc_configured
 				configure_telemetry_sla_samples
 				configure_telemetry_sla_thersholds
 				configure_telemetry_sla_detect
