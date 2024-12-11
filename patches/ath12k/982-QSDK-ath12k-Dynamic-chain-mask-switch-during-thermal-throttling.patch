@@ -47,28 +47,96 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1063,6 +1063,8 @@ struct ath12k {
+@@ -1063,6 +1063,10 @@ struct ath12k {
  	/* valid during scan; needed for mgmt rx during scan */
  	struct ieee80211_channel *scan_channel;
  
 +	struct tt_level_config tt_level_configs[ENHANCED_THERMAL_LEVELS];
++	struct wmi_therm_throt_level_stats_info tt_level_stats[ENHANCED_THERMAL_LEVELS];
++	struct wmi_therm_throt_stats_event tt_current_state;
 +
  	u8 cfg_tx_chainmask;
  	u8 cfg_rx_chainmask;
  	u8 num_rx_chains;
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -2440,6 +2440,103 @@ static const struct file_operations fops
+@@ -2440,6 +2440,177 @@ static const struct file_operations fops
  	.open = simple_open,
  };
  
++static ssize_t ath12k_debug_get_tt_stats_configs(struct file *file,
++						 char __user *user_buf,
++						 size_t count, loff_t *ppos)
++{
++	struct ath12k *ar = file->private_data;
++	int retval, i = 0;
++	size_t len = 0;
++	char *buf;
++	const int size = 1024;
++
++	buf = kzalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	mutex_lock(&ar->conf_mutex);
++	if (ar->state != ATH12K_STATE_ON) {
++		retval = -ENETDOWN;
++		mutex_unlock(&ar->conf_mutex);
++		return retval;
++	}
++
++	len += scnprintf(buf + len, size - len,
++			 "Thermal levels are %d with pout enabled : %d and tx chainmask enabled : %d\n",
++			 (test_bit(WMI_SERVICE_THERM_THROT_5_LEVELS, ar->ab->wmi_ab.svc_map) ? ENHANCED_THERMAL_LEVELS : THERMAL_LEVELS),
++			 (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION, ar->ab->wmi_ab.svc_map) ? 1 : 0),
++			 (test_bit(WMI_SERVICE_THERM_THROT_TX_CHAIN_MASK, ar->ab->wmi_ab.svc_map) ? 1 : 0));
++
++	len += scnprintf(buf + len, size - len, "Thermal config\n");
++	for (i = 0; i < ar->tt_current_state.therm_throt_levels; i++) {
++		len += scnprintf(buf + len, size - len,
++				 "level:%d low threshold: %d, high threshold: %d, dcoffpercent: %d,",
++				 i, ar->tt_level_configs[i].tmplwm,
++				 ar->tt_level_configs[i].tmphwm,
++				 ar->tt_level_configs[i].dcoffpercent);
++
++		if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION, ar->ab->wmi_ab.svc_map))
++			len += scnprintf(buf + len, size - len, " rpout[0.25db]: %d",
++					 ar->tt_level_configs[i].pout_reduction_db);
++
++		if (test_bit(WMI_SERVICE_THERM_THROT_TX_CHAIN_MASK, ar->ab->wmi_ab.svc_map))
++			len += scnprintf(buf + len, size - len, " tx_chainmask: %d",
++					 ar->tt_level_configs[i].tx_chain_mask);
++		len += scnprintf(buf + len, size - len, " dc: %d\n",
++				 ar->tt_level_configs[i].duty_cycle);
++	}
++
++	len += scnprintf(buf + len, size - len, "Thermal stats\n");
++
++	len += scnprintf(buf + len, size - len, "Current temperature: %d, Current level: %d\n",
++			 ar->tt_current_state.temp,
++			 ar->tt_current_state.level);
++
++	for (i = 0; i < ar->tt_current_state.therm_throt_levels; i++) {
++		len += scnprintf(buf + len, size - len,
++				 "level: %d, entry count: %d, duty cycle spent: %d\n",
++				 i, ar->tt_level_stats[i].level_count,
++				 ar->tt_level_stats[i].dc_count);
++	}
++	mutex_unlock(&ar->conf_mutex);
++
++	retval = simple_read_from_buffer(user_buf, count, ppos, buf, len);
++	kfree(buf);
++
++	return retval;
++}
++
 +static ssize_t ath12k_debug_write_tt_configs(struct file *file,
-+					       const char __user *user_buf,
-+					       size_t count, loff_t *ppos)
++					     const char __user *user_buf,
++					     size_t count, loff_t *ppos)
 +{
 +	struct ath12k *ar = file->private_data;
 +	unsigned int tx_chainmask, level, tmphwm, dcoffpercent, pout_reduction_db, duty_cycle;
-+	int tmplwm,ret;
++	int tmplwm, ret;
 +	char buf[128] = {0};
 +
 +	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, ppos,
@@ -77,44 +145,50 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +	if (ret <= 0)
 +		goto out;
 +
-+	ret = sscanf(buf, "%d %d %d %d %d %d %d", &level, &tmplwm, &tmphwm, &dcoffpercent, &pout_reduction_db, &tx_chainmask, &duty_cycle);
++	ret = sscanf(buf, "%d %d %d %d %d %d %d",
++		     &level, &tmplwm, &tmphwm, &dcoffpercent,
++		     &pout_reduction_db, &tx_chainmask, &duty_cycle);
 +
 +	if (dcoffpercent < 0 || dcoffpercent > 100) {
-+		ath12k_err(ar->ab,"dcoffpercent should be between 0 and 100");
++		ath12k_err(ar->ab, "dcoffpercent should be between 0 and 100");
 +		ret = -EINVAL;
 +		goto out;
 +	}
 +
 +	if (duty_cycle > 100 || duty_cycle < 10) {
-+		ath12k_err(ar->ab,"dc should be between 10 and 100");
++		ath12k_err(ar->ab, "dc should be between 10 and 100");
 +		ret = -EINVAL;
 +		goto out;
 +	}
 +
 +	if (test_bit(WMI_SERVICE_THERM_THROT_TX_CHAIN_MASK, ar->ab->wmi_ab.svc_map)) {
-+		if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION,ar->ab->wmi_ab.svc_map)) {
++		if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION, ar->ab->wmi_ab.svc_map)) {
 +			if (ret != 7) {
-+				ath12k_err(ar->ab,"7 arguments required usage: level tmplwm tmphwm dcoffpercent pout_reduction_db tx_chainmask duty_cycle");
++				ath12k_err(ar->ab,
++					   "7 arguments required usage: level tmplwm tmphwm dcoffpercent pout_reduction_db tx_chainmask duty_cycle");
 +				ret = -EINVAL;
 +				goto out;
 +			}
 +		} else {
 +			if (ret != 6) {
-+				ath12k_err(ar->ab,"6 arguments required usage: level tmplwm tmphwm dcoffpercent tx_chainmask duty_cycle");
++				ath12k_err(ar->ab,
++					   "6 arguments required usage: level tmplwm tmphwm dcoffpercent tx_chainmask duty_cycle");
 +				ret = -EINVAL;
 +				goto out;
 +			}
 +		}
 +	} else {
-+		if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION,ar->ab->wmi_ab.svc_map)) {
++		if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION, ar->ab->wmi_ab.svc_map)) {
 +			if (ret != 6) {
-+				ath12k_err(ar->ab,"6 arguments required usage: level tmplwm tmphwm dcoffpercent pout_reduction_db duty_cycle");
++				ath12k_err(ar->ab,
++					   "6 arguments required usage: level tmplwm tmphwm dcoffpercent pout_reduction_db duty_cycle");
 +				ret = -EINVAL;
 +				goto out;
 +			}
 +		} else {
-+			if (ret != 5){
-+				ath12k_err(ar->ab,"5 arguments required usage: level tmplwm tmphwm dcoffpercent duty_cycle");
++			if (ret != 5) {
++				ath12k_err(ar->ab,
++					   "5 arguments required usage: level tmplwm tmphwm dcoffpercent duty_cycle");
 +				ret = -EINVAL;
 +				goto out;
 +			}
@@ -122,32 +196,33 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +	}
 +
 +	if (pout_reduction_db > 100) {
-+		ath12k_err(ar->ab,"pout_reduction_db should be betweem 0 and 100");
++		ath12k_err(ar->ab, "pout_reduction_db should be betweem 0 and 100");
 +		ret = -EINVAL;
 +		goto out;
 +	}
 +
 +	if (test_bit(WMI_SERVICE_THERM_THROT_5_LEVELS, ar->ab->wmi_ab.svc_map)) {
 +		if (level > 4) {
-+			ath12k_err(ar->ab,"level should be between 0 and 4");
++			ath12k_err(ar->ab, "level should be between 0 and 4");
 +			ret = -EINVAL;
 +			goto out;
 +		}
 +	} else {
 +		if (level > 3) {
-+			ath12k_err(ar->ab,"level should be between 0 and 3");
++			ath12k_err(ar->ab, "level should be between 0 and 3");
 +			ret = -EINVAL;
 +			goto out;
 +		}
 +	}
 +
 +	if (tx_chainmask > ar->cfg_tx_chainmask || (tx_chainmask & (tx_chainmask + 1)) != 0) {
-+		ath12k_err(ar->ab,"tx_chainmask shoulb be 1/3/7/15");
++		ath12k_err(ar->ab, "tx_chainmask shoulb be 1/3/7/15");
 +		ret = -EINVAL;
 +		goto out;
 +	}
 +
-+	ath12k_update_tt_configs(ar, level, tmplwm, tmphwm, dcoffpercent, pout_reduction_db, tx_chainmask, duty_cycle);
++	ath12k_update_tt_configs(ar, level, tmplwm, tmphwm,
++				 dcoffpercent, pout_reduction_db, tx_chainmask, duty_cycle);
 +
 +	ret = count;
 +out:
@@ -155,6 +230,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +}
 +
 +static const struct file_operations tt_configs = {
++	.read = ath12k_debug_get_tt_stats_configs,
 +	.write = ath12k_debug_write_tt_configs,
 +	.open = simple_open,
 +};
@@ -162,7 +238,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  #ifdef CPTCFG_ATH12K_POWER_OPTIMIZATION
  static ssize_t ath12k_debug_write_dbs_power_reduction(struct file *file,
  						      const char __user *user_buf,
-@@ -5922,6 +6019,9 @@ int ath12k_debugfs_register(struct ath12
+@@ -5922,6 +6093,9 @@ int ath12k_debugfs_register(struct ath12
  
  	memset(&ar->wmm_stats, 0, sizeof(struct ath12k_wmm_stats));
  
@@ -174,7 +250,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  			    &fops_wmm_stats);
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -19634,6 +19634,7 @@ static int __ath12k_mac_register(struct
+@@ -19630,6 +19630,7 @@ static int __ath12k_mac_register(struct
  {
  	struct ieee80211_hw *hw;
  	struct ath12k_pdev_cap *cap;
@@ -182,7 +258,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  	u8 total_vdevs;
  
  	int ret;
-@@ -19650,6 +19651,62 @@ static int __ath12k_mac_register(struct
+@@ -19647,6 +19648,65 @@ static int __ath12k_mac_register(struct
  	if (ret)
  		return ret;
  
@@ -195,7 +271,8 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +			ar->tt_level_configs[level].dcoffpercent =
 +				tt_level_configs[ATH12K_IPA_THERMAL_LEVEL][level].dcoffpercent;
 +			ar->tt_level_configs[level].priority = 0;
-+			ar->tt_level_configs[level].duty_cycle = ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
++			ar->tt_level_configs[level].duty_cycle =
++				ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
 +
 +			if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION,
 +				     ar->ab->wmi_ab.svc_map))
@@ -212,7 +289,8 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +				ar->tt_level_configs[level].dcoffpercent =
 +					tt_level_configs[ATH12K_XFRM_IPQ5424_THERMAL_LEVEL][level].dcoffpercent;
 +				ar->tt_level_configs[level].priority = 0;
-+				ar->tt_level_configs[level].duty_cycle = ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
++				ar->tt_level_configs[level].duty_cycle =
++					ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
 +
 +				if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION,
 +					     ar->ab->wmi_ab.svc_map))
@@ -228,7 +306,8 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +				ar->tt_level_configs[level].dcoffpercent =
 +					tt_level_configs[ATH12K_XFRM_THERMAL_LEVEL][level].dcoffpercent;
 +				ar->tt_level_configs[level].priority = 0;
-+				ar->tt_level_configs[level].duty_cycle = ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
++				ar->tt_level_configs[level].duty_cycle =
++					ATH12K_THERMAL_DEFAULT_DUTY_CYCLE;
 +
 +				if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION,
 +					     ar->ab->wmi_ab.svc_map))
@@ -311,10 +390,11 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 -			ATH12K_THERMAL_LVL1_V2_TEMP_LOW_MARK,
 -			ATH12K_THERMAL_LVL1_V2_TEMP_HIGH_MARK,
 -			ATH12K_THERMAL_LVL1_V2_DUTY_CYCLE, 0,
+-			THERMAL_CONFIG_POUT1
 +			ATH12K_THERMAL_XFRM_LVL1_TEMP_LOW_MARK,
 +			ATH12K_THERMAL_XFRM_LVL1_TEMP_HIGH_MARK,
 +			ATH12K_THERMAL_LVL1_DUTY_CYCLE, 0,
- 			THERMAL_CONFIG_POUT1
++			THERMAL_CONFIG_POUT0
  		},
  		{ /* Level 2 */
 -			ATH12K_THERMAL_LVL2_V2_TEMP_LOW_MARK,
@@ -324,7 +404,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +			ATH12K_THERMAL_XFRM_LVL2_TEMP_LOW_MARK,
 +			ATH12K_THERMAL_XFRM_LVL2_TEMP_HIGH_MARK,
 +			ATH12K_THERMAL_LVL2_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT2
++			THERMAL_CONFIG_POUT0
  		},
  		{ /* Level 3 */
 -			ATH12K_THERMAL_LVL3_V2_TEMP_LOW_MARK,
@@ -334,16 +414,17 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +			ATH12K_THERMAL_XFRM_LVL3_TEMP_LOW_MARK,
 +			ATH12K_THERMAL_XFRM_LVL3_TEMP_HIGH_MARK,
 +			ATH12K_THERMAL_LVL3_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT3
++			THERMAL_CONFIG_POUT0
  		},
  		{ /* Level 4 */
 -			ATH12K_THERMAL_LVL4_V2_TEMP_LOW_MARK,
 -			ATH12K_THERMAL_LVL4_V2_TEMP_HIGH_MARK,
 -			ATH12K_THERMAL_LVL4_V2_DUTY_CYCLE, 0,
+-			THERMAL_CONFIG_POUT4
 +			ATH12K_THERMAL_XFRM_LVL4_TEMP_LOW_MARK,
 +			ATH12K_THERMAL_XFRM_LVL4_TEMP_HIGH_MARK,
 +			ATH12K_THERMAL_LVL4_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT4
++			THERMAL_CONFIG_POUT0
 +		}
 +	},
 +	{
@@ -357,32 +438,32 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
 +			ATH12K_THERMAL_XFRM_LVL1_TEMP_LOW_MARK_IPQ5424,
 +			ATH12K_THERMAL_XFRM_LVL1_TEMP_HIGH_MARK_IPQ5424,
 +			ATH12K_THERMAL_LVL1_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT1
++			THERMAL_CONFIG_POUT0
 +		},
 +		{ /* Level 2 */
 +			ATH12K_THERMAL_XFRM_LVL2_TEMP_LOW_MARK_IPQ5424,
 +			ATH12K_THERMAL_XFRM_LVL2_TEMP_HIGH_MARK_IPQ5424,
 +			ATH12K_THERMAL_LVL2_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT2
++			THERMAL_CONFIG_POUT0
 +		},
 +		{ /* Level 3 */
 +			ATH12K_THERMAL_XFRM_LVL3_TEMP_LOW_MARK_IPQ5424,
 +			ATH12K_THERMAL_XFRM_LVL3_TEMP_HIGH_MARK_IPQ5424,
 +			ATH12K_THERMAL_LVL3_DUTY_CYCLE, 0,
-+			THERMAL_CONFIG_POUT3
++			THERMAL_CONFIG_POUT0
 +		},
 +		{ /* Level 4 */
 +			ATH12K_THERMAL_XFRM_LVL4_TEMP_LOW_MARK_IPQ5424,
 +			ATH12K_THERMAL_XFRM_LVL4_TEMP_HIGH_MARK_IPQ5424,
 +			ATH12K_THERMAL_LVL4_DUTY_CYCLE, 0,
- 			THERMAL_CONFIG_POUT4
++			THERMAL_CONFIG_POUT0
  		}
  	}
  };
  
-+
 +void ath12k_update_tt_configs(struct ath12k *ar, int level, int tmplwm, int tmphwm,
-+			      int dcoffpercent, int pout_reduction_db, int tx_chain_mask, int duty_cycle)
++			      int dcoffpercent, int pout_reduction_db,
++			      int tx_chain_mask, int duty_cycle)
 +{
 +	ar->tt_level_configs[level].tx_chain_mask = tx_chain_mask;
 +	ar->tt_level_configs[level].tmplwm = tmplwm;
@@ -410,11 +491,11 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  
  	spin_lock_bh(&ar->data_lock);
 -	if (test_bit(WMI_TLV_SERVICE_THERM_THROT_POUT_REDUCTION, ar->ab->wmi_ab.svc_map))
-+	if (test_bit(WMI_SERVICE_IS_TARGET_IPA, ar->ab->wmi_ab.svc_map)) {
- 		ar->thermal.throttle_state =
+-		ar->thermal.throttle_state =
 -			tt_level_configs[ATH12K_ENHANCED_THERMAL_LEVEL][curr_level].dcoffpercent;
 -	else
--		ar->thermal.throttle_state =
++	if (test_bit(WMI_SERVICE_IS_TARGET_IPA, ar->ab->wmi_ab.svc_map)) {
+ 		ar->thermal.throttle_state =
 -			tt_level_configs[ATH12K_DEFAULT_THERMAL_LEVEL][curr_level].dcoffpercent;
 +			tt_level_configs[ATH12K_IPA_THERMAL_LEVEL][curr_level].dcoffpercent;
 +	} else {
@@ -587,11 +668,13 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  struct thermal_mitigation_params {
  	u32 pdev_id;
  	u32 enable;
-@@ -113,6 +124,7 @@ void ath12k_ath_update_active_pdev_count
+@@ -113,6 +124,9 @@ void ath12k_ath_update_active_pdev_count
  int ath12k_thermal_register(struct ath12k_base *sc);
  void ath12k_thermal_unregister(struct ath12k_base *sc);
  int ath12k_thermal_set_throttling(struct ath12k *ar, u32 throttle_state);
-+void ath12k_update_tt_configs(struct ath12k *ar, int level, int tmplwm, int tmphwm, int dcoffpercent, int pout_reduction_db, int tx_chain_mask, int duty_cycle);
++void ath12k_update_tt_configs(struct ath12k *ar, int level, int tmplwm,
++			      int tmphwm, int dcoffpercent, int pout_reduction_db,
++			      int tx_chain_mask, int duty_cycle);
  void ath12k_thermal_event_temperature(struct ath12k *ar, int temperature);
  void ath12k_thermal_event_throt_level(struct ath12k *ar, int curr_level);
  int ath12k_wmi_thermal_set_throttle(struct ath12k *ar);
@@ -690,6 +773,75 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  			lvl_conf++;
  		}
  	}
+@@ -14517,6 +14531,47 @@ exit:
+ 	rcu_read_unlock();
+ }
+ 
++static int ath12k_wmi_stats_parser(struct ath12k_base *ab,
++				   u16 tag, u16 tag_len,
++				   const void *ptr,
++				   void *data)
++{
++	int ret = 0;
++	u16 tlv_tag, tlv_len, len;
++	const struct wmi_tlv *tlv;
++	struct wmi_therm_throt_level_stats_info *tt_stats = data;
++
++	switch (tag) {
++	case WMI_TAG_THERM_THROT_STATS_EVENT:
++		break;
++	case WMI_TAG_ARRAY_STRUCT:
++		len = tag_len;
++		tlv = (struct wmi_tlv *)ptr;
++		tlv_tag = u32_get_bits(tlv->header, WMI_TLV_TAG);
++
++		while (len > 0) {
++			len -= sizeof(*tlv);
++			tlv_len = le32_get_bits(tlv->header, WMI_TLV_LEN);
++			ptr += sizeof(*tlv);
++			struct wmi_therm_throt_level_stats_info *stats;
++
++			stats = (struct wmi_therm_throt_level_stats_info *)ptr;
++
++			memcpy(tt_stats, stats,
++			       sizeof(struct wmi_therm_throt_level_stats_info));
++			ptr += tlv_len;
++			tt_stats++;
++			len -= tlv_len;
++		}
++		break;
++	default:
++		ath12k_warn(ab, "Invalid tag received tag %d len %d\n",
++			    tag, len);
++		return -EINVAL;
++	}
++	return ret;
++}
++
+ static void ath12k_wmi_thermal_throt_stats_event(struct ath12k_base *ab,
+ 						 struct sk_buff *skb)
+ {
+@@ -14524,6 +14579,7 @@ static void ath12k_wmi_thermal_throt_sta
+ 	const void **tb;
+ 	int ret;
+ 	const struct wmi_therm_throt_stats_event *ev;
++	struct wmi_therm_throt_level_stats_info *stats;
+ 
+ 	tb = ath12k_wmi_tlv_parse_alloc(ab, skb->data, skb->len, GFP_ATOMIC);
+ 	if (IS_ERR(tb)) {
+@@ -14549,6 +14605,12 @@ static void ath12k_wmi_thermal_throt_sta
+ 	if (!ar)
+ 		goto err;
+ 
++	stats = ar->tt_level_stats;
++	memcpy(&ar->tt_current_state, ev, sizeof(struct wmi_therm_throt_stats_event));
++	ret = ath12k_wmi_tlv_iter(ab, skb->data, skb->len,
++				  ath12k_wmi_stats_parser,
++				  stats);
++
+ 	ath12k_thermal_event_throt_level(ar, ev->level);
+ 
+ err:
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
 @@ -2529,6 +2529,9 @@ enum wmi_tlv_service {
@@ -702,7 +854,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  	WMI_TLV_SERVICE_DYNAMIC_TWT_MODE_SUPPORT = 433,
  	WMI_MAX_EXT2_SERVICE,
  };
-@@ -4979,13 +4982,17 @@ struct wmi_init_country_cmd {
+@@ -4980,13 +4983,17 @@ struct wmi_init_country_cmd {
  
  #define THERMAL_LEVELS  4
  #define ENHANCED_THERMAL_LEVELS  5
@@ -721,7 +873,17 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  };
  
  struct wmi_therm_throt_stats_event {
-@@ -5001,7 +5007,7 @@ struct ath12k_wmi_thermal_mitigation_arg
+@@ -4996,12 +5003,17 @@ struct wmi_therm_throt_stats_event {
+ 	__le32 therm_throt_levels;
+ } __packed;
+ 
++struct wmi_therm_throt_level_stats_info {
++	__le32 level_count;
++	__le32 dc_count;
++};
++
+ struct ath12k_wmi_thermal_mitigation_arg {
+ 	u32 pdev_id;
  	u32 enable;
  	u32 dc;
  	u32 dc_per_event;
@@ -730,7 +892,7 @@ Signed-off-by: Harish Rachakonda <quic_rachakon@quicinc.com>
  };
  
  struct wmi_therm_throt_config_request_cmd {
-@@ -5019,6 +5026,8 @@ struct wmi_therm_throt_level_config_info
+@@ -5020,6 +5032,8 @@ struct wmi_therm_throt_level_config_info
  	__le32 dc_off_percent;
  	__le32 prio;
  	__le32 pout_reduction_25db;
