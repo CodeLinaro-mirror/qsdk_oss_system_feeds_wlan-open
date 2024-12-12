@@ -27,7 +27,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	struct ieee80211_local *local = sdata->local;
  	int queue = sdata->vif.hw_queue[ieee80211_ac_from_tid(tid)];
  	unsigned long flags;
-+	struct spinlock_t *pcpu_queue_stop_reason_lock;
++	spinlock_t *pcpu_queue_stop_reason_lock;
 +	struct sk_buff_head *pcpu_pending;
  
  	ieee80211_stop_queue_agg(sdata, tid);
@@ -52,7 +52,43 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  
 --- a/net/mac80211/debugfs.c
 +++ b/net/mac80211/debugfs.c
-@@ -655,14 +655,26 @@ static ssize_t queues_read(struct file *
+@@ -626,8 +626,10 @@ static ssize_t misc_read(struct file *fi
+ 	char *buf;
+ 	char *pos, *end;
+ 	ssize_t rv;
+-	int i;
++	int i, cpu;
+ 	int ln;
++	struct sk_buff_head *pcpu_pending;
++	unsigned long flags;
+ 
+ 	buf = kzalloc(bufsz, GFP_KERNEL);
+ 	if (!buf)
+@@ -638,10 +640,19 @@ static ssize_t misc_read(struct file *fi
+ 
+ 	pos += scnprintf(pos, end - pos, "pending:\n");
+ 
+-	for (i = 0; i < IEEE80211_MAX_QUEUES; i++) {
+-		ln = skb_queue_len(&local->pending[i]);
+-		pos += scnprintf(pos, end - pos, "[%i] %d\n",
+-				 i, ln);
++	/* Read queues from each CPU for each access category
++	 */
++	for_each_possible_cpu(cpu) {
++		spin_lock_irqsave(per_cpu_ptr(local->queue_stop_reason_lock, cpu),
++				flags);
++		for (i = 0; i < IEEE80211_MAX_QUEUES; i++) {
++			pcpu_pending = per_cpu_ptr(local->pending[i], cpu);
++			ln = skb_queue_len(pcpu_pending);
++			pos += scnprintf(pos, end - pos, "cpu%d:[%i] %d\n",
++					 cpu, i, ln);
++		}
++		spin_unlock_irqrestore(per_cpu_ptr(local->queue_stop_reason_lock, cpu),
++				flags);
+ 	}
+ 
+ 	rv = simple_read_from_buffer(user_buf, count, ppos, buf, strlen(buf));
+@@ -655,14 +666,26 @@ static ssize_t queues_read(struct file *
  	struct ieee80211_local *local = file->private_data;
  	unsigned long flags;
  	char buf[IEEE80211_MAX_QUEUES * 20];
@@ -91,7 +127,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	struct ieee80211_if_managed *ifmgd;
  	unsigned long flags;
  	int q;
-+	struct spinlock_t *pcpu_queue_stop_reason_lock;
++	spinlock_t *pcpu_queue_stop_reason_lock;
 +	unsigned long *queue_stop_reasons;
  
  	/* can only happen when PS was just disabled anyway */
@@ -223,7 +259,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	int q = vif->hw_queue[txq->ac];
  	unsigned long flags;
  	bool q_stopped;
-+	struct spinlock_t *pcpu_queue_stop_reason_lock;
++	spinlock_t *pcpu_queue_stop_reason_lock;
 +	unsigned long *queue_stop_reasons;
  
  	WARN_ON_ONCE(softirq_count() == 0);
@@ -247,7 +283,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	struct ieee80211_sta *pubsta = NULL;
  	unsigned long flags;
  	int q = info->hw_queue;
-+	struct spinlock_t *queue_stop_reason_lock;
++	spinlock_t *queue_stop_reason_lock;
 +	struct sk_buff_head *pending;
 +	unsigned long *queue_stop_reasons;
 +
@@ -284,7 +320,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	struct ethhdr *ehdr = (struct ethhdr *)skb->data;
  	unsigned char *ra = ehdr->h_dest;
  	bool multicast = is_multicast_ether_addr(ra);
-+	struct spinlock_t *queue_stop_reason_lock;
++	spinlock_t *queue_stop_reason_lock;
 +	struct sk_buff_head *pending;
 +	unsigned long *queue_stop_reasons;
 +
