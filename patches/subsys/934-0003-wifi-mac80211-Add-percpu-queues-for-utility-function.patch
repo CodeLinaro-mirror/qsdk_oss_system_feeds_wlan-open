@@ -19,7 +19,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	int n_acs = IEEE80211_NUM_ACS;
  	unsigned long flags;
  	int i;
-+	struct spinlock_t *queue_stop_reason_lock;
++	spinlock_t *queue_stop_reason_lock;
 +	unsigned long *queue_stop_reasons;
  
  	rcu_read_lock();
@@ -202,7 +202,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 +	unsigned long flags;
 +	struct ieee80211_local *local = sdata->local;
 +	struct sk_buff *skb, *tmp;
-+	struct spinlock_t *pcpu_queue_stop_reason_lock;
++	spinlock_t *pcpu_queue_stop_reason_lock;
 +	struct sk_buff_head *pcpu_pending;
 +
 +	pcpu_queue_stop_reason_lock = this_cpu_ptr(local->queue_stop_reason_lock);
@@ -264,7 +264,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 +
 +	for_each_set_bit(i, &queues, hw->queues) {
 +		queue_info.queue = i;
-+		on_each_cpu(ieee80211_stop_queues_one_by_one, &queue_info, 1);
++		on_each_cpu((void (*)(void *))ieee80211_stop_queues_one_by_one, &queue_info, 1);
 +	}
  }
  
@@ -315,7 +315,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 +
 +	for_each_set_bit(i, &queues, hw->queues) {
 +		queue_info.queue = i;
-+		on_each_cpu(ieee80211_wake_queues_one_by_one, &queue_info, 1);
++		on_each_cpu((void (*)(void *))ieee80211_wake_queues_one_by_one, &queue_info, 1);
 +	}
  }
  
@@ -350,7 +350,7 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
 +	/* Since there are percpu SW queues, unlink all
 +	 * the skbs on each CPU SW queues
 +	 */
-+	on_each_cpu(ieee80211_unlink_all_skbs, sdata, 1);
++	on_each_cpu((void (*)(void *))ieee80211_unlink_all_skbs, sdata, 1);
  
  	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
  		ieee80211_txq_remove_vlan(local, sdata);
@@ -359,13 +359,13 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  
  	if (local->open_count == 0)
 -		ieee80211_clear_tx_pending(local);
-+		on_each_cpu(ieee80211_clear_tx_pending, local, 1);
++		on_each_cpu((void (*)(void *))ieee80211_clear_tx_pending, local, 1);
  
  	sdata->vif.bss_conf.beacon_int = 0;
  
 --- a/net/mac80211/main.c
 +++ b/net/mac80211/main.c
-@@ -1655,8 +1655,13 @@ EXPORT_SYMBOL(ieee80211_register_hw);
+@@ -1653,8 +1653,13 @@ EXPORT_SYMBOL(ieee80211_register_hw);
  void ieee80211_unregister_hw(struct ieee80211_hw *hw)
  {
  	struct ieee80211_local *local = hw_to_local(hw);
@@ -380,12 +380,12 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  	tasklet_kill(&local->tasklet);
  
  #ifdef __disabled__CONFIG_INET
-@@ -1687,7 +1692,7 @@ void ieee80211_unregister_hw(struct ieee
+@@ -1685,7 +1690,7 @@ void ieee80211_unregister_hw(struct ieee
  	cancel_work_sync(&local->restart_work);
  	cancel_work_sync(&local->reconfig_filter);
  
 -	ieee80211_clear_tx_pending(local);
-+	on_each_cpu(ieee80211_clear_tx_pending, local, 1);
++	on_each_cpu((void (*)(void *))ieee80211_clear_tx_pending, local, 1);
  	rate_control_deinitialize(local);
  
  	if (skb_queue_len(&local->skb_queue) ||
@@ -404,3 +404,27 @@ Signed-off-by: Ramanathan Choodamani <quic_rchoodam@quicinc.com>
  			ieee80211_free_txskb(&local->hw, skb);
  	}
  }
+--- a/net/mac80211/tdls.c
++++ b/net/mac80211/tdls.c
+@@ -1445,7 +1445,7 @@ int ieee80211_tdls_oper(struct wiphy *wi
+ 	struct sta_info *sta;
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct ieee80211_local *local = sdata->local;
+-	int ret;
++	int ret, cpu;
+ 
+ 	if (!(wiphy->flags & WIPHY_FLAG_SUPPORTS_TDLS))
+ 		return -ENOTSUPP;
+@@ -1508,7 +1508,11 @@ int ieee80211_tdls_oper(struct wiphy *wi
+ 		 * Note that this only forces the tasklet to flush pendings -
+ 		 * not to stop the tasklet from rescheduling itself.
+ 		 */
+-		tasklet_kill(&local->tx_pending_tasklet);
++		for_each_possible_cpu(cpu) {
++			struct ieee80211_tasklet_data *tasklet_data =
++				 per_cpu_ptr(local->tx_pending_tasklet, cpu);
++			tasklet_kill(&tasklet_data->tasklet);
++		}
+ 		/* flush a potentially queued teardown packet */
+ 		ieee80211_flush_queues(local, sdata, false);
+ 
