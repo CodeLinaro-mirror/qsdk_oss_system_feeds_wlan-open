@@ -16,6 +16,39 @@
 
 append DRIVERS "mac80211"
 
+update_primary_link()
+{
+	local mld_names
+	local phy=$1
+	config_load wireless
+
+	mac80211_get_wifi_mlds() {
+		append mld_names "$1"
+	}
+	config_foreach mac80211_get_wifi_mlds wifi-mld
+
+	if [ -n "$mld_names" ]; then
+		for mld_iface in $mld_names; do
+			config_get mld_primary_link "$mld_iface" primary_link
+			config_get mld_ifname "$mld_iface" ifname
+			if [ -z "$mld_ifname" ]; then
+				mld_ifname=$phy-$mld_iface
+			fi
+			if [ -n "$mld_primary_link" ]; then
+				while true;
+				do
+					ifname_state="$(hostapd_cli -i "$mld_ifname" status 2> /dev/null | grep state | cut -d'=' -f 2)"
+					if [ "$ifname_state" = "ENABLED" ] && \
+					   [ -f /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link ]; then
+						echo "$mld_primary_link" > /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link
+						break;
+					fi
+				done
+			fi
+		done
+	fi
+}
+
 mac80211_update_mld_iface_config() {
 	vif_name=$1
 	mld_name=$2
@@ -431,6 +464,12 @@ post_mac80211() {
 				configure_telemetry_sla_thersholds
 				configure_telemetry_sla_detect
 			fi
+			PHY_PATH="/sys/kernel/debug/ieee80211"
+			[ -d  $PHY_PATH ] && {
+				for phy in $(ls $PHY_PATH 2>/dev/null); do
+					update_primary_link "$phy"
+				done
+			}
 		;;
 	esac
 	return 0
