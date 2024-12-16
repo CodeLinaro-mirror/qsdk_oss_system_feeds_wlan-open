@@ -231,6 +231,84 @@ mlo_add_link() {
 	rm /tmp/mlo_support.txt 2>/dev/null
 }
 
+mlo_remove_link() {
+	local link
+	local mld
+	local iface_data
+	local check_band
+	local device_check
+	local remove_flag
+	local result
+
+	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]; then
+		echo "command line inputs missing" > /dev/ttyMSM0
+		return
+	fi
+
+	mld=$(uci show wireless | grep "'$3'" | cut -d "." -f 2 | sed -n '1p')
+	[ -n "$mld" ] || {
+		echo "wrong interface name is given or mld doesn't found for given interface" > /dev/ttyMSM0
+		return
+	}
+
+	iface_data=$(uci show wireless | grep "'$mld'" | cut -d'.' -f2 | cut -d'@' -f 2)
+	[ -n "$iface_data" ] || {
+		echo "link is not available to remove" > /dev/ttyMSM0
+		return
+	}
+
+	case "$2" in
+		2g)
+		channels="1-14"
+		;;
+		5g)
+		channels="36-177"
+		;;
+		5gl)
+		channels="36-64"
+		;;
+		5gh)
+		channels="100-177"
+		;;
+		6g)
+		channels="2-233"
+		;;
+		6gl)
+		channels="2-93"
+		;;
+		6gh)
+		channels="129-233"
+		;;
+		*) echo "wrong band is given" > /dev/ttyMSM0
+		return;;
+	esac
+	link=$(uci show wireless | grep $channels | cut -d "_" -f 2 | cut -d "." -f 1)
+	[ -n "$link" ] || {
+		echo "failed to find band number" > /dev/ttyMSM0
+		return
+	}
+	remove_flag=0
+	for iface in $iface_data; do
+		check_band=$(uci show wireless.@${iface}.device | awk -F"'" '{print $2}' | cut -d'_' -f2)
+		if [ "$check_band" = "$link" ]; then
+			result=$(hostapd_cli -i $3 -l $4 link_remove $5)
+			if [ "$result" = "FAIL" ]; then
+				echo "failed to remove the link" > /dev/ttyMSM0
+				return
+			fi
+			uci del wireless.@${iface}
+			uci commit wireless
+			device_check=$(uci show wireless | grep "device='radio0_$link")
+			[ -z "$device_check" ] && uci set wireless.radio0_${link}.disabled='1' && uci commit wireless
+			echo "link is removed" > /dev/ttyMSM0
+			remove_flag=1
+		fi
+	done
+	if [ $remove_flag = 0 ]; then
+		echo "link is not present on selected interface" > /dev/ttyMSM0
+	fi
+}
+
 configure_service_param() {
 	enable_service=$2
 	phy=$3
