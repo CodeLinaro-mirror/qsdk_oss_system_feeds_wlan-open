@@ -96,7 +96,7 @@ function generate_config(info, name, single_wiphy, id, radio_idx) {
 		channels = get_channel_list(start_freq, end_freq);
 		if (band_name == "6G") {
 			let start_freq = radio_idx.first_freq;
-			if (freq_to_channel(start_freq) == 189)
+			if (freq_to_channel(start_freq) >= 129)
 				channel = 197;
 			else
 				channel = 49;
