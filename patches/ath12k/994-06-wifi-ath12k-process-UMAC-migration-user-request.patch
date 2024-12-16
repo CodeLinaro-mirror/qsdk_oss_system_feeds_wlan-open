@@ -32,7 +32,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  #define ATH12K_HALF_20MHZ_BW 10
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -21182,3 +21182,301 @@ select_pri_link:
+@@ -21198,3 +21198,297 @@ select_pri_link:
  	return pri_link_id;
  }
  
@@ -174,11 +174,46 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	return node;
 +}
 +
++static int ath12k_mac_handle_sta_migration(struct ath12k_ml_peer *ml_peer,
++					   struct ath12k_sta *ahsta, u8 link_id,
++					   struct list_head *list_head, int *num_peers)
++{
++	struct ath12k_mac_pri_link_migr_peer_node *peer_node;
++	u8 pri_link_id;
++	int ret;
++
++	if (!ath12k_mac_ahsta_can_migrate(ahsta))
++		return -EPERM;
++
++	if (link_id == 0xFF) {
++		ret = ath12k_mac_get_next_pri_link(ahsta, &pri_link_id);
++		if (ret)
++			return ret;
++	} else if (ath12k_mac_ahsta_is_migra_link_valid(ahsta, link_id)) {
++		pri_link_id = link_id;
++	} else {
++		return -EINVAL;
++	}
++
++	peer_node = ath12k_mac_get_link_migr_peer_node(ml_peer, pri_link_id);
++	if (!peer_node)
++		return -ENOMEM;
++
++	ath12k_info(NULL,
++		    "ML sta %pM will migrate pri link to link_id %u hw_link_id %u\n",
++		    ml_peer->addr, pri_link_id, peer_node->hw_link_id);
++
++	list_add(&peer_node->list, list_head);
++	ahsta->is_migration_in_progress = true;
++	(*num_peers)++;
++
++	return 0;
++}
++
 +int
 +ath12k_mac_process_link_migrate_req(struct ath12k_vif *ahvif,
 +				    struct ath12k_mac_link_migrate_usr_params *params)
 +{
-+	struct ath12k_mac_pri_link_migr_peer_node *peer_node;
 +	struct ath12k_link_vif *arvif, *arvif_itr;
 +	struct ath12k_hw *ah = ahvif->ah;
 +	struct list_head peer_migr_list;
@@ -186,10 +221,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct ath12k_link_sta *arsta;
 +	unsigned long int valid_links;
 +	struct ath12k_sta *ahsta;
-+	u8 pri_link_id, link_id;
-+	struct ath12k *ar;
-+	bool found;
 +	int ret, num_peers = 0;
++	struct ath12k *ar;
++	u8 link_id;
++	bool found;
 +
 +	INIT_LIST_HEAD(&peer_migr_list);
 +
@@ -209,11 +244,6 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
 +		ahsta = ml_peer->ahsta;
 +
-+		if (!ath12k_mac_ahsta_can_migrate(ahsta)) {
-+			ret = -EPERM;
-+			goto exit_link_migrate_req;
-+		}
-+
 +		arvif = ath12k_get_arvif_from_link_id(ahvif, ahsta->primary_link_id);
 +		if (!arvif || !arvif->is_up || !arvif->ar) {
 +			ret = -ENODEV;
@@ -222,30 +252,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +
 +		ar = arvif->ar;
 +
-+		if (params->link_id == 0xFF) {
-+			ret = ath12k_mac_get_next_pri_link(ahsta, &pri_link_id);
-+			if (ret)
-+				goto exit_link_migrate_req;
-+		} else if (ath12k_mac_ahsta_is_migra_link_valid(ahsta, params->link_id)) {
-+			pri_link_id = params->link_id;
-+		} else {
-+			ret = -EINVAL;
++		ret = ath12k_mac_handle_sta_migration(ml_peer, ahsta, params->link_id,
++						      &peer_migr_list, &num_peers);
++		if (ret)
 +			goto exit_link_migrate_req;
-+		}
-+
-+		peer_node = ath12k_mac_get_link_migr_peer_node(ml_peer, pri_link_id);
-+		if (!peer_node) {
-+			ret = -ENOMEM;
-+			goto exit_link_migrate_req;
-+		}
-+
-+		ath12k_info(NULL,
-+			    "ML sta %pM will migrate pri link to link_id %u hw_link_id %u\n",
-+			    params->addr, pri_link_id, peer_node->hw_link_id);
-+
-+		list_add(&peer_node->list, &peer_migr_list);
-+		ahsta->is_migration_in_progress = true;
-+		num_peers++;
 +
 +		goto send_link_mig_cmd;
 +	}
@@ -300,24 +310,10 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +		if (!found)
 +			continue;
 +
-+		if (!ath12k_mac_ahsta_can_migrate(ahsta))
-+			continue;
-+
-+		ret = ath12k_mac_get_next_pri_link(ahsta, &pri_link_id);
++		ret = ath12k_mac_handle_sta_migration(ml_peer, ahsta, 0xFF,
++						      &peer_migr_list, &num_peers);
 +		if (ret)
-+			continue;
-+
-+		peer_node = ath12k_mac_get_link_migr_peer_node(ml_peer, pri_link_id);
-+		if (!peer_node)
-+			continue;
-+
-+		ath12k_info(NULL,
-+			    "ML sta %pM will migrate pri link to link_id %u hw_link_id %u\n",
-+			    ml_peer->addr, pri_link_id, peer_node->hw_link_id);
-+
-+		list_add(&peer_node->list, &peer_migr_list);
-+		ahsta->is_migration_in_progress = true;
-+		num_peers++;
++			goto exit_link_migrate_req;
 +	}
 +
 +send_link_mig_cmd:
@@ -400,7 +396,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/peer.h
 +++ b/drivers/net/wireless/ath/ath12k/peer.h
-@@ -145,6 +145,9 @@ struct ath12k_peer *ath12k_peer_find_by_
+@@ -147,6 +147,9 @@ struct ath12k_peer *ath12k_peer_find_by_
  #ifdef CPTCFG_ATH12K_SAWF
  struct ath12k_peer *ath12k_peer_find_pri_by_id(struct ath12k_base *ab, int peer_id);
  #endif
