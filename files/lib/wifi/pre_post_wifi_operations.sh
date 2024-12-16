@@ -105,12 +105,21 @@ mlo_add_link() {
 	local key
 	local channels
 	local mld
+	local iface_data
+	local check_band
 
-	mld=$(uci show wireless | grep "$3" | cut -d "." -f 2)
+	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
+		echo "command line inputs missing" > /dev/ttyMSM0
+		return
+	fi
+
+	mld=$(uci show wireless | grep "'$3'" | cut -d "." -f 2)
 	[ -n "$mld" ] || {
 		echo "wrong interface name is given or mld doesn't found for given interface" > /dev/ttyMSM0
 		return
 	}
+
+	iface_data=$(uci show wireless | grep "'$mld'" | cut -d'.' -f2 | cut -d'@' -f 2)
 
 	case "$2" in
 		2g)
@@ -142,6 +151,13 @@ mlo_add_link() {
 		echo "failed to find band number" > /dev/ttyMSM0
 		return
 	}
+	for iface in $iface_data; do
+		check_band=$(uci show wireless.@${iface}.device | awk -F"'" '{print $2}' | cut -d'_' -f2)
+		if [ "$check_band" = "$link" ]; then
+			echo "link is already present in the mld" > /dev/ttyMSM0
+			return
+		fi
+	done
 	uci add wireless wifi-iface
 	conf_idx=$(uci show wireless | sed -n 's/.*@wifi-iface\[\([0-9]\+\)\].*/\1/p' | sort -n | tail -1)
 	echo 1 > /tmp/mlo_support.txt&
@@ -161,9 +177,9 @@ mlo_add_link() {
 	uci set wireless.@wifi-iface[$conf_idx].mld="$mld"
 	uci set wireless.@wifi-iface[$conf_idx].macaddr="$4"
 	uci commit wireless
-	input_file=/var/run/hostapd-${1}_${link}.conf
+	input_file=/var/run/hostapd-${1}.${link:${#link}-1:1}.conf
 	if [ -f $input_file ]; then
-		output_file=/tmp/hostapd-${1}_${link}.conf
+		output_file=/tmp/hostapd-${1}.${link:${#link}-1:1}.conf
 		if grep -q "bss=" "$input_file"; then
 			awk '/bss=/ {exit} {print}' "$input_file" > "$output_file"
 		else
@@ -179,6 +195,10 @@ mlo_add_link() {
 		fi
 		echo "bssid=$4" >> $output_file
 		echo "interface=$3" >> $output_file
+		if [ "6g" = "$2" ]; then
+			echo "mbssid=3" >> "$input_file"
+			echo "mbssid_group_size=4" >> "$input_file"
+		fi
 		hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file"
 		rm "$output_file"
 	else
@@ -201,8 +221,8 @@ mlo_add_link() {
 		_wdev_handler_1 "$data" "mac80211" "setup" "radio0_$link" 2> /dev/null
 		json_select ..
 		if [ "6g" = "$2" ]; then
-			echo "mbssid=2" >> "$input_file"
-			echo "ema=1" >> "$input_file"
+			echo "mbssid=3" >> "$input_file"
+			echo "mbssid_group_size=4" >> "$input_file"
 		fi
 		hostapd_cli -i $3 mld_add_link bss_config=${1}:/var/run/hostapd-${1}_${link}.conf
 	fi
