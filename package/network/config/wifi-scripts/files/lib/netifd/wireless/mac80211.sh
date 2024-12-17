@@ -172,6 +172,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int unsol_bcast_presp
 	config_add_int fils_discovery
 	config_add_string ppe_vp
+	config_add_boolean disable_reconfig
 
 	# mesh
 	config_add_string mesh_id

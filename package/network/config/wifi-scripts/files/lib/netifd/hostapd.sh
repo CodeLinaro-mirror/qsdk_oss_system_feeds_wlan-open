@@ -1718,12 +1718,15 @@ wpa_supplicant_add_network() {
 	json_get_values bssid_whitelist bssid_whitelist
 	json_get_var sae_pwe sae_pwe
 	json_get_var rsn_overriding rsn_overriding
+	json_get_var disable_reconfig disable_reconfig
 
 	[ -n "$bssid_blacklist" ] && append network_data "bssid_blacklist=$bssid_blacklist" "$N$T"
 	[ -n "$bssid_whitelist" ] && append network_data "bssid_whitelist=$bssid_whitelist" "$N$T"
 
 	[ -n "$sae_pwe" ] && append saepwe "sae_pwe=$sae_pwe" "$N$T"
 	[ -n "$rsn_overriding" ] && append rsn_override "rsn_overriding=$rsn_overriding" "$N$T"
+
+	[ -n "$disable_reconfig" ] && append reconfig "disable_reconfig=$disable_reconfig" "$N$T"
 
 	[ -n "$basic_rate" ] && {
 		local br rate_list=
@@ -1792,6 +1795,7 @@ network={
 	disable_40mhz_scan=$disable_40mhz_scan
 	$ru_punct_str
 	ccfs=$ccfs
+	$reconfig
 	$freq_list
 }
 EOF
