@@ -799,7 +799,6 @@ ${channel:+channel=$channel}
 ${channel_list:+chanlist=$channel_list}
 ${hostapd_noscan:+noscan=1}
 ${tx_burst:+tx_queue_data2_burst=$tx_burst}
-${multiple_bssid:+mbssid=$multiple_bssid}
 #num_global_macaddr=$num_global_macaddr
 $base_cfg
 
@@ -1513,7 +1512,6 @@ wpa_supplicant_set_config() {
 	[ "$ret" != 0 -o -z "$supplicant_res" ] && wireless_setup_vif_failed WPA_SUPPLICANT_FAILED
 
 	wireless_add_process "$(jsonfilter -s "$supplicant_res" -l 1 -e @.pid)" "/usr/sbin/wpa_supplicant" 1 1
-	update_primary_link
 }
 
 hostapd_set_config() {
@@ -1880,28 +1878,6 @@ drv_mac80211_teardown() {
 	mac80211_set_suffix
 	mac80211_reset_config "$phy"
 }
-
-update_primary_link()
-{
-        if [ -n "$mld_names" ]; then
-                for mld_iface in $mld_names; do
-                        config_get mld_primary_link "$mld_iface" primary_link
-                        config_get mld_ifname "$mld_iface" ifname
-                        if [ -n "$mld_primary_link" ]; then
-                                while true;
-                                do
-                                        ifname_state="$(hostapd_cli -i "$mld_ifname" status 2> /dev/null | grep state | cut -d'=' -f 2)"
-                                        if [ "$ifname_state" = "ENABLED" ]; then
-                                                echo "$mld_primary_link" > /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link
-                                                break;
-                                        fi
-                                done
-                        fi
-                done
-        fi
-
-}
-
 
 _sta_radios=
 mac80211_derive_ml_info() {
