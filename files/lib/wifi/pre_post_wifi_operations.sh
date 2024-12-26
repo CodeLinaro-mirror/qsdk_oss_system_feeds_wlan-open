@@ -180,6 +180,35 @@ mlo_add_link() {
 	input_file=/var/run/hostapd-${1}.${link:${#link}-1:1}.conf
 	if [ -f $input_file ]; then
 		output_file=/tmp/hostapd-${1}.${link:${#link}-1:1}.conf
+		local interfaces=$(cat $input_file | grep -E 'interface=wlan[0-9]+|bss=wlan[0-9]+|interface=phy|bss=phy' | cut -d "=" -f 2)
+		local interface_channel iter_link found interface_bssid interface_addr interface_punct_bitmap
+		local found=0
+		interface_bssid=$(cat $input_file | grep bssid | cut -d "=" -f 2)
+		for iter in $interfaces; do
+			iter_link=$(hostapd_cli -i $iter status | grep 'num_links=' | cut -d "=" -f 2 | head -1) 2> /dev/null
+			while [ "$iter_link" -gt 0 ]; do
+				iter_link=$((iter_link-1))
+				interface_addr=$(hostapd_cli -i $iter -l $iter_link status | grep 'link_addr=' | cut -d "=" -f 2 | head -1) 2> /dev/null
+				for check_addr in $interface_bssid; do
+					if [ "$check_addr" = "$interface_addr" ]; then
+						interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
+						if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
+							interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
+							echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+						fi
+						found=1
+						break;
+					fi
+				done
+				if [ "$found" = 1 ]; then
+					break;
+				fi
+			done
+			if [ "$found" = 1 ]; then
+				break;
+			fi
+		done
+
 		if grep -q "bss=" "$input_file"; then
 			awk '/bss=/ {exit} {print}' "$input_file" > "$output_file"
 		else
@@ -199,6 +228,7 @@ mlo_add_link() {
 			echo "mbssid=3" >> "$input_file"
 			echo "mbssid_group_size=4" >> "$input_file"
 		fi
+		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
 		hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file"
 		rm "$output_file"
 	else
