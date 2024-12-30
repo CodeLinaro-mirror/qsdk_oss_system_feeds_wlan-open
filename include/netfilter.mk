@@ -278,6 +278,12 @@ $(eval $(call nf_add,NFNETLINK_QUEUE,CONFIG_NETFILTER_NETLINK_QUEUE, $(P_XT)nfne
 
 $(eval $(if $(NF_KMOD),$(call nf_add,NF_CONNCOUNT,CONFIG_NETFILTER_CONNCOUNT, $(P_XT)nf_conncount),))
 
+ifeq ($(CONFIG_OPENSYNC_SUPPORTED),y)
+# skipaccel
+
+$(eval $(call nf_add,IPT_SKIPACCEL,CONFIG_NETFILTER_XT_TARGET_SKIPACCEL, $(P_XT)ipt_skipaccel))
+endif
+
 #
 # ebtables
 #
