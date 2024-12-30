@@ -580,8 +580,12 @@ TARGET_CPPFLAGS := \
 
 TARGET_CFLAGS += \
 	-I$(PKG_BUILD_DIR)/include \
-	-I$(LINUX_DIR)/user_headers/include \
+	-I$(LINUX_DIR)/user_headers/include
+
+ifeq ($(CONFIG_OPENSYNC_SUPPORTED),)
+TARGET_CFLAGS += \
 	-DNO_LEGACY
+endif
 
 CONFIGURE_ARGS += \
 	--enable-shared \
