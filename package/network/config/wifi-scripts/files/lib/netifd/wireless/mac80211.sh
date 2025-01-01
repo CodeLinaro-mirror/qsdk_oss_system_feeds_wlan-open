@@ -924,8 +924,14 @@ mac80211_get_addr() {
 mac80211_generate_mac() {
 	local phy="$1"
 	local id="${macidx:-0}"
+	local group_size
+	if [ -n "mbssid_group_size" ]; then
+		group_size="$mbssid_group_size"
+	else
+		group_size="$has_ap"
+	fi
 
-	wdev_tool "$phy$phy_suffix" get_macaddr id=$id num_global=$num_global_macaddr mbssid=${multiple_bssid:-0}
+	wdev_tool "$phy$phy_suffix" get_macaddr id=$id num_global=$num_global_macaddr mbssid=$multiple_bssid mbssid_group_size=$group_size
 }
 
 get_board_phy_name() (

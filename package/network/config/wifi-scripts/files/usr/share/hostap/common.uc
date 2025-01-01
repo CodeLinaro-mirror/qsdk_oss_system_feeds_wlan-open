@@ -204,6 +204,7 @@ const phy_proto = {
 		let mbssid = int(data.mbssid ?? 0) > 0;
 		let num_global = int(data.num_global ?? 1);
 		let use_global = !mbssid && idx < num_global;
+		let mbssid_group_size = int(data.mbssid_group_size ?? 4);
 
 		let base_addr = phy_sysfs_file(phy, "macaddress");
 		if (!base_addr)
@@ -234,6 +235,21 @@ const phy_proto = {
 			return base_addr;
 
 		let addr = macaddr_split(base_addr);
+		let maxbssid_ind = 0;
+		if (mbssid) {
+			let num_bss_nontx = mbssid_group_size - 1;
+			while (num_bss_nontx > 0) {
+				maxbssid_ind++;
+				num_bss_nontx >>= 1;
+			}
+		}
+		let maxbssid = 2 ** maxbssid_ind;
+		if (mbssid && idx >= maxbssid) {
+			addr[5] = ((addr[5] >> maxbssid_ind) << maxbssid_ind);
+			addr[5] = addr[5] + (idx / maxbssid) * maxbssid;
+			idx = idx % maxbssid;
+		}
+
 		let mask = macaddr_split(base_mask);
 		let type;
 
@@ -256,9 +272,15 @@ const phy_proto = {
 			addr[0] ^= idx << 2;
 			break;
 		case "b5":
-			if (mbssid)
+			if (mbssid) {
 				addr[0] |= 2;
-			addr[5] ^= idx;
+				let size = maxbssid;
+				let B = addr[5] % size;
+				let loct = addr[5];
+				addr[5] = loct - B + ((B+idx) % size);
+			} else {
+				addr[5] ^= idx;
+			}
 			break;
 		default:
 			for (let i = 5; i > 0; i--) {
