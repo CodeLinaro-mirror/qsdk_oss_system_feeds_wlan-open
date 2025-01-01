@@ -226,9 +226,8 @@ const phy_proto = {
 			} else {
 				if (idx < length(addrs))
 					return addrs[idx];
-
-				base_mask = "ff:ff:ff:ff:ff:ff";
 			}
+			base_mask = "ff:ff:ff:ff:ff:ff";
 		}
 
 		if (!idx && !mbssid)
