@@ -37,11 +37,13 @@ update_primary_link()
 			if [ -n "$mld_primary_link" ]; then
 				while true;
 				do
-					ifname_state="$(hostapd_cli -i "$mld_ifname" status 2> /dev/null | grep state | cut -d'=' -f 2)"
-					if [ "$ifname_state" = "ENABLED" ] && \
-					   [ -f /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link ]; then
-						echo "$mld_primary_link" > /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link
-						break;
+					ifname_ap_state="$(hostapd_cli -i "$mld_ifname" status 2> /dev/null | grep state | cut -d'=' -f 2)"
+					ifname_sta_state="$(wpa_cli -i "$mld_ifname" status 2> /dev/null | grep wpa_state | cut -d'=' -f 2)"
+					if [ "$ifname_ap_state" = "ENABLED" ] || [ -n "$ifname_sta_state" ]; then
+						if [ -f /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link ]; then
+							echo "$mld_primary_link" > /sys/kernel/debug/ieee80211/phy"${phy#phy}"/netdev:"$mld_ifname"/primary_link
+							break;
+						fi
 					fi
 				done
 			fi
