@@ -119,7 +119,7 @@ mlo_add_link() {
 		return
 	}
 
-	iface_data=$(uci show wireless | grep "'$mld'" | cut -d'.' -f2 | cut -d'@' -f 2)
+	iface_data=$(uci show wireless | grep "'$mld'" | cut -d'.' -f2)
 
 	case "$2" in
 		2g)
@@ -152,7 +152,7 @@ mlo_add_link() {
 		return
 	}
 	for iface in $iface_data; do
-		check_band=$(uci show wireless.@${iface}.device | awk -F"'" '{print $2}' | cut -d'_' -f2)
+		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'_' -f2)
 		if [ "$check_band" = "$link" ]; then
 			echo "link is already present in the mld" > /dev/ttyMSM0
 			return
