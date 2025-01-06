@@ -764,7 +764,7 @@ mac80211_hostapd_setup_base() {
 				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N"
 			fi
 
-			[-n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
+			[ -n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
 		fi
 
 		if [ "$band" = "6g" ]; then
