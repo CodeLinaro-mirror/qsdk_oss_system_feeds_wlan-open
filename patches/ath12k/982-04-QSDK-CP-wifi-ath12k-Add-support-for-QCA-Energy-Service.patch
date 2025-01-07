@@ -44,7 +44,66 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  ieee80211_link_sta *ath12k_get_link_sta(struct ath12k_link_sta *arsta)
  {
  	struct ieee80211_sta *sta;
-@@ -3523,6 +3524,56 @@ static void ath12k_peer_assoc_h_mlo(stru
+@@ -906,23 +907,25 @@ ieee80211_link_sta *ath12k_get_link_sta(
+ 	return link_sta;
+ }
+ 
+-static void ath12k_get_active_arvif_iter_rcu(void *data, u8 *mac,
++static void ath12k_get_active_arvif_chanctx_iter_rcu(void *data, u8 *mac,
+ 					     struct ieee80211_vif *vif)
+ {
+ 	struct ath12k_vif *ahvif = (void *)vif->drv_priv;
+-	struct ath12k_vif_iter *arvif_iter = data;
++	struct ath12k_vif_chanctx_iter *arvif_iter = data;
+ 	struct ath12k_link_vif *arvif = NULL;
+ 	struct ieee80211_bss_conf* link_conf;
+ 	u8 link_id;
+ 
+ 	for_each_vif_active_link(vif, link_conf, link_id) {
+ 		arvif = rcu_dereference(ahvif->link[link_id]);
+-		if (arvif) {
+-			if ((arvif->vdev_id == arvif_iter->vdev_id) &&
+-			    (arvif->ar == arvif_iter->ar)) {
+-				arvif_iter->arvif = arvif;
++		if (arvif && arvif->ar == arvif_iter->ar) {
++				if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK &&
++				    arvif->chanctx.def.chan)
++					arvif_iter->chanctx = &arvif->chanctx;
++				else
++					arvif_iter->chanctx = NULL;
++
+ 				break;
+-			}
+ 		}
+ 	}
+ }
+@@ -948,20 +951,20 @@ static void ath12k_get_arvif_iter(void *
+ 	}
+ }
+ 
+-struct ath12k_link_vif *ath12k_mac_get_active_arvif(struct ath12k *ar, u32 vdev_id)
++struct ieee80211_chanctx_conf *ath12k_mac_get_first_active_arvif_chanctx(struct ath12k *ar)
+ {
+-	struct ath12k_vif_iter arvif_iter = {};
++	struct ath12k_vif_chanctx_iter arvif_iter = {};
+ 	u32 flags;
+ 
+-	arvif_iter.vdev_id = vdev_id;
+ 	arvif_iter.ar = ar;
++	arvif_iter.chanctx = NULL;
+ 
+ 	flags = IEEE80211_IFACE_ITER_RESUME_ALL;
+ 	ieee80211_iterate_active_interfaces_atomic(ar->ah->hw,
+ 						   flags,
+-						   ath12k_get_active_arvif_iter_rcu,
++						   ath12k_get_active_arvif_chanctx_iter_rcu,
+ 						   &arvif_iter);
+-	return arvif_iter.arvif;
++	return arvif_iter.chanctx;
+ }
+ 
+ struct ath12k_link_vif *ath12k_mac_get_arvif(struct ath12k *ar, u32 vdev_id)
+@@ -3523,6 +3526,56 @@ static void ath12k_peer_assoc_h_mlo(stru
  	}
  }
  
@@ -101,7 +160,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static int ath12k_peer_assoc_qos_ap(struct ath12k *ar,
  				    struct ath12k_link_vif *arvif,
  				    struct ath12k_link_sta *arsta)
-@@ -7171,6 +7222,51 @@ ath12k_mac_set_peer_eht_fixed_rate(struc
+@@ -7171,6 +7224,51 @@ ath12k_mac_set_peer_eht_fixed_rate(struc
  	return ret;
  }
  
@@ -153,7 +212,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static int ath12k_station_assoc(struct ath12k *ar,
  				struct ath12k_link_vif *arvif,
  				struct ath12k_link_sta *arsta,
-@@ -7369,6 +7465,8 @@ static int ath12k_station_assoc(struct a
+@@ -7369,6 +7467,8 @@ static int ath12k_station_assoc(struct a
  
  	spin_unlock_bh(&ar->data_lock);
  
@@ -162,7 +221,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	/* Trigger AP powersave recal for first peer create */
  	if (ar->ap_ps_enabled) {
  		ath12k_mac_ap_ps_recalc(ar);
-@@ -7382,6 +7480,7 @@ static int ath12k_station_disassoc(struc
+@@ -7382,6 +7482,7 @@ static int ath12k_station_disassoc(struc
  				   struct ath12k_link_sta *arsta)
  {
  	struct ath12k_sta *ahsta = arsta->ahsta;
@@ -170,7 +229,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	struct ieee80211_sta *sta;
  	int ret;
  
-@@ -7392,6 +7491,12 @@ static int ath12k_station_disassoc(struc
+@@ -7392,6 +7493,12 @@ static int ath12k_station_disassoc(struc
  
  	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
  
@@ -183,7 +242,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	spin_lock_bh(&arvif->ar->data_lock);
  
  	if (!arvif->num_stations) {
-@@ -7407,6 +7512,8 @@ static int ath12k_station_disassoc(struc
+@@ -7407,6 +7514,8 @@ static int ath12k_station_disassoc(struc
  
  	spin_unlock_bh(&arvif->ar->data_lock);
  
@@ -192,7 +251,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (!sta->wme) {
  		arvif->num_legacy_stations--;
  		ret = ath12k_recalc_rtscts_prot(arvif);
-@@ -10477,6 +10584,85 @@ static void ath12k_mac_setup_sband_iftyp
+@@ -10487,6 +10596,85 @@ static void ath12k_mac_setup_sband_iftyp
  
  }
  
@@ -278,7 +337,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  static int __ath12k_set_antenna(struct ath12k *ar, u32 tx_ant, u32 rx_ant)
  {
  	int ret;
-@@ -10520,6 +10706,10 @@ static int __ath12k_set_antenna(struct a
+@@ -10530,6 +10718,10 @@ static int __ath12k_set_antenna(struct a
  		return ret;
  	}
  
@@ -289,7 +348,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	return 0;
  }
  
-@@ -11518,13 +11708,10 @@ static int ath12k_mac_config_mon_status_
+@@ -11528,13 +11720,10 @@ static int ath12k_mac_config_mon_status_
  		if (ath12k_debugfs_rx_filter(ar))
  			tlv_filter.rx_filter = ath12k_debugfs_rx_filter(ar);
  
@@ -307,7 +366,7 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  
  	} else {
  		tlv_filter.rxmon_disable = true;
-@@ -18147,6 +18334,9 @@ void ath12k_mac_ap_ps_recalc(struct ath1
+@@ -18157,6 +18346,9 @@ void ath12k_mac_ap_ps_recalc(struct ath1
  		}
  	}
  
@@ -317,26 +376,17 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	if (!allow_ap_ps)
  		ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "ap ps is not"
  			   "allowed\n");
-@@ -20566,3 +20756,21 @@ void ath12k_mac_background_dfs_event(str
+@@ -20576,3 +20768,12 @@ void ath12k_mac_background_dfs_event(str
  		ar->agile_chandef.chan = NULL;
  	}
  }
 +
 +struct ieee80211_chanctx_conf *ath12k_mac_get_chan_ctx(struct ath12k *ar)
 +{
-+	struct ath12k_link_vif *arvif;
-+
 +	if (!ar)
 +		return NULL;
 +
-+	arvif = list_first_entry_or_null(&ar->arvifs, struct ath12k_link_vif,
-+					 list);
-+
-+	if (arvif && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK &&
-+	    arvif->chanctx.def.chan)
-+		return &arvif->chanctx;
-+	else
-+		return NULL;
++	return ath12k_mac_get_first_active_arvif_chanctx(ar);
 +}
 +
 --- a/drivers/net/wireless/ath/ath12k/mac.h
@@ -2630,7 +2680,19 @@ Signed-off-by: Sidhanta Sahu <quic_sidhanta@quicinc.com>
  	struct ath12k_mlo_wsi_load_info *wsi_load_info = NULL;
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -2140,4 +2140,6 @@ void ath12k_wsi_load_info_deinit(struct
+@@ -586,6 +586,11 @@ struct ath12k_vif_iter {
+ 	struct ath12k_link_vif *arvif;
+ };
+ 
++struct ath12k_vif_chanctx_iter {
++	struct ath12k *ar;
++	struct ieee80211_chanctx_conf *chanctx;
++};
++
+ #define HAL_AST_IDX_INVALID	0xFFFF
+ #define HAL_RX_MAX_MCS		12
+ #define HAL_RX_MAX_MCS_HT	31
+@@ -2140,4 +2145,6 @@ void ath12k_wsi_load_info_deinit(struct
  void ath12k_wsi_load_info_wsiorder_update(struct ath12k_base *ab);
  int ath12k_core_pdev_enable_telemetry_stats(struct ath12k_base *ab);
  
