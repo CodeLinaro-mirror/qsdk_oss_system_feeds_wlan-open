@@ -184,8 +184,10 @@ for (let phy_name, phy in board.wlan) {
 		return;
 
 	let macaddr = trim(readfile(`/sys/class/ieee80211/${phy_name}/macaddress`));
-	if (radio_exists(phy.path, macaddr, phy_name))
-		return;
+	if (radio_exists(phy.path, macaddr, phy_name)) {
+		idx++;
+		continue;
+	}
 
 	id = `phy='${phy_name}'`;
 	if (match(phy_name, /^phy[0-9]/))
@@ -203,11 +205,10 @@ for (let phy_name, phy in board.wlan) {
 			generate_config(info, name, single_wiphy, id, radio_idx);
 		}
 	} else {
-		while (config[`radio${idx}`])
-			idx++;
-		name = "radio" + idx++;
+		name = "radio" + idx;
 		generate_config(info, name, single_wiphy, id, NULL);
 	}
+	idx++;
 	commit = true;
 }
 
