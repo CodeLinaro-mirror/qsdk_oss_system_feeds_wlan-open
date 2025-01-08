@@ -36,6 +36,7 @@ target_specific_settings() {
 }
 
 #Disables stats and QDSS tracing for reducing CPU load leaving more room for actual data traffic
+#Disables link metrics update which is used by mesh
 disable_stats_n_qdss_trace() {
 	for dir in /sys/kernel/debug/ath11k/* /sys/kernel/debug/ath12k/*; do
         	if [ -f "$dir/stats_disable" ]; then
@@ -51,6 +52,16 @@ disable_stats_n_qdss_trace() {
 
 			if [ -f "$dir/trace_qdss" ]; then
 				echo 0 > "$dir/trace_qdss"
+			fi
+		fi
+
+		#Check if mesh metric offload is set to disable link metrics for mesh
+		if [[ "$dir" == *ath12k* ]]; then
+			if [ $(cat /sys/module/ath12k/parameters/mesh_metric_offload) -eq 1 ]; then
+				if [ -f "$dir/link_metrics_update" ]; then
+					#Disable Link metrics update for mesh
+					echo disable > "$dir/link_metrics_update"
+				fi
 			fi
 		fi
 	done
