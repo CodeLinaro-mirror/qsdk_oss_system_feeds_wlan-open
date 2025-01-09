@@ -1400,16 +1400,9 @@ wpa_supplicant_set_fixed_freq() {
 		HE80|VHT80|EHT80) append network_data "max_oper_chwidth=1" "$N$T";;
 		HE160|VHT160|EHT160)
 			append network_data "max_oper_chwidth=2" "$N$T"
-			if [ "$_w_mode" = "mesh" ]; then
-				append network_data "enable_160mhz_bw=1" "$N$T"
-			fi
 		;;
 		HE20|HE40|VHT20|VHT40) append network_data "max_oper_chwidth=0" "$N$T";;
 		EHT320)
-			if [ "$_w_mode" = "mesh" ]; then
-				append network_data "enable_160mhz_bw=1" "$N$T"
-				append network_data "enable_320mhz_bw=1" "$N$T"
-			fi
 			append network_data "max_oper_chwidth=9" "$N$T"
 		;;
 		*) append network_data "disable_vht=1" "$N$T";;
