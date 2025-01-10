@@ -1091,6 +1091,11 @@ mac80211_prepare_vif() {
 
 	}
 
+	[ -z "$mld" ] || {
+		uci set wireless.${mld}.ifname=$ifname
+		uci commit wireless
+	}
+
 	[ -z $ppe_vp ] && ppe_vp="ds"
 
         if [ $mode == "mesh" ] && [ $ppe_vp == "ds" ]; then
