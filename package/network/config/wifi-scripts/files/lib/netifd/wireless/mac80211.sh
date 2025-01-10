@@ -1066,14 +1066,6 @@ mac80211_prepare_vif() {
 	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld
 
 	[ -n "$ifname" ] || {
-		local prefix;
-
-		case "$mode" in
-		ap|sta|mesh) prefix=$mode;;
-		adhoc) prefix=ibss;;
-		monitor) prefix=mon;;
-		esac
-
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
                         if [[ "$htmode" == EHT* ]] && [ -n "$mld" ]; then
 				config_get mld_ifname "$mld" ifname
@@ -1083,10 +1075,10 @@ mac80211_prepare_vif() {
 					ifname="$mld_ifname"
 				fi
                         else
-                                mac80211_set_ifname "$phy-$band_name" "$prefix"
+				mac80211_set_ifname "$phy$vif_phy_suffix"
                         fi
                 else
-                        mac80211_set_ifname "$phy$vif_phy_suffix" "$prefix"
+                        mac80211_set_ifname "$phy$vif_phy_suffix"
                 fi
 
 	}
