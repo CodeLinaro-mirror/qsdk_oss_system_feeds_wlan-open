@@ -383,6 +383,8 @@ function iface_hostapd_notify(phy, radio, ifname, iface, state)
 			msg.center_freq1 = status.center_freq1;
 		if (status.center_freq2 != null)
 			msg.center_freq2 = status.center_freq2;
+		if (status.punct_bitmap != null)
+			msg.punct_bitmap = status.punct_bitmap;
 		break;
 	default:
 		return;
@@ -404,6 +406,7 @@ function iface_channel_switch(phy, radio, ifname, iface, info)
 		center_freq2: info.center_freq2,
 		csa: true,
 		csa_count: info.csa_count ? info.csa_count - 1 : 0,
+		punct_bitmap: info.punct_bitmap,
 	};
 	ubus.call("hostapd", "apsta_state", msg);
 }

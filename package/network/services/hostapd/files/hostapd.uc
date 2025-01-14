@@ -158,7 +158,8 @@ function iface_freq_info(iface, config, params)
 		width = 0;
 
 	return hostapd.freq_info(freq, sec_offset, width, params.chan_width,
-				 params.center_freq1, params.center_freq2);
+				 params.center_freq1, params.center_freq2,
+				 params.punct_bitmap);
 }
 
 function iface_add(phy, config, phy_status)
@@ -914,6 +915,7 @@ let main_obj = {
 			center_freq2: 0,
 			csa: true,
 			csa_count: 0,
+			punct_bitmap: 0,
 		},
 		call: ex_wrap(function(req) {
 			let phy = phy_name(req.args.phy, req.args.radio);
