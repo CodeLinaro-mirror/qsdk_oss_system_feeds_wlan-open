@@ -188,7 +188,6 @@ mlo_add_link() {
 	uci set wireless.@wifi-iface[$conf_idx].sae_pwe=$(uci get wireless."$mld".sae_pwe)
 	uci set wireless.@wifi-iface[$conf_idx].key=$(uci get wireless."$mld".key)
 	uci set wireless.@wifi-iface[$conf_idx].mld="$mld"
-	uci set wireless.@wifi-iface[$conf_idx].macaddr="$4"
 	uci commit wireless
 	band=$(echo $link | cut -d "_" -f 2)
 	input_file=/var/run/hostapd-${1}_${band}.conf
@@ -199,13 +198,14 @@ mlo_add_link() {
 	if [ -f $input_file ]; then
 		output_file=/tmp/hostapd-${link}.conf
 		local interfaces=$(cat $input_file | grep -E 'interface=wlan[0-9]+|bss=wlan[0-9]+|interface=phy|bss=phy' | cut -d "=" -f 2)
-		local interface_channel iter_link found interface_bssid interface_addr interface_punct_bitmap
+		local interface_channel iter_links found interface_bssid interface_addr interface_punct_bitmap partner_link default_link
 		local found=0
 		interface_bssid=$(cat $input_file | grep bssid | cut -d "=" -f 2)
 		for iter in $interfaces; do
-			iter_link=$(hostapd_cli -i $iter status | grep 'num_links=' | cut -d "=" -f 2 | head -1) 2> /dev/null
-			while [ "$iter_link" -gt 0 ]; do
-				iter_link=$((iter_link-1))
+			partner_link=$(hostapd_cli -i $iter status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
+			default_link=$(hostapd_cli -i $iter status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
+			iter_links=$(echo $partner_link $default_link)
+			for iter_link in $iter_links; do
 				interface_addr=$(hostapd_cli -i $iter -l $iter_link status | grep 'link_addr=' | cut -d "=" -f 2 | head -1) 2> /dev/null
 				for check_addr in $interface_bssid; do
 					if [ "$check_addr" = "$interface_addr" ]; then
@@ -290,7 +290,7 @@ mlo_add_link() {
 
 mlo_remove_link() {
 	local link
-	local mld
+	local mld mld_names ifname
 	local iface_data
 	local check_band
 	local device_check
@@ -302,9 +302,18 @@ mlo_remove_link() {
 		return
 	fi
 
-	mld=$(uci show wireless | grep "'$3'" | cut -d "." -f 2 | sed -n '1p')
+	mld_names=$(uci show wireless | grep "=wifi-mld"| cut -d "." -f 2 | cut -d "=" -f 1)
+	for i in $mld_names; do
+		ifname=$(uci get wireless.$i.ifname)
+		[ -z "$ifname" ] && continue
+		if [ "$ifname" = "$3" ]; then
+			mld=$i
+			break;
+		fi
+	done
+
 	[ -n "$mld" ] || {
-		echo "wrong interface name is given or mld doesn't found for given interface" > /dev/ttyMSM0
+		echo "wrong interface name is given or mld doesn't found for given interface or ifname is not found in mld list" > /dev/ttyMSM0
 		return
 	}
 
@@ -356,12 +365,13 @@ mlo_remove_link() {
 		echo "Hostapd config file is not present link_id is not verifed, may cause issues if link_id is worng" > /dev/ttyMSM0
 	fi
 
-	local link_id iter_link found interface_bssid interface_addr
+	local link_id partner_link found interface_bssid interface_addr default_link iter_links
 	local found=0
 	interface_bssid=$(cat $input_file | grep bssid | cut -d "=" -f 2)
-	iter_link=$(hostapd_cli -i $3 status | grep 'num_links=' | cut -d "=" -f 2 | head -1) 2> /dev/null
-	while [ "$iter_link" -gt 0 ]; do
-		iter_link=$((iter_link-1))
+	partner_link=$(hostapd_cli -i $3 status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
+	default_link=$(hostapd_cli -i $3 status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
+	iter_links=$(echo $partner_link $default_link)
+	for iter_link in $iter_links; do
 		interface_addr=$(hostapd_cli -i $3 -l $iter_link status | grep 'link_addr=' | cut -d "=" -f 2 | head -1) 2> /dev/null
 		for check_addr in $interface_bssid; do
 			if [ "$check_addr" = "$interface_addr" ]; then
