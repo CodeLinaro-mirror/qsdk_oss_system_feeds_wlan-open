@@ -59,7 +59,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  #include <linux/module.h>
  #include <linux/if_vlan.h>
  
-@@ -88,8 +89,197 @@ unlock_n_fail:
+@@ -88,8 +89,179 @@ unlock_n_fail:
  	return false;
  }
  
@@ -164,32 +164,14 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
 +	    !test_bit(ATH12K_FLAG_PPE_DS_ENABLED, &ab->dev_flags))
 +		goto unlock;
 +
-+	/*
-+	 * In splitphy mlo case, the vp number might get mapped to
-+	 * wrong lmac_id causing a traffic halt. Address this issue
-+	 * by adding a work around to fallback to sfe mode, in case
-+	 * the requested peer has a pdev with incompatible primary lmac id
-+	 */
-+	if (ab->num_radios > 1) {
-+		int idx = arvif->ppe_vp_profile_idx;
-+		int link_id;
-+		struct ath12k_link_vif *iter_arvif;
-+
-+		for_each_set_bit(link_id, &ahvif->links_map, IEEE80211_MLD_MAX_NUM_LINKS) {
-+			iter_arvif = ahvif->link[link_id];
-+			if (!iter_arvif || iter_arvif == arvif || ab != iter_arvif->ab)
-+				continue;
-+			if (iter_arvif->ppe_vp_profile_idx < idx) {
-+				ab->ppe.ppeds_stats.splitphy_fallbacks++;
-+				goto unlock;
-+			}
-+		}
-+	}
-+
 +	*node_id = ab->ppe.ds_node_id;
 +
 +unlock:
 +	rcu_read_unlock();
++
++	ath12k_dbg(ab, ATH12K_DBG_MAC,
++		   "Wifi-classifer mark peer %pM link_id %x node_id %x\n",
++		   peer_mac, *link_id, *node_id);
 +	return;
 +}
 +
@@ -259,7 +241,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  /**
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -95,6 +95,26 @@ extern bool ath12k_debug_critical;
+@@ -96,6 +96,26 @@ extern bool ath12k_debug_critical;
  #define ATH12K_SSR_PREPARE_SHUTDOWN QCOM_SSR_NOTIFY_CRASH
  #endif
  
@@ -286,7 +268,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  enum ath12k_bdf_search {
      ATH12K_BDF_SEARCH_DEFAULT,
      ATH12K_BDF_SEARCH_BUS_AND_BOARD,
-@@ -1914,6 +1934,16 @@ struct ath12k_dcs_wlan_interference {
+@@ -1922,6 +1942,16 @@ struct ath12k_dcs_wlan_interference {
  	struct wmi_dcs_wlan_interference_stats info;
  };
  
@@ -447,7 +429,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -11399,7 +11399,7 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11432,7 +11432,7 @@ static void ath12k_mac_op_tx(struct ieee
  	info = IEEE80211_SKB_CB(skb);
  	vif = info->control.vif;
  	info_flags = info->flags;
@@ -456,7 +438,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  	ahvif = ath12k_vif_to_ahvif(vif);
  
  	if (ahvif->vdev_type == WMI_VDEV_TYPE_MONITOR) {
-@@ -11412,60 +11412,21 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11445,60 +11445,21 @@ static void ath12k_mac_op_tx(struct ieee
  	memset(skb_cb, 0, sizeof(*skb_cb));
  	skb_cb->vif = vif;
  
@@ -476,12 +458,10 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  
 -		if (link >= ATH12K_NUM_MAX_LINKS ||
 -		    link == IEEE80211_MLD_MAX_NUM_LINKS) {
--			ieee80211_free_txskb(hw, skb);
--			return;
 +		if (!arvif || !arvif->ar) {
 +			rcu_read_unlock();
-+			ieee80211_free_txskb(hw, skb);
-+			return;
+ 			ieee80211_free_txskb(hw, skb);
+ 			return;
  		}
 -	} else {
 -		link = 0;
@@ -507,8 +487,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
 -	rcu_read_lock();
 -	arvif = rcu_dereference(ahvif->link[link]);
 -	skb_cb->link_id = link;
-+		ar = arvif->ar;
- 
+-
 -	if (!arvif || !arvif->ar) {
 -		rcu_read_unlock();
 -		ieee80211_free_txskb(hw, skb);
@@ -516,7 +495,8 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
 -	}
 -
 -	ar = arvif->ar;
--
++		ar = arvif->ar;
+ 
 -	if (unlikely(test_bit(ATH12K_FLAG_RECOVERY, &ar->ab->dev_flags))) {
 -		rcu_read_unlock();
 -		ieee80211_free_txskb(hw, skb);
@@ -528,7 +508,7 @@ Signed-off-by: Girish Kumar M P <quic_gmp@quicinc.com>
  		ret = ath12k_mac_tx_check_max_limit(ar, skb);
  		if (ret) {
  			rcu_read_unlock();
-@@ -11507,12 +11468,62 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11540,12 +11501,62 @@ static void ath12k_mac_op_tx(struct ieee
  		return;
  	}
  #endif
