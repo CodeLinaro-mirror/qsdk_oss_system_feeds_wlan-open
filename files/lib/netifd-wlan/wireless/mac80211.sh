@@ -92,7 +92,7 @@ start_disabled=
 dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
-
+dpp_ifaces=
 drv_mac80211_init_device_config() {
 	hostapd_common_add_device_config
 
@@ -1310,6 +1310,7 @@ mac80211_prepare_vif() {
 			fi
 
 			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" "$mode" "$3" || return
+			[ -n "$dpp" ] && append dpp_ifaces $ifname
 
 			NEWAPLIST="${NEWAPLIST}$ifname "
 			[ -n "$hostapd_ctrl" ] || {
@@ -2354,7 +2355,7 @@ drv_mac80211_setup() {
 				fi
 				flock -u 200
 			fi
-			hostapd_dpp_action "$ifname"
+			hostapd_dpp_action "$dpp_ifaces"
 		fi
 
 	}
