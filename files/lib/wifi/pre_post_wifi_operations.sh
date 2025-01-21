@@ -14,6 +14,9 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+. /lib/netifd/netifd-wireless.sh
+. /lib/netifd/wireless/mac80211.sh
+
 append DRIVERS "mac80211"
 
 update_primary_link()
@@ -100,7 +103,6 @@ mac80211_update_mld_configs() {
 mlo_add_link() {
 	local data
 	local link
-	local conf_idx
 	local ssid
 	local encryption
 	local sae_pwe
@@ -108,8 +110,8 @@ mlo_add_link() {
 	local channels
 	local mld
 	local iface_data
-	local check_band result
-	local hw_idx band check_disabled start_freq end_freq
+	local check_band result select_iface
+	local hw_idx band check_disabled start_freq end_freq check_config
 
 	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
 		echo "command line inputs missing" > /dev/ttyMSM0
@@ -193,6 +195,7 @@ mlo_add_link() {
 			sae_pwe=$(uci get wireless.${iface}.sae_pwe)
 			key=$(uci get wireless.${iface}.key)
 			uci commit wireless
+			select_iface=$(echo $iface)
 			break;
 		fi
 	done
@@ -207,11 +210,16 @@ mlo_add_link() {
 		input_file=/var/run/hostapd-${1}.${hw_idx}.conf
 	fi
 
-	if [ -f $input_file ]; then
+	check_config=$(cat $input_file | grep "$3$" | wc -l) 2> /dev/null
+
+	if [ -f $input_file ] && [ "$check_config" -gt 0 ]; then
+		# Use selected band interface hostapd config file to bring up interface.
 		output_file=/tmp/hostapd-${link}.conf
 		local interfaces=$(cat $input_file | grep -E 'interface=|bss=' | grep -v "interface=/" | cut -d "=" -f 2)
 		local interface_channel iter_links found interface_freq interface_punct_bitmap partner_link default_link
 		local found=0
+
+		#Get interface channel and puncture bitmap information, helpful if channel switch happened.
 		for iter in $interfaces; do
 			partner_link=$(hostapd_cli -i $iter status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
 			default_link=$(hostapd_cli -i $iter status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
@@ -233,11 +241,12 @@ mlo_add_link() {
 			fi
 		done
 
-		if grep -q "bss=" "$input_file"; then
-			awk '/bss=/ {exit} {print}' "$input_file" > "$output_file"
-		else
-			cp "$input_file" "$output_file"
-		fi
+		#Generate temp hostapd config file.
+		sed '/^interface=/,$d' "$input_file" > "$output_file"
+		sed -n "/^bss=${3}$/,/^bssid=/p" "$input_file" >> "$output_file"
+		sed -n "/^interface=${3}$/,/^bssid=/p" "$input_file" >> "$output_file"
+		sed -i 's/^bss=/interface=/' "$output_file"
+
 		echo "wpa_passphrase=$key" >> $output_file
 		echo "ssid=$ssid" >> $output_file
 		if [ $sae_pwe = 1 ]; then
@@ -246,13 +255,23 @@ mlo_add_link() {
 		if [ $encryption = "sae" ]; then
 			echo "wpa_key_mgmt=SAE" >> $output_file
 		fi
+		if [ $encryption = "sae-mixed" ]; then
+			echo "wpa_key_mgmt=WPA-PSK SAE" >> $output_file
+			echo "ieee80211w=1" >> $output_file
+		fi
+
 		echo "bssid=$4" >> $output_file
 		echo "interface=$3" >> $output_file
+		echo "bridge=br-lan" >> $output_file
+		echo "wds_bridge=" >> $output_file
+		echo "snoop_iface=br-lan" >> $output_file
+
 		if [ "6g" = "$2" ]; then
 			echo "mbssid=3" >> "$input_file"
 			echo "mbssid_group_size=4" >> "$input_file"
 		fi
 		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
+		[ -n "$interface_punct_bitmap" ] && echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
 		if [ -z "$hw_idx" ]; then
 			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file")
 		else
@@ -260,10 +279,117 @@ mlo_add_link() {
 		fi
 		if [ "$result" != "OK" ]; then
 			echo "failed to add the link" > /dev/ttyMSM0
-			uci set wireless.${iface}.disabled=1
+			uci set wireless.${select_iface}.disabled=1
+			uci commit wireless
+			rm /tmp/mlo_support.txt 2>/dev/null
+			rm "$output_file"
+			return
+		fi
+		rm "$output_file"
+	elif [ -f "$input_file" ]; then
+		#Use partner interface hostapd config file to bring up interface.
+		output_file=/tmp/hostapd-${link}.conf
+		local interfaces=$(cat $input_file | grep -E 'interface=|bss=' | grep -v "interface=/" | cut -d "=" -f 2)
+		local interface_channel iter_links found interface_freq interface_punct_bitmap partner_link default_link
+		local found=0 partner_input_file
+
+		#Get interface channel and puncture bitmap information, helpful if channel switch happened.
+		for iter in $interfaces; do
+			partner_link=$(hostapd_cli -i $iter status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
+			default_link=$(hostapd_cli -i $iter status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
+			iter_links=$(echo $partner_link $default_link)
+			for iter_link in $iter_links; do
+				interface_freq=$(hostapd_cli -i $iter -l $iter_link status | grep 'freq=' | cut -d "=" -f 2 | head -1) 2> /dev/null
+				if [ "$interface_freq" -ge "$start_freq" ] && [ "$interface_freq" -le "$end_freq" ]; then
+					interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
+					if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
+						interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
+						echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+					fi
+					found=1
+					break;
+				fi
+			done
+			if [ "$found" = 1 ]; then
+				break;
+			fi
+		done
+
+		found=0
+
+		#Get partner band hostapd config, to fetch the interface config
+		for iface in $iface_data; do
+			check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
+			hw_idx=$(uci show wireless.$check_band.radio | cut -d "'" -f 2)
+			band=$(echo $check_band | cut -d "_" -f 2)
+			partner_input_file=/var/run/hostapd-${1}_${band}.conf
+			if [ ! -f "$partner_input_file" ]; then
+				partner_input_file=/var/run/hostapd-${1}.${hw_idx}.conf
+			fi
+			if [ -f "$partner_input_file" ]; then
+				check_config=$(cat $partner_input_file | grep "$3$" | wc -l) 2> /dev/null
+				if [ "$check_config" -gt 0 ]; then
+					found=1
+					break;
+				fi
+			fi
+		done
+
+		if [ "$found" = 0 ]; then
+			echo "Not able to add new interface, failed to create config" > /dev/ttyMSM0
+			uci set wireless.${select_iface}.disabled=1
+			uci commit wireless
+			rm "$output_file" 2>/dev/null
+			rm /tmp/mlo_support.txt 2>/dev/null
+			return
+		fi
+
+		#Generate temp hostapd config file.
+		sed '/^interface=/,$d' "$input_file" > "$output_file"
+		sed -n "/^bss=${3}$/,/^bssid=/p" "$partner_input_file" >> "$output_file"
+		sed -n "/^interface=${3}$/,/^bssid=/p" "$partner_input_file" >> "$output_file"
+		sed -i 's/^bss=/interface=/' "$output_file"
+
+		echo "wpa_passphrase=$key" >> $output_file
+		echo "ssid=$ssid" >> $output_file
+		if [ $sae_pwe = 1 ]; then
+			echo "sae_pwe=$sae_pwe" >> $output_file
+		fi
+		if [ $encryption = "sae" ]; then
+			echo "wpa_key_mgmt=SAE" >> $output_file
+		fi
+		if [ $encryption = "sae-mixed" ]; then
+			echo "wpa_key_mgmt=WPA-PSK SAE" >> $output_file
+			echo "ieee80211w=1" >> $output_file
+		fi
+
+		echo "bssid=$4" >> $output_file
+		echo "bridge=br-lan" >> $output_file
+		echo "wds_bridge=" >> $output_file
+		echo "snoop_iface=br-lan" >> $output_file
+
+		if [ "6g" = "$2" ]; then
+			echo "mbssid=3" >> "$input_file"
+			echo "mbssid_group_size=4" >> "$input_file"
+		fi
+		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
+		[ -n "$interface_punct_bitmap" ] && echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+		if [ -z "$hw_idx" ]; then
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file")
+		else
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}.${hw_idx}:"$output_file")
+		fi
+		if [ "$result" != "OK" ]; then
+			echo "failed to add the link" > /dev/ttyMSM0
+			uci set wireless.${select_iface}.disabled=1
+			uci commit wireless
+			rm "$output_file" 2>/dev/null
+			rm /tmp/mlo_support.txt 2>/dev/null
+			return
 		fi
 		rm "$output_file"
 	else
+		#Generate hostapd config in new link addition.
 		ubus call network reload
 		json_load "$(ubus_wifi_cmd "status" "${link}")"
 		data=$(json_dump)
@@ -272,16 +398,21 @@ mlo_add_link() {
 		data="{ $data"
 		data=$(echo "$data" | sed -e 's/"interfaces": \[/"interfaces": { "0": /' -e 's/\} ]/} }/')
 		start_string='"section"'
-		end_string='"section": "@wifi-iface['"$conf_idx"']"'
+		end_string='"section": "${select_iface}"'
 		start_index=$(echo "$data" | awk -v pat="$start_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
 		end_index=$(echo "$data" | awk -v pat="$end_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
 		m_data="${data:0:start_index}${data:end_index}"
 		data="$m_data"
-		data=$(echo "$data" | sed -e "s/\"section\": \"@wifi-iface\[$conf_idx\]\"/\"bridge\": \"br-lan\", \"bridge_ifname\": \"br-lan\"/")
+		data=$(echo "$data" | sed -e "s/\"section\": \"${select_iface}\"/\"bridge\": \"br-lan\", \"bridge_ifname\": \"br-lan\"/")
 		data=$(echo "$data" | sed -e 's/\[\ ]/{ }/g' -e 's/"stations"/"stas"/g')
 		json_select "${link}"
 		_wdev_handler_1 "$data" "mac80211" "setup" "$link" 2> /dev/null
 		json_select ..
+
+		echo "bridge=br-lan" >>"$input_file"
+		echo "wds_bridge=" >>"$input_file"
+		echo "snoop_iface=br-lan" >>"$input_file"
+
 		if [ "6g" = "$2" ]; then
 			echo "mbssid=3" >> "$input_file"
 			echo "mbssid_group_size=4" >> "$input_file"
@@ -293,7 +424,10 @@ mlo_add_link() {
 		fi
 		if [ "$result" != "OK" ]; then
 			echo "failed to add the link" > /dev/ttyMSM0
-			uci set wireless.${iface}.disabled=1
+			uci set wireless.${select_iface}.disabled=1
+			uci commit wireless
+			rm /tmp/mlo_support.txt 2>/dev/null
+			return
 		fi
 	fi
 	uci set wireless.${link}.disabled='0'
@@ -437,8 +571,15 @@ mlo_remove_link() {
 			device_check=$(uci show wireless | grep "device='$link")
 			[ -z "$device_check" ] && uci set wireless.${link}.disabled='1' && uci commit wireless
 			echo "link is removed" > /dev/ttyMSM0
+			return
 		fi
 	done
+
+	result=$(hostapd_cli -i $3 -l $4 link_remove $5)
+	if [ "$result" != "OK" ]; then
+		echo "failed to remove the link and wireless config for interface not found" > /dev/ttyMSM0
+		return
+	fi
 }
 
 configure_service_param() {
