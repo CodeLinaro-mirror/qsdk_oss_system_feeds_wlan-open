@@ -108,11 +108,12 @@ mlo_add_link() {
 	local channels
 	local mld
 	local iface_data
-	local check_band
-	local hw_idx band
+	local check_band result
+	local hw_idx band check_disabled start_freq end_freq
 
 	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
 		echo "command line inputs missing" > /dev/ttyMSM0
+		echo "wifi mlo_add_link <phy> <band> <interface-name> <vap-mac-addr>" > /dev/ttyMSM0
 		return
 	fi
 
@@ -136,24 +137,38 @@ mlo_add_link() {
 	case "$2" in
 		2g)
 		channels="1-14"
+		start_freq=2412
+		end_freq=2484
 		;;
 		5g)
 		channels="36-177"
+		start_freq=5180
+		end_freq=5885
 		;;
 		5gl)
 		channels="36-64"
+		start_freq=5180
+		end_freq=5320
 		;;
 		5gh)
 		channels="100-177"
+		start_freq=5500
+		end_freq=5885
 		;;
 		6g)
 		channels="2-233"
+		start_freq=5935
+		end_freq=7115
 		;;
 		6gl)
 		channels="2-93"
+		start_freq=5935
+		end_freq=6415
 		;;
 		6gh)
 		channels="129-233"
+		start_freq=6595
+		end_freq=7115
 		;;
 		*) echo "wrong band is given" > /dev/ttyMSM0
 		return;;
@@ -166,29 +181,26 @@ mlo_add_link() {
 	hw_idx=$(uci show wireless.$link.radio | cut -d "'" -f 2)
 	for iface in $iface_data; do
 		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
-		if [ "$check_band" = "$link" ]; then
+		check_disabled=$(uci show wireless.${iface}.disabled | cut -d "'" -f2)
+		if [ "$check_band" = "$link" ] && [ "$check_disabled" = 0 ]; then
 			echo "link is already present in the mld" > /dev/ttyMSM0
 			return
 		fi
+		if [ "$check_band" = "$link" ] && [ "$check_disabled" = 1 ]; then
+			uci set wireless.${iface}.disabled=0
+			ssid=$(uci get wireless.${iface}.ssid)
+			encryption=$(uci get wireless.${iface}.encryption)
+			sae_pwe=$(uci get wireless.${iface}.sae_pwe)
+			key=$(uci get wireless.${iface}.key)
+			uci commit wireless
+			break;
+		fi
 	done
-	uci add wireless wifi-iface
-	conf_idx=$(uci show wireless | sed -n 's/.*@wifi-iface\[\([0-9]\+\)\].*/\1/p' | sort -n | tail -1)
+	if [ -z "$ssid" ]; then
+		echo "Interface is already up or wireless config is not present or sequence remove link then add link is not followed" > /dev/ttyMSM0
+		return
+	fi
 	echo 1 > /tmp/mlo_support.txt&
-	ssid=$(uci get wireless."$mld".ssid)
-	encryption=$(uci get wireless."$mld".encryption)
-	sae_pwe=$(uci get wireless."$mld".sae_pwe)
-	key=$(uci get wireless."$mld".key)
-
-	uci set wireless.@wifi-iface[$conf_idx]=wifi-iface
-	uci set wireless.@wifi-iface[$conf_idx].device=$link
-	uci set wireless.@wifi-iface[$conf_idx].network='lan'
-	uci set wireless.@wifi-iface[$conf_idx].mode='ap'
-	uci set wireless.@wifi-iface[$conf_idx].ssid=$(uci get wireless."$mld".ssid)
-	uci set wireless.@wifi-iface[$conf_idx].encryption=$(uci get wireless."$mld".encryption)
-	uci set wireless.@wifi-iface[$conf_idx].sae_pwe=$(uci get wireless."$mld".sae_pwe)
-	uci set wireless.@wifi-iface[$conf_idx].key=$(uci get wireless."$mld".key)
-	uci set wireless.@wifi-iface[$conf_idx].mld="$mld"
-	uci commit wireless
 	band=$(echo $link | cut -d "_" -f 2)
 	input_file=/var/run/hostapd-${1}_${band}.conf
 	if [ ! -f $input_file ]; then
@@ -197,28 +209,22 @@ mlo_add_link() {
 
 	if [ -f $input_file ]; then
 		output_file=/tmp/hostapd-${link}.conf
-		local interfaces=$(cat $input_file | grep -E 'interface=wlan[0-9]+|bss=wlan[0-9]+|interface=phy|bss=phy' | cut -d "=" -f 2)
-		local interface_channel iter_links found interface_bssid interface_addr interface_punct_bitmap partner_link default_link
+		local interfaces=$(cat $input_file | grep -E 'interface=|bss=' | grep -v "interface=/" | cut -d "=" -f 2)
+		local interface_channel iter_links found interface_freq interface_punct_bitmap partner_link default_link
 		local found=0
-		interface_bssid=$(cat $input_file | grep bssid | cut -d "=" -f 2)
 		for iter in $interfaces; do
 			partner_link=$(hostapd_cli -i $iter status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
 			default_link=$(hostapd_cli -i $iter status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
 			iter_links=$(echo $partner_link $default_link)
 			for iter_link in $iter_links; do
-				interface_addr=$(hostapd_cli -i $iter -l $iter_link status | grep 'link_addr=' | cut -d "=" -f 2 | head -1) 2> /dev/null
-				for check_addr in $interface_bssid; do
-					if [ "$check_addr" = "$interface_addr" ]; then
-						interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
-						if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
-							interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
-							echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
-						fi
-						found=1
-						break;
+				interface_freq=$(hostapd_cli -i $iter -l $iter_link status | grep 'freq=' | cut -d "=" -f 2 | head -1) 2> /dev/null
+				if [ "$interface_freq" -ge "$start_freq" ] && [ "$interface_freq" -le "$end_freq" ]; then
+					interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
+					if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
+						interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
+						echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
 					fi
-				done
-				if [ "$found" = 1 ]; then
+					found=1
 					break;
 				fi
 			done
@@ -241,7 +247,6 @@ mlo_add_link() {
 			echo "wpa_key_mgmt=SAE" >> $output_file
 		fi
 		echo "bssid=$4" >> $output_file
-		echo "#bssid=$4" >> "$input_file"
 		echo "interface=$3" >> $output_file
 		if [ "6g" = "$2" ]; then
 			echo "mbssid=3" >> "$input_file"
@@ -249,9 +254,13 @@ mlo_add_link() {
 		fi
 		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
 		if [ -z "$hw_idx" ]; then
-			hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file"
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file")
 		else
-			hostapd_cli -i $3 mld_add_link bss_config=${1}.${hw_idx}:"$output_file"
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}.${hw_idx}:"$output_file")
+		fi
+		if [ "$result" != "OK" ]; then
+			echo "failed to add the link" > /dev/ttyMSM0
+			uci set wireless.${iface}.disabled=1
 		fi
 		rm "$output_file"
 	else
@@ -278,9 +287,13 @@ mlo_add_link() {
 			echo "mbssid_group_size=4" >> "$input_file"
 		fi
 		if [ -z "$hw_idx" ]; then
-			hostapd_cli -i $3 mld_add_link bss_config=${1}:"$input_file"
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$input_file")
 		else
-			hostapd_cli -i $3 mld_add_link bss_config=${1}.${hw_idx}:"$input_file"
+			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}.${hw_idx}:"$input_file")
+		fi
+		if [ "$result" != "OK" ]; then
+			echo "failed to add the link" > /dev/ttyMSM0
+			uci set wireless.${iface}.disabled=1
 		fi
 	fi
 	uci set wireless.${link}.disabled='0'
@@ -295,10 +308,13 @@ mlo_remove_link() {
 	local check_band
 	local device_check
 	local result
-	local hw_idx band
+	local hw_idx band check_disabled start_freq end_freq check_device
+	local link_id partner_link found default_link iter_links check_mld
+	local found=0
 
 	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]; then
 		echo "command line inputs missing" > /dev/ttyMSM0
+		echo "wifi mlo_remove_link <phyX> <band> <interface name> <link-id> <Tbtt-count (5-50)>" > /dev/ttyMSM0
 		return
 	fi
 
@@ -326,24 +342,38 @@ mlo_remove_link() {
 	case "$2" in
 		2g)
 		channels="1-14"
+		start_freq=2412
+		end_freq=2484
 		;;
 		5g)
 		channels="36-177"
+		start_freq=5180
+		end_freq=5885
 		;;
 		5gl)
 		channels="36-64"
+		start_freq=5180
+		end_freq=5320
 		;;
 		5gh)
 		channels="100-177"
+		start_freq=5500
+		end_freq=5885
 		;;
 		6g)
 		channels="2-233"
+		start_freq=5935
+		end_freq=7115
 		;;
 		6gl)
 		channels="2-93"
+		start_freq=5935
+		end_freq=6415
 		;;
 		6gh)
 		channels="129-233"
+		start_freq=6595
+		end_freq=7115
 		;;
 		*) echo "wrong band is given" > /dev/ttyMSM0
 		return;;
@@ -353,6 +383,17 @@ mlo_remove_link() {
 		echo "failed to find band number" > /dev/ttyMSM0
 		return
 	}
+	for i in $iface_data; do
+		check_mld=$(uci show wireless.$i.mld | cut -d "'" -f 2)
+		if [ "$check_mld" = "$mld" ]; then
+			check_disabled=$(uci show wireless.$i.disabled | cut -d "'" -f 2)
+			check_device=$(uci show wireless.$i.device | cut -d "'" -f 2)
+			if [ "$check_disabled" = 1 ] && [ "$check_device" = "$link" ]; then
+				echo "Interface is already disabled" > /dev/console
+				return;
+			fi
+		fi
+	done
 	hw_idx=$(uci show wireless.$link.radio | cut -d "'" -f 2)
 	band=$(echo $link | cut -d "_" -f 2)
 	input_file=/var/run/hostapd-${1}_${band}.conf
@@ -365,44 +406,36 @@ mlo_remove_link() {
 		echo "Hostapd config file is not present link_id is not verifed, may cause issues if link_id is worng" > /dev/ttyMSM0
 	fi
 
-	local link_id partner_link found interface_bssid interface_addr default_link iter_links
-	local found=0
-	interface_bssid=$(cat $input_file | grep bssid | cut -d "=" -f 2)
 	partner_link=$(hostapd_cli -i $3 status | grep 'partner_link' | cut -d "[" -f 2 | cut -d "]" -f 1) 2> /dev/null
 	default_link=$(hostapd_cli -i $3 status | grep 'link_id=' | cut -d "=" -f 2) 2> /dev/null
 	iter_links=$(echo $partner_link $default_link)
 	for iter_link in $iter_links; do
-		interface_addr=$(hostapd_cli -i $3 -l $iter_link status | grep 'link_addr=' | cut -d "=" -f 2 | head -1) 2> /dev/null
-		for check_addr in $interface_bssid; do
-			if [ "$check_addr" = "$interface_addr" ]; then
-				link_id=$(($iter_link))
-				found=1
-				break;
-			fi
-		done
-		if [ "$found" = 1 ]; then
+		interface_freq=$(hostapd_cli -i $3 -l $iter_link status | grep 'freq=' | cut -d "=" -f 2 | head -1) 2> /dev/null
+		if [ "$interface_freq" -ge "$start_freq" ] && [ "$interface_freq" -le "$end_freq" ]; then
+			link_id=$(($iter_link))
+			found=1
 			break;
 		fi
 	done
 
-	if [ "$4" != "$link_id" ] || [ "$found" == 0 ]; then
+	if [ "$4" != "$link_id" ] || [ "$found" = 0 ]; then
 		echo "Invalid link_id is given or band does not exists on interface $3" > /dev/ttyMSM0
 		return;
 	fi
 
 	for iface in $iface_data; do
+		check_mld=$(uci show wireless.${iface}.mld | cut -d "'" -f 2)
 		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
-		if [ "$check_band" = "$link" ]; then
+		if [ "$check_band" = "$link" ] && [ "$check_mld" = "$mld" ]; then
 			result=$(hostapd_cli -i $3 -l $4 link_remove $5)
 			if [ "$result" != "OK" ]; then
 				echo "failed to remove the link" > /dev/ttyMSM0
 				return
 			fi
-			uci del wireless.${iface}
+			uci set wireless.${iface}.disabled=1
 			uci commit wireless
 			device_check=$(uci show wireless | grep "device='$link")
 			[ -z "$device_check" ] && uci set wireless.${link}.disabled='1' && uci commit wireless
-			sed -i "/#bssid=${interface_addr}/d" "$input_file" >> /dev/null
 			echo "link is removed" > /dev/ttyMSM0
 		fi
 	done
