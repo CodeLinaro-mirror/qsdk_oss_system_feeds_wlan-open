@@ -18,7 +18,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -936,6 +936,7 @@ struct ath12k {
+@@ -951,6 +951,7 @@ struct ath12k {
  		struct completion on_channel;
  		struct delayed_work timeout;
  		enum ath12k_scan_state state;
@@ -28,7 +28,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  		int roc_freq;
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -5375,6 +5375,8 @@ void __ath12k_mac_scan_finish(struct ath
+@@ -5386,6 +5386,8 @@ void __ath12k_mac_scan_finish(struct ath
  		ar->scan.roc_freq = 0;
  		cancel_delayed_work(&ar->scan.timeout);
  		complete(&ar->scan.completed);
@@ -37,7 +37,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  		ieee80211_queue_work(ah->hw, &ar->scan.vdev_del_wk);
  		break;
  	}
-@@ -5489,8 +5491,11 @@ static void ath12k_scan_vdev_del_work(st
+@@ -5497,8 +5499,11 @@ static void ath12k_scan_vdev_del_work(st
  	mutex_lock(&ar->conf_mutex);
  	/* scan vdev got deleted already. This can happen when on same vif, new
  	 * scan request was requested with different frequeny which leads to
@@ -51,7 +51,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  		goto work_complete;
  
  	mutex_unlock(&ar->conf_mutex);
-@@ -5717,6 +5722,7 @@ static int ath12k_mac_op_hw_scan(struct
+@@ -5732,6 +5737,7 @@ static int ath12k_mac_op_hw_scan(struct
  	 * on this vif
  	 */
  	ahvif->last_scan_link = arvif->link_id;
@@ -59,7 +59,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  
  	/* Add a margin to account for event/command processing */
  	ieee80211_queue_delayed_work(ar->ah->hw, &ar->scan.timeout,
-@@ -12075,6 +12081,10 @@ static int ath12k_mac_vdev_start_restart
+@@ -12066,6 +12072,10 @@ static int ath12k_mac_vdev_start_restart
  	ath12k_dbg(ab, ATH12K_DBG_MAC,  "vdev %pM started, vdev_id %d\n",
  		   arvif->addr, arvif->vdev_id);
  
@@ -70,7 +70,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  	ret = ath12k_mac_vdev_config_after_start(arvif, chandef);
  	if (ret)
  		ath12k_warn(ab, "failed to configure vdev %d after %s: %d\n",
-@@ -13472,6 +13482,40 @@ void ath12k_mac_parse_tx_pwr_env(struct
+@@ -13474,6 +13484,40 @@ void ath12k_mac_parse_tx_pwr_env(struct
  }
  
  static int
@@ -111,25 +111,29 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  ath12k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
  				 struct ieee80211_vif *vif,
  				 struct ieee80211_bss_conf *link_conf,
-@@ -13510,12 +13554,13 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13512,13 +13556,15 @@ ath12k_mac_op_assign_vif_chanctx(struct
  			mutex_unlock(&ah->conf_mutex);
  			return -EINVAL;
  		}
 -	}else if (vif->valid_links){
 -		ar = arvif->ar;
 -		if (WARN_ON(!ar)) {
-+	} else if (vif->valid_links) {
-+		ret = ath12k_validate_arvif(arvif);
-+		if (ret) {
- 			mutex_unlock(&ah->conf_mutex);
+-			mutex_unlock(&ah->conf_mutex);
 -			return -EINVAL;
-+			return ret;
- 		}
-+		ar = arvif->ar;
+-		}
   	}  else {
++		if (vif->valid_links) {
++			ret = ath12k_validate_arvif(arvif);
++			if (ret) {
++				mutex_unlock(&ah->conf_mutex);
++				return ret;
++			}
++		}
++
  		ar = ath12k_get_ar_by_ctx(hw, ctx);
  		if (!ar) {
-@@ -13533,32 +13578,14 @@ ath12k_mac_op_assign_vif_chanctx(struct
+ 			ath12k_err(NULL,
+@@ -13535,32 +13581,14 @@ ath12k_mac_op_assign_vif_chanctx(struct
  		 * before creating vdev for new connection
  		 */
  		if (ar != arvif->ar || (arvif->is_scan_vif)) {
@@ -165,7 +169,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  			ret = ath12k_mac_vdev_delete(arvif_ar, arvif);
  			mutex_unlock(&arvif_ar->conf_mutex);
  			if (ret)
-@@ -15791,14 +15818,15 @@ static int ath12k_mac_op_remain_on_chann
+@@ -15796,14 +15824,15 @@ static int ath12k_mac_op_remain_on_chann
  	if (!arvif->is_started && ahvif->vdev_type == WMI_VDEV_TYPE_STA) {
  		chandef.chan = chan;
  		chandef.center_freq1 = chan->center_freq;
@@ -182,7 +186,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  	}
  
  	mutex_unlock(&ah->conf_mutex);
-@@ -15831,11 +15859,7 @@ static int ath12k_mac_op_remain_on_chann
+@@ -15836,11 +15865,7 @@ static int ath12k_mac_op_remain_on_chann
  		return ret;
  	}
  
@@ -195,7 +199,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  	ath12k_wmi_start_scan_init(ar, &arg);
  
  	arg.num_chan = 1;
-@@ -15849,7 +15873,7 @@ static int ath12k_mac_op_remain_on_chann
+@@ -15854,7 +15879,7 @@ static int ath12k_mac_op_remain_on_chann
  	arg.chan_list[0] = chan->center_freq;
  
  	arg.vdev_id = arvif->vdev_id;
@@ -204,7 +208,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  	arg.dwell_time_active = scan_time_msec;
  	arg.dwell_time_passive = scan_time_msec;
  	arg.max_scan_time = scan_time_msec;
-@@ -15874,6 +15898,7 @@ static int ath12k_mac_op_remain_on_chann
+@@ -15879,6 +15904,7 @@ static int ath12k_mac_op_remain_on_chann
  		goto exit;
  	}
  
@@ -212,7 +216,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  	ret = wait_for_completion_timeout(&ar->scan.on_channel, 3 * HZ);
  	if (ret == 0) {
  		ath12k_warn(ar->ab, "failed to switch to channel for roc scan\n");
-@@ -15885,7 +15910,7 @@ static int ath12k_mac_op_remain_on_chann
+@@ -15890,7 +15916,7 @@ static int ath12k_mac_op_remain_on_chann
  	}
  
  	ieee80211_queue_delayed_work(ah->hw, &ar->scan.timeout,
@@ -221,7 +225,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  						      ATH12K_MAC_SCAN_TIMEOUT_MSECS));
  
  	ret = 0;
-@@ -17331,6 +17356,7 @@ static int ath12k_mac_setup(struct ath12
+@@ -17380,6 +17406,7 @@ static int ath12k_mac_setup(struct ath12
  	INIT_DELAYED_WORK(&ar->scan.timeout, ath12k_scan_timeout_work);
  	INIT_WORK(&ar->scan.vdev_del_wk, ath12k_scan_vdev_del_work);
  	ar->scan.vdev_id = -1;
@@ -231,7 +235,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -8056,7 +8056,7 @@ static void ath12k_wmi_event_scan_comple
+@@ -8242,7 +8242,7 @@ static void ath12k_wmi_event_scan_comple
  	}
  }
  
@@ -240,7 +244,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  {
  	lockdep_assert_held(&ar->data_lock);
  
-@@ -8069,7 +8069,20 @@ static void ath12k_wmi_event_scan_bss_ch
+@@ -8255,7 +8255,20 @@ static void ath12k_wmi_event_scan_bss_ch
  		break;
  	case ATH12K_SCAN_RUNNING:
  	case ATH12K_SCAN_ABORTING:
@@ -262,7 +266,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  		break;
  	}
  }
-@@ -12017,7 +12030,8 @@ static void ath12k_scan_event(struct ath
+@@ -12209,7 +12222,8 @@ static void ath12k_scan_event(struct ath
  		ath12k_wmi_event_scan_completed(ar);
  		break;
  	case WMI_SCAN_EVENT_BSS_CHANNEL:
@@ -274,7 +278,7 @@ Signed-off-by: Arunpandi Kannan <quic_arunpand@quicinc.com>
  		ath12k_wmi_event_scan_foreign_chan(ar, le32_to_cpu(scan_ev.channel_freq));
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -4170,6 +4170,7 @@ struct wmi_start_scan_arg {
+@@ -4301,6 +4301,7 @@ struct wmi_start_scan_arg {
   * is trigger by HOST
   */
  #define ATH12K_SCAN_ID          0xA000
