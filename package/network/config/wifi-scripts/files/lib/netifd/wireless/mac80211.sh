@@ -80,6 +80,9 @@ dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
 
+#dpp
+dpp_ifaces=
+
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
 }
@@ -1136,6 +1139,8 @@ mac80211_prepare_vif() {
 
 			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
 
+			[ -n "$dpp" ] && append dpp_ifaces $ifname
+
 			[ -n "$hostapd_ctrl" ] || {
 				ap_ifname="${ifname}"
 				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
@@ -1839,6 +1844,8 @@ drv_mac80211_setup() {
 	[ -f "/lib/performance.sh" ] && {
 		. /lib/performance.sh
 	}
+
+	hostapd_dpp_action "$dpp_ifaces"
 
 	for_each_interface "ap mesh" mac80211_set_fq_limit
 	wireless_set_up
