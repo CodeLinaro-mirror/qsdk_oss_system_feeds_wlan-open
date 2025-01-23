@@ -1700,11 +1700,14 @@ drv_mac80211_setup() {
                 radio=-1
         fi
 
-	json_select data && {
-		json_get_var prev_rxantenna rxantenna
-		json_get_var prev_txantenna txantenna
-		json_select ..
-	}
+	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
+	if [ $mlo_add_flag -eq 0 ]; then
+		json_select data && {
+			json_get_var prev_rxantenna rxantenna
+			json_get_var prev_txantenna txantenna
+			json_select ..
+		}
+	fi
 
 	find_phy || {
 		echo "Could not find PHY for device '$1'"
