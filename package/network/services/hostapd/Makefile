@@ -180,7 +180,10 @@ Package/hostapd-openssl/description = $(Package/hostapd/description)
 define Package/hostapd-macsec
 $(call Package/hostapd/Default,$(1))
   TITLE+= (macsec)
+  PROVIDES:=hostapd-macsec
+  CONFLICTS:=
   VARIANT:=macsec
+  DEPENDS+=$(OPENSSL_DEPENDS) +kmod-qca-nss-macsec +libnl
 endef
 
 define Package/hostapd-macsec/description
@@ -451,7 +454,10 @@ endef
 define Package/wpa-supplicant-macsec
 $(call Package/wpa-supplicant/Default,$(1))
   TITLE:=WPA Supplicant (MACSEC)
+  PROVIDES:=wpa-supplicant-macsec
+  CONFLICTS:=
   VARIANT:=supplicant-macsec
+  DEPENDS+=$(OPENSSL_DEPENDS) +kmod-qca-nss-macsec +libnl
 endef
 
 define Package/wpa-supplicant-macsec/Description
@@ -588,6 +594,11 @@ endif
 
 define Build/Configure
 	$(Build/Configure/rebuild)
+	# Revert specific patch for wpa-supplicant-macsec
+	$(if $(filter supplicant-macsec,$(BUILD_VARIANT)), \
+		$(PATCH) -d $(PKG_BUILD_DIR) -p1 -R < $(EXTERNAL_PATCH_DIR)/r31-hostapd-display-the-link_type-of-a-station-through-hostapd_cli.patch && \
+		$(PATCH) -d $(PKG_BUILD_DIR) -p1 -R < $(EXTERNAL_PATCH_DIR)/b00-034-hostapd-Add-max-rate-information-into-STATUS-and-STA.patch \
+	)
 	$(if $(wildcard ./files/hostapd-$(CONFIG_VARIANT).config), \
 		$(CP) ./files/hostapd-$(CONFIG_VARIANT).config $(PKG_BUILD_DIR)/hostapd/.config \
 	)
@@ -635,9 +646,13 @@ ifdef CONFIG_WPA_ENABLE_WEP
 endif
 
 ifeq ($(LOCAL_VARIANT),macsec)
-	TARGET_LDFLAGS += -lcrypto -lssl -lfal -L$(STAGING_DIR)/usr/lib
-	TARGET_CPPFLAGS += \
-	-I$(STAGING_DIR)/usr/include/qca-nss-macsec
+	EXTERNAL_PATCH_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/patches
+	TARGET_LDFLAGS += -lcrypto -lssl -lfal -L$(STAGING_DIR)/usr/lib -lnl-3 -lnl-genl-3 -lnl-route-3 -ldl -pie
+	TARGET_LDFLAGS := $(filter-out -lnl-tiny, $(TARGET_LDFLAGS))
+	TARGET_CFLAGS += -Wno-implicit-function-declaration -Wno-int-conversion
+	TARGET_CPPFLAGS := \
+		-I$(STAGING_DIR)/usr/include \
+		-I$(STAGING_DIR)/usr/include/qca-nss-macsec
 endif
 
 define Build/RunMake
@@ -745,7 +760,6 @@ Package/hostapd/conffiles = $(Package/hostapd-full/conffiles)
 Package/hostapd-openssl/conffiles = $(Package/hostapd-full/conffiles)
 Package/hostapd-wolfssl/conffiles = $(Package/hostapd-full/conffiles)
 Package/hostapd-mbedtls/conffiles = $(Package/hostapd-full/conffiles)
-Package/hostapd-macsec/conffiles = $(Package/hostapd-full/conffiles)
 endif
 
 define Install/hostapd
@@ -782,7 +796,7 @@ Package/hostapd-wolfssl/install = $(Package/hostapd/install)
 Package/hostapd-mbedtls/install = $(Package/hostapd/install)
 
 define Package/hostapd-macsec/install
-	$(call Install/hostapd,$(1))
+	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/hostapd/hostapd $(1)/usr/sbin/hostapd-macsec
 endef
 
@@ -829,7 +843,7 @@ Package/wpa-supplicant-mesh-wolfssl/install = $(Package/wpa-supplicant/install)
 Package/wpa-supplicant-mesh-mbedtls/install = $(Package/wpa-supplicant/install)
 
 define Package/wpa-supplicant-macsec/install
-	$(call Install/supplicant,$(1))
+	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wpa_supplicant/wpa_supplicant $(1)/usr/sbin/wpa_supplicant-macsec
 endef
 
@@ -910,3 +924,5 @@ $(eval $(call BuildPackage,eapol-test))
 $(eval $(call BuildPackage,eapol-test-openssl))
 $(eval $(call BuildPackage,eapol-test-wolfssl))
 $(eval $(call BuildPackage,eapol-test-mbedtls))
+$(eval $(call BuildPackage,hostapd-macsec))
+$(eval $(call BuildPackage,wpa-supplicant-macsec))
