@@ -232,11 +232,10 @@ define KernelPackage/dm
 	CONFIG_DM_LOG_USERSPACE=n \
 	CONFIG_MD=y \
 	CONFIG_BLK_DEV_DM \
-	CONFIG_DM_CRYPT \
+	CONFIG_DM_CRYPT=y \
 	CONFIG_DM_MIRROR
   FILES:= \
     $(LINUX_DIR)/drivers/md/dm-mod.ko \
-    $(LINUX_DIR)/drivers/md/dm-crypt.ko \
     $(LINUX_DIR)/drivers/md/dm-log.ko \
     $(LINUX_DIR)/drivers/md/dm-mirror.ko \
     $(LINUX_DIR)/drivers/md/dm-region-hash.ko
