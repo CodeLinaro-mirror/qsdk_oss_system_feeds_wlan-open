@@ -1,0 +1,324 @@
+From 3527bac95e326e2c68d610c9f09b9199aa3c8b43 Mon Sep 17 00:00:00 2001
+From: Aishwarya R <quic_aisr@quicinc.com>
+Date: Thu, 26 Dec 2024 09:25:00 +0530
+Subject: [PATCH] UPSTREAM:DP:wifi: mac80211: Implement set_dscp_tid call back
+ function to notify qos_map_set events from mac80211
+
+Currently, ath12k follows fixed DSCP to TID mapping.Add support
+for dynamic DSCP to TID mapping based on qos_map_set values from
+mac80211.
+
+Add support for TID offload mechanism when Hardware supports
+IEEE80211_HW_SUPPORTS_DSCP_TID_MAP.
+
+Implement set_dscp_tid call back function to notify driver upon
+receiving qos_map_set events from mac80211 and update TID registers
+accordingly.
+
+Patch-dependency: none
+Signed-off-by: Aishwarya R <quic_aisr@quicinc.com>
+---
+ include/net/cfg80211.h    |  3 ++-
+ include/net/mac80211.h    |  6 ++++++
+ net/mac80211/cfg.c        | 10 +++++++++-
+ net/mac80211/debugfs.c    |  1 +
+ net/mac80211/driver-ops.h | 14 ++++++++++++++
+ net/mac80211/trace.h      | 37 +++++++++++++++++++++++++++++++++++++
+ net/wireless/ap.c         |  2 +-
+ net/wireless/ibss.c       |  2 +-
+ net/wireless/mesh.c       |  2 +-
+ net/wireless/nl80211.c    |  3 ++-
+ net/wireless/rdev-ops.h   |  7 ++++---
+ net/wireless/sme.c        |  2 +-
+ net/wireless/trace.h      |  4 ++--
+ net/wireless/util.c       |  2 +-
+ 14 files changed, 82 insertions(+), 13 deletions(-)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index 3d9f7fc..1f073a0 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -5070,7 +5070,8 @@ struct cfg80211_ops {
+ 
+ 	int     (*set_qos_map)(struct wiphy *wiphy,
+ 			       struct net_device *dev,
+-			       struct cfg80211_qos_map *qos_map);
++			       struct cfg80211_qos_map *qos_map,
++			       unsigned int link_id);
+ 
+ 	int	(*set_ap_chanwidth)(struct wiphy *wiphy, struct net_device *dev,
+ 				    unsigned int link_id,
+diff --git a/include/net/mac80211.h b/include/net/mac80211.h
+index 8187e70..f60572a 100644
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -2848,6 +2848,8 @@ struct ieee80211_txq {
+  * @IEEE80211_HW_SUPPORTS_CONC_AP_MON_IN_80211_FORMAT: Hardware supports concurrent
+  *	encapsulation decapsulation offload for AP and monitor in 80211 FORMAT.
+  *
++ * @IEEE80211_HW_SUPPORTS_DSCP_TID_MAP: Hardware/driver supports DSCP to TID mapping.
++ *
+  * @NUM_IEEE80211_HW_FLAGS: number of hardware flags, used for sizing arrays
+  */
+ enum ieee80211_hw_flags {
+@@ -2913,6 +2915,7 @@ enum ieee80211_hw_flags {
+ 	IEEE80211_HW_SUPPORT_ECM_REGISTRATION,
+ 	IEEE80211_HW_SUPPORTS_VLAN_DATA_OFFLOAD,
+ 	IEEE80211_HW_SUPPORTS_CONC_AP_MON_IN_80211_FORMAT,
++	IEEE80211_HW_SUPPORTS_DSCP_TID_MAP,
+ 
+ 	/* keep last, obviously */
+ 	NUM_IEEE80211_HW_FLAGS
+@@ -4425,6 +4428,7 @@ struct ieee80211_ppe_vp_ds_params {
+  *	This callback may sleep.
+  * @sta_set_4addr: Called to notify the driver when a station starts/stops using
+  *	4-address mode
++ * @set_dscp_tid: Notify the driver when receive qos_map_set events from mac80211.
+  * @set_sar_specs: Update the SAR (TX power) settings.
+  * @sta_set_decap_offload: Called to notify the driver when a station is allowed
+  *	to use rx decapsulation offload
+@@ -4820,6 +4824,8 @@ struct ieee80211_ops {
+ 				   struct ieee80211_vif *vif);
+ 	void (*sta_set_4addr)(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			      struct ieee80211_sta *sta, bool enabled);
++	void (*set_dscp_tid)(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++			     struct cfg80211_qos_map *qos_map, unsigned int link_id);
+ 	int (*set_sar_specs)(struct ieee80211_hw *hw,
+ 			     const struct cfg80211_sar_specs *sar);
+ 	void (*sta_set_decap_offload)(struct ieee80211_hw *hw,
+diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
+index 3198c7c..6d9dbfa 100644
+--- a/net/mac80211/cfg.c
++++ b/net/mac80211/cfg.c
+@@ -4989,11 +4989,19 @@ static void ieee80211_set_wakeup(struct wiphy *wiphy, bool enabled)
+ 
+ static int ieee80211_set_qos_map(struct wiphy *wiphy,
+ 				 struct net_device *dev,
+-				 struct cfg80211_qos_map *qos_map)
++				 struct cfg80211_qos_map *qos_map,
++				 unsigned int link_id)
+ {
++	struct ieee80211_local *local = wiphy_priv(wiphy);
+ 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+ 	struct mac80211_qos_map *new_qos_map, *old_qos_map;
+ 
++	if (ieee80211_hw_check(&local->hw, SUPPORTS_DSCP_TID_MAP)) {
++		if (qos_map)
++			drv_set_dscp_tid(local, sdata, qos_map, link_id);
++		return 0;
++	}
++
+ 	if (qos_map) {
+ 		new_qos_map = kzalloc(sizeof(*new_qos_map), GFP_KERNEL);
+ 		if (!new_qos_map)
+diff --git a/net/mac80211/debugfs.c b/net/mac80211/debugfs.c
+index d834a08..d78a01c 100644
+--- a/net/mac80211/debugfs.c
++++ b/net/mac80211/debugfs.c
+@@ -585,6 +585,7 @@ static const char *hw_flag_names[] = {
+ 	FLAG(SUPPORT_ECM_REGISTRATION),
+ 	FLAG(SUPPORTS_VLAN_DATA_OFFLOAD),
+ 	FLAG(SUPPORTS_CONC_AP_MON_IN_80211_FORMAT),
++	FLAG(SUPPORTS_DSCP_TID_MAP),
+ #undef FLAG
+ };
+ 
+diff --git a/net/mac80211/driver-ops.h b/net/mac80211/driver-ops.h
+index 710a5bb..527e3a3 100644
+--- a/net/mac80211/driver-ops.h
++++ b/net/mac80211/driver-ops.h
+@@ -1483,6 +1483,20 @@ static inline void drv_sta_set_4addr(struct ieee80211_local *local,
+ 	trace_drv_return_void(local);
+ }
+ 
++static inline void drv_set_dscp_tid(struct ieee80211_local *local,
++				    struct ieee80211_sub_if_data *sdata,
++				    struct cfg80211_qos_map *qos_map,
++				    unsigned int link_id)
++{
++        if (!check_sdata_in_driver(sdata))
++                return;
++
++	trace_drv_set_dscp_tid(local, sdata, qos_map, link_id);
++        if (local->ops->set_dscp_tid)
++                local->ops->set_dscp_tid(&local->hw, &sdata->vif, qos_map, link_id);
++        trace_drv_return_void(local);
++}
++
+ static inline void drv_sta_set_decap_offload(struct ieee80211_local *local,
+ 					     struct ieee80211_sub_if_data *sdata,
+ 					     struct ieee80211_sta *sta,
+diff --git a/net/mac80211/trace.h b/net/mac80211/trace.h
+index 6e4ca44..b8221c8 100644
+--- a/net/mac80211/trace.h
++++ b/net/mac80211/trace.h
+@@ -2497,6 +2497,43 @@ DEFINE_EVENT(sta_flag_evt, drv_sta_set_decap_offload,
+ 	TP_ARGS(local, sdata, sta, enabled)
+ );
+ 
++DECLARE_EVENT_CLASS(dscp_flag_evt,
++	TP_PROTO(struct ieee80211_local *local,
++		 struct ieee80211_sub_if_data *sdata,
++		 struct cfg80211_qos_map *qos_map,
++		 unsigned int link_id),
++
++	TP_ARGS(local, sdata, qos_map, link_id),
++
++	TP_STRUCT__entry(
++		LOCAL_ENTRY
++		VIF_ENTRY
++		__field(struct cfg80211_qos_map *, qos_map)
++		__field(unsigned int, link_id)
++	),
++
++	TP_fast_assign(
++		LOCAL_ASSIGN;
++		VIF_ASSIGN;
++		__entry->qos_map = qos_map;
++		__entry->link_id = link_id;
++	),
++
++	TP_printk(
++		LOCAL_PR_FMT  VIF_PR_FMT " qos_map=%p link_id=%u",
++		LOCAL_PR_ARG, VIF_PR_ARG, __entry->qos_map, __entry->link_id
++	)
++);
++
++DEFINE_EVENT(dscp_flag_evt, drv_set_dscp_tid,
++	TP_PROTO(struct ieee80211_local *local,
++		 struct ieee80211_sub_if_data *sdata,
++		 struct cfg80211_qos_map *qos_map,
++		 unsigned int link_id),
++
++	TP_ARGS(local, sdata, qos_map, link_id)
++);
++
+ TRACE_EVENT(drv_add_twt_setup,
+ 	TP_PROTO(struct ieee80211_local *local,
+ 		 struct ieee80211_sta *sta,
+diff --git a/net/wireless/ap.c b/net/wireless/ap.c
+index 8235785..3347e67 100644
+--- a/net/wireless/ap.c
++++ b/net/wireless/ap.c
+@@ -54,7 +54,7 @@ static int ___cfg80211_stop_ap(struct cfg80211_registered_device *rdev,
+ 			wdev->u.ap.ssid_len = 0;
+ 		}
+ 
+-		rdev_set_qos_map(rdev, dev, NULL);
++		rdev_set_qos_map(rdev, dev, NULL, link_id);
+ 		if (notify)
+ 			nl80211_send_ap_stopped(wdev, link_id);
+ 
+diff --git a/net/wireless/ibss.c b/net/wireless/ibss.c
+index a12276f..a48f19f 100644
+--- a/net/wireless/ibss.c
++++ b/net/wireless/ibss.c
+@@ -162,7 +162,7 @@ static void __cfg80211_clear_ibss(struct net_device *dev, bool nowext)
+ 	kfree_sensitive(wdev->connect_keys);
+ 	wdev->connect_keys = NULL;
+ 
+-	rdev_set_qos_map(rdev, dev, NULL);
++	rdev_set_qos_map(rdev, dev, NULL, -1);
+ 
+ 	/*
+ 	 * Delete all the keys ... pairwise keys can't really
+diff --git a/net/wireless/mesh.c b/net/wireless/mesh.c
+index c1dc235..3df1039 100644
+--- a/net/wireless/mesh.c
++++ b/net/wireless/mesh.c
+@@ -284,7 +284,7 @@ int __cfg80211_leave_mesh(struct cfg80211_registered_device *rdev,
+ 		wdev->u.mesh.beacon_interval = 0;
+ 		memset(&wdev->u.mesh.chandef, 0,
+ 		       sizeof(wdev->u.mesh.chandef));
+-		rdev_set_qos_map(rdev, dev, NULL);
++		rdev_set_qos_map(rdev, dev, NULL, -1);
+ 		cfg80211_sched_dfs_chan_update(rdev);
+ 	}
+ 
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 1c3466a..c92d377 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -16410,6 +16410,7 @@ static int nl80211_set_qos_map(struct sk_buff *skb,
+ 	struct cfg80211_registered_device *rdev = info->user_ptr[0];
+ 	struct cfg80211_qos_map *qos_map = NULL;
+ 	struct net_device *dev = info->user_ptr[1];
++	unsigned int link_id = nl80211_link_id(info->attrs);
+ 	u8 *pos, len, num_des, des_len, des;
+ 	int ret;
+ 
+@@ -16447,7 +16448,7 @@ static int nl80211_set_qos_map(struct sk_buff *skb,
+ 	wdev_lock(dev->ieee80211_ptr);
+ 	ret = nl80211_key_allowed(dev->ieee80211_ptr);
+ 	if (!ret)
+-		ret = rdev_set_qos_map(rdev, dev, qos_map);
++		ret = rdev_set_qos_map(rdev, dev, qos_map, link_id);
+ 	wdev_unlock(dev->ieee80211_ptr);
+ 
+ 	kfree(qos_map);
+diff --git a/net/wireless/rdev-ops.h b/net/wireless/rdev-ops.h
+index 5b6ed2a..19a0dc8 100644
+--- a/net/wireless/rdev-ops.h
++++ b/net/wireless/rdev-ops.h
+@@ -1140,13 +1140,14 @@ static inline int rdev_channel_switch(struct cfg80211_registered_device *rdev,
+ 
+ static inline int rdev_set_qos_map(struct cfg80211_registered_device *rdev,
+ 				   struct net_device *dev,
+-				   struct cfg80211_qos_map *qos_map)
++				   struct cfg80211_qos_map *qos_map,
++				   unsigned int link_id)
+ {
+ 	int ret = -EOPNOTSUPP;
+ 
+ 	if (rdev->ops->set_qos_map) {
+-		trace_rdev_set_qos_map(&rdev->wiphy, dev, qos_map);
+-		ret = rdev->ops->set_qos_map(&rdev->wiphy, dev, qos_map);
++		trace_rdev_set_qos_map(&rdev->wiphy, dev, qos_map, link_id);
++		ret = rdev->ops->set_qos_map(&rdev->wiphy, dev, qos_map, link_id);
+ 		trace_rdev_return_int(&rdev->wiphy, ret);
+ 	}
+ 
+diff --git a/net/wireless/sme.c b/net/wireless/sme.c
+index 5da8523..0a2b9b6 100644
+--- a/net/wireless/sme.c
++++ b/net/wireless/sme.c
+@@ -1392,7 +1392,7 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
+ 			rdev_del_key(rdev, dev, -1, i, false, NULL);
+ 	}
+ 
+-	rdev_set_qos_map(rdev, dev, NULL);
++	rdev_set_qos_map(rdev, dev, NULL, -1);
+ 
+ #ifdef CPTCFG_CFG80211_WEXT
+ 	memset(&wrqu, 0, sizeof(wrqu));
+diff --git a/net/wireless/trace.h b/net/wireless/trace.h
+index dd48108..c680d7f 100644
+--- a/net/wireless/trace.h
++++ b/net/wireless/trace.h
+@@ -2437,8 +2437,8 @@ TRACE_EVENT(rdev_channel_switch,
+ 
+ TRACE_EVENT(rdev_set_qos_map,
+ 	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev,
+-		 struct cfg80211_qos_map *qos_map),
+-	TP_ARGS(wiphy, netdev, qos_map),
++		 struct cfg80211_qos_map *qos_map, unsigned int link_id),
++	TP_ARGS(wiphy, netdev, qos_map, link_id),
+ 	TP_STRUCT__entry(
+ 		WIPHY_ENTRY
+ 		NETDEV_ENTRY
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index 7fb8d2b..ff53947 100644
+--- a/net/wireless/util.c
++++ b/net/wireless/util.c
+@@ -1151,7 +1151,7 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
+ 
+ 		dev->ieee80211_ptr->use_4addr = false;
+ 		wdev_lock(dev->ieee80211_ptr);
+-		rdev_set_qos_map(rdev, dev, NULL);
++		rdev_set_qos_map(rdev, dev, NULL, -1);
+ 		wdev_unlock(dev->ieee80211_ptr);
+ 
+ 		switch (otype) {
+-- 
+2.34.1
+
