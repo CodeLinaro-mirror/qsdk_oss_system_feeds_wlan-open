@@ -78,12 +78,31 @@ boost_performance() {
 	[ -e /proc/device-tree/MP_256 ] || [ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 
 	#Disable Generic receive offload(GRO) and Generic Segmentation offload(GSO) on interfaces
-	interfaces="eth0 eth1 eth4 eth5 wlan0 wlan1 wlan2 wlan3 wlan00 mld0 mld1 mld2 mld3"
-	for iface in $interfaces; do
-		if [ -e "/sys/class/net/$iface" ]; then
-			ethtool -K "$iface" gro off
-			ethtool -K "$iface" gso off
+	eth_interfaces="eth0 eth1 eth4 eth5"
+	for eth_iface in $eth_interfaces; do
+		if [ -e "/sys/class/net/$eth_iface" ]; then
+			ethtool -K "$eth_iface" gro off
+			ethtool -K "$eth_iface" gso off
 		fi
+	done
+
+	phy_list=$(ls /sys/class/ieee80211/)
+	for phy in $phy_list; do
+		iface_list=$(ls /sys/class/ieee80211/${phy}/device/net/)
+		for iface in $iface_list; do
+			interfaces="${interfaces} ${iface}"
+		done
+	done
+
+	for iface in $interfaces; do
+	case "$iface" in
+		*.sta*)
+			continue
+			;;
+		*)
+			echo 0 > /sys/class/net/${iface}/queues/rx-0/rps_cpus
+			;;
+		esac
 	done
 
 	echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
