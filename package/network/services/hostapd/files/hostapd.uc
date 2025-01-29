@@ -157,6 +157,9 @@ function iface_freq_info(iface, config, params)
 	if (freq < 4000)
 		width = 0;
 
+	if (params.chan_width != null && params.chan_width <=1)
+		sec_offset = 0;
+
 	return hostapd.freq_info(freq, sec_offset, width, params.chan_width,
 				 params.center_freq1, params.center_freq2,
 				 params.punct_bitmap);
