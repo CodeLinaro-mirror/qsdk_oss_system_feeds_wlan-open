@@ -783,6 +783,11 @@ post_wifi_updown() {
 	:
 }
 
+post_wifi_config() {
+	post_mac80211 "update_pri_link"
+	:
+}
+
 restart_rsrcmgr() {
 	[ -f /tmp/rsrcmgr.log ] && {
 		rm -rf /tmp/rsrcmgr.log
@@ -822,6 +827,15 @@ pre_mac80211() {
 	return 0
 }
 
+set_primary_link() {
+	PHY_PATH="/sys/kernel/debug/ieee80211"
+	[ -d  "$PHY_PATH" ] && {
+		for phy in $(ls $PHY_PATH 2>/dev/null); do
+			update_primary_link "$phy"
+		done
+	}
+}
+
 post_mac80211() {
 	local action=${1}
 
@@ -835,12 +849,10 @@ post_mac80211() {
 				configure_telemetry_sla_thersholds
 				configure_telemetry_sla_detect
 			fi
-			PHY_PATH="/sys/kernel/debug/ieee80211"
-			[ -d  $PHY_PATH ] && {
-				for phy in $(ls $PHY_PATH 2>/dev/null); do
-					update_primary_link "$phy"
-				done
-			}
+			set_primary_link
+		;;
+		update_pri_link)
+			set_primary_link
 		;;
 	esac
 	return 0
