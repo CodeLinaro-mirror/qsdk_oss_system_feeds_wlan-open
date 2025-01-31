@@ -30,7 +30,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
-@@ -9426,6 +9429,9 @@ int ath12k_mac_update_sta_state(struct i
+@@ -9474,6 +9477,9 @@ int ath12k_mac_update_sta_state(struct i
  		ahsta->deflink.is_assoc_link = true;
  		ahsta->assoc_link_id = link_id;
  		ahsta->primary_link_id = link_id;
@@ -40,7 +40,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	links = ahsta->links_map;
-@@ -9457,6 +9463,9 @@ int ath12k_mac_update_sta_state(struct i
+@@ -9505,6 +9511,9 @@ int ath12k_mac_update_sta_state(struct i
  								    ahvif, sta);
  			ahsta->assoc_link_id = link_id;
  			ahsta->primary_link_id = link_id;
@@ -50,7 +50,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		} else {
  			ret = ath12k_mac_reconfig_ahsta_links_mode1(ah, ahsta,
  								    ahvif, sta);
-@@ -9552,14 +9561,18 @@ static int ath12k_mac_op_sta_state(struc
+@@ -9600,14 +9609,18 @@ static int ath12k_mac_op_sta_state(struc
  
  void ath12k_mac_assign_middle_link_id(struct ieee80211_sta *sta,
  				      struct ath12k_sta *ahsta,
@@ -70,7 +70,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	/* 4 device: In case of 3 link STA association, Make sure to select
  	 * the middle device link as primary_link_id of sta which is adjacent
-@@ -9610,8 +9623,8 @@ void ath12k_mac_assign_middle_link_id(st
+@@ -9658,8 +9671,8 @@ void ath12k_mac_assign_middle_link_id(st
  		if (ab->wsi_info.chip_idx == i) {
  			ath12k_info(ab, "Overwriting primary link_id as %d for sta %pM",
  				    link_id, sta->addr);
@@ -81,18 +81,18 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		}
  	}
  }
-@@ -9629,7 +9642,7 @@ static int ath12k_mac_op_change_sta_link
+@@ -9677,7 +9690,7 @@ static int ath12k_mac_op_change_sta_link
  	struct ath12k_sta *ahsta = ath12k_sta_to_ahsta(sta);
  	unsigned long valid_links;
  	u16 removed_link_map;
 -	u8 link_id, num_devices = ah->ag->num_chip, tmp_link_id;
 +	u8 link_id, tmp_link_id, pri_link_id;
  	int ret = 0;
+ 	bool skip_remove_sta = false;
  
- 	if (!sta->valid_links)
-@@ -9647,25 +9660,6 @@ static int ath12k_mac_op_change_sta_link
- 		/* this op is expected only after initial sta insertion with default link */
- 		WARN_ON(ahsta->links_map == 0);
+@@ -9702,25 +9715,6 @@ static int ath12k_mac_op_change_sta_link
+ 			return -EINVAL;
+ 		}
  
 -		if ((test_bit(ahvif->primary_link_id, &sta->valid_links))) {
 -			arvif = ath12k_get_arvif_from_link_id(ahvif, ahvif->primary_link_id);
@@ -116,7 +116,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		valid_links = new_links;
  		for_each_set_bit(link_id, &valid_links, IEEE80211_MLD_MAX_NUM_LINKS) {
  			if (ahsta->links_map & BIT(link_id))
-@@ -9698,7 +9692,18 @@ static int ath12k_mac_op_change_sta_link
+@@ -9753,7 +9747,18 @@ static int ath12k_mac_op_change_sta_link
  			mutex_unlock(&ar->conf_mutex);
  		}
  
@@ -136,8 +136,8 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	} else {
  		removed_link_map = old_links ^ new_links;
  
-@@ -21129,3 +21134,59 @@ struct ieee80211_chanctx_conf *ath12k_ma
- 		return NULL;
+@@ -21273,3 +21278,79 @@ struct ieee80211_chanctx_conf *ath12k_ma
+ 	return ath12k_mac_get_first_active_arvif_chanctx(ar);
  }
  
 +static u8 ath12k_mac_ahsta_get_pri_link_id(struct ath12k_vif *ahvif,
@@ -147,7 +147,9 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +	struct ath12k_hw *ah = ahvif->ah;
 +	struct ath12k_link_vif *arvif;
 +	struct ieee80211_sta *sta;
-+	u8 link_id, pri_link_id;
++	struct ath12k *ar;
++	u8 link_id = 0, pri_link_id;
++	bool is_link_found = false;
 +
 +	lockdep_assert_held(&ah->conf_mutex);
 +
@@ -155,6 +157,24 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +		return IEEE80211_MLD_MAX_NUM_LINKS;
 +
 +	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
++
++	/* Handle conversion of user configured hw link id to primary link id for
++	 * STA mode.
++	 */
++	if (ahvif->vif->type == NL80211_IFTYPE_STATION) {
++		for_each_set_bit_from(link_id, &ahvif->links_map, ATH12K_NUM_MAX_LINKS) {
++			arvif = ath12k_get_arvif_from_link_id(ahvif, link_id);
++			if (!arvif)
++				continue;
++			ar = arvif->ar;
++			if (ahvif->hw_link_id == ar->link_idx) {
++				is_link_found = true;
++				break;
++			}
++		}
++		if (is_link_found)
++			ahvif->primary_link_id = arvif->link_id;
++	}
 +
 +	/* if not configured in debugfs then proceed to find a suitable
 +	 * link with available links
