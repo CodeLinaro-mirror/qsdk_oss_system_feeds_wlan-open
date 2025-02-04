@@ -1310,11 +1310,27 @@ hostapd_set_log_options() {
 }
 
 hostapd_dpp_action() {
-	local ifname="$1"
+	local ifnames="$1"
+	local iface_name=
+	local current_ifaces=
+	local ifname_iter=
+	local script_started=0
 
-	if [ "${dpp}" -eq 1 ]; then
-		/usr/sbin/hostapd_cli -i "$ifname" -p /var/run/hostapd -a /lib/netifd/dpp-hostapd-event-update -B
-	fi
+	for iface_name in $ifnames
+	do
+		current_ifaces=$(/usr/sbin/hostapd_cli -i $iface_name interface)
+		for ifname_iter in $current_ifaces
+		do
+			if [[ "$ifname_iter" == *"$iface_name"_link* ]]; then
+				/usr/sbin/hostapd_cli -i "$ifname_iter" -p /var/run/hostapd -a /lib/netifd/dpp-hostapd-event-update -B
+				script_started=1
+			fi
+		done
+
+		if [ $script_started -ne 1 ]; then
+			/usr/sbin/hostapd_cli -i "$iface_name" -p /var/run/hostapd -a /lib/netifd/dpp-hostapd-event-update -B
+		fi
+	done
 }
 
 _wpa_supplicant_common() {
