@@ -33,7 +33,7 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  #include <ppe_ds_wlan.h>
  #include <ppe_vp_public.h>
-@@ -2146,6 +2149,26 @@ static inline int ath12k_get_peer_count(
+@@ -2154,6 +2157,26 @@ static inline int ath12k_get_peer_count(
  	return peer_count;
  }
  
@@ -74,26 +74,40 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -303,7 +303,8 @@ void ath12k_dp_rx_bufs_replenish(struct
+@@ -286,6 +286,7 @@ void ath12k_dp_rx_bufs_replenish(struct
+ 	dma_addr_t paddr;
+ 	enum hal_rx_buf_return_buf_manager mgr = ab->hw_params->hal_params->rx_buf_rbm;
+ 	int num_remain;
++	bool is_dma_inv_done = false;
+ 
+ 	srng = &ab->hal.srng_list[rx_ring->refill_buf_ring.ring_id];
+ 
+@@ -302,8 +303,11 @@ void ath12k_dp_rx_bufs_replenish(struct
+ 		if (unlikely(!skb))
  			break;
  
- 		if (unlikely(!skb->fast_recycled))
+-		if (unlikely(!skb->fast_recycled))
 -			dmac_inv_range_no_dsb(skb->data, skb->data + (skb->len + skb_tailroom(skb)));
++		if (unlikely(!skb->fast_recycled)) {
 +			ath12k_core_dma_inv_range_no_dsb(skb->data,
 +							 skb->data + (skb->len + skb_tailroom(skb)));
++			is_dma_inv_done = true;
++		}
  
  		paddr = dma_map_single_attrs(ab->dev, skb->data,
  					     skb->len + skb_tailroom(skb),
-@@ -318,7 +319,7 @@ void ath12k_dp_rx_bufs_replenish(struct
+@@ -318,7 +322,9 @@ void ath12k_dp_rx_bufs_replenish(struct
  		num_remain--;
  	}
  
 -	dsb(st);
-+	ath12k_core_dsb();
++	if (unlikely(is_dma_inv_done))
++		ath12k_core_dsb();
++
  	spin_lock_bh(&srng->lock);
  	ath12k_hal_srng_access_begin(ab, srng);
  	while ((skb = __skb_dequeue(&skb_list))) {
-@@ -3907,7 +3908,9 @@ try_again:
+@@ -3908,7 +3914,9 @@ try_again:
  		ath12k_hal_srng_access_end(ab, srng);
  		return -EINVAL;
  	}
@@ -101,9 +115,9 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  	ath12k_hal_srng_dst_invalidate_entry(ab, srng, valid_entries);
 +#endif
  
- 	if (valid_entries < DP_VALID_PREFETCH_ENTRY)
+ 	if (valid_entries > DP_VALID_PREFETCH_ENTRY)
  		l_pf_reo_desc = ath12k_hal_srng_dst_prefetch_reo_desc(srng);
-@@ -3966,7 +3969,7 @@ try_again:
+@@ -3967,7 +3975,7 @@ try_again:
  
  		chip_id = src_ab->chip_id;
  
@@ -114,7 +128,7 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  		desc_info->skb = NULL;
 --- a/drivers/net/wireless/ath/ath12k/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_tx.c
-@@ -303,7 +303,7 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
+@@ -308,7 +308,7 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
  		return -ENOSPC;
  	}
  
@@ -123,7 +137,7 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  	paddr = (dma_addr_t)virt_to_phys(skb->data);
  
  	len = skb->len;
-@@ -627,7 +627,7 @@ skip_htt_meta:
+@@ -632,7 +632,7 @@ skip_htt_meta:
  	}
  
  
@@ -132,7 +146,7 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  	ti.paddr = (dma_addr_t)virt_to_phys(skb->data);
  
  	tx_desc->skb = skb;
-@@ -662,7 +662,8 @@ skip_htt_meta:
+@@ -667,7 +667,8 @@ skip_htt_meta:
  		}
  
  
@@ -142,7 +156,7 @@ Signed-off-by: Thiraviyam Mariyappan <quic_tmariyap@quicinc.com>
  		ti.paddr = (dma_addr_t)virt_to_phys(skb_ext_desc->data);
  
  		ti.data_len = skb_ext_desc->len;
-@@ -1611,7 +1612,9 @@ int ath12k_dp_tx_completion_handler(stru
+@@ -1617,7 +1618,9 @@ int ath12k_dp_tx_completion_handler(stru
  	if (valid_entries > budget)
  		valid_entries = budget;
  
