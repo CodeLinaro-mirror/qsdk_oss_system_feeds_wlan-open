@@ -1759,6 +1759,11 @@ drv_mac80211_setup() {
 				iw reg set "$country"
 				sleep 1
 			}
+			if [ "$country" = "00" ]; then
+				iw reg set "$country"
+				sleep 1
+			fi
+
 		}
 	fi
 
