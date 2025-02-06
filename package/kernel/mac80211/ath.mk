@@ -77,6 +77,7 @@ config-$(call config_package,ath12k) += ATH12K
 
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
 config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
+config-$(CONFIG_PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO) += ATH12K_TEST_FW_FOR_11S_MLO
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH12K_MEM_PROFILE_512M
 endif
@@ -355,6 +356,13 @@ define KernelPackage/ath12k/config
 		default y
 		help
 			This option enables support for SAWF and Telemetry
+			in ATH12K.
+
+	config PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO
+		bool "Enable 11S MLO host test Framework in ATH12K"
+		default n
+		help
+			This option enables support for 11S MLO Host Test Framework
 			in ATH12K.
 endef
 
