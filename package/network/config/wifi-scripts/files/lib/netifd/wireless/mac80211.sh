@@ -1544,6 +1544,9 @@ wpa_supplicant_start() {
 	[ -n "$mld" ] && is_mld="true"
 
 	ubus_call wpa_supplicant config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "num_global_macaddr": '"$num_global_macaddr"', "is_ml": '"$is_mld"' }' > /dev/null
+	if [ "${dpp}" -eq 1 ]; then
+		/usr/sbin/wpa_cli -i $ifname -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
+	fi
 }
 
 mac80211_setup_supplicant() {
