@@ -183,7 +183,7 @@ mlo_add_link() {
 	hw_idx=$(uci show wireless.$link.radio | cut -d "'" -f 2)
 	for iface in $iface_data; do
 		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
-		check_disabled=$(uci show wireless.${iface}.disabled | cut -d "'" -f2)
+		check_disabled=$(uci show wireless.${iface}.disabled | cut -d "'" -f2) 2> /dev/null
 		if [ "$check_band" = "$link" ] && [ "$check_disabled" = 0 ]; then
 			echo "link is already present in the mld" > /dev/ttyMSM0
 			return
@@ -520,7 +520,7 @@ mlo_remove_link() {
 	for i in $iface_data; do
 		check_mld=$(uci show wireless.$i.mld | cut -d "'" -f 2)
 		if [ "$check_mld" = "$mld" ]; then
-			check_disabled=$(uci show wireless.$i.disabled | cut -d "'" -f 2)
+			check_disabled=$(uci show wireless.$i.disabled | cut -d "'" -f 2) 2> /dev/null
 			check_device=$(uci show wireless.$i.device | cut -d "'" -f 2)
 			if [ "$check_disabled" = 1 ] && [ "$check_device" = "$link" ]; then
 				echo "Interface is already disabled" > /dev/console
