@@ -809,12 +809,16 @@ ifneq ($(LOCAL_VARIANT),macsec)
 endif
 endif
 
+EXTERNAL_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
+
 define Package/wpad/install
 	$(call Install/hostapd,$(1))
 	$(call Install/supplicant,$(1))
+	$(INSTALL_DIR) $(1)/etc/sysctl.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wpad $(1)/usr/sbin/
 	$(LN) wpad $(1)/usr/sbin/hostapd
 	$(LN) wpad $(1)/usr/sbin/wpa_supplicant
+	$(INSTALL_BIN) $(EXTERNAL_DIR)/files/hostapd.sysctl $(1)/etc/sysctl.d/hostapd.conf
 endef
 Package/wpad-basic/install = $(Package/wpad/install)
 Package/wpad-basic-openssl/install = $(Package/wpad/install)
