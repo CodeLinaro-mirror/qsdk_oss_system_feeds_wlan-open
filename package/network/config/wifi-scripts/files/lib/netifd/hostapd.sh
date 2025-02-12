@@ -408,6 +408,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int dpp
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
+	config_add_int dpp_configurator_connectivity
 	config_add_int ssid_protection
 
 	config_add_int rsn_overriding
@@ -1048,7 +1049,7 @@ hostapd_set_bss_options() {
 			append bss_conf "rsn_preauth_interfaces=$network_bridge" "$N"
 		else
 			case "$auth_type" in
-			*sae*|owe)
+			*sae*|owe|dpp)
 				set_default auth_cache 1
 			;;
 			*)
@@ -1262,13 +1263,14 @@ hostapd_set_bss_options() {
 	if [ "$dpp" -eq "1" ]; then
 		json_get_vars \
 			dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey\
-			dpp_connector_sign
+			dpp_connector_sign dpp_configurator_connectivity
 
 		[ -n "$dpp_csign" ] && append bss_conf "dpp_csign=$dpp_csign" "$N"
 		[ -n "$dpp_connector" ] && append bss_conf "dpp_connector=$dpp_connector" "$N"
 		[ -n "$dpp_netaccesskey" ] && append bss_conf "dpp_netaccesskey=$dpp_netaccesskey" "$N"
 		[ -n "$dpp_ppkey" ] && append bss_conf " dpp_ppkey=$dpp_ppkey" "$N"
 		[ -n "$dpp_connector_sign" ] && append bss_conf "dpp_connector_sign=$dpp_connector_sign" "$N"
+		[ -n "$dpp_configurator_connectivity" ] && append bss_conf "dpp_configurator_connectivity=$dpp_configurator_connectivity" "$N"
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
@@ -1756,11 +1758,12 @@ wpa_supplicant_add_network() {
 			dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey\
 			dpp_connector_sign
 
-		[ -n "$dpp_csign" ] && append network_data "dpp_csign=$dpp_csign" "$N"
-		[ -n "$dpp_connector" ] && append network_data "dpp_connector=$dpp_connector" "$N"
-		[ -n "$dpp_netaccesskey" ] && append network_data "dpp_netaccesskey=$dpp_netaccesskey" "$N"
-		[ -n "$dpp_ppkey" ] && append network_data "dpp_ppkey=$dpp_ppkey" "$N"
-		[ -n "$dpp_connector_sign" ] && append network_data "dpp_connector_sign=$dpp_connector_sign" "$N"
+		[ -n "$dpp_csign" ] && append network_data "dpp_csign=$dpp_csign" "$N$T"
+		[ -n "$dpp_connector" ] && append network_data "dpp_connector=\"$dpp_connector\"" "$N$T"
+		[ -n "$dpp_netaccesskey" ] && append network_data "dpp_netaccesskey=$dpp_netaccesskey" "$N$T"
+		[ -n "$dpp_ppkey" ] && append network_data "dpp_ppkey=$dpp_ppkey" "$N$T"
+		[ -n "$dpp_connector_sign" ] && append network_data "dpp_connector_sign=$dpp_connector_sign" "$N$T"
+		update_config="update_config=1"
 
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
@@ -1796,6 +1799,7 @@ $saepwe
 $rsn_override
 ppe_vp=$ppe_vp_type
 $freq_list
+$update_config
 network={
 	$scan_ssid
 	ssid="$ssid"
