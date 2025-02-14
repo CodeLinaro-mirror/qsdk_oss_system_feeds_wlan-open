@@ -98,7 +98,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  
  	hw = wiphy_to_ieee80211_hw(wdev->wiphy);
  	if (!ieee80211_hw_check(hw, SUPPORT_ECM_REGISTRATION))
-@@ -201,6 +185,33 @@ unlock:
+@@ -206,6 +190,33 @@ unlock:
  	return;
  }
  
@@ -132,7 +132,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  /**
   * ath12k_get_metadata_info() - Retrieve ds node id
   * @ndev: pointer to corresponding net_device
-@@ -213,6 +224,7 @@ unlock:
+@@ -218,6 +229,7 @@ unlock:
  u32 ath12k_get_metadata_info(struct ath_dp_metadata_param *md_param)
  {
  	struct net_device *dest_dev = NULL;
@@ -140,7 +140,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  	u32 metadata = 0;
  	u16 msduq_peer = SAWF_PEER_MSDUQ_INVALID;
  	u8 *dest_mac = NULL;
-@@ -234,22 +246,21 @@ u32 ath12k_get_metadata_info(struct ath_
+@@ -239,22 +251,21 @@ u32 ath12k_get_metadata_info(struct ath_
  	if (!dest_dev || !dest_mac)
  		return metadata;
  
@@ -192,6 +192,15 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  #ifndef CPTCFG_ATH12K_MEM_PROFILE_512M
  extern unsigned int ath12k_max_clients;
  #endif
+@@ -119,6 +120,8 @@ extern bool ath12k_debug_critical;
+ #define ATH12K_MLO_METADATA_VALID 1
+ #define ATH12K_MLO_METADATA_VALID_MASK BIT(23)
+ #define ATH12K_MLO_METADATA_TAG 0xAA
++#define ATH12K_MLO_METADATA_MLO_ASSIST_TAG 0xAA800000
++#define ATH12K_MLO_METADATA_MLO_ASSIST_TAG_MASK 0xFF800000
+ #define ATH12K_MLO_METADATA_TAG_MASK GENMASK(31, 24)
+ #define ATH12K_MLO_METADATA_LINKID_MASK GENMASK(20, 16)
+ #define ATH12k_MLO_LINK_ID_INVALID 0xFF
 --- a/drivers/net/wireless/ath/ath12k/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/hw.c
 @@ -1928,6 +1928,7 @@ static struct ath12k_hw_params ath12k_hw
@@ -854,7 +863,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  	ath12k_dbg(ar->ab, ATH12K_DBG_WMI,
  		   "wmi peer assoc vdev id %d assoc id %d peer mac %pM peer_flags %x rate_caps %x peer_caps %x \nlisten_intval %d ht_caps %x max_mpdu %d nss %d phymode %d peer_mpdu_density %d vht_caps %x he cap_info %x he ops %x \nhe cap_info_ext %x he phy %x %x %x peer_bw_rxnss_override %x peer_flags_ext %x eht mac_cap %x %x eht phy_cap %x %x %x \neht ops %x ml flags %x mld_addr %pM logical_link_idx %u ml peer id %d is_bridge_peer %d ieee_link_id %u num_partner_links %d\n",
  		   cmd->vdev_id, cmd->peer_associd, arg->peer_mac,
-@@ -16484,6 +16483,267 @@ ath12k_wmi_delete_all_peer_resp_event(st
+@@ -16489,6 +16488,267 @@ ath12k_wmi_delete_all_peer_resp_event(st
  		    arg.status, arg.vdev_id);
  }
  
@@ -1122,7 +1131,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -16696,6 +16956,9 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -16701,6 +16961,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_PDEV_POWER_BOOST_EVENTID:
  		ath12k_wmi_power_boost_event(ab, skb);
  		break;
@@ -1411,7 +1420,18 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -12269,6 +12269,17 @@ int ath12k_mac_radio_start(struct ath12k
+@@ -11637,7 +11637,9 @@ static void ath12k_mac_op_tx(struct ieee
+ 	skb_cb->vif = vif;
+ 
+ #ifdef CPTCFG_MAC80211_SFE_SUPPORT
+-	if (skb->mark & ATH12K_MLO_METADATA_VALID_MASK) {
++	if (likely(skb->fast_xmit &&
++		   ((skb->mark & ATH12K_MLO_METADATA_MLO_ASSIST_TAG_MASK) ==
++		   ATH12K_MLO_METADATA_MLO_ASSIST_TAG))) {
+ 		link_id =  u32_get_bits(skb->mark, ATH12K_MLO_METADATA_LINKID_MASK);
+ 		rcu_read_lock();
+ 		arvif = rcu_dereference(ahvif->link[link_id]);
+@@ -12271,6 +12273,17 @@ int ath12k_mac_radio_start(struct ath12k
  		}
  	}
  
@@ -1429,7 +1449,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  	ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_EAP,
  					   ATH12K_ROUTE_EAP_METADATA);
  	if (ret) {
-@@ -13142,6 +13153,20 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -13144,6 +13157,20 @@ int ath12k_mac_vdev_create(struct ath12k
  	}
  #endif
  
@@ -1492,7 +1512,26 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  #endif
  	dma_addr_t paddr;
  	int ret, len;
-@@ -336,14 +357,12 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
+@@ -310,13 +331,13 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
+ 	paddr = (dma_addr_t)virt_to_phys(skb->data);
+ 
+ 	len = skb->len;
+-	is_from_recycler = skb->is_from_recycler;
+ 	/* the edma driver uses this flags to optimize the cache invalidation */
+-	skb->fast_recycled = 1;
+ 
+-	tx_desc->flags = 0;
+-	if (is_from_recycler)
+-		tx_desc->flags |= DP_TX_DESC_FLAG_FAST;
++	is_from_recycler = (skb->fast_recycled = !!skb->is_from_recycler);
++	if (likely(is_from_recycler))
++		tx_desc->flags = DP_TX_DESC_FLAG_FAST;
++	else
++		tx_desc->flags = 0;
+ 
+ 	tx_desc->skb = skb;
+ 	tx_desc->mac_id = desc->mac_id;
+@@ -334,14 +355,12 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
  #ifdef CPTCFG_ATH12K_SAWF
          /* SAWF */
  	if (skb->mark & SAWF_VALID_MASK) {
@@ -1510,7 +1549,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  			rcu_read_lock();
  			peer = ath12k_peer_find_by_peer_list_index(ar, peer_id);
  			if (unlikely(!peer)) {
-@@ -351,10 +370,8 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
+@@ -349,10 +368,8 @@ int ath12k_dp_tx_hw_enqueue(struct ath12
  					   "peer_id %u not found\n", peer_id);
  				rcu_read_unlock();
  			} else {
@@ -1523,7 +1562,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  				meta_data_flags = ath12k_sawf_get_tcl_metadata_update(skb->mark, svc_id);
  				tcl_desc.info1 = u32_encode_bits(meta_data_flags,
  								 HAL_TCL_DATA_CMD_INFO1_CMD_NUM);
-@@ -428,6 +445,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -426,6 +443,7 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  	struct ath12k_tx_desc_info *tx_desc;
  #ifdef CPTCFG_ATH12K_SAWF
  	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
@@ -1531,7 +1570,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  #endif
  	struct ath12k_skb_cb *skb_cb = ATH12K_SKB_CB(skb);
  	struct hal_tcl_data_cmd *hal_tcl_desc;
-@@ -514,8 +532,8 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -512,8 +530,8 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  	 */
  #ifdef CPTCFG_ATH12K_SAWF
  	if (skb->mark & SAWF_VALID_MASK) {
@@ -1542,7 +1581,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  		if (msduq_id < (ab->max_msduq_per_tid * ATH12K_SAWF_MAX_TID_SUPPORT)) {
  			rcu_read_lock();
  			peer = ath12k_peer_find_by_peer_list_index(ar, peer_id);
-@@ -523,9 +541,8 @@ int ath12k_dp_tx(struct ath12k *ar, stru
+@@ -521,9 +539,8 @@ int ath12k_dp_tx(struct ath12k *ar, stru
  				ath12k_dbg(ab, ATH12K_DBG_SAWF,
  					   "peer_id %u not found\n", peer_id);
  			else {
@@ -1554,7 +1593,7 @@ Signed-off-by: Adwait Nayak <quic_adwaitn@quicinc.com>
  				ti.meta_data_flags =
  					ath12k_sawf_get_tcl_metadata_update(skb->mark, svc_id);
  			}
-@@ -721,12 +738,10 @@ skip_htt_meta:
+@@ -719,12 +736,10 @@ skip_htt_meta:
  	tcl_cmd->info3 = (ti.vdev_id << 24) | arvif->desc.info3;
  	tcl_cmd->info4 = info4;
  	tcl_cmd->info5 = 0;
