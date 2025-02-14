@@ -74,7 +74,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  static struct dentry *debugfs_ath12k;
  
-@@ -3756,6 +3757,9 @@ int ath12k_debugfs_pdev_create(struct at
+@@ -3578,6 +3579,9 @@ int ath12k_debugfs_pdev_create(struct at
  		debugfs_create_file("ppeds_stats", 0600, ab->debugfs_soc, ab,
  				    &fops_ppeds_stats);
  #endif
@@ -187,7 +187,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = ath12k_peer_create(ar, arvif, sta, &peer_param);
  	if (ret) {
  		ath12k_warn(ab, "Failed to add peer: %pM for VDEV: %d\n",
-@@ -9400,6 +9410,100 @@ send_dp_tx_event:
+@@ -9400,6 +9410,102 @@ send_dp_tx_event:
  					   src_info, ret);
  }
  
@@ -219,7 +219,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	    ahvif->vif->type != NL80211_IFTYPE_MESH_POINT ||
 +	    !ath12k_11s_mlo_testing_is_preconfigured_11s_mlo_sta(sta->addr) ||
 +	    wdev->is_netdev_going_down)
-+		return 1;
++		return 0;
 +
 +	/* Dont allow 11S MLO STA state changes before all VAPS comes up or
 +	 *	beacons enabled on DP RX
@@ -231,7 +231,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	if ((old_state == IEEE80211_STA_NONE && new_state == IEEE80211_STA_NOTEXIST) ||
 +	    (old_state == IEEE80211_STA_NOTEXIST && new_state == IEEE80211_STA_NONE)) {
 +		if (!ath12k_11s_mlo_testing_peer_already_created(sta->addr))
-+			return 1;
++			return 0;
 +	}
 +
 +	/*
@@ -252,7 +252,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +		ath12k_mac_unassign_link_sta(ah, ahsta, link_id);
 +
-+		return 0;
++		/* bypass rest of ath12k_mac_update_sta_state */
++		return 1;
 +	}
 +
 +	/* if peer entry is already present in firmware, skip only that part */
@@ -277,24 +278,30 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		INIT_WORK(&arsta->update_wk, ath12k_sta_rc_update_wk);
 +		mutex_unlock(&arvif->ar->conf_mutex);
 +
-+		return 0;
++		/* bypass rest of ath12k_mac_update_sta_state */
++		return 1;
 +	}
 +
-+	/* when unsure always lets regular mac sta state machine take it further */
-+	return 1;
++	/* when unsure always rest of ath12k_mac_update_sta_state process sta state */
++	return 0;
 +}
 +#endif
 +
  /*
   * FIXME: Refactor this function based on clean code principle
   * mac80211 warns on any error during state transition.
-@@ -9429,6 +9533,13 @@ int ath12k_mac_update_sta_state(struct i
+@@ -9429,6 +9535,18 @@ int ath12k_mac_update_sta_state(struct i
  
  	mutex_lock(&ah->conf_mutex);
  
++	/* This fucntion return 1 or error when ath12k_mac_update_sta_state
++	 * must be bypassed. */
 +	ret = ath12k_11s_mlo_testing_handle_sta_state_transitions(ah, ahvif, sta,
 +								  old_state, new_state);
-+	if (ret != 1) {
++	if (ret) {
++		/* reset return value to 0 so that mac80211 doesn't warn */
++		if (ret == 1)
++			ret = 0;
 +		mutex_unlock(&ah->conf_mutex);
 +		return ret;
 +	}
@@ -302,7 +309,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  	if (!ahsta->ppe_vp_num)
  		ahsta->ppe_vp_num = ahvif->ppe_vp_num;
-@@ -9699,8 +9810,13 @@ static int ath12k_mac_op_sta_state(struc
+@@ -9699,8 +9817,13 @@ static int ath12k_mac_op_sta_state(struc
  				   enum ieee80211_sta_state old_state,
  				   enum ieee80211_sta_state new_state)
  {
@@ -318,7 +325,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  }
  
  void ath12k_mac_assign_middle_link_id(struct ieee80211_sta *sta,
-@@ -11838,6 +11954,14 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11841,6 +11964,14 @@ static void ath12k_mac_op_tx(struct ieee
  		}
  	} else {
  		link = 0;
@@ -333,7 +340,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	/* TODO: Holding RCU lock for such a big function is not required, may
-@@ -12864,6 +12988,8 @@ static int ath12k_mac_setup_vdev_create_
+@@ -12868,6 +12999,8 @@ static int ath12k_mac_setup_vdev_create_
  			   arg->mld_addr, arvif->vdev_id, arvif->addr);
  	}
  
@@ -342,7 +349,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	return 0;
  }
  
-@@ -14480,6 +14606,9 @@ static int ath12k_mac_vdev_start_restart
+@@ -14484,6 +14617,9 @@ static int ath12k_mac_vdev_start_restart
  		   arg.vdev_id, arg.channel.freq,
  		   ath12k_mac_phymode_str(arg.channel.mode), arg.punct_bitmap);
  
@@ -352,7 +359,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = ath12k_wmi_vdev_start(ar, &arg, restart);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to %s WMI vdev %i\n",
-@@ -16644,6 +16773,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
+@@ -16648,6 +16784,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
  
  	/* TODO: Setup ps and cts/rts protection */
  
@@ -361,7 +368,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  out:
  	mutex_unlock(&ar->conf_mutex);
  
-@@ -16826,6 +16957,9 @@ stop_primary:
+@@ -16830,6 +16968,9 @@ stop_primary:
  
  	arvif->is_started = false;
  
@@ -1502,7 +1509,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +						    enum ieee80211_sta_state new_state)
 +{
 +	/* Follow regular processing */
-+	return 1;
++	return 0;
 +}
 +
 +static inline u8
@@ -1659,7 +1666,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  struct ath12k_wmi_svc_ready_parse {
  	bool wmi_svc_bitmap_done;
-@@ -13070,6 +13071,18 @@ skip_mgmt_stats:
+@@ -13093,6 +13094,18 @@ skip_mgmt_stats:
  		}
  	}
  
