@@ -60,7 +60,6 @@ eht_ulmumimo_80mhz=
 eht_ulmumimo_160mhz=
 eht_ulmumimo_320mhz=
 ru_punct_bitmap=
-ru_punct_ofdma=
 ru_punct_acs_threshold=
 use_ru_puncture_dfs=
 he_su_beamformer=
@@ -124,7 +123,6 @@ drv_mac80211_init_device_config() {
 		he_spr_psr_enabled \
 		he_bss_color_enabled \
 		he_twt_required \
-		ru_punct_ofdma \
 		use_ru_puncture_dfs
 	config_add_int \
 		beamformer_antennas \
@@ -719,7 +717,7 @@ mac80211_hostapd_setup_base() {
 				append base_cfg "eht_oper_chwidth=$eht_oper_chwidth" "$N"
 				append base_cfg "eht_oper_centr_freq_seg0_idx=$eht_center_seg0" "$N"
 			}
-			json_get_vars ru_punct_bitmap:0 ru_punct_ofdma:0 ru_punct_acs_threshold:0 ccfs:0
+			json_get_vars ru_punct_bitmap:0 ru_punct_acs_threshold:0 ccfs:0
 			append base_cfg "eht_su_beamformer=1" "$N"
 			append base_cfg "eht_mu_beamformer=1" "$N"
 			append base_cfg "eht_su_beamformee=1" "$N"
@@ -755,15 +753,11 @@ mac80211_hostapd_setup_base() {
 			fi
 
 			if [ -n "$ru_punct_bitmap" ] && [ "$ru_punct_bitmap" -gt 0 ]; then
-				append base_cfg "ru_punct_bitmap=$ru_punct_bitmap" "$N"
-			fi
-
-			if [ -n "$ru_punct_ofdma" ] && [ "$ru_punct_ofdma" -gt 0 ]; then
-				append base_cfg "ru_punct_ofdma=$ru_punct_ofdma" "$N"
+				append base_cfg "punct_bitmap=$ru_punct_bitmap" "$N"
 			fi
 
 			if [ -n "$ru_punct_acs_threshold" ] && [ "$ru_punct_acs_threshold" -gt 0 ]; then
-				append base_cfg "ru_punct_acs_threshold=$ru_punct_acs_threshold" "$N"
+				append base_cfg "punct_acs_threshold=$ru_punct_acs_threshold" "$N"
 			fi
 
 			[ -n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
