@@ -1928,9 +1928,9 @@ mac80211_derive_ml_info() {
 	                fi
 
 	                if ! [[ "$sta_mldevices" =~ "$mldevice" ]]; then
-	                        append sta_mldevices "$mldevice"
 
 	                        if [ -n "$mld_name" ] &&  [ "$_mld" = "$mld_name" ]; then
+	                        	append sta_mldevices "$mldevice"
 	                                config_get disabled "$mldevice" disabled
 	                                if [ "$disabled" -eq 1 ]; then
 	                                        continue;
