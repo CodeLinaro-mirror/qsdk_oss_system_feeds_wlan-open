@@ -1419,7 +1419,7 @@ wpa_supplicant_set_fixed_freq() {
 		HE160|VHT160|EHT160)
 			append network_data "max_oper_chwidth=2" "$N$T"
 		;;
-		HE20|HE40|VHT20|VHT40) append network_data "max_oper_chwidth=0" "$N$T";;
+		HE20|HE40|VHT20|VHT40|EHT20|EHT40) append network_data "max_oper_chwidth=0" "$N$T";;
 		EHT320)
 			append network_data "max_oper_chwidth=9" "$N$T"
 		;;
