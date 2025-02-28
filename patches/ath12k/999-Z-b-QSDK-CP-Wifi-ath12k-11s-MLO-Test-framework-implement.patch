@@ -122,7 +122,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  #define ATH12K_DP_RX_FRAGMENT_TIMEOUT_MS (2 * HZ)
  
-@@ -3963,6 +3963,17 @@ static void ath12k_dp_rx_deliver_msdu(st
+@@ -3971,6 +3971,17 @@ static void ath12k_dp_rx_deliver_msdu(st
  	    !(is_mcbc && rx_status->flag & RX_FLAG_DECRYPTED))
  		rx_status->flag |= RX_FLAG_8023;
  
@@ -150,17 +150,18 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  #define IEEE80211_EHT_PPE_THRES_NSS_POS                        0
  #define IEEE80211_EHT_PPE_THRES_NSS_MASK               0xf
-@@ -1192,6 +1193,9 @@ bool ath12k_mac_is_ml_arvif(struct ath12
+@@ -1192,6 +1193,10 @@ bool ath12k_mac_is_ml_arvif(struct ath12
  	if (ahvif->vif->valid_links & BIT(arvif->link_id))
  		return true;
  
-+	if (ath12k_11s_mlo_testing_is_ml_vif(ahvif))
++	if (arvif->link_id != ATH12K_DEFAULT_SCAN_LINK &&
++	    ath12k_11s_mlo_testing_is_ml_vif(ahvif))
 +		return true;
 +
  	return false;
  }
  
-@@ -4240,6 +4244,9 @@ static void ath12k_peer_assoc_prepare(st
+@@ -4240,6 +4245,9 @@ static void ath12k_peer_assoc_prepare(st
  	ath12k_peer_assoc_h_smps(arsta, arg, link_sta);
  	ath12k_peer_assoc_h_mlo(arsta, arg);
  
@@ -170,7 +171,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	arsta->peer_nss = arg->peer_nss;
  
  	WARN_ON_ONCE(arsta->peer_nss < 1 ||
-@@ -7693,6 +7700,8 @@ static int ath12k_station_disassoc(struc
+@@ -7687,6 +7695,8 @@ static int ath12k_station_disassoc(struc
  
  	spin_unlock_bh(&arvif->ar->data_lock);
  
@@ -179,7 +180,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	if (link_sta)
  		ath12k_mac_vendor_send_disassoc_event(arsta, link_sta);
  	if (!sta->wme) {
-@@ -8417,6 +8426,7 @@ static int ath12k_mac_station_add(struct
+@@ -8328,6 +8338,7 @@ static int ath12k_mac_station_add(struct
  		}
  	}
  
@@ -187,7 +188,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = ath12k_peer_create(ar, arvif, sta, &peer_param);
  	if (ret) {
  		ath12k_warn(ab, "Failed to add peer: %pM for VDEV: %d\n",
-@@ -9400,6 +9410,102 @@ send_dp_tx_event:
+@@ -9312,6 +9323,104 @@ send_dp_tx_event:
  					   src_info, ret);
  }
  
@@ -230,8 +231,10 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	/* First time NOEXIST <-> NONE transitions are handled in regular path */
 +	if ((old_state == IEEE80211_STA_NONE && new_state == IEEE80211_STA_NOTEXIST) ||
 +	    (old_state == IEEE80211_STA_NOTEXIST && new_state == IEEE80211_STA_NONE)) {
-+		if (!ath12k_11s_mlo_testing_peer_already_created(sta->addr))
++		if (!ath12k_11s_mlo_testing_peer_already_created(sta->addr)) {
++			ath12k_11s_mlo_testing_free_ptk(sta->addr);
 +			return 0;
++		}
 +	}
 +
 +	/*
@@ -290,7 +293,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  /*
   * FIXME: Refactor this function based on clean code principle
   * mac80211 warns on any error during state transition.
-@@ -9429,6 +9535,18 @@ int ath12k_mac_update_sta_state(struct i
+@@ -9341,6 +9450,18 @@ int ath12k_mac_update_sta_state(struct i
  
  	mutex_lock(&ah->conf_mutex);
  
@@ -309,7 +312,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  	if (!ahsta->ppe_vp_num)
  		ahsta->ppe_vp_num = ahvif->ppe_vp_num;
-@@ -9699,8 +9817,13 @@ static int ath12k_mac_op_sta_state(struc
+@@ -9611,8 +9732,13 @@ static int ath12k_mac_op_sta_state(struc
  				   enum ieee80211_sta_state old_state,
  				   enum ieee80211_sta_state new_state)
  {
@@ -325,7 +328,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  }
  
  void ath12k_mac_assign_middle_link_id(struct ieee80211_sta *sta,
-@@ -11843,6 +11966,14 @@ static void ath12k_mac_op_tx(struct ieee
+@@ -11754,6 +11880,14 @@ static void ath12k_mac_op_tx(struct ieee
  		}
  	} else {
  		link = 0;
@@ -340,7 +343,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	}
  
  	/* TODO: Holding RCU lock for such a big function is not required, may
-@@ -12870,6 +13001,8 @@ static int ath12k_mac_setup_vdev_create_
+@@ -12784,6 +12918,8 @@ static int ath12k_mac_setup_vdev_create_
  			   arg->mld_addr, arvif->vdev_id, arvif->addr);
  	}
  
@@ -349,7 +352,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	return 0;
  }
  
-@@ -14488,6 +14621,9 @@ static int ath12k_mac_vdev_start_restart
+@@ -14401,6 +14537,9 @@ static int ath12k_mac_vdev_start_restart
  		   arg.vdev_id, arg.channel.freq,
  		   ath12k_mac_phymode_str(arg.channel.mode), arg.punct_bitmap);
  
@@ -359,7 +362,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = ath12k_wmi_vdev_start(ar, &arg, restart);
  	if (ret) {
  		ath12k_warn(ar->ab, "failed to %s WMI vdev %i\n",
-@@ -16652,6 +16788,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
+@@ -16575,6 +16714,8 @@ ath12k_mac_assign_vif_chanctx_handle(str
  
  	/* TODO: Setup ps and cts/rts protection */
  
@@ -368,7 +371,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  out:
  	mutex_unlock(&ar->conf_mutex);
  
-@@ -16834,6 +16972,9 @@ stop_primary:
+@@ -16757,6 +16898,9 @@ stop_primary:
  
  	arvif->is_started = false;
  
@@ -398,7 +401,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	ret = ath12k_wait_for_peer_delete_done(ar, vdev_id, addr);
  	if (ret)
  		return ret;
-@@ -894,6 +898,10 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -895,6 +899,10 @@ int ath12k_peer_create(struct ath12k *ar
  			    arg->peer_addr, ar->pdev_idx, peer->vdev_id);
  		spin_unlock_bh(&ab->base_lock);
  		mutex_unlock(&ab->tbl_mtx_lock);
@@ -409,7 +412,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  		return -EINVAL;
  	}
  
-@@ -935,6 +943,10 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -936,6 +944,10 @@ int ath12k_peer_create(struct ath12k *ar
  	if (ret)
  		return ret;
  
@@ -420,7 +423,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	mutex_lock(&ab->tbl_mtx_lock);
  	spin_lock_bh(&ab->base_lock);
  
-@@ -1058,6 +1070,10 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -1059,6 +1071,10 @@ int ath12k_peer_create(struct ath12k *ar
  			peer->ml_peer_id = ATH12K_MLO_PEER_ID_INVALID;
  			peer->mlo = false;
  		}
@@ -433,7 +436,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  	rcu_assign_pointer(ab->peer_list[peer_id], peer);
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/test_mlo_mesh.c
-@@ -0,0 +1,996 @@
+@@ -0,0 +1,1110 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -503,6 +506,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +
 +/* Disable address translations done specifically for 11S MLO test framework */
 +int ath12k_11s_mlo_testing_disable_addr_trans;
++
++/* Uses predefined GTK and PTK 16 byte keys for debugging only */
++int use_predef_keys;
 +
 +/* Protects 11s mlo sta states maintained locally */
 +static DEFINE_SPINLOCK(state_change_lock);
@@ -664,7 +670,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	struct ath12k_pdev *pdev = ar->pdev;
 +
 +	if (!ath12k_11s_mlo_testing_enable ||
-+	    !arvif || arvif->ahvif->vif->type != NL80211_IFTYPE_MESH_POINT)
++	    !arvif || arvif->ahvif->vif->type != NL80211_IFTYPE_MESH_POINT ||
++	     arvif->link_id == ATH12K_DEFAULT_SCAN_LINK)
 +		return;
 +
 +	if (!wdev->netdev)
@@ -752,6 +759,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	ml_arg->link_add = true;
 +	ml_arg->ieee_link_id = arvif->link_id;
 +	partner_info = ml_arg->partner_info;
++
++	if (num_sta_entries <= 1)
++		return;
 +
 +	/* currently supports only 2 link MLD */
 +	other_iface_idx = (iface_idx == 0) ? 1 : 0;
@@ -845,6 +855,9 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	/*emlsr */
 +	ml->eml_caps = sta->eml_cap;
 +
++	if (num_sta_entries <= 1)
++		return;
++
 +	/* Pick partner link */
 +	partner_sta_arr_idx = (cur_sta_arr_idx == 0) ? 1 : 0;
 +	link_info = &link_sta_info[partner_sta_arr_idx];
@@ -858,7 +871,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	ml->partner_info[0].logical_link_idx = link_info->link_idx;
 +	ml->num_partner_links++;
 +
-+	ath12k_info(NULL, "11S_MLO_TEST: peer_assoc_params vif %pM mld %pM %pM primary %d assoc_link %d  Partner info  %pM in peer assoc cmd hw_link_id %d assoc_link %d primary_link %d \n",
++	ath12k_info(NULL, "11S_MLO_TEST: peer_assoc_params vif %pM mld %pM arsta %pM primary %d assoc_link %d  Partner info  %pM in peer assoc cmd hw_link_id %d assoc_link %d primary_link %d \n",
 +		    arvif->addr, link_sta_info[1].mld_addr, arsta->addr, ml->primary_umac, ml->assoc_link,
 +		    link_info->addr, link_info->hw_link_id, link_info->is_assoc_link, link_info->is_primary_link);
 +}
@@ -868,7 +881,7 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +					      struct ath12k_wmi_vdev_create_arg *arg)
 +{
 +	if (!arvif || arvif->ahvif->vif->type != NL80211_IFTYPE_MESH_POINT ||
-+	    !ath12k_11s_mlo_testing_enable)
++	    arvif->link_id == ATH12K_DEFAULT_SCAN_LINK || !ath12k_11s_mlo_testing_enable)
 +		return;
 +
 +	ether_addr_copy(arg->mld_addr, global_iface_mld_addr);
@@ -1186,7 +1199,8 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +		"`block` - Block beacons from ath12k dp rx. Default disabled.\n"
 +		"`enable` - Enable beacons in dp rx after all VAPs are up.\n"
 +		"`disable_addr_trans` - Disable address translation in Datapath TX/RX\n"
-+		"`enable_addr_trans` - Enable address translation in Datapath TX/RX\n";
++		"`enable_addr_trans` - Enable address translation in Datapath TX/RX\n"
++		"`use_predef_keys` - Replace both GTK and PTK with static keys for debugging\n";
 +
 +	return simple_read_from_buffer(user_buf, count, ppos, buf, strlen(buf));
 +}
@@ -1230,6 +1244,10 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	} else if (!strcmp(buf, "enable_addr_trans")) {
 +		ath12k_info(ab, "enabling address translation\n");
 +		ath12k_11s_mlo_testing_disable_addr_trans = 0;
++		ret = 0;
++	} else if (!strcmp(buf, "use_predef_keys")) {
++		ath12k_info(ab, "Replaces both GTK and PTKs with static keys during key install.\n");
++		use_predef_keys = 1;
 +		ret = 0;
 +	} else {
 +		ret = -EINVAL;
@@ -1430,9 +1448,108 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +	ath12k_dbg(ab, ATH12K_DBG_PEER, "11S_MLO_TEST: ML peer: %pM assigned to ML peer list[%d]\n",
 +		   peer->addr, peer->ml_peer_id);
 +}
++
++#define MAX_KEY_IDX	3
++#define KEY_LENGTH	16
++
++/*
++ * Random predefined keys can be replaced by debugfs use_predef_keys before interface bringup
++ * gtk - repalced for mesh VAPs as well as per mesh peer GTK
++ * ptk - repalced for per mesh peer PTK
++ */
++static u8 ath12k_11s_mlo_gtk[KEY_LENGTH] = {
++	0xd9, 0xd8, 0xc4, 0x38, 0xed, 0xa3, 0x1f, 0x54,
++	0xd4, 0x34, 0xc7, 0x8f, 0x06, 0x6d, 0x11, 0x11
++};
++
++static u8 ath12k_11s_mlo_ptk[KEY_LENGTH] = {
++	0xd9, 0xd8, 0xc4, 0x38, 0xed, 0xa3, 0x1f, 0x54,
++	0xd4, 0x34, 0xc7, 0x8f, 0x06, 0x6d, 0x22, 0x22
++};
++
++static u8 ath12k_11s_mlo_test_skb_ptk[MAX_KEY_IDX][KEY_LENGTH];
++static bool ath12k_11s_mlo_test_skb_ptk_stored[MAX_KEY_IDX];
++
++void ath12k_11s_mlo_testing_free_ptk(const u8 *addr)
++{
++	int key_idx;
++
++	if (!ath12k_11s_mlo_testing_enable || use_predef_keys)
++		return;
++
++	for (key_idx = 0; key_idx < MAX_KEY_IDX; key_idx++) {
++		memset(ath12k_11s_mlo_test_skb_ptk[key_idx], 0, KEY_LENGTH);
++		ath12k_11s_mlo_test_skb_ptk_stored[key_idx] = false;
++	}
++
++	ath12k_warn(NULL, "11S_MLO_TEST: clean ptk for %pM cleared ptk\n", addr);
++}
++
++int
++ath12k_mlo_testing_replace_or_store_ptk(struct wmi_vdev_install_key_arg *arg,
++					u8 *tlv_data)
++{
++	const u8 *addr = arg->macaddr;
++	int key_idx = arg->key_idx;
++	int key_flags = arg->key_flags;
++
++	if (!ath12k_11s_mlo_testing_enable)
++		return -EINVAL;
++
++	if (key_idx < 0 || key_idx >= MAX_KEY_IDX) {
++		ath12k_warn(NULL, "11S_MLO_TEST: get key for %pM Invalid key_idx %d\n",
++			    addr, key_idx);
++		return -EINVAL;
++	}
++
++	if (arg->key_len != KEY_LENGTH) {
++		ath12k_warn(NULL, "11S_MLO_TEST: KEY_LENGTH mismatch %d cannot change any keys \n",
++			    arg->key_len);
++		return -EINVAL;
++	}
++
++	if (use_predef_keys) {
++		if (arg->key_flags == WMI_KEY_PAIRWISE)
++			memcpy(tlv_data, ath12k_11s_mlo_ptk, KEY_LENGTH);
++		else
++			memcpy(tlv_data, ath12k_11s_mlo_gtk, KEY_LENGTH);
++
++		return 0;
++	}
++
++	/* In MLO Mesh, only PTK is expected to match across mesh links.
++	 * GTKs can differ per link similar to MLO AP mode
++	 */
++	if (key_flags != WMI_KEY_PAIRWISE)
++		return 0;
++
++	if (!ath12k_11s_mlo_testing_is_preconfigured_11s_mlo_sta(addr))
++		return 0;
++
++	 /* If key is already present use it*/
++	if (ath12k_11s_mlo_test_skb_ptk_stored[key_idx]) {
++		ath12k_info(NULL, "11S_MLO_TEST: already has PTK at key_idx %d. replaced current one\n",
++			    key_idx);
++		memcpy(tlv_data, ath12k_11s_mlo_test_skb_ptk[key_idx], KEY_LENGTH);
++		return 0;
++	}
++
++	if (key_idx < MAX_KEY_IDX) {
++		memcpy(ath12k_11s_mlo_test_skb_ptk[key_idx], arg->key_data, KEY_LENGTH);
++		ath12k_11s_mlo_test_skb_ptk_stored[key_idx] = true;
++	} else {
++		ath12k_warn(NULL, "11S_MLO_TEST: Key buffer is full\n");
++		return -ENOMEM;
++	}
++
++	ath12k_warn(NULL, "11S_MLO_TEST: stored ptk for %pM at key_idx %d\n",
++		    addr, key_idx);
++
++	return 0;
++}
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/test_mlo_mesh.h
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,239 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -1500,6 +1617,10 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +void ath12k_11s_mlo_testing_handle_tx_skb(struct ath12k_base *ab,
 +					  struct ieee80211_vif *vif,
 +					  struct sk_buff *skb);
++void ath12k_11s_mlo_testing_free_ptk(const u8 *addr);
++int
++ath12k_mlo_testing_replace_or_store_ptk(struct wmi_vdev_install_key_arg *arg,
++					u8 *tlv_data);
 +#else
 +static inline int
 +ath12k_11s_mlo_testing_handle_sta_state_transitions(struct ath12k_hw *ah,
@@ -1653,6 +1774,18 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
 +{
 +}
 +
++static inline void
++ath12k_11s_mlo_testing_free_ptk(const u8 *addr)
++{
++}
++
++static inline int
++ath12k_mlo_testing_replace_or_store_ptk(struct wmi_vdev_install_key_arg *arg,
++					u8 *tlv_data)
++{
++	return 0;
++}
++
 +#endif /* CPTCFG_ATH12K_TEST_FW_FOR_11S_MLO */
 +
 +#endif
@@ -1666,7 +1799,15 @@ Signed-off-by: Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com>
  
  struct ath12k_wmi_svc_ready_parse {
  	bool wmi_svc_bitmap_done;
-@@ -13097,6 +13098,18 @@ skip_mgmt_stats:
+@@ -3253,6 +3254,7 @@ int ath12k_wmi_vdev_install_key(struct a
+ 	tlv = (struct wmi_tlv *)(skb->data + sizeof(*cmd));
+ 	tlv->header = ath12k_wmi_tlv_hdr(WMI_TAG_ARRAY_BYTE, key_len_aligned);
+ 	memcpy(tlv->value, arg->key_data, arg->key_len);
++	ath12k_mlo_testing_replace_or_store_ptk(arg, tlv->value);
+ 
+ 	ath12k_dbg(ar->ab, ATH12K_DBG_WMI,
+ 		   "WMI vdev install key idx %d cipher %d len %d\n",
+@@ -13097,6 +13099,18 @@ skip_mgmt_stats:
  		}
  	}
  
