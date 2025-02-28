@@ -44,7 +44,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -543,6 +543,7 @@ struct ath12k_link_vif {
+@@ -544,6 +544,7 @@ struct ath12k_link_vif {
  	/* Add per link DS specific information here */
  #endif
  	u64 tbtt_offset;
@@ -134,7 +134,18 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  			init_completion(&arvif->peer_ch_width_switch_send);
  			INIT_WORK(&arvif->peer_ch_width_switch_work,
  				  ath12k_wmi_peer_chan_width_switch_work);
-@@ -8352,8 +8384,10 @@ static int ath12k_mac_station_add(struct
+@@ -8200,8 +8232,8 @@ static int ath12k_mac_station_add(struct
+ 
+ 	ret = ath12k_mac_inc_num_stations(arvif, arsta);
+ 	if (ret) {
+-		ath12k_warn(ab, "refusing to associate station: too many connected already (%d)\n",
+-			    ar->max_num_stations);
++		ath12k_warn(ab, "refusing to associate station: Max stations: %d Stations connected: %d\n",
++			    ar->max_num_stations, ar->num_stations);
+ 		goto exit;
+ 	}
+ 
+@@ -8263,8 +8295,10 @@ static int ath12k_mac_station_add(struct
  		goto free_rx_stats;
  	}
  
@@ -142,12 +153,12 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 -		    arsta->addr, arvif->vdev_id, ar->num_stations);
 +	arvif->num_peers++;
 +
-+	ath12k_dbg(ab, ATH12K_DBG_PEER, "Added peer: %pM for VDEV: %d num_stations : %d num_peers:%d\n",
++	ath12k_dbg(ab, ATH12K_DBG_PEER, "Added peer: %pM for VDEV: %d num_stations : %d link num_peers:%d\n",
 +		    arsta->addr, arvif->vdev_id, ar->num_stations, arvif->num_peers);
  
  	if (ath12k_debugfs_is_extd_tx_stats_enabled(ar) && (!arsta->tx_stats)) {
  		arsta->tx_stats = kzalloc(sizeof(*arsta->tx_stats),
-@@ -8887,6 +8921,7 @@ static int ath12k_mac_station_remove(str
+@@ -8799,6 +8833,7 @@ static int ath12k_mac_station_remove(str
  	struct ath12k_vif *ahvif = arvif->ahvif;
          struct ieee80211_vif *vif = ahvif->vif;
  	bool skip_peer_delete;
@@ -155,7 +166,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  
  	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
  
-@@ -8894,8 +8929,19 @@ static int ath12k_mac_station_remove(str
+@@ -8806,8 +8841,19 @@ static int ath12k_mac_station_remove(str
  
  	ath12k_dp_peer_cleanup(ar, arvif->vdev_id, arsta->addr);
  
@@ -177,7 +188,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  
  	if (!skip_peer_delete) {
  		ret = ath12k_peer_delete(ar, arvif->vdev_id, arsta->addr);
-@@ -8907,8 +8953,10 @@ static int ath12k_mac_station_remove(str
+@@ -8819,8 +8865,10 @@ static int ath12k_mac_station_remove(str
  				   arsta->addr, arvif->vdev_id);
  
  		ath12k_mac_station_post_remove(ar, arvif, arsta);
@@ -188,7 +199,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	ath12k_cfr_decrement_peer_count(ar, arsta);
  
  	if (sta->valid_links)
-@@ -8925,19 +8973,31 @@ static void ath12k_mac_ml_station_remove
+@@ -8837,19 +8885,31 @@ static void ath12k_mac_ml_station_remove
  	struct ath12k_hw *ah = ahvif->ah;
   	struct ath12k_link_vif *arvif;
   	struct ath12k_link_sta *arsta;
@@ -221,7 +232,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	links = ahsta->links_map;
  	for_each_set_bit(link_id, &links, ATH12K_NUM_MAX_LINKS) {
  		arvif = ath12k_get_arvif_from_link_id(ahvif, link_id);
-@@ -8948,13 +9008,21 @@ static void ath12k_mac_ml_station_remove
+@@ -8860,13 +8920,22 @@ static void ath12k_mac_ml_station_remove
  
  		ar = arvif->ar;
  
@@ -233,7 +244,8 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
 -		mutex_unlock(&ar->conf_mutex);
 +			ath12k_mac_station_post_remove(ar, arvif, arsta);
 +			mutex_unlock(&ar->conf_mutex);
-+		} else if (link_id != link_going_down) {
++		} else if (link_id != link_going_down ||
++			   ahsta->primary_link_id != link_going_down) {
 +			/* Partner link peer delete is sent.
 +			 * Decrement only for partner links
 +			 */
@@ -246,7 +258,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  	ath12k_ml_peer_delete(ah, sta);
  }
  
-@@ -13580,7 +13648,7 @@ static void ath12k_mac_remove_link_inter
+@@ -13493,7 +13562,7 @@ static void ath12k_mac_remove_link_inter
  		   arvif->addr, arvif->vdev_id);
  
  err_vdev_del:
@@ -255,7 +267,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  
  	spin_lock_bh(&ar->data_lock);
  
-@@ -20824,6 +20892,7 @@ static int ath12k_mac_setup(struct ath12
+@@ -20751,6 +20820,7 @@ static int ath12k_mac_setup(struct ath12
  	init_completion(&ar->mlo_setup_done);
  	init_completion(&ar->mvr_complete);
  	init_completion(&ar->scan.on_channel);
@@ -513,7 +525,18 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  static inline bool
  ath12k_wmi_check_device_present(u32 width_device,
  				u32 center_freq_device,
-@@ -16390,6 +16422,65 @@ static void ath12k_wmi_power_boost_event
+@@ -2027,8 +2059,8 @@ int ath12k_wmi_send_peer_delete_cmd(stru
+ 	cmd->vdev_id = cpu_to_le32(vdev_id);
+ 
+ 	ath12k_dbg(ar->ab, ATH12K_DBG_PEER,
+-		   "WMI peer delete vdev_id %d peer_addr %pM num_peer : %d\n",
+-		   vdev_id,  peer_addr, ar->num_peers);
++		   "WMI peer delete vdev_id %d peer_addr %pM num_stations: %d radio num_peer : %d\n",
++		   vdev_id,  peer_addr, ar->num_stations, ar->num_peers);
+ 
+ 	ret = ath12k_wmi_cmd_send(wmi, skb, WMI_PEER_DELETE_CMDID);
+ 	if (ret) {
+@@ -16392,6 +16424,65 @@ static void ath12k_wmi_power_boost_event
  		   ev->phy_mode, ev->size);
  }
  
@@ -579,7 +602,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -16602,6 +16693,10 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -16604,6 +16695,10 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_PDEV_POWER_BOOST_EVENTID:
  		ath12k_wmi_power_boost_event(ab, skb);
  		break;
@@ -632,7 +655,7 @@ Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
  #define WMI_VDEV_START_HIDDEN_SSID  BIT(0)
  #define WMI_VDEV_START_PMF_ENABLED  BIT(1)
  #define WMI_VDEV_START_LDPC_RX_ENABLED BIT(3)
-@@ -9354,4 +9373,5 @@ int ath12k_wmi_send_wsi_stats_info(struc
+@@ -9356,4 +9375,5 @@ int ath12k_wmi_send_wsi_stats_info(struc
  
  int ath12k_wmi_pdev_enable_telemetry_stats(struct ath12k_base *ab,
  					   struct ath12k *ar);
