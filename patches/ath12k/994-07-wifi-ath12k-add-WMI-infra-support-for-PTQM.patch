@@ -34,7 +34,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  
  static const struct ieee80211_channel ath12k_2ghz_channels[] = {
  	CHAN2G(1, 2412, 0),
-@@ -6042,6 +6043,11 @@ ath12k_mac_assign_link_vif(struct ath12k
+@@ -6069,6 +6070,11 @@ ath12k_mac_assign_link_vif(struct ath12k
  			init_completion(&arvif->peer_ch_width_switch_send);
  			INIT_WORK(&arvif->peer_ch_width_switch_work,
  				  ath12k_wmi_peer_chan_width_switch_work);
@@ -46,7 +46,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  			if (!is_bridge_vdev) {
  				INIT_WORK(&arvif->update_obss_color_notify_work,
  					  ath12k_update_obss_color_notify_work);
-@@ -13492,6 +13498,9 @@ ppe_vp_config:
+@@ -13519,6 +13525,9 @@ ppe_vp_config:
  	init_completion(&ahvif->deflink.peer_ch_width_switch_send);
  	INIT_WORK(&ahvif->deflink.peer_ch_width_switch_work,
  		  ath12k_wmi_peer_chan_width_switch_work);
@@ -54,9 +54,9 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +	INIT_WORK(&ahvif->deflink.wmi_migration_cmd_work, ath12k_wmi_migration_cmd_work);
 +	INIT_LIST_HEAD(&ahvif->deflink.peer_migrate_list);
  
- 	ahvif->key_cipher = INVALID_CIPHER;
- 
-@@ -13554,6 +13563,7 @@ static void ath12k_mac_remove_link_inter
+ 	/* Allocate Default Queue now and reassign during actual vdev create */
+ 	vif->cab_queue = ATH12K_HW_DEFAULT_QUEUE;
+@@ -13579,6 +13588,7 @@ static void ath12k_mac_remove_link_inter
  		cancel_work_sync(&arvif->update_bcn_template_work);
  	}
  	cancel_work_sync(&arvif->peer_ch_width_switch_work);
@@ -64,7 +64,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	cancel_delayed_work_sync(&ahvif->deflink.connection_loss_work);
  
  	lockdep_assert_held(&ah->conf_mutex);
-@@ -20761,6 +20771,34 @@ err_mac_unregister:
+@@ -20832,6 +20842,34 @@ err_mac_unregister:
  	return ret;
  }
  
@@ -99,7 +99,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  static int ath12k_mac_setup(struct ath12k_hw *ah, u8 link_id,
  			    struct ath12k_base *ab, int mac_id)
  {
-@@ -21322,6 +21360,10 @@ ath12k_mac_free_link_migr_peer_list(stru
+@@ -21405,6 +21443,10 @@ ath12k_mac_free_link_migr_peer_list(stru
  	 * peers later as per the requirement
  	 */
  	list_for_each_entry_safe(peer_node, tmp_peer, peer_migr_list, list) {
@@ -110,7 +110,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  		ml_peer = ath12k_ml_peer_find_by_id(ah, peer_node->ml_peer_id);
  		if (ml_peer)
  			ml_peer->ahsta->is_migration_in_progress = false;
-@@ -21420,6 +21462,15 @@ ath12k_mac_process_link_migrate_req(stru
+@@ -21503,6 +21545,15 @@ ath12k_mac_process_link_migrate_req(stru
  
  	lockdep_assert_held(&ah->conf_mutex);
  
@@ -126,9 +126,9 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	spin_lock_bh(&ah->data_lock);
  
  	/* Request for single MLD peer */
-@@ -21517,6 +21568,19 @@ send_link_mig_cmd:
- 		    "pri link migrate: got num peers %d for vdev_id %d\n",
- 		    num_peers, arvif->vdev_id);
+@@ -21600,6 +21651,19 @@ send_link_mig_cmd:
+ 		   "pri link migrate: got num peers %d for vdev_id %d\n",
+ 		   num_peers, arvif->vdev_id);
  
 +	if (ret)
 +		goto exit_link_migrate_req;
@@ -148,7 +148,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	spin_unlock_bh(&ah->data_lock);
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -16658,6 +16658,154 @@ exit:
+@@ -16755,6 +16755,154 @@ exit:
  	return;
  }
  
@@ -252,7 +252,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
 +		}
 +
 +		ml_peer_id |= ATH12K_ML_PEER_ID_VALID;
-+		peer = ath12k_peer_find_list_by_id(ab, ml_peer_id);
++		peer = ath12k_peer_find_by_ml_peer_vdev_id(ab, ml_peer_id, vdev_id);
 +		if (!peer) {
 +			ath12k_err(ab, "failed to find ML peer with id %d\n", ml_peer_id);
 +			goto exit_pri_link_mig_event;
@@ -303,7 +303,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  static void ath12k_wmi_op_rx(struct ath12k_base *ab, struct sk_buff *skb)
  {
  	struct wmi_cmd_hdr *cmd_hdr;
-@@ -16876,7 +17024,9 @@ static void ath12k_wmi_op_rx(struct ath1
+@@ -16973,7 +17121,9 @@ static void ath12k_wmi_op_rx(struct ath1
  	case WMI_VDEV_DELETE_ALL_PEER_RESP_EVENTID:
  		ath12k_wmi_delete_all_peer_resp_event(ab, skb);
  		break;
@@ -314,7 +314,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	/* TODO: Add remaining events */
  	default:
  		ath12k_dbg(ab, ATH12K_DBG_WMI, "Unknown eventid: 0x%x\n", id);
-@@ -17711,4 +17861,118 @@ int ath12k_wmi_send_wsi_stats_info(struc
+@@ -18026,4 +18176,118 @@ int ath12k_wmi_send_wsi_stats_info(struc
  	}
  
  	return ret;
@@ -459,7 +459,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_MLO_TLT_SELECTION_FOR_TID_SPRAY_EVENTID = 0x4800C,
  };
  
-@@ -2282,6 +2292,10 @@ enum wmi_tlv_tag {
+@@ -2285,6 +2295,10 @@ enum wmi_tlv_tag {
  	WMI_TAG_MLO_LINK_REMOVAL_EVENT_FIXED_PARAM,
  	WMI_TAG_MLO_LINK_REMOVAL_CMD_FIXED_PARAM = 0x464,
  	WMI_CTRL_PATH_PMLO_STATS = 0x479,
@@ -470,7 +470,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_TAG_PDEV_WSI_STATS_INFO_CMD = 0x4b1,
  	WMI_TAG_PDEV_DFS_RADAR_FLAGS = 0x4b4,
  	WMI_TAG_PDEV_UTF_CMD_FIXED_PARAM = 0x4be,
-@@ -2544,6 +2558,7 @@ enum wmi_tlv_service {
+@@ -2548,6 +2562,7 @@ enum wmi_tlv_service {
  	WMI_SERVICE_THERM_THROT_TX_CHAIN_MASK = 426,
  	WMI_SERVICE_THERM_THROT_5_LEVELS = 429,
  	WMI_TLV_SERVICE_DYNAMIC_TWT_MODE_SUPPORT = 433,
@@ -478,8 +478,8 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  	WMI_MAX_EXT2_SERVICE,
  };
  
-@@ -9142,6 +9157,72 @@ struct ath12k_wmi_wsi_stats_info_param {
- 	u32 wsi_egress_load_info;
+@@ -9214,6 +9229,72 @@ struct mlo_tlt_selection_evt_params {
+ 	u32 link_bmap[WMI_TLT_NUM_TID_PER_AC];
  };
  
 +struct wmi_mlo_new_pri_link_peer_info {
@@ -551,7 +551,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  void ath12k_wmi_init_qcn9274(struct ath12k_base *ab,
  			     struct ath12k_wmi_resource_config_arg *config);
  void ath12k_wmi_init_wcn7850(struct ath12k_base *ab,
-@@ -9372,4 +9453,8 @@ int ath12k_wmi_send_wsi_stats_info(struc
+@@ -9443,4 +9524,8 @@ int ath12k_wmi_send_wsi_stats_info(struc
  int ath12k_wmi_pdev_enable_telemetry_stats(struct ath12k_base *ab,
  					   struct ath12k *ar);
  int ath12k_wmi_peer_delete_all(struct ath12k_link_vif *arvif);
@@ -562,7 +562,7 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -549,6 +549,10 @@ struct ath12k_link_vif {
+@@ -554,6 +554,10 @@ struct ath12k_link_vif {
  	u64 tbtt_offset;
  	int num_peers;
  
@@ -573,3 +573,48 @@ Signed-off-by: Karthikeyan Kathirvel <quic_kathirve@quicinc.com>
  };
  
  struct ath12k_vlan_iface {
+--- a/drivers/net/wireless/ath/ath12k/peer.c
++++ b/drivers/net/wireless/ath/ath12k/peer.c
+@@ -108,6 +108,31 @@ static struct ath12k_peer *ath12k_peer_f
+ 	return NULL;
+ }
+ 
++struct ath12k_peer *ath12k_peer_find_by_ml_peer_vdev_id(struct ath12k_base *ab,
++							int peer_id,
++							int vdev_id)
++{
++	struct ath12k_peer *peer;
++
++	lockdep_assert_held(&ab->base_lock);
++
++	if (peer_id == ATH12K_PEER_ID_INVALID)
++		return NULL;
++
++	if (peer_id & ATH12K_ML_PEER_ID_VALID) {
++		list_for_each_entry(peer, &ab->peers, list)
++			if (peer_id == peer->ml_peer_id && vdev_id == peer->vdev_id)
++				return peer;
++	} else {
++		list_for_each_entry(peer, &ab->peers, list) {
++			if (peer->peer_id == peer_id)
++				return peer;
++		}
++	}
++
++	return NULL;
++}
++
+ struct ath12k_peer *ath12k_peer_find_list_by_id(struct ath12k_base *ab,
+ 						int peer_id)
+ {
+--- a/drivers/net/wireless/ath/ath12k/peer.h
++++ b/drivers/net/wireless/ath/ath12k/peer.h
+@@ -141,6 +141,8 @@ struct ath12k_peer *ath12k_peer_find(str
+ 				     const u8 *addr);
+ struct ath12k_peer *ath12k_peer_find_list_by_id(struct ath12k_base *ab,
+ 						int peer_id);
++struct ath12k_peer *ath12k_peer_find_by_ml_peer_vdev_id(struct ath12k_base *ab,
++							int ml_peer_id, int vdev_id);
+ struct ath12k_peer *ath12k_peer_find_by_addr(struct ath12k_base *ab,
+ 					     const u8 *addr);
+ struct ath12k_peer *ath12k_peer_find_by_id(struct ath12k_base *ab, int peer_id);
