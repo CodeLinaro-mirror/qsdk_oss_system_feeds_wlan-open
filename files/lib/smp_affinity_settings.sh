@@ -314,6 +314,13 @@ enable_affinity_mpc1() {
 
 enable_affinity_al02_c4() {
 
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix3
+
 	#pci 3
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -410,6 +417,15 @@ enable_affinity_al02_c4() {
 
 
 enable_affinity_al02_c20() {
+
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0001\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0000\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0000\:01\:00.0/rx_hash_ix3
 
 	#pci 3
 	#assign 4 rx interrupts to each cores
@@ -512,6 +528,11 @@ enable_affinity_al02_c20() {
 
 enable_affinity_al02_c6() {
 
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0003\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw1.0_0002\:01\:00.0/rx_hash_ix3
+
 	#pci 3
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -596,6 +617,11 @@ enable_affinity_al02_c6() {
 
 enable_affinity_al02_c9() {
 
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000\:01\:00.0/rx_hash_ix3
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix2
+	echo 0x21321321 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002\:01\:00.0/rx_hash_ix3
+
 	# Enable smp affinity for PCIE attach
 	#pci 1
 
@@ -658,6 +684,18 @@ enable_affinity_al02_c9() {
 }
 
 enable_affinity_mi01_2() {
+
+	#5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
 	#IPQ5332 2G radio
 	#assign 4 rx interrupts to each cores
@@ -755,6 +793,14 @@ enable_affinity_mi01_2() {
 
 enable_affinity_mi01_6() {
 
+	#For 5G/6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
         #IPQ5332 2G radio
         #assign 4 rx interrupts to each cores
         irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -820,6 +866,18 @@ enable_affinity_mi01_6() {
 }
 
 enable_affinity_mi01_3() {
+
+	#For 6GHz reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_2/rx_hash_ix3
+
+	#For 5GHz reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+	#For 2GHz reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
         #IPQ5332 2G radio
         #assign 4 rx interrupts to each cores
@@ -915,6 +973,14 @@ enable_affinity_mi01_3() {
 
 enable_affinity_mi01_3_c2() {
 
+	#For 5GHz reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+	#For 2GHz reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
         #IPQ5332 2G radio
         #assign 4 rx interrupts to each cores
         irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -978,6 +1044,14 @@ enable_affinity_mi01_3_c2() {
 
 }
 enable_affinity_mi01_3_c3() {
+	#5G/6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
 	#IPQ5332 2G radio
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -1040,6 +1114,15 @@ enable_affinity_mi01_3_c3() {
 }
 
 enable_affinity_mi01_9() {
+
+	#For 5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+
 	#pci 0
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -1100,6 +1183,18 @@ enable_affinity_mi01_9() {
 }
 
 enable_affinity_mi01_14() {
+
+	#5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
 
 	#IPQ5332 2G radio
 	#assign 4 rx interrupts to each cores
@@ -1197,6 +1292,18 @@ enable_affinity_mi01_14() {
 
 enable_affinity_mi01_12() {
 
+	#5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn6432\ hw1.0_1/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0000:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5332\ hw1.0_c000000.wifi/rx_hash_ix3
+
 	#IPQ5332 2G radio
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -1290,6 +1397,22 @@ enable_affinity_mi01_12() {
 }
 
 enable_affinity_mr01() {
+
+	#5G High reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix3
+
+	#5G Low reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0001:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix3
 
 	#IPQ5424 2G radio
 	#assign 4 rx interrupts to each cores
@@ -1416,6 +1539,18 @@ enable_affinity_mr01() {
 
 enable_affinity_mr02() {
 
+	#5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0003:01:00.0/rx_hash_ix3
+
+	#For 6G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix3
+
+	#For 2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix3
+
 	#IPQ5424 2G radio
 	#assign 4 rx interrupts to each cores
 	irq_affinity_num=`grep -E -m1 'reo2host-destination-ring4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
@@ -1511,6 +1646,14 @@ enable_affinity_mr02() {
 }
 
 enable_affinity_mr03() {
+
+	#For 5G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/qcn9274\ hw2.0_0002:01:00.0/rx_hash_ix3
+
+	#2G reo queues
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix2
+	echo 0x23123123 > /sys/kernel/debug/ath12k/ipq5424\ hw1.0_c000000.wifi/rx_hash_ix3
 
 	#IPQ5424 2G radio
 	#assign 4 rx interrupts to each cores
