@@ -1754,9 +1754,9 @@ drv_mac80211_setup() {
 	local found
 
 	# convert channel to frequency
-	if [ $mlo_add_flag -eq 0 ]; then
-		[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel" "$band")"
+	[ "$auto_channel" -gt 0 ] || freq="$(get_freq "$phy" "$channel" "$band")"
 
+	if [ $mlo_add_flag -eq 0 ]; then
 		[ -n "$country" ] && {
 			iw reg get | grep -q "^country $country:" || {
 				iw reg set "$country"
