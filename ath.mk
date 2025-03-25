@@ -146,8 +146,9 @@ define KernelPackage/ath12k
   TITLE:=QTI 802.11be wireless cards support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
   DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT
-  FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
-  AUTOLOAD:=$(call AutoProbe,ath12k)
+  FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
+         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
+  AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7)
 endef
 
 define KernelPackage/ath12k/description
