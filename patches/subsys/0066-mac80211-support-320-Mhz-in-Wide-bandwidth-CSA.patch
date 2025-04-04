@@ -1,0 +1,157 @@
+From bc2bea0cabbaed83a1843b69b6dcf6f5a39d9dc5 Mon Sep 17 00:00:00 2001
+From: Balamurugan Ramar <quic_bramar@quicinc.com>
+Date: Thu, 10 Apr 2025 23:25:44 +0530
+Subject: [PATCH] mac80211: support Mhz in Wide bandwidth CSA
+
+Add support for 320 Mhz in Wide bandwidth channel switch subelement,
+which is included in beacon and action frame during channel switch announcement.
+
+On receiving CSA with 320 Mhz,
+channel width and frequency has to be updated to cfg80211_chan_def.
+
+Signed-off-by: Ramya Gnanasekar <quic_rgnanase@quicinc.com>
+Signed-off-by: Balamurugan Ramar <quic_bramar@quicinc.com>
+---
+ include/linux/ieee80211.h | 30 ++++++++++++++++++------------
+ net/mac80211/util.c       | 17 ++++++++++-------
+ net/wireless/util.c       |  4 +++-
+ 3 files changed, 31 insertions(+), 20 deletions(-)
+
+diff --git a/include/linux/ieee80211.h b/include/linux/ieee80211.h
+index 88de057..178b376 100644
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -2057,20 +2057,26 @@ struct ieee80211_vht_cap {
+ } __packed;
+ 
+ /**
+- * enum ieee80211_vht_chanwidth - VHT channel width
+- * @IEEE80211_VHT_CHANWIDTH_USE_HT: use the HT operation IE to
++ * enum ieee80211_chanwidth - channel width
++ * @IEEE80211_CHANWIDTH_USE_HT: use the HT operation IE to
+  *	determine the channel width (20 or 40 MHz)
+- * @IEEE80211_VHT_CHANWIDTH_80MHZ: 80 MHz bandwidth
+- * @IEEE80211_VHT_CHANWIDTH_160MHZ: 160 MHz bandwidth
+- * @IEEE80211_VHT_CHANWIDTH_80P80MHZ: 80+80 MHz bandwidth
+- */
+-enum ieee80211_vht_chanwidth {
+-	IEEE80211_VHT_CHANWIDTH_USE_HT		= 0,
+-	IEEE80211_VHT_CHANWIDTH_80MHZ		= 1,
+-	IEEE80211_VHT_CHANWIDTH_160MHZ		= 2,
+-	IEEE80211_VHT_CHANWIDTH_80P80MHZ	= 3,
++ * @IEEE80211_CHANWIDTH_80MHZ: 80 MHz bandwidth
++ * @IEEE80211_CHANWIDTH_160MHZ: 160 MHz bandwidth
++ * @IEEE80211_CHANWIDTH_80P80MHZ: 80+80 MHz bandwidth
++ */
++enum ieee80211_chanwidth {
++	IEEE80211_CHANWIDTH_USE_HT		= 0,
++	IEEE80211_CHANWIDTH_80MHZ		= 1,
++	IEEE80211_CHANWIDTH_160MHZ		= 2,
++	IEEE80211_CHANWIDTH_80P80MHZ	= 3,
++	IEEE80211_CHANWIDTH_320MHZ	=	4,
+ };
+ 
++#define IEEE80211_VHT_CHANWIDTH_USE_HT	IEEE80211_CHANWIDTH_USE_HT
++#define IEEE80211_VHT_CHANWIDTH_80MHZ	IEEE80211_CHANWIDTH_80MHZ
++#define IEEE80211_VHT_CHANWIDTH_160MHZ      IEEE80211_CHANWIDTH_160MHZ
++#define IEEE80211_VHT_CHANWIDTH_80P80MHZ	IEEE80211_CHANWIDTH_80P80MHZ
++
+ /**
+  * struct ieee80211_vht_operation - VHT operation IE
+  *
+@@ -2418,7 +2424,7 @@ struct ieee80211_eht_operation_info {
+  * Note: This function is exported by cfg80211.
+  */
+ int ieee80211_get_vht_max_nss(struct ieee80211_vht_cap *cap,
+-			      enum ieee80211_vht_chanwidth bw,
++			      enum ieee80211_chanwidth bw,
+ 			      int mcs, bool ext_nss_bw_capable,
+ 			      unsigned int max_vht_nss);
+ 
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index a49e345..380f015 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -2691,18 +2691,17 @@ void ieee80211_ie_build_wide_bw_cs(u8 *pos,
+ 	/* New channel width */
+ 	switch (chandef->width) {
+ 	case NL80211_CHAN_WIDTH_80:
+-		*pos++ = IEEE80211_VHT_CHANWIDTH_80MHZ;
++		*pos++ = IEEE80211_CHANWIDTH_80MHZ;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_160:
+-		*pos++ = IEEE80211_VHT_CHANWIDTH_160MHZ;
++		*pos++ = IEEE80211_CHANWIDTH_160MHZ;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_80P80:
+-		*pos++ = IEEE80211_VHT_CHANWIDTH_80P80MHZ;
++		*pos++ = IEEE80211_CHANWIDTH_80P80MHZ;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_320:
+-		/* The behavior is not defined for 320 MHz channels */
+-		WARN_ON(1);
+-		fallthrough;
++		*pos++ = IEEE80211_CHANWIDTH_320MHZ;
++		break;
+ 	default:
+ 		*pos++ = IEEE80211_VHT_CHANWIDTH_USE_HT;
+ 	}
+@@ -3670,6 +3669,7 @@ again:
+ 		c->punctured = 0;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_40:
++		c->center_freq2 = 0;
+ 		c->width = NL80211_CHAN_WIDTH_20;
+ 		c->center_freq1 = c->chan->center_freq;
+ 		if (conn->mode == IEEE80211_CONN_MODE_VHT)
+@@ -3678,6 +3678,7 @@ again:
+ 		c->punctured = 0;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_80:
++		c->center_freq2 = 0;
+ 		new_primary_width = NL80211_CHAN_WIDTH_40;
+ 		if (conn->mode == IEEE80211_CONN_MODE_VHT)
+ 			conn->mode = IEEE80211_CONN_MODE_HT;
+@@ -3689,6 +3690,7 @@ again:
+ 		conn->bw_limit = IEEE80211_CONN_BW_LIMIT_80;
+ 		break;
+ 	case NL80211_CHAN_WIDTH_160:
++		c->center_freq2 = 0;
+ 		new_primary_width = NL80211_CHAN_WIDTH_80;
+ 		conn->bw_limit = IEEE80211_CONN_BW_LIMIT_80;
+ 		break;
+@@ -3810,7 +3812,8 @@ int ieee80211_send_action_csa(struct ieee80211_sub_if_data *sdata,
+ 
+ 	if (csa_settings->chandef.width == NL80211_CHAN_WIDTH_80 ||
+ 	    csa_settings->chandef.width == NL80211_CHAN_WIDTH_80P80 ||
+-	    csa_settings->chandef.width == NL80211_CHAN_WIDTH_160) {
++	    csa_settings->chandef.width == NL80211_CHAN_WIDTH_160 ||
++	    csa_settings->chandef.width == NL80211_CHAN_WIDTH_320) {
+ 		skb_put(skb, 5);
+ 		ieee80211_ie_build_wide_bw_cs(pos, &csa_settings->chandef);
+ 	}
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index ebebd63..70b5066 100644
+--- a/net/wireless/util.c
++++ b/net/wireless/util.c
+@@ -2729,7 +2729,7 @@ void cfg80211_send_layer2_update(struct net_device *dev, const u8 *addr)
+ EXPORT_SYMBOL(cfg80211_send_layer2_update);
+ 
+ int ieee80211_get_vht_max_nss(struct ieee80211_vht_cap *cap,
+-			      enum ieee80211_vht_chanwidth bw,
++			      enum ieee80211_chanwidth bw,
+ 			      int mcs, bool ext_nss_bw_capable,
+ 			      unsigned int max_vht_nss)
+ {
+@@ -2828,6 +2828,8 @@ int ieee80211_get_vht_max_nss(struct ieee80211_vht_cap *cap,
+ 		    ext_nss_bw == 2)
+ 			return (3 * max_vht_nss) / 4;
+ 		break;
++	default:
++		break;
+ 	}
+ 
+ 	/* not covered or invalid combination received */
+-- 
+2.34.1
+
