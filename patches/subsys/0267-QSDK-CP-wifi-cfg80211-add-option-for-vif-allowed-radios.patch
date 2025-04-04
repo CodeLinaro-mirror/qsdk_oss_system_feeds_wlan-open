@@ -1,0 +1,115 @@
+From 43645aaeb6c97a5302034cbc4061f69270ec6728 Mon Sep 17 00:00:00 2001
+From: Balamurugan Ramar <quic_bramar@quicinc.com>
+Date: Thu, 10 Apr 2025 23:27:14 +0530
+Subject: [PATCH] mac80211: QSDKCP wifi add option for vif allowed radios
+
+This allows users to prevent a vif from affecting radios other than the
+configured ones. This can be useful in cases where e.g. an AP is running
+on one radio, and triggering a scan on another radio should not disturb it.
+
+Changing the allowed radios list for a vif is supported, but only while
+it is down.
+
+While it is possible to achieve the same by always explicitly specifying
+a frequency list for scan requests and ensuring that the wrong channel/band
+is never accidentally set on an unrelated interface, this change makes
+multi-radio wiphy setups a lot easier to deal with for CLI users.
+
+By itself, this patch only enforces the radio mask for scanning requests
+and remain-on-channel. Follow-up changes build on this to limit configured
+frequencies.
+
+patch-work: None
+patch-dependency: None
+
+Link: https://lore.kernel.org/all/eefcb218780f71a1549875d149f1196486762756.1728462320.git-series.nbd@nbd.name/
+
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
+Signed-off-by: Balamurugan Ramar <quic_bramar@quicinc.com>
+---
+ include/net/cfg80211.h       |  2 +-
+ include/uapi/linux/nl80211.h |  2 ++
+ net/wireless/nl80211.c       | 14 ++++++++++++++
+ 3 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index ae63247..d16a415 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -6881,12 +6881,12 @@ struct wireless_dev {
+ 	} links[IEEE80211_MLD_MAX_NUM_LINKS];
+ 	u16 valid_links;
+ 
+-	u32 radio_mask;
+ 	u8 reg_6g_power_mode;
+ 	bool critical_update;
+ 	bool is_netdev_going_down; /*Indicates netdev going down - wdev specific*/
+ 	u8 ppe_vp_type;
+ 	bool link_removal_flag;
++	u32 radio_mask;
+ };
+ 
+ static inline const u8 *wdev_address(struct wireless_dev *wdev)
+diff --git a/include/uapi/linux/nl80211.h b/include/uapi/linux/nl80211.h
+index 0cf528a..c0c4576 100644
+--- a/include/uapi/linux/nl80211.h
++++ b/include/uapi/linux/nl80211.h
+@@ -2960,6 +2960,8 @@ enum nl80211_commands {
+  *	this attribute is not present, and hence any associated attributes are
+  *	deemed to be applicable to all radios
+  *
++ * @NL80211_ATTR_VIF_RADIO_MASK: Bitmask of allowed radios (u32).
++ *	A value of 0 means all radios.
+  * @NL80211_ATTR_WIPHY_ANTENNA_GAIN: Configured antenna gain. Used to reduce
+  *	transmit power to stay within regulatory limits. u32, dBi.
+  *
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 6f146b8..aab46d2 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -958,6 +958,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
+ 	[NL80211_ATTR_AP_REMOVAL_COUNT] = { .type = NLA_U32 },
+ 	[NL80211_ATTR_TSF] = { .type = NLA_U64 },
+ 	[NL80211_ATTR_WIPHY_ANTENNA_GAIN] = { .type = NLA_U32 },
++	[NL80211_ATTR_VIF_RADIO_MASK] = { .type = NLA_U32 },
+ };
+ 
+ /* policy for the key attributes */
+@@ -4776,6 +4777,12 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
+ 	if (err && netif_running(dev))
+ 		return -EBUSY;
+ 
++	err = nl80211_parse_vif_radio_mask(info, &radio_mask);
++	if (err < 0)
++		return err;
++	if (err && netif_running(dev))
++		return -EBUSY;
++
+ 	if (change)
+ 		err = cfg80211_change_iface(rdev, dev, ntype, &params);
+ 	else
+@@ -4841,6 +4848,10 @@ static int _nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
+ 	if (err < 0)
+ 		return err;
+ 
++	err = nl80211_parse_vif_radio_mask(info, &radio_mask);
++	if (err < 0)
++		return err;
++
+ 	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+ 	if (!msg)
+ 		return -ENOMEM;
+@@ -4882,6 +4893,9 @@ static int _nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
+ 		break;
+ 	}
+ 
++	if (radio_mask)
++		wdev->radio_mask = radio_mask;
++
+ 	if (radio_mask)
+ 		wdev->radio_mask = radio_mask;
+ 
+-- 
+2.34.1
+
