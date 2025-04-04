@@ -1,0 +1,109 @@
+From 97e9a45175cb2f9469d8224329d803d0630497f1 Mon Sep 17 00:00:00 2001
+From: Balamurugan Ramar <quic_bramar@quicinc.com>
+Date: Thu, 10 Apr 2025 23:26:18 +0530
+Subject: [PATCH] mac80211: SLO WDS link add
+
+Currently,when EHT WDS virtual ap interface is
+brought up multiple crashes and warn ons are seen
+as it is not fully supported yet.
+
+In order to handle this, link id information on which
+WDS STA was trying to associate should be passed from hostapd
+to create the AP/VLAN interface which is part of
+MLO+WDS feature (yet to be supported).
+
+Until then, use master VAP's link for creating AP/VLAN
+interface regardless of the WDS STA associated link.
+
+Signed-off-by: Harshitha Prem <quic_hprem@quicinc.com>
+Signed-off-by: Balamurugan Ramar <quic_bramar@quicinc.com>
+---
+ net/mac80211/chan.c | 16 +++++++++++-----
+ net/mac80211/link.c |  8 ++++++++
+ net/wireless/util.c |  3 ++-
+ 3 files changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/net/mac80211/chan.c b/net/mac80211/chan.c
+index 3dd7cb5..f6fd7da 100644
+--- a/net/mac80211/chan.c
++++ b/net/mac80211/chan.c
+@@ -1096,6 +1096,9 @@ __ieee80211_link_copy_chanctx_to_vlans(struct ieee80211_link_data *link,
+ 		if (WARN_ON(!vlan_conf))
+ 			continue;
+ 
++		if (rcu_access_pointer(sdata->vif.link_conf[link_id]) == vlan_conf)
++			continue;
++
+ 		rcu_assign_pointer(vlan_conf->chanctx_conf, conf);
+ 	}
+ }
+@@ -2183,6 +2186,14 @@ void ieee80211_link_vlan_copy_chanctx(struct ieee80211_link_data *link)
+ 	if (WARN_ON(sdata->vif.type != NL80211_IFTYPE_AP_VLAN || !sdata->bss))
+ 		return;
+ 
++	/* TODO: This check would help only for SLO WDS VAP. For MLO WDS VAP,
++		we have to extend the logic for all the links
++	*/
++	if (sdata->vif.valid_links) {
++		link_id = ffs(sdata->vif.valid_links) - 1;
++		link_conf = rcu_dereference(sdata->vif.link_conf[link_id]);
++	}
++
+ 	ap = container_of(sdata->bss, struct ieee80211_sub_if_data, u.ap);
+ 
+ 	ap_conf = wiphy_dereference(local->hw.wiphy,
+@@ -2190,11 +2201,6 @@ void ieee80211_link_vlan_copy_chanctx(struct ieee80211_link_data *link)
+ 	conf = wiphy_dereference(local->hw.wiphy,
+ 				 ap_conf->chanctx_conf);
+ 	rcu_assign_pointer(link_conf->chanctx_conf, conf);
+-
+-	memcpy(&sdata->vif.link_conf[link_id]->chanreq.oper,
+-	       &ap->vif.link_conf[link_id]->chanreq.oper,
+-	       sizeof(struct cfg80211_chan_def));
+-
+ }
+ 
+ void ieee80211_iter_chan_contexts_atomic(
+diff --git a/net/mac80211/link.c b/net/mac80211/link.c
+index b01a894..16bd27a 100644
+--- a/net/mac80211/link.c
++++ b/net/mac80211/link.c
+@@ -128,6 +128,9 @@ skip_vlan_conf:
+ 	link->ap_power_level = IEEE80211_UNSET_POWER_LEVEL;
+ 	link->user_power_level = local->user_power_level;
+ 
++	if (sdata->vif.type == NL80211_IFTYPE_AP)
++		ieee80211_update_apvlan_links(sdata);
++
+ 	if (!deflink) {
+ 		switch (sdata->vif.type) {
+ 		case NL80211_IFTYPE_AP:
+@@ -314,6 +317,11 @@ static int ieee80211_vif_update_links(struct ieee80211_sub_if_data *sdata,
+ 
+ 	memset(to_free, 0, sizeof(links));
+ 
++	/* TODO: currently, SLO wds AP/VLAN's link pointer is same as master VAP
++		hence, skip update link for AP_VLAN */
++	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
++		return 0;
++
+ 	if (old_links == new_links && dormant_links == sdata->vif.dormant_links)
+ 		return 0;
+ 
+diff --git a/net/wireless/util.c b/net/wireless/util.c
+index 8635b52..8d493cd 100644
+--- a/net/wireless/util.c
++++ b/net/wireless/util.c
+@@ -3158,7 +3158,8 @@ void cfg80211_remove_link(struct wireless_dev *wdev, unsigned int link_id)
+ 		break;
+ 	}
+ 
+-	rdev_del_intf_link(rdev, wdev, link_id);
++	if (wdev->iftype != NL80211_IFTYPE_AP_VLAN)
++		rdev_del_intf_link(rdev, wdev, link_id);
+ 
+ 	wdev->valid_links &= ~BIT(link_id);
+ 	eth_zero_addr(wdev->links[link_id].addr);
+-- 
+2.34.1
+
