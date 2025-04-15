@@ -604,6 +604,18 @@ define Device/hnet_c108
 endef
 TARGET_DEVICES += hnet_c108
 
+define Device/hongdian_h8922-v30
+  SOC := mt7620a
+  IMAGE_SIZE := 15808k
+  DEVICE_VENDOR := Hongdian
+  DEVICE_MODEL := H8922
+  DEVICE_VARIANT := v30
+  DEVICE_PACKAGES := kmod-usb2 kmod-usb-ohci kmod-usb-net-qmi-wwan kmod-usb-serial-option uqmi uboot-envtools
+  IMAGES += rootfs.bin
+  IMAGE/rootfs.bin := append-rootfs | check-size 10560k
+endef
+TARGET_DEVICES += hongdian_h8922-v30
+
 define Device/humax_e2
   SOC := mt7620a
   IMAGE_SIZE := 7744k
@@ -1290,7 +1302,7 @@ endef
 TARGET_DEVICES += tplink_ec220-g5-v2
 
 define Device/tplink_re200-v1
-  $(Device/tplink-v1)
+  $(Device/tplink-v1-okli)
   SOC := mt7620a
   DEVICE_MODEL := RE200
   DEVICE_VARIANT := v1
@@ -1302,7 +1314,7 @@ endef
 TARGET_DEVICES += tplink_re200-v1
 
 define Device/tplink_re210-v1
-  $(Device/tplink-v1)
+  $(Device/tplink-v1-okli)
   SOC := mt7620a
   DEVICE_MODEL := RE210
   DEVICE_VARIANT := v1

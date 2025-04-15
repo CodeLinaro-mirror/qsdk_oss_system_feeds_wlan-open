@@ -1,12 +1,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r8125
-PKG_VERSION:=9.013.02
-PKG_RELEASE:=4
+PKG_VERSION:=9.015.00
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
 PKG_SOURCE_URL:=https://github.com/openwrt/rtl8125/releases/download/$(PKG_VERSION)
-PKG_HASH:=d36410ee99c956f250d9cd08340d8c36567d190f420a8ee128ff6e51225aac0c
+PKG_HASH:=7d6906336c3ad960c3e7c0299ad655659d7110bdc933c5b568b7f2536cb8ffc3
 
 PKG_BUILD_PARALLEL:=1
 PKG_LICENSE:=GPLv2
@@ -27,6 +27,7 @@ endef
 
 define KernelPackage/r8125-rss
 $(call KernelPackage/r8125)
+  CONFLICTS:=kmod-r8125
   TITLE+= (RSS)
   VARIANT:=rss
 endef

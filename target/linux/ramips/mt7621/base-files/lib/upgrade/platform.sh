@@ -99,6 +99,8 @@ platform_do_upgrade() {
 	h3c,tx1806|\
 	haier,har-20s2u1|\
 	hiwifi,hc5962|\
+	gemtek,wvrtm-127acn|\
+	gemtek,wvrtm-130acn|\
 	iptime,a3004t|\
 	iptime,ax2004m|\
 	iptime,t5004|\
@@ -154,8 +156,9 @@ platform_do_upgrade() {
 	buffalo,wsr-2533dhpls)
 		buffalo_do_upgrade "$1"
 		;;
-	dna,valokuitu-plus-ex400)
-		dna_do_upgrade "$1"
+	dna,valokuitu-plus-ex400|\
+	genexis,pulse-ex400)
+		inteno_do_upgrade "$1"
 		;;
 	elecom,wrc-x1800gs)
 		[ "$(fw_printenv -n bootmenu_delay)" != "0" ] || \
