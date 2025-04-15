@@ -1,0 +1,134 @@
+From f207db9a7e71404e167fcc11c59df0f6c0cf2237 Mon Sep 17 00:00:00 2001
+From: Hariharan Ramanathan <quic_hramanat@quicinc.com>
+Date: Tue, 15 Apr 2025 18:40:38 +0530
+Subject: [PATCH 06/15] UPSTREAM:DP:ath12k: add statistic support for
+counting wmm received packets
+
+Taken tid value from the reo dest ring and
+the packets are counted based on WMM categories.
+
+Original Patch:
+717-ath12k-received-pkts.patch
+
+Signed-off-by: saleemuddin shaik <quic_saleemud@quicinc.com>
+Signed-off-by: Hariharan Ramanathan <quic_hramanat@quicinc.com>
+---
+ drivers/net/wireless/ath/ath12k/debugfs.c     | 15 ++++++++++++++-
+ drivers/net/wireless/ath/ath12k/dp.h          |  2 ++
+ drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c | 13 +++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath12k/debugfs.c b/drivers/net/wireless/ath/ath12k/debugfs.c
+index 5f3df39..87b3918 100644
+--- a/drivers/net/wireless/ath/ath12k/debugfs.c
++++ b/drivers/net/wireless/ath/ath12k/debugfs.c
+@@ -1422,6 +1422,7 @@ static ssize_t ath12k_read_wmm_stats(struct file *file,
+        char *buf;
+        ssize_t retval;
+        u64 total_wmm_sent_pkts = 0;
++       u64 total_wmm_received_pkts = 0;
+ 
+        buf = kzalloc(size, GFP_KERNEL);
+        if (!buf) {
+@@ -1430,11 +1431,15 @@ static ssize_t ath12k_read_wmm_stats(struct file *file,
+        }
+ 
+        wiphy_lock(dp_pdev->hw->wiphy);
+-       for (count = 0; count < WME_NUM_AC; count++)
++       for (count = 0; count < WME_NUM_AC; count++) {
+                total_wmm_sent_pkts += dp_pdev->wmm_stats.total_wmm_tx_pkts[count];
++	       total_wmm_received_pkts += dp_pdev->wmm_stats.total_wmm_rx_pkts[count];
++       }
+ 
+        len += scnprintf(buf + len, size - len, "Total number of wmm_sent: %llu\n",
+                         total_wmm_sent_pkts);
++       len += scnprintf(buf + len, size - len, "total number of wmm_received: %llu\n",
++		        total_wmm_received_pkts);
+        len += scnprintf(buf + len, size - len, "Num of BE wmm_sent: %llu\n",
+                         dp_pdev->wmm_stats.total_wmm_tx_pkts[WME_AC_BE]);
+        len += scnprintf(buf + len, size - len, "Num of BK wmm_sent: %llu\n",
+@@ -1443,6 +1448,14 @@ static ssize_t ath12k_read_wmm_stats(struct file *file,
+                         dp_pdev->wmm_stats.total_wmm_tx_pkts[WME_AC_VI]);
+        len += scnprintf(buf + len, size - len, "Num of VO wmm_sent: %llu\n",
+                         dp_pdev->wmm_stats.total_wmm_tx_pkts[WME_AC_VO]);
++       len += scnprintf(buf + len, size - len, "num of be wmm_received: %llu\n",
++		        dp_pdev->wmm_stats.total_wmm_rx_pkts[WME_AC_BE]);
++       len += scnprintf(buf + len, size - len, "num of bk wmm_received: %llu\n",
++		        dp_pdev->wmm_stats.total_wmm_rx_pkts[WME_AC_BK]);
++       len += scnprintf(buf + len, size - len, "num of vi wmm_received: %llu\n",
++		        dp_pdev->wmm_stats.total_wmm_rx_pkts[WME_AC_VI]);
++       len += scnprintf(buf + len, size - len, "num of vo wmm_received: %llu\n",
++		        dp_pdev->wmm_stats.total_wmm_rx_pkts[WME_AC_VO]);
+ 
+        wiphy_unlock(dp_pdev->hw->wiphy);
+ 
+diff --git a/drivers/net/wireless/ath/ath12k/dp.h b/drivers/net/wireless/ath/ath12k/dp.h
+index 5293434..72cac57 100644
+--- a/drivers/net/wireless/ath/ath12k/dp.h
++++ b/drivers/net/wireless/ath/ath12k/dp.h
+@@ -118,7 +118,9 @@ enum wme_ac {
+ 
+ struct ath12k_wmm_stats {
+        int tx_type;
++       int rx_type;
+        u64 total_wmm_tx_pkts[WME_NUM_AC];
++       u64 total_wmm_rx_pkts[WME_NUM_AC];
+ };
+ 
+ struct dp_mon_mpdu {
+diff --git a/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c b/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
+index 9e4ebfc..50117da 100644
+--- a/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
++++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
+@@ -634,6 +634,7 @@ static void ath12k_wifi7_dp_rx_h_undecap(struct ath12k_pdev_dp *dp_pdev,
+ 		/* TODO: Handle undecap for these formats */
+ 		break;
+ 	}
++	dp_pdev->wmm_stats.total_wmm_rx_pkts[dp_pdev->wmm_stats.rx_type]++;
+ }
+ 
+ static void ath12k_wifi7_dp_rx_h_mpdu(struct ath12k_pdev_dp *dp_pdev,
+@@ -649,7 +650,10 @@ static void ath12k_wifi7_dp_rx_h_mpdu(struct ath12k_pdev_dp *dp_pdev,
+ 	struct ieee80211_hdr *hdr;
+ 	struct ath12k_dp_peer *peer;
+ 	u32 err_bitmap = rx_desc_data->err_bitmap;
++	struct ath12k_dp_rx_tid *rx_tid;
++	u8 tid;
+ 
++	tid = rx_desc_data->tid;
+ 	/* PN for multicast packets will be checked in mac80211 */
+ 	rxcb = ATH12K_SKB_RXCB(msdu);
+ 	rxcb->is_mcbc = rx_desc_data->fill_crypto_hdr;
+@@ -668,6 +672,12 @@ static void ath12k_wifi7_dp_rx_h_mpdu(struct ath12k_pdev_dp *dp_pdev,
+ 	} else {
+ 		enctype = HAL_ENCRYPT_TYPE_OPEN;
+ 	}
++
++	rx_tid = &peer->rx_tid[tid];
++	dp_pdev->wmm_stats.rx_type =
++		ath12k_tid_to_ac(rx_tid->tid > ATH12K_DSCP_PRIORITY ? 0: rx_tid->tid);
++	dp_pdev->wmm_stats.total_wmm_rx_pkts[dp_pdev->wmm_stats.rx_type]++;
++
+ 	spin_unlock_bh(&dp->dp_lock);
+ 	rcu_read_unlock();
+ 
+@@ -988,6 +998,8 @@ ath12k_wifi7_dp_rx_process_received_packets(struct ath12k_dp *dp,
+ 			continue;
+ 		}
+ 
++		dp_pdev->wmm_stats.rx_type = ath12k_tid_to_ac(rxcb->tid > ATH12K_DSCP_PRIORITY ? 0: rxcb->tid);
++
+ 		ret = ath12k_wifi7_dp_rx_process_msdu(dp_pdev, msdu, msdu_list,
+ 						      &rx_status, &rx_desc_data);
+ 		if (ret) {
+@@ -2339,6 +2351,7 @@ int ath12k_wifi7_dp_rx_process_wbm_err(struct ath12k_dp *dp,
+ 		}
+ 		ath12k_wifi7_dp_rx_wbm_err(dp_pdev, napi, msdu, &msdu_list);
+ 	}
++
+ 	rcu_read_unlock();
+ done:
+ 	return total_num_buffs_reaped;
+-- 
+2.34.1
+
