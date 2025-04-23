@@ -1,0 +1,100 @@
+From 0839454b4e501986ae788241712444fb8adc6784 Mon Sep 17 00:00:00 2001
+From: Ramya Gnanasekar <ramya.gnanasekar@oss.qualcomm.com>
+Date: Tue, 8 Apr 2025 23:11:59 +0530
+Subject: [PATCH] wifi:ath11k: compilation fixes with mac80211 upgrade
+
+Signed-off-by: Ramya Gnanasekar <ramya.gnanasekar@oss.qualcomm.com>
+---
+ drivers/net/wireless/ath/ath11k/wmi.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -4066,7 +4066,7 @@ ath11k_wmi_obss_color_collision_event(st
+ 	switch (ev->evt_type) {
+ 	case WMI_BSS_COLOR_COLLISION_DETECTION:
+ 		ieee80211_obss_color_collision_notify(arvif->vif, ev->obss_color_bitmap,
+-						      0);
++						      GFP_KERNEL, 0);
+ 		ath11k_dbg(ab, ATH11K_DBG_WMI,
+ 			   "OBSS color collision detected vdev:%d, event:%d, bitmap:%08llx\n",
+ 			   ev->vdev_id, ev->evt_type, ev->obss_color_bitmap);
+--- a/drivers/net/wireless/ath/ath11k/testmode.h
++++ b/drivers/net/wireless/ath/ath11k/testmode.h
+@@ -9,7 +9,7 @@
+ #ifdef CPTCFG_NL80211_TESTMODE
+ 
+ void ath11k_tm_wmi_event(struct ath11k_base *ab, u32 cmd_id, struct sk_buff *skb);
+-int ath11k_tm_cmd(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++int ath11k_tm_cmd(struct ieee80211_hw *hw, struct ieee80211_vif *vif, u8 link_id,
+ 		  void *data, int len);
+ 
+ #else
+@@ -21,7 +21,7 @@ static inline void ath11k_tm_wmi_event(s
+ 
+ static inline int ath11k_tm_cmd(struct ieee80211_hw *hw,
+ 				struct ieee80211_vif *vif,
+-				void *data, int len)
++				u8 link_id, void *data, int len)
+ {
+ 	return 0;
+ }
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -3299,7 +3299,7 @@ static int ath11k_mac_fils_discovery(str
+ 	if (info->fils_discovery.max_interval) {
+ 		interval = info->fils_discovery.max_interval;
+ 
+-		tmpl = ieee80211_get_fils_discovery_tmpl(ar->hw, arvif->vif);
++		tmpl = ieee80211_get_fils_discovery_tmpl(ar->hw, arvif->vif, 0);
+ 		if (tmpl)
+ 			ret = ath11k_wmi_fils_discovery_tmpl(ar, arvif->vdev_id,
+ 							     tmpl);
+@@ -3308,7 +3308,7 @@ static int ath11k_mac_fils_discovery(str
+ 		interval = info->unsol_bcast_probe_resp_interval;
+ 
+ 		tmpl = ieee80211_get_unsol_bcast_probe_resp_tmpl(ar->hw,
+-								 arvif->vif);
++								 arvif->vif, 0);
+ 		if (tmpl)
+ 			ret = ath11k_wmi_probe_resp_tmpl(ar, arvif->vdev_id,
+ 							 tmpl);
+@@ -7268,7 +7268,7 @@ ath11k_mac_vdev_start_restart(struct ath
+ 	    cfg80211_chandef_dfs_usable(ar->hw->wiphy, chandef)) {
+ 		set_bit(ATH11K_CAC_RUNNING, &ar->dev_flags);
+ 		dfs_cac_time = cfg80211_chandef_dfs_cac_time(ar->hw->wiphy,
+-							     chandef);
++							     chandef, false, false);
+ 		ath11k_dbg(ab, ATH11K_DBG_MAC,
+ 			   "cac started dfs_cac_time %u center_freq %d center_freq1 %d for vdev %d\n",
+ 			   dfs_cac_time, arg.channel.freq, chandef->center_freq1,
+@@ -8193,7 +8193,8 @@ ath11k_set_vdev_param_to_all_vifs(struct
+  * this is set interface specific to firmware from ath11k driver
+  */
+ static int ath11k_mac_op_set_rts_threshold(struct ieee80211_hw *hw, u8 radio_id,
+-					   u32 value)
++					   u32 value, struct ieee80211_vif *vif,
++                                          u32 link_id)
+ {
+ 	struct ath11k *ar = hw->priv;
+ 	int param_id = WMI_VDEV_PARAM_RTS_THRESHOLD;
+@@ -8740,7 +8741,7 @@ out:
+ 
+ static int
+ ath11k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
+-			       struct ieee80211_vif *vif,
++			       struct ieee80211_vif *vif, unsigned int link_id,
+ 			       const struct cfg80211_bitrate_mask *mask)
+ {
+ 	struct ath11k_vif *arvif = ath11k_vif_to_arvif(vif);
+--- a/drivers/net/wireless/ath/ath11k/testmode.c
++++ b/drivers/net/wireless/ath/ath11k/testmode.c
+@@ -473,7 +473,7 @@ out:
+ }
+ 
+ int ath11k_tm_cmd(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+-		  void *data, int len)
++		  u8 link_id, void *data, int len)
+ {
+ 	struct ath11k *ar = hw->priv;
+ 	struct nlattr *tb[ATH_TM_ATTR_MAX + 1];
