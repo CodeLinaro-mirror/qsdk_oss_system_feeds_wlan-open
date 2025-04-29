@@ -35,6 +35,7 @@ PKG_BUILD_PARALLEL:=1
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
 PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
 PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
 
 PKG_DRIVERS = \
 	mac80211-hwsim
@@ -99,6 +100,57 @@ define KernelPackage/cfg80211
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
 	$(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
+endef
+
+define Package/ath-legacy-wifi-scripts
+  SECTION:=QCA
+  CATEGORY:=QCA software
+  TITLE:= ATH legacy wifi scripts for kernel6.6
+  DEPENDS:=@TARGET_ipq807x||TARGET_ipq50xx||TARGET_ipq60xx||TARGET_ipq95xx||TARGET_ipq53xx||TARGET_ipq54xx
+endef
+
+define Package/ath-legacy-wifi-scripts/install
+	$(INSTALL_DIR) $(1)/lib/wifi/
+	$(INSTALL_DIR) $(1)/lib/netifd/
+	$(INSTALL_DIR) $(1)/lib/netifd/wireless/
+	$(INSTALL_BIN) ./files/lib/wifi/mac80211.sh $(1)/lib/wifi/mac80211.sh
+	$(INSTALL_BIN) ./files/lib/netifd-wlan/wireless/mac80211.sh $(1)/lib/netifd/wireless/
+	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/hostapd.sh $(1)/lib/netifd/hostapd.sh
+endef
+
+define KernelPackage/cfg80211/install
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/ieee80211
+	$(INSTALL_DIR) $(1)/lib/wifi $(1)/etc/hotplug.d/devcoredump
+	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
+	$(INSTALL_DIR) $(1)/lib/wifi/sawf
+	$(INSTALL_DIR) $(1)/lib/wifi/sawf/telemetry
+	$(INSTALL_DATA) ./files/lib/wifi/def_service_classes.json $(1)/lib/wifi/sawf/
+	$(INSTALL_DATA) ./files/lib/wifi/service_classes.json $(1)/lib/wifi/sawf/
+	$(INSTALL_DATA) ./files/lib/wifi/telemetry/config.json $(1)/lib/wifi/sawf/telemetry/
+	$(INSTALL_DATA) ./files/lib/wifi/telemetry/sla.json $(1)/lib/wifi/sawf/telemetry/
+	$(INSTALL_DATA) ./files/lib/wifi/telemetry/sla_detect.json $(1)/lib/wifi/sawf/telemetry/
+ifneq ($(wildcard ./files/lib/wifi/pre_post_wifi_operations.sh),)
+	$(INSTALL_DATA) ./files/lib/wifi/pre_post_wifi_operations.sh $(1)/lib/wifi/
+endif
+	$(INSTALL_BIN) ./files/lib/performance.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
+ifeq ($(CONFIG_KERNEL_ATHMEMDEBUG),y)
+	$(INSTALL_BIN) ./files/lib/memleak_check.sh $(1)/lib
+endif
+	$(INSTALL_BIN) ./files/coredump.sh $(1)/etc/hotplug.d/devcoredump
+	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
+	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/ath11k_uboot_mod_params.sh $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
+	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-hostapd-event-update.sh $(1)/lib/netifd/dpp-hostapd-event-update
+	chmod 0755 $(1)/lib/netifd/dpp-hostapd-event-update
+	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-supplicant-event-update.sh $(1)/lib/netifd/dpp-supplicant-event-update
+	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
 endef
 
 define KernelPackage/cfg80211/description
@@ -453,3 +505,4 @@ $(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(eval $(call DownloadBackports,backpo
 $(eval $(foreach drv,$(PKG_DRIVERS),$(call KernelPackage,$(drv))))
 $(eval $(call KernelPackage,cfg80211))
 $(eval $(call KernelPackage,mac80211))
+$(eval $(call BuildPackage,ath-legacy-wifi-scripts))
