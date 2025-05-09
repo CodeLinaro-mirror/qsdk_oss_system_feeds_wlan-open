@@ -29,6 +29,7 @@ find $TARGETS -not -path \*/lib/firmware/\* -a -type f -a -exec file {} \; | \
 	[ "${S}" = "relocatable" ] && {
 		[ "${F##*.}" == "o" ] && continue
 		eval "$STRIP_KMOD $F"
+		eval "${MOD_SIGN_CMD} $F"
 	} || {
 		b=$(stat -c '%a' $F)
 		[ -z "$PATCHELF" ] || [ -z "$TOPDIR" ] || {

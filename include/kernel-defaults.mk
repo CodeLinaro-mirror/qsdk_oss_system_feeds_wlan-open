@@ -141,6 +141,7 @@ define Kernel/CompileModules/Default
 	cmp -s $(LINUX_DIR)/.config $(LINUX_DIR)/.config.modules.save && \
 		mv $(LINUX_DIR)/.config.modules.save $(LINUX_DIR)/.config; \
 	$(CP) $(LINUX_DIR)/.config $(LINUX_DIR)/.config.modules.save
+	+$(KERNEL_MAKE) certs
 endef
 
 OBJCOPY_STRIP = -R .reginfo -R .notes -R .note -R .comment -R .mdebug -R .note.gnu.build-id
