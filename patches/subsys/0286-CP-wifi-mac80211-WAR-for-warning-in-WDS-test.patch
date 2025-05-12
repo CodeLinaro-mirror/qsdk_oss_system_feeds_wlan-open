@@ -1,0 +1,63 @@
+From ae845b502b9eac91a0a3ef126312d761e910da39 Mon Sep 17 00:00:00 2001
+From: Ramya Gnanasekar <rgnanase@qti.qualcomm.com>
+Date: Mon, 12 May 2025 16:10:22 +0530
+Subject: [PATCH] QSDK:CP: wifi: mac80211: WAR for warning in WDS test
+
+For WDS, upstream design is to be followed. Currently due to upstream
+and QSDK solution both present, while doing wifi down in AP, the VLAN
+interface valid links is not resetted due to a return statement in
+corresponding caller.
+
+Till the rework is done, propose WAR to unset the valid link for VLAN
+interface to solve below call stack:
+
+[ 1242.867166] ------------[ cut here ]------------
+[ 1242.867188] destroying interface with valid links 0x0001
+[ 1243.323703] Call trace:
+[ 1243.330817]  ieee80211_vif_unblock_queues_csa+0x244/0x7bc [mac80211]
+[ 1243.333078]  ieee80211_vif_unblock_queues_csa+0x770/0x7bc [mac80211]
+[ 1243.339675]  __dev_close_many+0xec/0x100
+[ 1243.346009]  dev_close_many+0x3c/0xe8
+[ 1243.349915]  dev_close+0x44/0x78
+[ 1243.353473]  __cfg80211_send_event_skb+0x1c4/0xf94 [cfg80211]
+[ 1243.356774]  genl_family_rcv_msg_doit+0xc8/0x130
+[ 1243.362415]  genl_rcv_msg+0x194/0x210
+[ 1243.367102]  netlink_rcv_skb+0xa0/0x110
+[ 1243.370661]  genl_rcv+0x34/0x48
+[ 1243.374307]  netlink_unicast+0x168/0x248
+[ 1243.377432]  netlink_sendmsg+0x358/0x3b8
+[ 1243.381600]  __sock_sendmsg+0x18/0x2c
+[ 1243.385504]  ____sys_sendmsg+0x278/0x310
+[ 1243.389065]  ___sys_sendmsg+0x78/0xc4
+[ 1243.393057]  __sys_sendmsg+0x68/0xb8
+[ 1243.396616]  __arm64_sys_sendmsg+0x1c/0x24
+[ 1243.400263]  el0_svc_common.constprop.0+0xc8/0x120
+[ 1243.404169]  do_el0_svc+0x18/0x20
+[ 1243.408941]  el0_svc+0x18/0x40
+[ 1243.412327]  el0t_64_sync_handler+0x80/0x124
+[ 1243.415280]  el0t_64_sync+0x150/0x154
+[ 1243.419707] ---[ end trace 0000000000000000 ]---
+
+Signed-off-by: Ramya Gnanasekar <rgnanase@qti.qualcomm.com>
+---
+ net/mac80211/iface.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
+index 7ad1549..b715800 100644
+--- a/net/mac80211/iface.c
++++ b/net/mac80211/iface.c
+@@ -497,6 +497,10 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
+ 		break;
+ 	case NL80211_IFTYPE_AP_VLAN:
+ 		sdata->wdev.valid_links = 0;
++		/* WAR: Unset the valid links.
++		 * To be removed after MLD WDS rework
++		 */
++		sdata->vif.valid_links = 0;
+ 		ieee80211_vif_clear_links(sdata);
+ 		break;
+ 	default:
+-- 
+2.34.1
+
