@@ -29,7 +29,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -332,6 +332,11 @@ struct ath12k_rekey_data {
+@@ -337,6 +337,11 @@ struct ath12k_rekey_data {
  	bool enable_offload;
  };
  
@@ -41,7 +41,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  struct ath12k_link_vif {
  	u32 vdev_id;
  	u32 beacon_interval;
-@@ -379,6 +384,10 @@ struct ath12k_link_vif {
+@@ -385,6 +390,10 @@ struct ath12k_link_vif {
  	bool beacon_prot;
  	u64 tbtt_offset;
  	int num_stations;
@@ -52,18 +52,17 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  };
  
  struct ath12k_dp_link_vif {
-@@ -1215,6 +1224,8 @@ struct ath12k_base {
- 	struct rhashtable *rhead_sta_addr;
+@@ -1282,6 +1291,7 @@ struct ath12k_base {
  	struct rhashtable_params rhash_sta_addr_param;
- 
+ 	
+ 	bool in_coldboot_fwreset;
 +	u32 chwidth_num_peer_caps;
-+
+ 
  	/* must be last */
  	u8 drv_priv[] __aligned(sizeof(void *));
- };
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -4166,6 +4166,9 @@ static void ath12k_mac_init_arvif(struct
+@@ -4186,6 +4186,9 @@ static void ath12k_mac_init_arvif(struct
  	wiphy_work_init(&arvif->update_bcn_template_work,
  			ath12k_update_bcn_template_work);
  	arvif->num_stations = 0;
@@ -73,7 +72,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	for (i = 0; i < ARRAY_SIZE(arvif->bitrate_mask.control); i++) {
  		arvif->bitrate_mask.control[i].legacy = 0xffffffff;
-@@ -4242,6 +4245,8 @@ static void ath12k_mac_remove_link_inter
+@@ -4264,6 +4267,8 @@ static void ath12k_mac_remove_link_inter
  			  &arvif->update_obss_color_notify_work);
  	wiphy_work_cancel(ah->hw->wiphy,
  			  &arvif->update_bcn_template_work);
@@ -82,7 +81,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac remove link interface (vdev %d link id %d)",
  		   arvif->vdev_id, arvif->link_id);
-@@ -6583,7 +6588,6 @@ static int ath12k_mac_station_assoc(stru
+@@ -6611,7 +6616,6 @@ static int ath12k_mac_station_assoc(stru
  
  	spin_lock_bh(&ar->data_lock);
  	arsta->bw = ath12k_mac_ieee80211_sta_bw_to_wmi(ar, link_sta);
@@ -90,7 +89,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	spin_unlock_bh(&ar->data_lock);
  
  	if (link_sta->vht_cap.vht_supported && num_vht_rates == 1) {
-@@ -6671,6 +6675,70 @@ static int ath12k_mac_station_disassoc(s
+@@ -6699,6 +6703,70 @@ static int ath12k_mac_station_disassoc(s
  	return 0;
  }
  
@@ -161,7 +160,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  static void ath12k_sta_rc_update_wk(struct wiphy *wiphy, struct wiphy_work *wk)
  {
  	struct ieee80211_link_sta *link_sta;
-@@ -6683,10 +6751,9 @@ static void ath12k_sta_rc_update_wk(stru
+@@ -6711,10 +6779,9 @@ static void ath12k_sta_rc_update_wk(stru
  	const u16 *vht_mcs_mask;
  	const u16 *he_mcs_mask;
  	const u16 *eht_mcs_mask;
@@ -173,7 +172,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	struct ath12k_link_sta *arsta;
  	struct ieee80211_vif *vif;
  
-@@ -6713,7 +6780,6 @@ static void ath12k_sta_rc_update_wk(stru
+@@ -6741,7 +6808,6 @@ static void ath12k_sta_rc_update_wk(stru
  	arsta->changed = 0;
  
  	bw = arsta->bw;
@@ -181,7 +180,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	nss = arsta->nss;
  	smps = arsta->smps;
  
-@@ -6740,53 +6806,19 @@ static void ath12k_sta_rc_update_wk(stru
+@@ -6768,53 +6834,19 @@ static void ath12k_sta_rc_update_wk(stru
  		return;
  
  	if (changed & IEEE80211_RC_BW_CHANGED) {
@@ -247,7 +246,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	}
  
  	if (changed & IEEE80211_RC_NSS_CHANGED) {
-@@ -7691,7 +7723,6 @@ void ath12k_mac_op_link_sta_rc_update(st
+@@ -7742,7 +7774,6 @@ void ath12k_mac_op_link_sta_rc_update(st
  
  	if (changed & IEEE80211_RC_BW_CHANGED) {
  		bw = ath12k_mac_ieee80211_sta_bw_to_wmi(ar, link_sta);
@@ -257,7 +256,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -5634,6 +5634,7 @@ static int ath12k_wmi_svc_rdy_ext2_parse
+@@ -5783,6 +5783,7 @@ static int ath12k_wmi_svc_rdy_ext2_parse
  				    ret);
  			return ret;
  		}
@@ -265,7 +264,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  		break;
  
  	case WMI_TAG_ARRAY_STRUCT:
-@@ -12326,3 +12327,183 @@ int ath12k_wmi_pdev_multiple_vdev_restar
+@@ -12514,3 +12515,183 @@ int ath12k_wmi_pdev_multiple_vdev_restar
  
  	return ret;
  }
@@ -451,7 +450,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
 +}
 --- a/drivers/net/wireless/ath/ath12k/wmi.h
 +++ b/drivers/net/wireless/ath/ath12k/wmi.h
-@@ -435,6 +435,8 @@ enum wmi_tlv_cmd_id {
+@@ -436,6 +436,8 @@ enum wmi_tlv_cmd_id {
  	WMI_PEER_REORDER_QUEUE_REMOVE_CMDID,
  	WMI_PEER_SET_RX_BLOCKSIZE_CMDID,
  	WMI_PEER_ANTDIV_INFO_REQ_CMDID,
@@ -460,7 +459,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  	WMI_BCN_TX_CMDID = WMI_TLV_CMD(WMI_GRP_MGMT),
  	WMI_PDEV_SEND_BCN_CMDID,
  	WMI_BCN_TMPL_CMDID,
-@@ -5695,6 +5697,38 @@ struct wmi_rssi_dbm_conv_offsets {
+@@ -5834,6 +5836,38 @@ struct wmi_rssi_dbm_conv_offsets {
  	u32 xlna_bypass_threshold;
  };
  
@@ -499,7 +498,7 @@ Signed-off-by: Aditya Kumar Singh <quic_adisi@quicinc.com>
  #define ATH12K_FW_STATS_BUF_SIZE (1024 * 1024)
  
  enum wmi_sys_cap_info_flags {
-@@ -6865,5 +6899,6 @@ int ath12k_wmi_pdev_ap_ps_cmd_send(struc
+@@ -7009,5 +7043,6 @@ int ath12k_wmi_pdev_ap_ps_cmd_send(struc
  bool ath12k_wmi_is_mvr_supported(struct ath12k_base *ab);
  int ath12k_wmi_pdev_multiple_vdev_restart(struct ath12k *ar,
  					  struct wmi_pdev_multiple_vdev_restart_req_arg *arg);
