@@ -11,6 +11,7 @@ use strict;
 use warnings;
 use File::Basename;
 use File::Copy;
+use File::Path;
 use Text::ParseWords;
 use JSON::PP;
 
@@ -175,7 +176,7 @@ sub download
 		}
 
 		if (! -d "$target") {
-			system("mkdir", "-p", "$target/");
+			make_path($target);
 		}
 
 		if (! open TMPDLS, "find $mirror -not -path '*/[@.]*' -follow -name $filename 2>/dev/null |") {
@@ -246,7 +247,7 @@ sub download
 	};
 
 	unlink "$target/$filename";
-	system("mv", "$target/$filename.dl", "$target/$filename");
+	move("$target/$filename.dl", "$target/$filename");
 	cleanup();
 }
 

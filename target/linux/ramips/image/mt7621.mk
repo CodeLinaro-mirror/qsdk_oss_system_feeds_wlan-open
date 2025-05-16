@@ -51,7 +51,7 @@ define Build/arcadyan-trx
 	rm $@.hsqs $@.tail
 endef
 
-define Build/dna-header
+define Build/inteno-y3-header
 	BC='$(STAGING_DIR_HOST)/bin/bc' ;\
 	ubifsofs="1024" ;\
 	ubifs="$$(stat -c%s $@)" ;\
@@ -67,12 +67,12 @@ define Build/dna-header
 	echo "IntenoIopY" > $@.tmp ;\
 	echo "version 5" >> $@.tmp ;\
 	echo "integrity MD5SUM" >> $@.tmp ;\
-	echo "board EX400" >> $@.tmp ;\
-	echo "chip 7621" >> $@.tmp ;\
-	echo "arch all mipsel_1004kc" >> $@.tmp ;\
-	echo "model EX400" >> $@.tmp ;\
-	echo "release EX400-X-DNA-4.3.6.100-R-210518_0935" >> $@.tmp ;\
-	echo "customer DNA" >> $@.tmp ;\
+	echo "board $(word 1,$(1))" >> $@.tmp ;\
+	echo "chip $(patsubst mt%,%,$(SOC:bcm%=%))" >> $@.tmp ;\
+	echo "arch all $(CONFIG_TARGET_ARCH_PACKAGES)" >> $@.tmp ;\
+	echo "model $(word 1,$(1))" >> $@.tmp ;\
+	echo "release $(DEVICE_IMG_PREFIX)" >> $@.tmp ;\
+	echo "customer $(if $(CONFIG_VERSION_DIST),$(CONFIG_VERSION_DIST),OpenWrt)" >> $@.tmp ;\
 	echo "ubifsofs $${ubifsofs}" >> $@.tmp ;\
 	echo "ubifs $${ubifs}" >> $@.tmp ;\
 	echo "pkginfoofs $${pkginfoofs}" >> $@.tmp ;\
@@ -91,21 +91,12 @@ define Build/dna-header
 	mv $@.tmp $@
 endef
 
-define Build/dna-bootfs
+define Build/inteno-bootfs
 	mkdir -p $@.ubifs-dir/boot
 
-	# populate the boot fs with the dtb and with either initramfs kernel or
-	# the normal kernel
+	# populate the boot fs with the dtb and the kernel image
 	$(CP) $(KDIR)/image-$(firstword $(DEVICE_DTS)).dtb $@.ubifs-dir/boot/dtb
-
-	$(if $(findstring with-initrd,$(word 1,$(1))),\
-		( \
-			$(CP) $@ $@.ubifs-dir/boot/uImage \
-		) , \
-		( \
-			$(CP) $(IMAGE_KERNEL) $@.ubifs-dir/boot/uImage \
-		) \
-	)
+	$(CP) $@ $@.ubifs-dir/boot/uImage
 
 	# create ubifs
 	$(STAGING_DIR_HOST)/bin/mkfs.ubifs ${MKUBIFS_OPTS} -r $@.ubifs-dir/ -o $@.new
@@ -180,10 +171,6 @@ define Build/iodata-mstc-header2
 	mv $@.new $@
 endef
 
-define Build/kernel-initramfs-bin
-	$(CP) $(KDIR)/vmlinux-initramfs $@
-endef
-
 define Build/znet-header
 	$(eval version=$(word 1,$(1)))
 	$(eval magic=$(if $(word 2,$(1)),$(word 2,$(1)),ZNET))
@@ -231,30 +218,6 @@ define Build/belkin-header
 		cat $@; \
 	) > $@.new
 	mv $@.new $@
-endef
-
-define Build/ubnt-erx-factory-image
-	if [ -e $(KDIR)/tmp/$(KERNEL_INITRAMFS_IMAGE) -a "$$(stat -c%s $@)" -lt "$(KERNEL_SIZE)" ]; then \
-		echo '21001:7' > $(1).compat; \
-		$(TAR) -cf $(1) --transform='s/^.*/compat/' $(1).compat; \
-		\
-		$(TAR) -rf $(1) --transform='s/^.*/vmlinux.tmp/' $(KDIR)/tmp/$(KERNEL_INITRAMFS_IMAGE); \
-		$(MKHASH) md5 $(KDIR)/tmp/$(KERNEL_INITRAMFS_IMAGE) > $(1).md5; \
-		$(TAR) -rf $(1) --transform='s/^.*/vmlinux.tmp.md5/' $(1).md5; \
-		\
-		echo "dummy" > $(1).rootfs; \
-		$(TAR) -rf $(1) --transform='s/^.*/squashfs.tmp/' $(1).rootfs; \
-		\
-		$(MKHASH) md5 $(1).rootfs > $(1).md5; \
-		$(TAR) -rf $(1) --transform='s/^.*/squashfs.tmp.md5/' $(1).md5; \
-		\
-		echo '$(BOARD) $(VERSION_CODE) $(VERSION_NUMBER)' > $(1).version; \
-		$(TAR) -rf $(1) --transform='s/^.*/version.tmp/' $(1).version; \
-		\
-		$(CP) $(1) $(BIN_DIR)/; \
-	else \
-		echo "WARNING: initramfs kernel image too big, cannot generate factory image (actual $$(stat -c%s $@); max $(KERNEL_SIZE))" >&2; \
-	fi
 endef
 
 define Build/zytrx-header
@@ -331,11 +294,11 @@ TARGET_DEVICES += alfa-network_quad-e4g
 
 define Device/ampedwireless_ally_common
   $(Device/nand)
+  $(Device/uimage-lzma-loader)
   DEVICE_VENDOR := Amped Wireless
   DEVICE_PACKAGES := kmod-mt7615-firmware
   IMAGE_SIZE := 32768k
-  KERNEL_INITRAMFS := $(KERNEL_DTB) | uImage lzma -n 'flashable-initramfs' |\
-	edimax-header -s CSYS -m RN68 -f 0x001c0000 -S 0x01100000
+  KERNEL_INITRAMFS := $$(KERNEL) | edimax-header -s CSYS -m RN68 -f 0x001c0000 -S 0x01100000
 endef
 
 define Device/ampedwireless_ally-r1900k
@@ -404,7 +367,7 @@ define Device/asus_rp-ac56
   DEVICE_MODEL := RP-AC56
   IMAGE_SIZE := 16000k
   DEVICE_PACKAGES := kmod-mt7603 kmod-mt76x2 \
-	kmod-i2c-ralink kmod-sound-mt7620 -uboot-envtools
+	kmod-sound-mt7620 -uboot-envtools
   IMAGES += factory.bin
   IMAGE/factory.bin := append-kernel | append-rootfs | pad-rootfs | check-size
   IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | \
@@ -709,6 +672,31 @@ define Device/comfast_cf-ew72-v2
     IMAGE/factory.bin := append-kernel | append-rootfs | pad-rootfs | check-size
 endef
 TARGET_DEVICES += comfast_cf-ew72-v2
+
+define Device/confiabits_mt7621-v1
+  $(Device/dsa-migration)
+  $(Device/uimage-lzma-loader)
+  IMAGE_SIZE := 16064k
+  DEVICE_VENDOR := Confiabits
+  DEVICE_MODEL := MT7621
+  DEVICE_VARIANT := v1
+  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7615e kmod-mt7663-firmware-ap \
+	-uboot-envtools
+endef
+TARGET_DEVICES += confiabits_mt7621-v1
+
+define Device/cudy_m1300-v2
+  $(Device/dsa-migration)
+  IMAGE_SIZE := 15872k
+  DEVICE_VENDOR := Cudy
+  DEVICE_MODEL := M1300
+  DEVICE_VARIANT := v2
+  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7615e kmod-mt7663-firmware-ap \
+	-uboot-envtools
+  UIMAGE_NAME := R15
+  SUPPORTED_DEVICES += R15
+endef
+TARGET_DEVICES += cudy_m1300-v2
 
 define Device/cudy_m1800
   $(Device/dsa-migration)
@@ -1083,24 +1071,11 @@ define Device/d-team_pbr-m1
 endef
 TARGET_DEVICES += d-team_pbr-m1
 
+# Branded version of Genexis / Inteno EX400 (difference is one LED)
 define Device/dna_valokuitu-plus-ex400
-  $(Device/dsa-migration)
-  IMAGE_SIZE := 117m
-  PAGESIZE := 2048
-  MKUBIFS_OPTS := --min-io-size=$$(PAGESIZE) --leb-size=124KiB --max-leb-cnt=96 \
-  		  --log-lebs=2 --space-fixup --squash-uids
+  $(Device/genexis_pulse-ex400/common)
   DEVICE_VENDOR := DNA
   DEVICE_MODEL := Valokuitu Plus EX400
-  KERNEL := kernel-bin | lzma | uImage lzma
-  KERNEL_INITRAMFS := kernel-bin | append-dtb | lzma | uImage lzma
-  IMAGES := factory.bin sysupgrade.bin
-  IMAGE/factory.bin := kernel-initramfs-bin | lzma | uImage lzma | \
-                       dna-bootfs with-initrd | dna-header | \
-                       append-md5sum-ascii-salted
-  IMAGE/sysupgrade.bin := dna-bootfs | sysupgrade-tar kernel=$$$$@ | check-size | \
-  			  append-metadata
-  DEVICE_IMG_NAME = $$(DEVICE_IMG_PREFIX)-$$(2)
-  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7615-firmware kmod-usb3
 endef
 TARGET_DEVICES += dna_valokuitu-plus-ex400
 
@@ -1381,6 +1356,56 @@ define Device/gehua_ghl-r-001
 	kmod-usb-ledtrig-usbport -uboot-envtools
 endef
 TARGET_DEVICES += gehua_ghl-r-001
+
+define Device/gemtek_wvrtm-1xxacn
+  $(Device/nand)
+  $(Device/uimage-lzma-loader)
+  IMAGE_SIZE := 122368k
+  DEVICE_VENDOR := Gemtek
+  DEVICE_PACKAGES := kmod-gpio-nxp-74hc164 kmod-spi-gpio \
+  kmod-usb3 -uboot-envtools 
+endef
+
+define Device/gemtek_wvrtm-127acn
+  $(Device/gemtek_wvrtm-1xxacn)
+  DEVICE_MODEL := WVRTM-127ACN
+  DEVICE_PACKAGES += kmod-mt7603 kmod-mt76x2
+endef
+TARGET_DEVICES += gemtek_wvrtm-127acn
+
+define Device/gemtek_wvrtm-130acn
+  $(Device/gemtek_wvrtm-1xxacn)
+  DEVICE_MODEL := WVRTM-130ACN
+  DEVICE_PACKAGES += kmod-mt7615-firmware
+endef
+TARGET_DEVICES += gemtek_wvrtm-130acn
+
+# Common definitions shared between genexis_pulse-ex400 and dna_valokuitu-plus-ex400
+define Device/genexis_pulse-ex400/common
+  $(Device/dsa-migration)
+  IMAGE_SIZE := 117m
+  PAGESIZE := 2048
+  MKUBIFS_OPTS := --min-io-size=$$(PAGESIZE) --leb-size=124KiB --max-leb-cnt=96 \
+    --log-lebs=2 --space-fixup --squash-uids
+  KERNEL := kernel-bin | lzma | uImage lzma
+  KERNEL_INITRAMFS := kernel-bin | append-dtb | lzma | uImage lzma
+  IMAGES += factory.bin
+  IMAGE/factory.bin := append-image-stage initramfs-kernel.bin | \
+	inteno-bootfs | inteno-y3-header EX400 | append-md5sum-ascii-salted
+  IMAGE/sysupgrade.bin := append-kernel | inteno-bootfs | \
+    sysupgrade-tar kernel=$$$$@ | check-size | append-metadata
+  DEVICE_IMG_NAME = $$(DEVICE_IMG_PREFIX)-$$(2)
+  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7615-firmware kmod-usb3
+endef
+
+define Device/genexis_pulse-ex400
+  $(Device/genexis_pulse-ex400/common)
+  DEVICE_VENDOR := Genexis
+  DEVICE_MODEL := Pulse EX400
+  DEVICE_ALT0_VENDOR := Inteno
+  DEVICE_ALT0_MODEL := Pulse EX400
+endef
+TARGET_DEVICES += genexis_pulse-ex400
 
 define Device/glinet_gl-mt1300
   $(Device/dsa-migration)
@@ -1966,6 +1991,8 @@ define Device/mercusys_mr70x-v1
   $(Device/tplink-safeloader)
   DEVICE_VENDOR := MERCUSYS
   DEVICE_MODEL := MR70X
+  DEVICE_ALT0_VENDOR := MERCUSYS
+  DEVICE_ALT0_MODEL := MR1800X
   DEVICE_VARIANT := v1
   DEVICE_PACKAGES := kmod-mt7915-firmware -uboot-envtools
   TPLINK_BOARD_ID := MR70X
@@ -2732,6 +2759,8 @@ TARGET_DEVICES += tplink_ec330-g5u-v1
 
 define Device/tplink_er605-v2
   $(Device/nand)
+  DEVICE_COMPAT_VERSION := 1.2
+  DEVICE_COMPAT_MESSAGE := Config cannot be migrated because interface names have changed
   DEVICE_VENDOR := TP-Link
   DEVICE_MODEL := ER605
   DEVICE_VARIANT := v2
@@ -2837,14 +2866,15 @@ define Device/ubnt_edgerouter_common
   $(Device/dsa-migration)
   $(Device/uimage-lzma-loader)
   DEVICE_VENDOR := Ubiquiti
-  IMAGE_SIZE := 256768k
+  IMAGE_SIZE := 259840k
   FILESYSTEMS := squashfs
-  KERNEL_SIZE := 3145728
-  KERNEL_INITRAMFS := $$(KERNEL) | \
-	ubnt-erx-factory-image $(KDIR)/tmp/$$(KERNEL_INITRAMFS_PREFIX)-factory.tar
+  KERNEL_SIZE := 6144k
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
   DEVICE_PACKAGES += -wpad-basic-mbedtls -uboot-envtools
-  DEFAULT := n
+  DEVICE_COMPAT_VERSION := 2.0
+  DEVICE_COMPAT_MESSAGE :=  Partition table has been changed due to kernel size restrictions. \
+    Refer to the wiki page for instructions to migrate to the new layout: \
+    https://openwrt.org/toh/ubiquiti/edgerouter_x_er-x_ka
 endef
 
 define Device/ubnt_edgerouter-x
