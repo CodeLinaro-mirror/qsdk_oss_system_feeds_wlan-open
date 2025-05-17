@@ -57,7 +57,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  #define SM(_v, _f) (((_v) << _f##_LSB) & _f##_MASK)
  
-@@ -522,16 +523,6 @@ struct ath12k_htt_data_stats {
+@@ -521,16 +522,6 @@ struct ath12k_htt_data_stats {
  	u64 ru_loc[ATH12K_COUNTER_TYPE_MAX][HAL_RX_RU_ALLOC_TYPE_MAX];
  };
  
@@ -74,20 +74,20 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  struct ath12k_per_ppdu_tx_stats {
  	u16 succ_pkts;
  	u16 failed_pkts;
-@@ -587,6 +578,12 @@ struct ath12k_sta {
+@@ -586,6 +577,12 @@ struct ath12k_sta {
  	u8 assoc_link_id;
  	u16 ml_peer_id;
  	u8 num_peer;
 +	u8 primary_link_id;
 +
 +#ifdef CPTCFG_MAC80211_DEBUGFS
-+	/* protected by wiphy lock */
++	/* protected by conf_mutex */
 +	bool aggr_mode;
 +#endif
  	bool use_4addr_set;
  	struct wiphy_work set_4addr_wk;
  
-@@ -633,6 +630,7 @@ struct ath12k_ftm_event_obj {
+@@ -632,6 +629,7 @@ struct ath12k_ftm_event_obj {
  };
  
  struct ath12k_fw_stats {
@@ -95,7 +95,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  	u32 pdev_id;
  	u32 stats_id;
  	struct list_head pdevs;
-@@ -666,6 +664,12 @@ struct ath12k_debug {
+@@ -665,6 +663,12 @@ struct ath12k_debug {
  	struct wmi_tpc_stats_arg *tpc_stats;
  	u32 rx_filter;
  	bool extd_rx_stats;
@@ -108,6 +108,18 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  };
  
  enum ath12k_fw_recovery_option {
+@@ -723,6 +727,11 @@ struct ath12k {
+ 	u32 num_stations;
+ 	u32 max_num_stations;
+ 
++	/* To synchronize concurrent synchronous mac80211 callback operations,
++	 * concurrent debugfs configuration and concurrent FW statistics events
++	 */
++	struct mutex conf_mutex;
++
+ 	/* protects the radio specific data like debug stats, ppdu_stats_info stats,
+ 	 * vdev_stop_status info, scan data, ath12k_sta info, ath12k_link_vif info,
+ 	 * channel context data, survey info, test mode data.
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
 @@ -20,6 +20,82 @@
@@ -3852,17 +3864,17 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  /*
   * TODO: fix this
-@@ -866,6 +867,7 @@ void ath12k_dp_pdev_free(struct ath12k_b
- 	spin_lock_bh(&dp->dp_lock);
+@@ -875,6 +876,7 @@ void ath12k_dp_pdev_free(struct ath12k_b
  	for (i = 0; i < ab->num_radios; i++) {
  		ar = ab->pdevs[i].ar;
+ 		ath12k_dp_rx_pdev_free(ab, i);
 +		ath12k_debugfs_unregister(ar);
- 		rcu_assign_pointer(dp->dp_pdevs[ar->pdev_idx], NULL);
+ 		ath12k_fw_stats_free(&ar->fw_stats);
  	}
- 	spin_unlock_bh(&dp->dp_lock);
+ }
 --- a/drivers/net/wireless/ath/ath12k/dp.h
 +++ b/drivers/net/wireless/ath/ath12k/dp.h
-@@ -574,6 +574,89 @@ struct ath12k_dp {
+@@ -554,6 +554,89 @@ struct ath12k_dp {
  	struct rhashtable_params rhash_peer_addr_param;
  	struct ath12k_device_dp_stats device_stats;
  };
@@ -3962,7 +3974,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  static enum hal_tcl_encap_type
  ath12k_dp_tx_get_encap_type(struct ath12k_base *ab, struct sk_buff *skb)
-@@ -703,7 +704,8 @@ ath12k_wifi7_dp_tx_update_txcompl(struct
+@@ -698,7 +699,8 @@ ath12k_wifi7_dp_tx_update_txcompl(struct
  static void ath12k_wifi7_dp_tx_complete_msdu(struct ath12k_pdev_dp *dp_pdev,
  					     struct sk_buff *msdu,
  					     struct hal_tx_status *ts,
@@ -3972,7 +3984,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  {
  	struct ieee80211_tx_status status = { 0 };
  	struct ieee80211_rate_status status_rate = { 0 };
-@@ -717,6 +719,7 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -712,6 +714,7 @@ static void ath12k_wifi7_dp_tx_complete_
  	struct ath12k_vif *ahvif;
  	struct ath12k_dp_link_peer *peer;
  	struct sk_buff *skb_ext_desc = tx_desc->skb_ext_desc;
@@ -3980,7 +3992,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  	if (WARN_ON_ONCE(ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM)) {
  		/* Must not happen */
-@@ -743,6 +746,8 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -738,6 +741,8 @@ static void ath12k_wifi7_dp_tx_complete_
  		return;
  	}
  
@@ -3989,7 +4001,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  	rcu_read_lock();
  
  	if (!rcu_dereference(ab->pdevs_active[dp_pdev->mac_id])) {
-@@ -808,7 +813,7 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -803,7 +808,7 @@ static void ath12k_wifi7_dp_tx_complete_
  	 * Might end up reporting it out-of-band from HTT stats.
  	 */
  
@@ -3998,7 +4010,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  
  	spin_lock_bh(&dp->dp_lock);
  	peer = ath12k_dp_link_peer_find_by_id(dp, ts->peer_id);
-@@ -964,7 +969,7 @@ void ath12k_wifi7_dp_tx_completion_handl
+@@ -956,7 +961,7 @@ void ath12k_wifi7_dp_tx_completion_handl
  		if (atomic_dec_and_test(&dp_pdev->num_tx_pending))
  			wake_up(&dp_pdev->tx_empty_waitq);
  
@@ -4072,7 +4084,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  int ath12k_wmi_send_init_country_cmd(struct ath12k *ar,
  				     struct ath12k_wmi_init_country_arg *arg)
  {
-@@ -9838,6 +9884,7 @@ free:
+@@ -9831,6 +9877,7 @@ free:
  static void ath12k_wmi_ctrl_path_stats_event(struct ath12k_base *ab,
  struct sk_buff *skb)
  {
@@ -4119,7 +4131,7 @@ Signed-off-by: Rajat Soni <quic_rajson@quicinc.com>
  #define DFS_PHYERR_UNIT_TEST_CMD 0
  #define DFS_UNIT_TEST_MODULE	0x2b
  #define DFS_UNIT_TEST_TOKEN	0xAA
-@@ -6789,6 +6819,7 @@ int ath12k_wmi_send_bcn_offload_control_
+@@ -6787,6 +6817,7 @@ int ath12k_wmi_send_bcn_offload_control_
  					    u32 vdev_id, u32 bcn_ctrl_op);
  int ath12k_wmi_send_init_country_cmd(struct ath12k *ar,
  				     struct ath12k_wmi_init_country_arg *arg);
