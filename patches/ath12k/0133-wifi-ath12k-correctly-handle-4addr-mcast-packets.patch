@@ -55,19 +55,57 @@ Signed-off-by: Tamizh Chelvam Raja <tamizhr@qti.qualcomm.com>
  	struct ath12k *ar;
  	struct ath12k_link_vif *arvif;
  	struct ath12k_sta *ahsta;
-@@ -6094,6 +6095,13 @@ static void ath12k_sta_set_4addr_wk(stru
+@@ -6073,7 +6074,6 @@ static void ath12k_sta_set_4addr_wk(stru
+ 	struct ath12k_link_sta *arsta;
+ 	struct ieee80211_sta *sta;
+ 	unsigned long links;
+-	//struct ath12k_peer *peer;
+ 	int ret = 0;
+ 	u8 link_id;
+ 
+@@ -6094,6 +6094,18 @@ static void ath12k_sta_set_4addr_wk(stru
  						arvif->vdev_id,
  						WMI_PEER_USE_4ADDR,
  						WMI_PEER_4ADDR_ALLOW_EAPOL_DATA_FRAME);
++		spin_lock_bh(&ar->ab->dp->dp_lock);
 +		peer = ath12k_dp_link_peer_find_by_vdev_id_and_addr(ar->ab->dp, arvif->vdev_id,
 +								    arsta->addr);
 +		if (peer) {
 +			peer->dp_peer->vdev_type_4addr |= BIT(peer->vif->type);
 +			peer->dp_peer->is_reset_mcbc = true;
++			arsta->tcl_metadata = peer->tcl_metadata;
++			arsta->ast_hash = peer->ast_hash;
 +		}
++
++		spin_unlock_bh(&ar->ab->dp->dp_lock);
 +
  		if (ahvif->dp_vif.tx_encap_type != ATH12K_HW_TXRX_ETHERNET)
  			continue;
+ 
+@@ -6180,10 +6192,8 @@ static int ath12k_mac_station_unauthoriz
+ 
+ 	peer = ath12k_dp_link_peer_find_by_vdev_id_and_addr(ar->ab->dp, arvif->vdev_id,
+ 							    arsta->addr);
+-	if (peer) {
++	if (peer)
+ 		peer->is_authorized = false;
+-		arsta->peer = NULL;
+-	}
+ 
+ 	spin_unlock_bh(&ar->ab->dp->dp_lock);
+ 
+@@ -6217,11 +6227,8 @@ static int ath12k_mac_station_authorize(
+ 
+ 	peer = ath12k_dp_link_peer_find_by_vdev_id_and_addr(ar->ab->dp, arvif->vdev_id,
+ 							    arsta->addr);
+-	if (peer) {
++	if (peer)
+ 		peer->is_authorized = true;
+-		arsta->peer = peer;
+-	} else
+-		arsta->peer = NULL;
+ 
+ 	spin_unlock_bh(&ar->ab->dp->dp_lock);
  
 --- a/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
@@ -252,3 +290,100 @@ Signed-off-by: Tamizh Chelvam Raja <tamizhr@qti.qualcomm.com>
  }
  
  static inline u16
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -537,7 +537,8 @@ struct ath12k_link_sta {
+ 	struct rhash_head rhash_addr;
+ 	bool rhash_done;
+ 
+-	struct ath12k_dp_link_peer *peer;
++	u16 tcl_metadata;
++	u16 ast_hash;
+ };
+ 
+ struct ath12k_sta {
+--- a/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c
++++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c
+@@ -86,7 +86,7 @@ static int ath12k_wifi7_dp_prepare_htt_m
+ int ath12k_wifi7_dp_tx(struct ath12k_pdev_dp *dp_pdev,
+ 		       struct ath12k_link_vif *arvif,
+ 		       struct sk_buff *skb, bool gsn_valid, int mcbc_gsn,
+-		       bool is_mcast, struct ath12k_dp_link_peer *peer)
++		       bool is_mcast, struct ath12k_link_sta *arsta)
+ {
+ 	struct ath12k_dp *dp = dp_pdev->dp;
+ 	struct ath12k_hal *hal = dp->hal;
+@@ -126,15 +126,15 @@ int ath12k_wifi7_dp_tx(struct ath12k_pde
+ 	if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP)
+ 		eth = (struct ethhdr *)skb->data;
+ 
+-	if (eth && is_multicast_ether_addr(eth->h_dest) && peer) {
+-		ti.meta_data_flags = peer->tcl_metadata;
++	if (eth && is_multicast_ether_addr(eth->h_dest) && arsta) {
++		ti.meta_data_flags = arsta->tcl_metadata;
+ 		peer_id = u16_get_bits(ti.meta_data_flags, HTT_TCL_META_DATA_PEER_ID_MISSION);
+-		ti.bss_ast_hash = peer->ast_hash;
++		ti.bss_ast_hash = arsta->ast_hash;
+ 		ti.bss_ast_idx = peer_id;
+ 		ti.lookup_override = true;
+ 	} else if (ieee80211_has_a4(hdr->frame_control) &&
+-	    is_multicast_ether_addr(hdr->addr3) && peer) {
+-		ti.meta_data_flags = peer->tcl_metadata;
++	    is_multicast_ether_addr(hdr->addr3) && arsta) {
++		ti.meta_data_flags = arsta->tcl_metadata;
+ 		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO2_TO_FW, 1);
+ 	} else {
+ 		ti.meta_data_flags = dp_link_vif->tcl_metadata;
+--- a/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.h
++++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.h
+@@ -11,7 +11,7 @@ void ath12k_wifi7_dp_tx_completion_handl
+ int ath12k_wifi7_dp_tx(struct ath12k_pdev_dp *dp_pdev,
+ 		       struct ath12k_link_vif *arvif,
+ 		       struct sk_buff *skb, bool gsn_valid, int mcbc_gsn,
+-		       bool is_mcast, struct ath12k_dp_link_peer *peer);
++		       bool is_mcast, struct ath12k_link_sta *arsta);
+ u32 ath12k_wifi7_dp_tx_get_vdev_bank_config(struct ath12k_base *ab,
+ 					    struct ath12k_link_vif *arvif);
+ #endif
+--- a/drivers/net/wireless/ath/ath12k/wifi7/hw.c
++++ b/drivers/net/wireless/ath/ath12k/wifi7/hw.c
+@@ -868,10 +868,8 @@ static void ath12k_wifi7_mac_op_tx(struc
+ 
+ 	if (sta) {
+ 		ahsta = ath12k_sta_to_ahsta(sta);
+-		if (ahsta->use_4addr_set) {
++		if (ahsta->use_4addr_set)
+ 			arsta = rcu_dereference(ahsta->link[link_id]);
+-			peer = arsta->peer;
+-		}
+ 	}
+ 
+ 
+@@ -918,7 +916,7 @@ static void ath12k_wifi7_mac_op_tx(struc
+ 
+ 	if (!vif->valid_links || !is_mcast || is_dvlan || is_eth ||
+ 	    test_bit(ATH12K_FLAG_RAW_MODE, &ar->ab->dev_flags)) {
+-		ret = ath12k_wifi7_dp_tx(dp_pdev, arvif, skb, false, 0, is_mcast, peer);
++		ret = ath12k_wifi7_dp_tx(dp_pdev, arvif, skb, false, 0, is_mcast, arsta);
+ 		if (unlikely(ret)) {
+ 			ath12k_warn(ar->ab, "failed to transmit frame %d\n", ret);
+ 			ieee80211_free_txskb(ar->ah->hw, skb);
+@@ -954,6 +952,9 @@ static void ath12k_wifi7_mac_op_tx(struc
+ 			skb_cb->link_id = link_id;
+ 			skb_cb->vif = vif;
+ 
++			if (ahsta && ahsta->use_4addr_set)
++				arsta = rcu_dereference(ahsta->link[link_id]);
++
+ 			/* For open mode, skip peer find logic */
+ 			if (unlikely(arvif->key_cipher == WMI_CIPHER_NONE))
+ 				goto skip_peer_find;
+@@ -985,7 +986,7 @@ static void ath12k_wifi7_mac_op_tx(struc
+ 
+ skip_peer_find:
+ 			ret = ath12k_wifi7_dp_tx(tmp_dp_pdev, tmp_arvif,
+-						 msdu_copied, true, mcbc_gsn, is_mcast, peer);
++						 msdu_copied, true, mcbc_gsn, is_mcast, arsta);
+ 			if (unlikely(ret)) {
+ 				if (ret == -ENOMEM) {
+ 					/* Drops are expected during heavy multicast
