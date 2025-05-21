@@ -357,7 +357,7 @@ mlo_add_link() {
 					interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
 					if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
 						interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
-						echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+						echo "punct_bitmap=$interface_punct_bitmap" >> $output_file
 					fi
 					found=1
 					break;
@@ -398,7 +398,7 @@ mlo_add_link() {
 			echo "mbssid_group_size=4" >> "$input_file"
 		fi
 		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
-		[ -n "$interface_punct_bitmap" ] && echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+		[ -n "$interface_punct_bitmap" ] && echo "punct_bitmap=$interface_punct_bitmap" >> $output_file
 		if [ -z "$hw_idx" ]; then
 			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file")
 		else
@@ -431,7 +431,7 @@ mlo_add_link() {
 					interface_channel=$(hostapd_cli -i $iter -l $iter_link status | grep 'channel' | cut -d "=" -f 2 | head -1) 2> /dev/null
 					if [ "$2" != "2g" ] && [ -n "$interface_channel" ]; then
 						interface_punct_bitmap=$(hostapd_cli -i $iter -l $iter_link status | grep "punct_bitmap=" | cut -d "=" -f 2) 2> /dev/null
-						echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+						echo "punct_bitmap=$interface_punct_bitmap" >> $output_file
 					fi
 					found=1
 					break;
@@ -500,7 +500,7 @@ mlo_add_link() {
 			echo "mbssid_group_size=4" >> "$input_file"
 		fi
 		[ -n "$interface_channel" ] && echo "channel=$interface_channel" >> $output_file
-		[ -n "$interface_punct_bitmap" ] && echo "ru_punct_bitmap=$interface_punct_bitmap" >> $output_file
+		[ -n "$interface_punct_bitmap" ] && echo "punct_bitmap=$interface_punct_bitmap" >> $output_file
 		if [ -z "$hw_idx" ]; then
 			result=$(hostapd_cli -i $3 mld_add_link bss_config=${1}:"$output_file")
 		else
