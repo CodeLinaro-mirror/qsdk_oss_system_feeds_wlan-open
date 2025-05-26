@@ -33,7 +33,6 @@ endef
 
 define Package/wifi-scripts/install
 	$(INSTALL_DIR) $(1)
-	$(CP) $(TOPDIR)/package/network/config/wifi-scripts/files/* $(1)/
 	$(CP) ./files/* $(1)/
 endef
 
