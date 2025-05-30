@@ -34,11 +34,9 @@ Signed-off-by: Thiraviyam Mariyappan <tmariyap@qti.qualcomm.com>
  drivers/net/wireless/ath/ath12k/wmi.c         |  2 +-
  13 files changed, 262 insertions(+), 159 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/ce.c b/drivers/net/wireless/ath/ath12k/ce.c
-index a9fe332..de17a72 100644
 --- a/drivers/net/wireless/ath/ath12k/ce.c
 +++ b/drivers/net/wireless/ath/ath12k/ce.c
-@@ -77,7 +77,7 @@ static int ath12k_ce_rx_post_pipe(struct ath12k_ce_pipe *pipe)
+@@ -77,7 +77,7 @@ static int ath12k_ce_rx_post_pipe(struct
  		}
  
  		WARN_ON_ONCE(!IS_ALIGNED((unsigned long)skb->data, 4));
@@ -47,7 +45,7 @@ index a9fe332..de17a72 100644
  		paddr = dma_map_single(ab->dev, skb->data,
  				       skb->len + skb_tailroom(skb),
  				       DMA_FROM_DEVICE);
-@@ -87,15 +87,24 @@ static int ath12k_ce_rx_post_pipe(struct ath12k_ce_pipe *pipe)
+@@ -87,15 +87,24 @@ static int ath12k_ce_rx_post_pipe(struct
  			ret = -EIO;
  			goto exit;
  		}
@@ -75,7 +73,7 @@ index a9fe332..de17a72 100644
  			dev_kfree_skb_any(skb);
  			goto exit;
  		}
-@@ -167,8 +176,8 @@ static void ath12k_ce_recv_process_cb(struct ath12k_ce_pipe *pipe)
+@@ -167,8 +176,8 @@ static void ath12k_ce_recv_process_cb(st
  	__skb_queue_head_init(&list);
  	while (ath12k_ce_completed_recv_next(pipe, &skb, &nbytes) == 0) {
  		max_nbytes = skb->len + skb_tailroom(skb);
@@ -86,7 +84,7 @@ index a9fe332..de17a72 100644
  
  		if (unlikely(max_nbytes < nbytes)) {
  			ath12k_warn(ab, "rxed more than expected (nbytes %d, max %d)",
-@@ -245,8 +254,8 @@ static void ath12k_ce_send_done_cb(struct ath12k_ce_pipe *pipe)
+@@ -247,8 +256,8 @@ static void ath12k_ce_tx_process_cb(stru
  		if (!skb)
  			continue;
  
@@ -94,10 +92,10 @@ index a9fe332..de17a72 100644
 -				 DMA_TO_DEVICE);
 +		ath12k_core_dma_unmap_single(ab->dev, ATH12K_SKB_CB(skb)->paddr, skb->len,
 +					     DMA_TO_DEVICE);
- 		dev_kfree_skb_any(skb);
- 	}
- }
-@@ -355,9 +364,9 @@ ath12k_ce_alloc_ring(struct ath12k_base *ab, int nentries, int desc_sz)
+ 		if ((!pipe->send_cb) || ab->hw_params->credit_flow) {
+ 			dev_kfree_skb_any(skb);
+ 			continue;
+@@ -368,9 +377,9 @@ ath12k_ce_alloc_ring(struct ath12k_base
  	 * coherent DMA are unsupported
  	 */
  	ce_ring->base_addr_owner_space_unaligned =
@@ -110,7 +108,7 @@ index a9fe332..de17a72 100644
  	if (!ce_ring->base_addr_owner_space_unaligned) {
  		kfree(ce_ring);
  		return ERR_PTR(-ENOMEM);
-@@ -563,8 +572,8 @@ static void ath12k_ce_rx_pipe_cleanup(struct ath12k_ce_pipe *pipe)
+@@ -578,8 +587,8 @@ static void ath12k_ce_rx_pipe_cleanup(st
  			continue;
  
  		ring->skb[i] = NULL;
@@ -121,7 +119,7 @@ index a9fe332..de17a72 100644
  		dev_kfree_skb_any(skb);
  	}
  }
-@@ -727,11 +736,11 @@ void ath12k_ce_free_pipes(struct ath12k_base *ab)
+@@ -742,11 +751,11 @@ void ath12k_ce_free_pipes(struct ath12k_
  		if (pipe->src_ring) {
  			desc_sz = ath12k_hal_ce_get_desc_size(hal,
  							      HAL_CE_DESC_SRC);
@@ -138,7 +136,7 @@ index a9fe332..de17a72 100644
  			kfree(pipe->src_ring);
  			pipe->src_ring = NULL;
  		}
-@@ -739,11 +748,11 @@ void ath12k_ce_free_pipes(struct ath12k_base *ab)
+@@ -754,11 +763,11 @@ void ath12k_ce_free_pipes(struct ath12k_
  		if (pipe->dest_ring) {
  			desc_sz = ath12k_hal_ce_get_desc_size(hal,
  							      HAL_CE_DESC_DST);
@@ -155,7 +153,7 @@ index a9fe332..de17a72 100644
  			kfree(pipe->dest_ring);
  			pipe->dest_ring = NULL;
  		}
-@@ -752,11 +761,11 @@ void ath12k_ce_free_pipes(struct ath12k_base *ab)
+@@ -767,11 +776,11 @@ void ath12k_ce_free_pipes(struct ath12k_
  			desc_sz =
  			  ath12k_hal_ce_get_desc_size(hal,
  						      HAL_CE_DESC_DST_STATUS);
@@ -172,12 +170,10 @@ index a9fe332..de17a72 100644
  			kfree(pipe->status_ring);
  			pipe->status_ring = NULL;
  		}
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 4d37f36..4dc0a6f 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1581,4 +1581,35 @@ static inline bool ath12k_hw_group_recovery_in_progress(const struct ath12k_hw_g
- 	return test_bit(ATH12K_FLAG_RECOVERY, &ag->dev_flags);
+@@ -1678,4 +1678,35 @@ static inline bool ath12k_hw_group_recov
+ 	return test_bit(ATH12K_GROUP_FLAG_RECOVERY, &ag->flags);
  }
  
 +static inline void *ath12k_core_dma_alloc_coherent(struct device *dev, size_t size,
@@ -212,11 +208,9 @@ index 4d37f36..4dc0a6f 100644
 +}
 +
  #endif /* _CORE_H_ */
-diff --git a/drivers/net/wireless/ath/ath12k/dbring.c b/drivers/net/wireless/ath/ath12k/dbring.c
-index bb4d71c..b558db6 100644
 --- a/drivers/net/wireless/ath/ath12k/dbring.c
 +++ b/drivers/net/wireless/ath/ath12k/dbring.c
-@@ -58,13 +58,18 @@ static int ath12k_dbring_bufs_replenish(struct ath12k *ar,
+@@ -58,13 +58,18 @@ static int ath12k_dbring_bufs_replenish(
  	ptr_unaligned = buff->payload;
  	ptr_aligned = PTR_ALIGN(ptr_unaligned, ring->buf_align);
  	ath12k_dbring_fill_magic_value(ar, ptr_aligned, ring->buf_sz);
@@ -236,7 +230,7 @@ index bb4d71c..b558db6 100644
  	spin_lock_bh(&ring->idr_lock);
  	buf_id = idr_alloc(&ring->bufs_idr, buff, 0, ring->bufs_max, gfp);
  	spin_unlock_bh(&ring->idr_lock);
-@@ -80,8 +85,9 @@ static int ath12k_dbring_bufs_replenish(struct ath12k *ar,
+@@ -80,8 +85,9 @@ static int ath12k_dbring_bufs_replenish(
  	}
  
  	buff->paddr = paddr;
@@ -258,7 +252,7 @@ index bb4d71c..b558db6 100644
  err:
  	ath12k_hal_srng_access_end(ab, srng);
  	return ret;
-@@ -343,8 +349,8 @@ int ath12k_dbring_buffer_release_event(struct ath12k_base *ab,
+@@ -343,8 +349,8 @@ int ath12k_dbring_buffer_release_event(s
  		idr_remove(&ring->bufs_idr, buf_id);
  		spin_unlock_bh(&ring->idr_lock);
  
@@ -269,7 +263,7 @@ index bb4d71c..b558db6 100644
  
  		if (ring->handler) {
  			vaddr_unalign = buff->payload;
-@@ -380,8 +386,8 @@ void ath12k_dbring_buf_cleanup(struct ath12k *ar, struct ath12k_dbring *ring)
+@@ -380,8 +386,8 @@ void ath12k_dbring_buf_cleanup(struct at
  	spin_lock_bh(&ring->idr_lock);
  	idr_for_each_entry(&ring->bufs_idr, buff, buf_id) {
  		idr_remove(&ring->bufs_idr, buf_id);
@@ -280,11 +274,9 @@ index bb4d71c..b558db6 100644
  		kfree(buff);
  	}
  
-diff --git a/drivers/net/wireless/ath/ath12k/dp.c b/drivers/net/wireless/ath/ath12k/dp.c
-index 384d12f..870cd37 100644
 --- a/drivers/net/wireless/ath/ath12k/dp.c
 +++ b/drivers/net/wireless/ath/ath12k/dp.c
-@@ -123,8 +123,8 @@ void ath12k_dp_srng_cleanup(struct ath12k_base *ab, struct dp_srng *ring)
+@@ -123,8 +123,8 @@ void ath12k_dp_srng_cleanup(struct ath12
  	if (ring->cached)
  		kfree(ring->vaddr_unaligned);
  	else
@@ -295,7 +287,7 @@ index 384d12f..870cd37 100644
  
  	ring->vaddr_unaligned = NULL;
  }
-@@ -264,6 +264,7 @@ int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
+@@ -264,6 +264,7 @@ int ath12k_dp_srng_setup(struct ath12k_b
  		num_entries = max_entries;
  
  	ring->size = (num_entries * entry_sz) + HAL_RING_BASE_ALIGN - 1;
@@ -303,7 +295,7 @@ index 384d12f..870cd37 100644
  	if (ab->hw_params->alloc_cacheable_memory) {
  		/* Allocate the reo dst and tx completion rings from cacheable memory */
  		switch (type) {
-@@ -275,6 +276,9 @@ int ath12k_dp_srng_setup(struct ath12k_base *ab, struct dp_srng *ring,
+@@ -275,6 +276,9 @@ int ath12k_dp_srng_setup(struct ath12k_b
  			cached = false;
  		}
  	}
@@ -313,7 +305,7 @@ index 384d12f..870cd37 100644
  
  	if (cached) {
  		ring->vaddr_unaligned = kzalloc(ring->size, GFP_KERNEL);
-@@ -602,8 +606,8 @@ static void ath12k_dp_scatter_idle_link_desc_cleanup(struct ath12k_base *ab)
+@@ -602,8 +606,8 @@ static void ath12k_dp_scatter_idle_link_
  		if (!slist[i].vaddr)
  			continue;
  
@@ -324,7 +316,7 @@ index 384d12f..870cd37 100644
  		slist[i].vaddr = NULL;
  	}
  }
-@@ -637,9 +641,9 @@ static int ath12k_dp_scatter_idle_link_desc_setup(struct ath12k_base *ab,
+@@ -637,9 +641,9 @@ static int ath12k_dp_scatter_idle_link_d
  		return -EINVAL;
  
  	for (i = 0; i < num_scatter_buf; i++) {
@@ -337,7 +329,7 @@ index 384d12f..870cd37 100644
  		if (!slist[i].vaddr) {
  			ret = -ENOMEM;
  			goto err;
-@@ -695,10 +699,10 @@ ath12k_dp_link_desc_bank_free(struct ath12k_base *ab,
+@@ -695,10 +699,10 @@ ath12k_dp_link_desc_bank_free(struct ath
  
  	for (i = 0; i < DP_LINK_DESC_BANKS_MAX; i++) {
  		if (link_desc_banks[i].vaddr_unaligned) {
@@ -352,7 +344,7 @@ index 384d12f..870cd37 100644
  			link_desc_banks[i].vaddr_unaligned = NULL;
  		}
  	}
-@@ -719,9 +723,9 @@ static int ath12k_dp_link_desc_bank_alloc(struct ath12k_base *ab,
+@@ -719,9 +723,9 @@ static int ath12k_dp_link_desc_bank_allo
  			desc_sz = last_bank_sz;
  
  		desc_bank[i].vaddr_unaligned =
@@ -365,7 +357,7 @@ index 384d12f..870cd37 100644
  		if (!desc_bank[i].vaddr_unaligned) {
  			ret = -ENOMEM;
  			goto err;
-@@ -1069,8 +1073,8 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+@@ -1065,8 +1069,8 @@ static void ath12k_dp_cc_cleanup(struct
  			if (!skb)
  				continue;
  
@@ -376,7 +368,7 @@ index 384d12f..870cd37 100644
  			dev_kfree_skb_any(skb);
  		}
  	}
-@@ -1098,10 +1102,10 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+@@ -1094,10 +1098,10 @@ static void ath12k_dp_cc_cleanup(struct
  				continue;
  
  			if (tx_desc_info->skb_ext_desc) {
@@ -391,7 +383,7 @@ index 384d12f..870cd37 100644
  				dev_kfree_skb_any(tx_desc_info->skb_ext_desc);
  			}
  
-@@ -1116,8 +1120,8 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+@@ -1112,8 +1116,8 @@ static void ath12k_dp_cc_cleanup(struct
  					wake_up(&ar->dp.tx_empty_waitq);
  			}
  
@@ -402,7 +394,7 @@ index 384d12f..870cd37 100644
  			dev_kfree_skb_any(skb);
  		}
  
-@@ -1144,8 +1148,8 @@ static void ath12k_dp_cc_cleanup(struct ath12k_base *ab)
+@@ -1140,8 +1144,8 @@ static void ath12k_dp_cc_cleanup(struct
  		if (!dp->spt_info[i].vaddr)
  			continue;
  
@@ -413,7 +405,7 @@ index 384d12f..870cd37 100644
  		dp->spt_info[i].vaddr = NULL;
  	}
  
-@@ -1162,17 +1166,17 @@ static void ath12k_dp_reoq_lut_cleanup(struct ath12k_base *ab)
+@@ -1158,17 +1162,17 @@ static void ath12k_dp_reoq_lut_cleanup(s
  
  	if (dp->reoq_lut.vaddr_unaligned) {
  		ath12k_hal_write_reoq_lut_addr(ab, 0);
@@ -437,7 +429,7 @@ index 384d12f..870cd37 100644
  		dp->ml_reoq_lut.vaddr_unaligned = NULL;
  	}
  }
-@@ -1414,10 +1418,10 @@ static int ath12k_dp_cc_init(struct ath12k_base *ab)
+@@ -1410,10 +1414,10 @@ static int ath12k_dp_cc_init(struct ath1
  	dp->rx_ppt_base = ab->device_id * ATH12K_NUM_RX_SPT_PAGES;
  
  	for (i = 0; i < dp->num_spt_pages; i++) {
@@ -452,7 +444,7 @@ index 384d12f..870cd37 100644
  
  		if (!dp->spt_info[i].vaddr) {
  			ret = -ENOMEM;
-@@ -1459,9 +1463,9 @@ static int ath12k_dp_alloc_reoq_lut(struct ath12k_base *ab,
+@@ -1455,9 +1459,9 @@ static int ath12k_dp_alloc_reoq_lut(stru
  				    struct ath12k_reo_q_addr_lut *lut)
  {
  	lut->size =  DP_REOQ_LUT_SIZE + HAL_REO_QLUT_ADDR_ALIGN - 1;
@@ -465,7 +457,7 @@ index 384d12f..870cd37 100644
  	if (!lut->vaddr_unaligned)
  		return -ENOMEM;
  
-@@ -1488,9 +1492,9 @@ static int ath12k_dp_reoq_lut_setup(struct ath12k_base *ab)
+@@ -1484,9 +1488,9 @@ static int ath12k_dp_reoq_lut_setup(stru
  	ret = ath12k_dp_alloc_reoq_lut(ab, &dp->ml_reoq_lut);
  	if (ret) {
  		ath12k_warn(ab, "failed to allocate memory for ML reoq table");
@@ -478,11 +470,9 @@ index 384d12f..870cd37 100644
  		dp->reoq_lut.vaddr_unaligned = NULL;
  		return ret;
  	}
-diff --git a/drivers/net/wireless/ath/ath12k/dp_mon.c b/drivers/net/wireless/ath/ath12k/dp_mon.c
-index 8e63a4e..017f316 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_mon.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_mon.c
-@@ -2306,9 +2306,9 @@ ath12k_dp_mon_parse_status_buf(struct ath12k *ar,
+@@ -2306,9 +2306,9 @@ ath12k_dp_mon_parse_status_buf(struct at
  		return 0;
  	}
  
@@ -495,7 +485,7 @@ index 8e63a4e..017f316 100644
  
  	offset = packet_info->dma_length + ATH12K_MON_RX_DOT11_OFFSET;
  	if (ath12k_dp_pkt_set_pktlen(msdu, offset)) {
-@@ -2469,14 +2469,18 @@ int ath12k_dp_mon_buf_replenish(struct ath12k_base *ab,
+@@ -2469,14 +2469,18 @@ int ath12k_dp_mon_buf_replenish(struct a
  				 PTR_ALIGN(skb->data, DP_RX_BUFFER_ALIGN_SIZE) -
  				 skb->data);
  		}
@@ -527,7 +517,7 @@ index 8e63a4e..017f316 100644
  fail_free_skb:
  	dev_kfree_skb_any(skb);
  fail_alloc_skb:
-@@ -3572,9 +3576,9 @@ int ath12k_dp_mon_srng_process(struct ath12k_pdev_dp *pdev_dp, int *budget,
+@@ -3572,9 +3576,9 @@ int ath12k_dp_mon_srng_process(struct at
  		}
  
  		rxcb = ATH12K_SKB_RXCB(skb);
@@ -540,11 +530,9 @@ index 8e63a4e..017f316 100644
  
  		end_reason = u32_get_bits(info0, HAL_MON_DEST_INFO0_END_REASON);
  
-diff --git a/drivers/net/wireless/ath/ath12k/dp_rx.c b/drivers/net/wireless/ath/ath12k/dp_rx.c
-index f023307..cd0bfb8 100644
 --- a/drivers/net/wireless/ath/ath12k/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/dp_rx.c
-@@ -357,12 +357,18 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_dp *dp,
+@@ -357,12 +357,18 @@ int ath12k_dp_rx_bufs_replenish(struct a
  				 PTR_ALIGN(skb->data, DP_RX_BUFFER_ALIGN_SIZE) -
  				 skb->data);
  		}
@@ -564,7 +552,7 @@ index f023307..cd0bfb8 100644
  
  		rx_desc = list_first_entry_or_null(used_list,
  						   struct ath12k_rx_desc_info,
-@@ -389,8 +395,8 @@ int ath12k_dp_rx_bufs_replenish(struct ath12k_dp *dp,
+@@ -389,8 +395,8 @@ int ath12k_dp_rx_bufs_replenish(struct a
  	goto out;
  
  fail_dma_unmap:
@@ -575,7 +563,7 @@ index f023307..cd0bfb8 100644
  fail_free_skb:
  	dev_kfree_skb_any(skb);
  out:
-@@ -417,8 +423,8 @@ static int ath12k_dp_rxdma_mon_buf_ring_free(struct ath12k_base *ab,
+@@ -417,8 +423,8 @@ static int ath12k_dp_rxdma_mon_buf_ring_
  		/* TODO: Understand where internal driver does this dma_unmap
  		 * of rxdma_buffer.
  		 */
@@ -586,40 +574,40 @@ index f023307..cd0bfb8 100644
  		dev_kfree_skb_any(skb);
  	}
  
-@@ -567,8 +573,8 @@ void ath12k_dp_rx_reo_cmd_list_cleanup(struct ath12k_base *ab)
- 	spin_lock_bh(&dp->reo_cmd_lock);
- 	list_for_each_entry_safe(cmd, tmp, &dp->reo_cmd_list, list) {
+@@ -570,8 +576,8 @@ void ath12k_dp_rx_reo_cmd_list_cleanup(s
  		list_del(&cmd->list);
--		dma_unmap_single(ab->dev, cmd->data.paddr,
--				 cmd->data.size, DMA_BIDIRECTIONAL);
-+		ath12k_core_dma_unmap_single(ab->dev, cmd->data.paddr,
-+					     cmd->data.size, DMA_BIDIRECTIONAL);
- 		kfree(cmd->data.vaddr);
- 		kfree(cmd);
- 	}
-@@ -577,8 +583,8 @@ void ath12k_dp_rx_reo_cmd_list_cleanup(struct ath12k_base *ab)
- 				 &dp->reo_cmd_cache_flush_list, list) {
- 		list_del(&cmd_cache->list);
+ 		rx_tid = &cmd->data;
+ 		if (rx_tid->vaddr) {
+-			dma_unmap_single(ab->dev, rx_tid->paddr,
+-					 rx_tid->size, DMA_BIDIRECTIONAL);
++			ath12k_core_dma_unmap_single(ab->dev, rx_tid->paddr,
++						     rx_tid->size, DMA_BIDIRECTIONAL);
+ 			kfree(rx_tid->vaddr);
+ 			rx_tid->vaddr = NULL;
+ 		}
+@@ -584,8 +590,8 @@ void ath12k_dp_rx_reo_cmd_list_cleanup(s
  		dp->reo_cmd_cache_flush_count--;
--		dma_unmap_single(ab->dev, cmd_cache->data.paddr,
--				 cmd_cache->data.size, DMA_BIDIRECTIONAL);
-+		ath12k_core_dma_unmap_single(ab->dev, cmd_cache->data.paddr,
-+					     cmd_cache->data.size, DMA_BIDIRECTIONAL);
- 		kfree(cmd_cache->data.vaddr);
- 		kfree(cmd_cache);
- 	}
-@@ -594,8 +600,8 @@ void ath12k_dp_reo_cmd_free(struct ath12k_dp *dp, void *ctx,
+ 		rx_tid = &cmd_cache->data;
+ 		if (rx_tid->vaddr) {
+-			dma_unmap_single(ab->dev, rx_tid->paddr,
+-					 rx_tid->size, DMA_BIDIRECTIONAL);
++			ath12k_core_dma_unmap_single(ab->dev, rx_tid->paddr,
++						     rx_tid->size, DMA_BIDIRECTIONAL);
+ 			kfree(rx_tid->vaddr);
+ 			rx_tid->vaddr = NULL;
+ 		}
+@@ -603,8 +609,8 @@ void ath12k_dp_reo_cmd_free(struct ath12
  		ath12k_warn(dp->ab, "failed to flush rx tid hw desc, tid %d status %d\n",
  			    rx_tid->tid, status);
- 
--	dma_unmap_single(dp->ab->dev, rx_tid->paddr, rx_tid->size,
+ 	if (rx_tid->vaddr) {
+-		dma_unmap_single(dp->ab->dev, rx_tid->paddr, rx_tid->size,
 -			 DMA_BIDIRECTIONAL);
-+	ath12k_core_dma_unmap_single(dp->ab->dev, rx_tid->paddr, rx_tid->size,
-+				     DMA_BIDIRECTIONAL);
- 	kfree(rx_tid->vaddr);
- 	rx_tid->vaddr = NULL;
- }
-@@ -656,8 +662,8 @@ void ath12k_dp_rx_tid_del_func(struct ath12k_dp *dp, void *ctx,
++		ath12k_core_dma_unmap_single(dp->ab->dev, rx_tid->paddr, rx_tid->size,
++					     DMA_BIDIRECTIONAL);
+ 		kfree(rx_tid->vaddr);
+ 		rx_tid->vaddr = NULL;
+ 	}
+@@ -677,8 +683,8 @@ void ath12k_dp_rx_tid_del_func(struct at
  
  	return;
  free_desc:
@@ -630,11 +618,9 @@ index f023307..cd0bfb8 100644
  	kfree(rx_tid->vaddr);
  	rx_tid->vaddr = NULL;
  }
-diff --git a/drivers/net/wireless/ath/ath12k/hal.c b/drivers/net/wireless/ath/ath12k/hal.c
-index 41b75b8..531acd0 100644
 --- a/drivers/net/wireless/ath/ath12k/hal.c
 +++ b/drivers/net/wireless/ath/ath12k/hal.c
-@@ -141,8 +141,8 @@ static int ath12k_hal_alloc_cont_rdp(struct ath12k_hal *hal)
+@@ -141,8 +141,8 @@ static int ath12k_hal_alloc_cont_rdp(str
  	size_t size;
  
  	size = sizeof(u32) * HAL_SRNG_RING_ID_MAX;
@@ -645,7 +631,7 @@ index 41b75b8..531acd0 100644
  	if (!hal->rdp.vaddr)
  		return -ENOMEM;
  
-@@ -157,8 +157,8 @@ static void ath12k_hal_free_cont_rdp(struct ath12k_hal *hal)
+@@ -157,8 +157,8 @@ static void ath12k_hal_free_cont_rdp(str
  		return;
  
  	size = sizeof(u32) * HAL_SRNG_RING_ID_MAX;
@@ -656,7 +642,7 @@ index 41b75b8..531acd0 100644
  	hal->rdp.vaddr = NULL;
  }
  
-@@ -167,8 +167,8 @@ static int ath12k_hal_alloc_cont_wrp(struct ath12k_hal *hal)
+@@ -167,8 +167,8 @@ static int ath12k_hal_alloc_cont_wrp(str
  	size_t size;
  
  	size = sizeof(u32) * (HAL_SRNG_NUM_PMAC_RINGS + HAL_SRNG_NUM_DMAC_RINGS);
@@ -667,7 +653,7 @@ index 41b75b8..531acd0 100644
  	if (!hal->wrp.vaddr)
  		return -ENOMEM;
  
-@@ -183,8 +183,8 @@ static void ath12k_hal_free_cont_wrp(struct ath12k_hal *hal)
+@@ -183,8 +183,8 @@ static void ath12k_hal_free_cont_wrp(str
  		return;
  
  	size = sizeof(u32) * (HAL_SRNG_NUM_PMAC_RINGS + HAL_SRNG_NUM_DMAC_RINGS);
@@ -678,7 +664,7 @@ index 41b75b8..531acd0 100644
  	hal->wrp.vaddr = NULL;
  }
  
-@@ -322,11 +322,12 @@ void *ath12k_hal_srng_dst_get_next_entry(struct ath12k_base *ab,
+@@ -322,11 +322,12 @@ void *ath12k_hal_srng_dst_get_next_entry
          if (srng->u.dst_ring.tp == srng->ring_size)
                  srng->u.dst_ring.tp = 0;
  
@@ -692,11 +678,9 @@ index 41b75b8..531acd0 100644
  	return desc;
  }
  EXPORT_SYMBOL(ath12k_hal_srng_dst_get_next_entry);
-diff --git a/drivers/net/wireless/ath/ath12k/htc.c b/drivers/net/wireless/ath/ath12k/htc.c
-index 607b509..177329d 100644
 --- a/drivers/net/wireless/ath/ath12k/htc.c
 +++ b/drivers/net/wireless/ath/ath12k/htc.c
-@@ -108,13 +108,20 @@ int ath12k_htc_send(struct ath12k_htc *htc,
+@@ -110,13 +110,20 @@ int ath12k_htc_send(struct ath12k_htc *h
  	}
  
  	ath12k_htc_prepare_tx_skb(ep, skb);
@@ -718,20 +702,18 @@ index 607b509..177329d 100644
  
  	ret = ath12k_ce_send(htc->ab, skb, ep->ul_pipe_id, ep->eid);
  	if (ret)
-@@ -123,7 +130,7 @@ int ath12k_htc_send(struct ath12k_htc *htc,
+@@ -125,7 +132,7 @@ int ath12k_htc_send(struct ath12k_htc *h
  	return 0;
  
  err_unmap:
 -	dma_unmap_single(dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
 +	ath12k_core_dma_unmap_single(dev, skb_cb->paddr, skb->len, DMA_TO_DEVICE);
  err_credits:
- 	if (ep->tx_credit_flow_enabled) {
+ 	if (credit_flow_enabled) {
  		spin_lock_bh(&htc->tx_lock);
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index e5c0634..893f502 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -9133,8 +9133,8 @@ static void ath12k_mac_tx_mgmt_free(struct ath12k *ar, int buf_id)
+@@ -9710,8 +9710,8 @@ static void ath12k_mac_tx_mgmt_free(stru
  	if (!msdu)
  		return;
  
@@ -742,7 +724,7 @@ index e5c0634..893f502 100644
  
  	info = IEEE80211_SKB_CB(msdu);
  	memset(&info->status, 0, sizeof(info->status));
-@@ -9201,14 +9201,21 @@ static int ath12k_mac_mgmt_tx_wmi(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9776,14 +9776,21 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  			skb_put(skb, mic_len);
  		}
  	}
@@ -766,7 +748,7 @@ index e5c0634..893f502 100644
  	skb_cb->paddr = paddr;
  
  	link_agnostic = ATH12K_SKB_CB(skb)->flags & ATH12K_SKB_MGMT_LINK_AGNOSTIC;
-@@ -9223,8 +9230,8 @@ static int ath12k_mac_mgmt_tx_wmi(struct ath12k *ar, struct ath12k_link_vif *arv
+@@ -9798,8 +9805,8 @@ static int ath12k_mac_mgmt_tx_wmi(struct
  	return 0;
  
  err_unmap_buf:
@@ -777,22 +759,9 @@ index e5c0634..893f502 100644
  err_free_idr:
  	spin_lock_bh(&ar->txmgmt_idr_lock);
  	idr_remove(&ar->txmgmt_idr, buf_id);
-diff --git a/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c b/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
-index de04947..6ac50b0 100644
 --- a/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_rx.c
-@@ -171,8 +171,8 @@ void ath12k_wifi7_dp_reo_cache_flush(struct ath12k_base *ab,
- 	if (ret) {
- 		ath12k_err(ab, "failed to send HAL_REO_CMD_FLUSH_CACHE cmd, tid %d (%d)\n",
- 			   rx_tid->tid, ret);
--		dma_unmap_single(ab->dev, rx_tid->paddr, rx_tid->size,
--				 DMA_BIDIRECTIONAL);
-+		ath12k_core_dma_unmap_single(ab->dev, rx_tid->paddr, rx_tid->size,
-+					     DMA_BIDIRECTIONAL);
- 		kfree(rx_tid->vaddr);
- 		rx_tid->vaddr = NULL;
- 	}
-@@ -256,8 +256,8 @@ void ath12k_wifi7_dp_rx_peer_tid_delete(struct ath12k *ar,
+@@ -262,8 +262,8 @@ void ath12k_wifi7_dp_rx_peer_tid_delete(
  	if (ret) {
  		ath12k_err(ar->ab, "failed to send HAL_REO_CMD_UPDATE_RX_QUEUE cmd, tid %d (%d)\n",
  			   tid, ret);
@@ -803,7 +772,7 @@ index de04947..6ac50b0 100644
  		kfree(rx_tid->vaddr);
  		rx_tid->vaddr = NULL;
  	}
-@@ -1093,8 +1093,9 @@ int ath12k_wifi7_dp_rx_process(struct ath12k_dp *dp, int ring_id,
+@@ -1103,8 +1103,9 @@ int ath12k_wifi7_dp_rx_process(struct at
  	struct sk_buff *msdu;
  	bool done = false;
  	u64 desc_va;
@@ -814,7 +783,7 @@ index de04947..6ac50b0 100644
  	__skb_queue_head_init(&msdu_list);
  
  	for (device_id = 0; device_id < ATH12K_MAX_SOCS; device_id++)
-@@ -1107,6 +1108,7 @@ int ath12k_wifi7_dp_rx_process(struct ath12k_dp *dp, int ring_id,
+@@ -1117,6 +1118,7 @@ int ath12k_wifi7_dp_rx_process(struct at
  try_again:
  	ath12k_hal_srng_access_begin(ab, srng);
  
@@ -822,7 +791,7 @@ index de04947..6ac50b0 100644
  	valid_entries = ath12k_hal_srng_dst_num_free(ab, srng, false);
  	if (unlikely(!valid_entries)) {
  		ath12k_hal_srng_access_end(ab, srng);
-@@ -1114,7 +1116,7 @@ try_again:
+@@ -1124,7 +1126,7 @@ try_again:
  		return -EINVAL;
  	}
  	ath12k_hal_srng_dst_invalidate_entry(ab, srng, valid_entries);
@@ -831,7 +800,7 @@ index de04947..6ac50b0 100644
  	while ((desc = ath12k_hal_srng_dst_get_next_cached_entry(ab, srng))) {
  		struct rx_mpdu_desc *mpdu_info;
  		struct rx_msdu_desc *msdu_info;
-@@ -1161,9 +1163,9 @@ try_again:
+@@ -1171,9 +1173,9 @@ try_again:
  		list_add_tail(&desc_info->list, &rx_desc_used_list[device_id]);
  
  		rxcb = ATH12K_SKB_RXCB(msdu);
@@ -844,7 +813,7 @@ index de04947..6ac50b0 100644
  
  		num_buffs_reaped[device_id]++;
  
-@@ -1432,12 +1434,17 @@ ath12k_wifi7_dp_rx_h_defrag_reo_reinject(struct ath12k_dp *dp,
+@@ -1442,12 +1444,17 @@ ath12k_wifi7_dp_rx_h_defrag_reo_reinject
  	/* change msdu len in hal rx desc */
  	ath12k_wifi7_dp_rxdesc_set_msdu_len(ab, rx_desc, len_diff);
  
@@ -863,7 +832,7 @@ index de04947..6ac50b0 100644
  	spin_lock_bh(&dp->rx_desc_lock);
  	desc_info = list_first_entry_or_null(&dp->rx_desc_free_list,
  					     struct ath12k_rx_desc_info,
-@@ -1524,8 +1531,8 @@ err_free_desc:
+@@ -1534,8 +1541,8 @@ err_free_desc:
  	list_add_tail(&desc_info->list, &dp->rx_desc_free_list);
  	spin_unlock_bh(&dp->rx_desc_lock);
  err_unmap_dma:
@@ -874,7 +843,7 @@ index de04947..6ac50b0 100644
  	return ret;
  }
  
-@@ -1774,9 +1781,9 @@ ath12k_wifi7_dp_process_rx_err_buf(struct ath12k_pdev_dp *dp_pdev,
+@@ -1784,9 +1791,9 @@ ath12k_wifi7_dp_process_rx_err_buf(struc
  	list_add_tail(&desc_info->list, used_list);
  
  	rxcb = ATH12K_SKB_RXCB(msdu);
@@ -887,7 +856,18 @@ index de04947..6ac50b0 100644
  
  	if (drop) {
  		dev_kfree_skb_any(msdu);
-@@ -2322,9 +2329,9 @@ int ath12k_wifi7_dp_rx_process_wbm_err(struct ath12k_dp *dp,
+@@ -1849,8 +1856,8 @@ static int ath12k_wifi7_handle_msdu_buft
+ 	desc_info->skb = NULL;
+ 
+ 	list_add_tail(&desc_info->list, rx_desc_used_list);
+-	dma_unmap_single(dp->dev, ATH12K_SKB_RXCB(msdu)->paddr,
+-			 msdu->len + skb_tailroom(msdu), DMA_FROM_DEVICE);
++	ath12k_core_dma_unmap_single(dp->dev, ATH12K_SKB_RXCB(msdu)->paddr,
++				     msdu->len + skb_tailroom(msdu), DMA_FROM_DEVICE);
+ 	dev_kfree_skb_any(msdu);
+ 
+ 	return 0;
+@@ -2366,9 +2373,9 @@ int ath12k_wifi7_dp_rx_process_wbm_err(s
  		list_add_tail(&desc_info->list, &rx_desc_used_list[device_id]);
  
  		rxcb = ATH12K_SKB_RXCB(msdu);
@@ -900,7 +880,7 @@ index de04947..6ac50b0 100644
  
  		num_buffs_reaped[device_id]++;
  		total_num_buffs_reaped++;
-@@ -2470,7 +2477,7 @@ int ath12k_wifi7_dp_alloc_reo_qdesc(struct ath12k_base *ab,
+@@ -2514,7 +2521,7 @@ int ath12k_wifi7_dp_alloc_reo_qdesc(stru
  		return -ENOMEM;
  
  	*addr_aligned = PTR_ALIGN(vaddr, HAL_LINK_DESC_ALIGN);
@@ -909,7 +889,7 @@ index de04947..6ac50b0 100644
  	paddr = dma_map_single(ab->dev, *addr_aligned, hw_desc_sz,
  			       DMA_BIDIRECTIONAL);
  	ret = dma_mapping_error(ab->dev, paddr);
-@@ -2478,7 +2485,13 @@ int ath12k_wifi7_dp_alloc_reo_qdesc(struct ath12k_base *ab,
+@@ -2522,7 +2529,13 @@ int ath12k_wifi7_dp_alloc_reo_qdesc(stru
  		kfree(vaddr);
  		return ret;
  	}
@@ -924,11 +904,9 @@ index de04947..6ac50b0 100644
  	rx_tid->vaddr = vaddr;
  	rx_tid->paddr = paddr;
  	rx_tid->size = hw_desc_sz;
-diff --git a/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c b/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c
-index eb1cf3b..75c5f98 100644
 --- a/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/dp_tx.c
-@@ -273,6 +273,7 @@ tcl_ring_sel:
+@@ -285,6 +285,7 @@ tcl_ring_sel:
  		hdr = (void *)skb->data;
  	}
  map:
@@ -936,11 +914,10 @@ index eb1cf3b..75c5f98 100644
  	ti.paddr = dma_map_single(dp->dev, skb->data, skb->len, DMA_TO_DEVICE);
  	if (dma_mapping_error(dp->dev, ti.paddr)) {
  		atomic_inc(&dp->device_stats.tx_err.misc_fail);
-@@ -280,7 +281,15 @@ map:
+@@ -292,6 +293,15 @@ map:
  		ret = -ENOMEM;
  		goto fail_remove_tx_buf;
  	}
--
 +#else
 +	ti.paddr = virt_to_phys(skb->data);
 +	if (!ti.paddr) {
@@ -950,10 +927,10 @@ index eb1cf3b..75c5f98 100644
 +		goto fail_remove_tx_buf;
 +	}
 +#endif
- 	if ((!test_bit(ATH12K_FLAG_HW_CRYPTO_DISABLED, &ab->dev_flags) &&
+ 
+ 	if ((!test_bit(ATH12K_GROUP_FLAG_HW_CRYPTO_DISABLED, &ab->ag->flags) &&
  	     !(skb_cb->flags & ATH12K_SKB_HW_80211_ENCAP) &&
- 	     !(skb_cb->flags & ATH12K_SKB_CIPHER_SET) &&
-@@ -326,13 +335,17 @@ skip_htt_metadata:
+@@ -338,13 +348,17 @@ skip_htt_metadata:
  				goto fail_free_ext_skb;
  			}
  		}
@@ -973,7 +950,7 @@ index eb1cf3b..75c5f98 100644
  		ti.data_len = skb_ext_desc->len;
  		ti.type = HAL_TCL_DESC_TYPE_EXT_DESC;
  
-@@ -397,15 +410,15 @@ skip_htt_metadata:
+@@ -409,15 +423,15 @@ skip_htt_metadata:
  
  fail_unmap_dma_ext:
  	if (skb_cb->paddr_ext_desc)
@@ -993,7 +970,7 @@ index eb1cf3b..75c5f98 100644
  
  fail_remove_tx_buf:
  	ath12k_dp_tx_release_txbuf(dp, tx_desc, pool_id);
-@@ -433,10 +446,10 @@ static void ath12k_wifi7_dp_tx_free_txbuf(struct ath12k_dp *dp,
+@@ -445,10 +459,10 @@ static void ath12k_wifi7_dp_tx_free_txbu
  	skb_cb = ATH12K_SKB_CB(msdu);
  	dp_pdev = dp->dp_pdevs[pdev_id];
  
@@ -1007,7 +984,7 @@ index eb1cf3b..75c5f98 100644
  		dev_kfree_skb_any(skb_ext_desc);
  	}
  
-@@ -476,10 +489,10 @@ ath12k_wifi7_dp_tx_htt_tx_complete_buf(struct ath12k_base *ab,
+@@ -488,10 +502,10 @@ ath12k_wifi7_dp_tx_htt_tx_complete_buf(s
  	if (atomic_dec_and_test(&ar->dp.num_tx_pending))
  		wake_up(&ar->dp.tx_empty_waitq);
  
@@ -1021,7 +998,7 @@ index eb1cf3b..75c5f98 100644
  		dev_kfree_skb_any(skb_ext_desc);
  	}
  
-@@ -734,10 +747,10 @@ static void ath12k_wifi7_dp_tx_complete_msdu(struct ath12k_pdev_dp *dp_pdev,
+@@ -747,10 +761,10 @@ static void ath12k_wifi7_dp_tx_complete_
  			dp_pdev->wmm_stats.total_wmm_tx_drop[dp_pdev->wmm_stats.tx_type]++;
  	}
  
@@ -1035,7 +1012,7 @@ index eb1cf3b..75c5f98 100644
  		dev_kfree_skb_any(skb_ext_desc);
  	}
  
-@@ -896,12 +909,14 @@ void ath12k_wifi7_dp_tx_completion_handler(struct ath12k_dp *dp, int ring_id)
+@@ -909,12 +923,14 @@ void ath12k_wifi7_dp_tx_completion_handl
  	struct hal_wbm_release_ring *desc;
  	u8 pdev_id;
  	u64 desc_va;
@@ -1051,7 +1028,7 @@ index eb1cf3b..75c5f98 100644
  	valid_entries = ath12k_hal_srng_dst_num_free(ab, status_ring, false);
  	if (!valid_entries) {
  		ath12k_hal_srng_access_end(ab, status_ring);
-@@ -910,7 +925,7 @@ void ath12k_wifi7_dp_tx_completion_handler(struct ath12k_dp *dp, int ring_id)
+@@ -923,7 +939,7 @@ void ath12k_wifi7_dp_tx_completion_handl
  	}
  
  	ath12k_hal_srng_dst_invalidate_entry(ab, status_ring, valid_entries);
@@ -1060,11 +1037,9 @@ index eb1cf3b..75c5f98 100644
  	while (ATH12K_TX_COMPL_NEXT(tx_ring->tx_status_head) != tx_ring->tx_status_tail) {
  		desc = ath12k_hal_srng_dst_get_next_cached_entry(ab, status_ring);
  		if (!desc)
-diff --git a/drivers/net/wireless/ath/ath12k/wifi7/hal_rx.c b/drivers/net/wireless/ath/ath12k/wifi7/hal_rx.c
-index 6dfb0c9..b18f417 100644
 --- a/drivers/net/wireless/ath/ath12k/wifi7/hal_rx.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/hal_rx.c
-@@ -1164,7 +1164,7 @@ ath12k_wifi7_hal_rx_fst_attach(struct ath12k_base *ab)
+@@ -1167,7 +1167,7 @@ ath12k_wifi7_hal_rx_fst_attach(struct at
  	ath12k_dbg(ab, ATH12K_DBG_DP_FST, "HAL FST allocation %pK entries %u entry size %u alloc_size %u\n",
  		   fst, fst->max_entries, fst->fst_entry_size, alloc_size);
  
@@ -1073,7 +1048,7 @@ index 6dfb0c9..b18f417 100644
  					     &fst->base_paddr, GFP_KERNEL);
  	if (!fst->base_vaddr) {
  		kfree(fst);
-@@ -1190,9 +1190,9 @@ void ath12k_wifi7_hal_rx_fst_detach(struct ath12k_base *ab, struct hal_rx_fst *f
+@@ -1193,9 +1193,9 @@ void ath12k_wifi7_hal_rx_fst_detach(stru
  		return;
  
  	if (fst->base_vaddr)
@@ -1086,11 +1061,9 @@ index 6dfb0c9..b18f417 100644
  	kfree(fst);
  }
  
-diff --git a/drivers/net/wireless/ath/ath12k/wmi.c b/drivers/net/wireless/ath/ath12k/wmi.c
-index 5e9c097..94f933d 100644
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -6741,7 +6741,7 @@ static int wmi_process_mgmt_tx_comp(struct ath12k *ar, u32 desc_id,
+@@ -7122,7 +7122,7 @@ static int wmi_process_mgmt_tx_comp(stru
  	spin_unlock_bh(&ar->txmgmt_idr_lock);
  
  	skb_cb = ATH12K_SKB_CB(msdu);
@@ -1099,6 +1072,3 @@ index 5e9c097..94f933d 100644
  
  	hdr = (struct ieee80211_hdr *)msdu->data;
  
--- 
-2.34.1
-
