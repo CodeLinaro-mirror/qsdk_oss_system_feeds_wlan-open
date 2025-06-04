@@ -33,11 +33,9 @@ Signed-off-by: Balamurugan Mahalingam <bmahalin@qti.qualcomm.com>
  drivers/net/wireless/ath/ath12k/ppe.h  |  18 +++
  5 files changed, 295 insertions(+), 2 deletions(-)
 
-diff --git a/drivers/net/wireless/ath/ath12k/core.h b/drivers/net/wireless/ath/ath12k/core.h
-index 255d917..0e8204f 100644
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -489,6 +489,13 @@ struct ath12k_dp_link_vif {
+@@ -490,6 +490,13 @@ struct ath12k_dp_link_vif {
  	int bank_id;
  };
  
@@ -51,15 +49,15 @@ index 255d917..0e8204f 100644
  struct ath12k_dp_vif {
  	u8 tx_encap_type;
  	u32 key_cipher;
-@@ -536,6 +543,7 @@ struct ath12k_vif {
+@@ -537,6 +544,7 @@ struct ath12k_vif {
  	/* indicates bitmap of link vif created in FW */
  	unsigned long links_map;
  	u8 last_scan_link;
 +	struct ath12k_vlan_iface *vlan_iface;
  	bool chanctx_peer_del_done;
- 
- 	struct ath12k_mgmt_frame_stats mgmt_stats;
-@@ -687,6 +695,7 @@ struct ath12k_sta {
+ 	u8 primary_link_id;
+ 	u8 hw_link_id;
+@@ -693,6 +701,7 @@ struct ath12k_sta {
  	enum ieee80211_sta_state state;
  #ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
  	int ppe_vp_num;
@@ -67,11 +65,9 @@ index 255d917..0e8204f 100644
  #endif
  	bool low_ack_sent;
  };
-diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
-index e390ace..0a29ba1 100644
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -775,7 +775,7 @@ struct ath12k_link_vif *ath12k_mac_get_arvif(struct ath12k *ar, u32 vdev_id)
+@@ -775,7 +775,7 @@ struct ath12k_link_vif *ath12k_mac_get_a
  
  	/* To use the arvif returned, caller must have held rcu read lock.
  	 */
@@ -80,7 +76,7 @@ index e390ace..0a29ba1 100644
  	arvif_iter.vdev_id = vdev_id;
  	arvif_iter.ar = ar;
  
-@@ -1558,8 +1558,11 @@ void ath12k_mac_op_sta_set_4addr(struct ieee80211_hw *hw,
+@@ -1588,8 +1588,11 @@ void ath12k_mac_op_sta_set_4addr(struct
  					struct ieee80211_sta *sta, bool enabled)
  {
  	struct ath12k_sta *ahsta = ath12k_sta_to_ahsta(sta);
@@ -92,7 +88,7 @@ index e390ace..0a29ba1 100644
  		wiphy_work_queue(hw->wiphy, &ahsta->set_4addr_wk);
  		ahsta->use_4addr_set = true;
  	}
-@@ -7813,6 +7816,9 @@ static void ath12k_sta_set_4addr_wk(struct wiphy *wiphy, struct wiphy_work *wk)
+@@ -7878,6 +7881,9 @@ static void ath12k_sta_set_4addr_wk(stru
  	sta = container_of((void *)ahsta, struct ieee80211_sta, drv_priv);
  	links = ahsta->links_map;
  
@@ -102,7 +98,7 @@ index e390ace..0a29ba1 100644
  	for_each_set_bit(link_id, &links, ATH12K_NUM_MAX_LINKS) {
  		arsta = rcu_dereference(ahsta->link[link_id]);
  		arvif = arsta->arvif;
-@@ -7842,6 +7848,8 @@ static void ath12k_sta_set_4addr_wk(struct wiphy *wiphy, struct wiphy_work *wk)
+@@ -7907,6 +7913,8 @@ static void ath12k_sta_set_4addr_wk(stru
  		if (ahvif->dp_vif.tx_encap_type != ATH12K_HW_TXRX_ETHERNET)
  			continue;
  
@@ -111,7 +107,7 @@ index e390ace..0a29ba1 100644
  		ret = ath12k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
                                                      WMI_VDEV_PARAM_AP_ENABLE_NAWDS,
                                                      1);
-@@ -8346,6 +8354,7 @@ int ath12k_mac_op_sta_state(struct ieee80211_hw *hw,
+@@ -8411,6 +8419,7 @@ int ath12k_mac_op_sta_state(struct ieee8
  	struct ath12k_hw *ah = ath12k_hw_to_ah(hw);
  	struct ath12k_link_vif *arvif;
  	struct ath12k_link_sta *arsta;
@@ -119,7 +115,7 @@ index e390ace..0a29ba1 100644
  	bool is_recovery = false;
  	u8 link_id = 0;
  	int ret = -EINVAL;
-@@ -8353,6 +8362,28 @@ int ath12k_mac_op_sta_state(struct ieee80211_hw *hw,
+@@ -8418,6 +8427,28 @@ int ath12k_mac_op_sta_state(struct ieee8
  
  	lockdep_assert_wiphy(hw->wiphy);
  
@@ -148,7 +144,7 @@ index e390ace..0a29ba1 100644
  	if (ieee80211_vif_is_mld(vif) && sta->valid_links) {
  		WARN_ON(!sta->mlo && hweight16(sta->valid_links) != 1);
  		link_id = ffs(sta->valid_links) - 1;
-@@ -11447,6 +11478,9 @@ int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -11634,6 +11665,9 @@ int ath12k_mac_op_add_interface(struct i
  	struct ath12k_hw *ah = ath12k_hw_to_ah(hw);
  	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
@@ -158,7 +154,7 @@ index e390ace..0a29ba1 100644
  	struct ath12k_link_vif *arvif;
  	int ppe_vp_num = ATH12K_INVALID_PPE_VP_NUM, ppe_core_mask = 0;
  	int i, ppe_vp_type = ATH12K_INVALID_PPE_VP_TYPE;
-@@ -11461,6 +11495,7 @@ int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -11648,6 +11682,7 @@ int ath12k_mac_op_add_interface(struct i
  		ppe_vp_num = ahvif->dp_vif.ppe_vp_num;
  		ppe_core_mask = ahvif->dp_vif.ppe_core_mask;
  		ppe_vp_type = ahvif->dp_vif.ppe_vp_type;
@@ -166,7 +162,7 @@ index e390ace..0a29ba1 100644
  		links_map = ahvif->links_map;
  	}
  
-@@ -11490,14 +11525,59 @@ int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -11677,14 +11712,59 @@ int ath12k_mac_op_add_interface(struct i
  		ppe_vp_type = PPE_VP_USER_TYPE_PASSIVE;
  	}
  
@@ -226,7 +222,7 @@ index e390ace..0a29ba1 100644
  	}
  
  	/* Allocate Default Queue now and reassign during actual vdev create */
-@@ -11515,6 +11595,7 @@ int ath12k_mac_op_add_interface(struct ieee80211_hw *hw,
+@@ -11702,6 +11782,7 @@ int ath12k_mac_op_add_interface(struct i
  	/* Defer vdev creation until assign_chanctx or hw_scan is initiated as driver
  	 * will not know if this interface is an ML vif at this point.
  	 */
@@ -234,7 +230,7 @@ index e390ace..0a29ba1 100644
  	return 0;
  }
  EXPORT_SYMBOL(ath12k_mac_op_add_interface);
-@@ -11628,7 +11709,8 @@ err_vdev_del:
+@@ -11815,7 +11896,8 @@ err_vdev_del:
  void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
  				    struct ieee80211_vif *vif)
  {
@@ -244,7 +240,7 @@ index e390ace..0a29ba1 100644
  	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
  	struct ath12k_link_vif *arvif;
  	struct ath12k *ar;
-@@ -11636,6 +11718,16 @@ void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
+@@ -11823,6 +11905,16 @@ void ath12k_mac_op_remove_interface(stru
  
  	lockdep_assert_wiphy(hw->wiphy);
  
@@ -261,7 +257,7 @@ index e390ace..0a29ba1 100644
  	for (link_id = 0; link_id < ATH12K_NUM_MAX_LINKS; link_id++) {
  		/* if we cached some config but never received assign chanctx,
  		 * free the allocated cache.
-@@ -11645,6 +11737,10 @@ void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
+@@ -11832,6 +11924,10 @@ void ath12k_mac_op_remove_interface(stru
  		if (!arvif || !arvif->is_created)
  			continue;
  
@@ -272,7 +268,7 @@ index e390ace..0a29ba1 100644
  		ar = arvif->ar;
  
  		/* Scan abortion is in progress since before this, cancel_hw_scan()
-@@ -11676,6 +11772,8 @@ void ath12k_mac_op_remove_interface(struct ieee80211_hw *hw,
+@@ -11863,6 +11959,8 @@ void ath12k_mac_op_remove_interface(stru
  
  	/* free ppe vp allocated for RFS */
  	ath12k_vif_free_vp(ahvif, wdev->netdev);
@@ -281,11 +277,9 @@ index e390ace..0a29ba1 100644
  }
  EXPORT_SYMBOL(ath12k_mac_op_remove_interface);
  
-diff --git a/drivers/net/wireless/ath/ath12k/peer.c b/drivers/net/wireless/ath/ath12k/peer.c
-index f11a817..6b26f3b 100644
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -129,6 +129,7 @@ static int __ath12k_peer_delete(struct ath12k *ar, u32 vdev_id, u8 *addr)
+@@ -129,6 +129,7 @@ static int __ath12k_peer_delete(struct a
  	if (ret)
  		return ret;
  
@@ -293,7 +287,7 @@ index f11a817..6b26f3b 100644
  	arvif = ath12k_mac_get_arvif(ar, vdev_id);
  	if (!arvif) {
  		ath12k_warn(ab,"failed to get arvif with vdev_id %d,"
-@@ -138,6 +139,7 @@ static int __ath12k_peer_delete(struct ath12k *ar, u32 vdev_id, u8 *addr)
+@@ -138,6 +139,7 @@ static int __ath12k_peer_delete(struct a
  		ath12k_dp_tx_ppeds_cfg_astidx_cache_mapping(ab, arvif, false);
  	}
  
@@ -301,11 +295,9 @@ index f11a817..6b26f3b 100644
  	ret = ath12k_wait_for_peer_delete_done(ar, vdev_id, addr);
  	if (ret)
  		return ret;
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.c b/drivers/net/wireless/ath/ath12k/ppe.c
-index 6064009..69f80f9 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.c
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -829,6 +829,140 @@ void ath12k_dp_ppeds_update_vp_entry(struct ath12k *ar,
+@@ -829,6 +829,140 @@ void ath12k_dp_ppeds_update_vp_entry(str
  	ath12k_dp_ppeds_setup_vp_entry(ab, arvif->ar, arvif, vp_profile);
  }
  
@@ -446,7 +438,7 @@ index 6064009..69f80f9 100644
  int ath12k_ppeds_attach_link_vif(struct ath12k_link_vif *arvif, int vp_num,
  				 int *link_ppe_vp_profile_idx,
  				 struct ieee80211_vif *vif)
-@@ -1003,6 +1137,38 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache_mapping(struct ath12k_base *ab,
+@@ -1004,6 +1138,38 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache
  							  ppeds_idx_map_val);
  	}
  }
@@ -478,15 +470,13 @@ index 6064009..69f80f9 100644
 +	vif_type = arvif->ahvif->vif->type;
 +	ath12k_dp_ppeds_dealloc_ppe_vp_profile(ab, ppe_vp_profile_idx, vif_type);
 +	vlan_iface->ppe_vp_profile_idx[link_id] = ATH12K_INVALID_VP_PROFILE_IDX;
-+	printk("PPEDS vdev detach success vpnum %d  ppe_vp_profile_idx %d\n",
++	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach success vpnum %d  ppe_vp_profile_idx %d\n",
 +	       vp_profile->vp_num, ppe_vp_profile_idx);
 +}
 +
  void ath12k_ppeds_detach_link_vif(struct ath12k_link_vif *arvif, int ppe_vp_profile_idx)
  {
  	struct ath12k *ar = arvif->ar;
-diff --git a/drivers/net/wireless/ath/ath12k/ppe.h b/drivers/net/wireless/ath/ath12k/ppe.h
-index 43288bd..76bdf29 100644
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -18,6 +18,7 @@
@@ -497,7 +487,7 @@ index 43288bd..76bdf29 100644
  struct ath12k_link_sta;
  struct dp_srng;
  
-@@ -165,6 +166,11 @@ void ath12k_dp_rx_ppe_fse_unregister(void);
+@@ -165,6 +166,11 @@ void ath12k_dp_rx_ppe_fse_unregister(voi
  void ath12k_dp_tx_ppeds_cfg_astidx_cache_mapping(struct ath12k_base *ab,
  						 struct ath12k_link_vif *arvif,
  						 bool peer_map);
@@ -509,7 +499,7 @@ index 43288bd..76bdf29 100644
  int ath12k_ppeds_attach_link_vif(struct ath12k_link_vif *arvif, int vp_num,
  				 int *link_ppe_vp_profile_idx,
  				 struct ieee80211_vif *vif);
-@@ -284,5 +290,17 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache_mapping(struct ath12k_base *ab,
+@@ -284,5 +290,17 @@ void ath12k_dp_tx_ppeds_cfg_astidx_cache
  						 bool peer_map)
  {
  }
@@ -527,6 +517,3 @@ index 43288bd..76bdf29 100644
 +
  #endif /* CPTCFG_ATH12K_PPE_DS_SUPPORT */
  #endif /* ATH12K_PPE_H */
--- 
-2.34.1
-

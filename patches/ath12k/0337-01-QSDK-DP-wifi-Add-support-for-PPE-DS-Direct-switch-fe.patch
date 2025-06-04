@@ -900,7 +900,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/dp_cmn.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_cmn.h
-@@ -11,6 +11,15 @@
+@@ -11,6 +11,16 @@
  struct ath12k_hw_group;
  struct ath12k;
  
@@ -911,6 +911,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +	dma_addr_t paddr;
 +	int size;
 +	u32 ring_id;
++	u8 cached;
 +};
 +
  struct ath12k_dp_hw_link {
@@ -2077,18 +2078,16 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
  		    ab->hw_params->ring_mask->rx_mon_dest[i]) {
  			num_irq = 1;
  		}
-@@ -787,8 +949,8 @@ int ath12k_pcic_ext_irq_config(struct at
+@@ -787,8 +949,6 @@ int ath12k_pcic_ext_irq_config(struct at
  
  			scnprintf(dp_irq_name[bus_id][i], DP_IRQ_NAME_LEN,
  				  "pci%u_wlan_dp_%u", bus_id, i);
 -			ath12k_dbg(ab, ATH12K_DBG_PCI, "PCI bus id: pci:%d IRQ Name:%s\n",
 -				   bus_id, dp_irq_name[bus_id][i]);
-+			//printk("PCI bus id: pci:%d irq %d IRQ Name:%s\n",
-+			//	   bus_id, irq, dp_irq_name[bus_id][i]);
  			irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
  			ret = request_irq(irq, ath12k_pcic_ext_interrupt_handler,
  					  IRQF_SHARED,
-@@ -1023,12 +1185,14 @@ int ath12k_pcic_config_hybrid_irq(struct
+@@ -1023,12 +1183,14 @@ int ath12k_pcic_config_hybrid_irq(struct
                          i++;
                          continue;
  		}
@@ -2103,7 +2102,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
  				if (j == ab->hw_params->ce_count) {
  					ce_done = true;
  					break;
-@@ -1039,14 +1203,112 @@ int ath12k_pcic_config_hybrid_irq(struct
+@@ -1039,14 +1201,112 @@ int ath12k_pcic_config_hybrid_irq(struct
  					ath12k_warn(ab, "failed to request irq %d\n", ret);
  					return ret;
  				}
@@ -2281,7 +2280,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
  
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/ppe.c
-@@ -0,0 +1,1685 @@
+@@ -0,0 +1,1677 @@
 +// SPDX-License-Identifier: BSD-3-Clause-Clear
 +/*
 + * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
@@ -3241,7 +3240,8 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +
 +	ath12k_dp_ppeds_setup_vp_entry(ab, ar, arvif, vp_profile);
 +
-+		   printk("PPEDS vdev attach success soc_idx %d ds_node_id %d vdev_id %d vpnum %d ppe_vp_profile_idx %d "
++	ath12k_dbg(ab, ATH12K_DBG_PPE,
++		   "PPEDS vdev attach success soc_idx %d ds_node_id %d vdev_id %d vpnum %d ppe_vp_profile_idx %d "
 +		   "ppe_vp_tbl_idx %d to_fw %d int_pri %d prec_en %d search_idx_reg_num %d\n",
 +		   ab->dp->ppe.ppeds_soc_idx, ab->dp->ppe.ds_node_id, vdev_id,
 +		   vp_num, ppe_vp_profile_idx, ppe_vp_tbl_idx, vp_profile->to_fw,
@@ -3280,7 +3280,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +
 +	vif_type = arvif->ahvif->vif->type;
 +	ath12k_dp_ppeds_dealloc_ppe_vp_profile(ab, ppe_vp_profile_idx, vif_type);
-+		   printk("PPEDS vdev detach success vpnum %d  ppe_vp_profile_idx %d\n",
++	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS vdev detach success vpnum %d  ppe_vp_profile_idx %d\n",
 +		   vp_profile->vp_num, ppe_vp_profile_idx);
 +}
 +
@@ -3433,8 +3433,8 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +	}
 +	ab->dp->ppe.ds_node_id = ds_node_id;
 +
-+	printk("PPEDS start success device_id %d ds_node_id %d ppeds_soc_idx %d",
-+	       ab->device_id, ab->dp->ppe.ds_node_id, ab->dp->ppe.ppeds_soc_idx);
++	ath12k_dbg(ab, ATH12K_DBG_PPE, "PPEDS start success device_id %d ds_node_id %d ppeds_soc_idx %d",
++		   ab->device_id, ab->dp->ppe.ds_node_id, ab->dp->ppe.ppeds_soc_idx);
 +	return 0;
 +}
 +
@@ -3629,7 +3629,7 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +
 +	ppe_vp_free(ahvif->dp_vif.ppe_vp_num);
 +
-+	printk("Destroyed PPE VP port no:%d for dev:%s vdev type %d subtype %d\n",
++	ath12k_info(NULL, "Destroyed PPE VP port no:%d for dev:%s vdev type %d subtype %d\n",
 +	       ahvif->dp_vif.ppe_vp_num, dev->name,
 +	       ahvif->vdev_type, ahvif->vdev_subtype);
 +	ahvif->dp_vif.ppe_vp_num = ATH12K_INVALID_PPE_VP_NUM;
@@ -3675,14 +3675,10 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +	}
 +
 +	ahvif->dp_vif.ppe_vp_type = ppe_vp_type;
-+/*
++
 +	ath12k_info(NULL,
 +		    "Updated PPE VP port no %d for dev %s type %d\n",
 +		    ahvif->dp_vif.ppe_vp_num, wdev->netdev->name, ahvif->dp_vif.ppe_vp_type);
-+*/
-+	printk("Updated PPE VP port no %d for dev %s type %d\n",
-+	       ahvif->dp_vif.ppe_vp_num, wdev->netdev->name,
-+	       ahvif->dp_vif.ppe_vp_type);
 +exit:
 +	return ret;
 +}
@@ -3777,16 +3773,11 @@ Signed-off-by: Sidhanta Sahu <sidhanta@qti.qualcomm.com>
 +	ahvif->dp_vif.ppe_vp_num = ppe_vp_num;
 +	ahvif->dp_vif.ppe_vp_type = ppe_vp_type;
 +	ahvif->dp_vif.ppe_core_mask = vpai.core_mask;
-+/*
++
 +	ath12k_info(NULL,
 +		    "Enabling PPE VP type %d for dev %s vp_num %d core_mask 0x%x\n",
 +		    ppe_vp_type, dev->name,
 +		    ahvif->dp_vif.ppe_vp_num, ahvif->dp_vif.ppe_core_mask);
-+*/
-+	printk("Enabling PPE VP type %d for dev %s vp_num %d core_mask 0x%x\n",
-+	       ppe_vp_type, dev->name,
-+	       ahvif->dp_vif.ppe_vp_num, ahvif->dp_vif.ppe_core_mask);
-+
 +	return 0;
 +}
 +EXPORT_SYMBOL(ath12k_vif_alloc_vp);
