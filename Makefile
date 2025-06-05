@@ -20,7 +20,7 @@ PKG_BACKPORTS_SOURCE_URL:=git://git.kernel.org/pub/scm/linux/kernel/git/backport
 PKG_BACKPORTS_BRANCH:=master
 
 PKG_KERNEL_VERSION:=9a0dddfb30f1
-PKG_KERNEL_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/kvalo/ath.git
+PKG_KERNEL_SOURCE_URL:=http://git.codelinaro.org/clo/qsdk/kvalo/ath.git
 PKG_KERNEL_BRANCH:=korg-kvalo/master
 
 PKG_VERSION:=20250213
@@ -346,17 +346,6 @@ ifneq ($(CONFIG_PACKAGE_kmod-cfg80211),)
  endef
 endif
 
-#do not Build/Configure for EXTERNAL KERNEL
-ifeq ($(strip $(CONFIG_EXTERNAL_KERNEL_TREE)),"")
-  ifeq ($(strip $(CONFIG_KERNEL_GIT_CLONE_URI)),"")
-    define Build/Configure
-	  cmp $(PKG_BUILD_DIR)/include/linux/ath9k_platform.h $(LINUX_DIR)/include/linux/ath9k_platform.h
-	  cmp $(PKG_BUILD_DIR)/include/linux/ath5k_platform.h $(LINUX_DIR)/include/linux/ath5k_platform.h
-	  cmp $(PKG_BUILD_DIR)/include/linux/rt2x00_platform.h $(LINUX_DIR)/include/linux/rt2x00_platform.h
-    endef
-  endif
-endif
-
 EXTERNAL_PATCH_DIR:=$(TOPDIR)/openwrt-patches/package/kernel/mac80211/patches
 
 define Build/Patch
@@ -416,18 +405,18 @@ ifneq ($(call qstrip,$(_LINUX_SRC)),)
 # --reference option doesn't work on git trees synced with "repo", so instead
 # we're manually using clone & fetch to speed up sync time
   define FastCloneKernel
-	git clone --depth=1 file://$(_LINUX_SRC) $(2) || \
+	git clone file://$(_LINUX_SRC) $(2) || \
 	(rm -rf $(2) && \
-	git clone --depth=1 file://$(_LINUX_SRC) $(2))
+	git clone file://$(_LINUX_SRC) $(2))
 	(cd $(2); git remote add src $(1); git fetch src)
   endef
 else
   define FastCloneKernel
 	GIT_NAME=$$$$(echo $(1) | sed -e 's:.*//[^/]*.::g'); \
-	git clone --depth=1 $(1) $(2) || \
+	git clone $(1) $(2) || \
 	([ -n "${CONFIG_GIT_MIRROR}" ] && \
 	rm -rf $(2) && \
-	git clone --depth=1 $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
+	git clone $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(2))
   endef
 endif
 
