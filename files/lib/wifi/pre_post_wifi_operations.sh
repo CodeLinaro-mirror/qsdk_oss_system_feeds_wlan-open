@@ -19,6 +19,43 @@
 
 append DRIVERS "mac80211"
 
+mac80211_freq_to_channel() {
+        local freq=$1
+
+	if [ "$freq" -lt 1000 ]; then
+		echo 0
+		return
+	fi
+	if [ "$freq" -eq 2484 ]; then
+		echo 14
+		return
+	fi
+	if [ "$freq" -eq 5935 ]; then
+		echo 2
+		return
+	fi
+	if [ "$freq" -lt 2484 ]; then
+		echo $(((freq-2407)/5))
+		return
+        fi
+	if [ "$freq" -ge 4910 ] && [ "$freq" -le 4980 ]; then
+		echo $(((freq-4000)/5))
+		return
+	fi
+	if [ "$freq" -lt 5950 ]; then
+		echo $(((freq-5000)/5))
+		return
+	fi
+	if [ "$freq" -le 45000 ]; then
+		echo $(((freq-5950)/5))
+		return
+	fi
+	if [ "$freq" -ge 58320 ] && [ "$freq" -le 70200 ]; then
+		echo $(((freq-56160)/5))
+		return
+	fi
+}
+
 update_primary_link()
 {
 	local mld_names
@@ -138,43 +175,114 @@ mlo_add_link() {
 
 	case "$2" in
 		2g)
-		channels="1-14"
-		start_freq=2412
-		end_freq=2484
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5g)
-		channels="36-177"
-		start_freq=5180
-		end_freq=5885
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gl)
-		channels="36-64"
-		start_freq=5180
-		end_freq=5320
+		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -lt "65" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gh)
-		channels="100-177"
-		start_freq=5500
-		end_freq=5885
+		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -gt "65" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6g)
-		channels="2-233"
-		start_freq=5935
-		end_freq=7115
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gl)
-		channels="2-93"
-		start_freq=5935
-		end_freq=6415
+		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -lt "100" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gh)
-		channels="129-233"
-		start_freq=6595
-		end_freq=7115
+		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -gt "100" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		*) echo "wrong band is given" > /dev/ttyMSM0
 		return;;
 	esac
+
 	link=$(uci show wireless | grep $channels | cut -d "." -f 2)
 	[ -n "$link" ] || {
 		echo "failed to find band number" > /dev/ttyMSM0
@@ -182,7 +290,7 @@ mlo_add_link() {
 	}
 	hw_idx=$(uci show wireless.$link.radio | cut -d "'" -f 2)
 	for iface in $iface_data; do
-		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
+		check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2) 2> /dev/null
 		check_disabled=$(uci show wireless.${iface}.disabled | cut -d "'" -f2)
 		if [ "$check_band" = "$link" ] && [ "$check_disabled" = 0 ]; then
 			echo "link is already present in the mld" > /dev/ttyMSM0
@@ -319,7 +427,7 @@ mlo_add_link() {
 
 		#Get partner band hostapd config, to fetch the interface config
 		for iface in $iface_data; do
-			check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2)
+			check_band=$(uci show wireless.${iface}.device | awk -F"'" '{print $2}' | cut -d'.' -f2) 2> /dev/null
 			hw_idx=$(uci show wireless.$check_band.radio | cut -d "'" -f 2)
 			band=$(echo $check_band | cut -d "_" -f 2)
 			partner_input_file=/var/run/hostapd-${1}_${band}.conf
@@ -475,39 +583,109 @@ mlo_remove_link() {
 
 	case "$2" in
 		2g)
-		channels="1-14"
-		start_freq=2412
-		end_freq=2484
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5g)
-		channels="36-177"
-		start_freq=5180
-		end_freq=5885
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gl)
-		channels="36-64"
-		start_freq=5180
-		end_freq=5320
+		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -lt "65" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gh)
-		channels="100-177"
-		start_freq=5500
-		end_freq=5885
+		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -gt "65" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6g)
-		channels="2-233"
-		start_freq=5935
-		end_freq=7115
+		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gl)
-		channels="2-93"
-		start_freq=5935
-		end_freq=6415
+		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -lt "100" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gh)
-		channels="129-233"
-		start_freq=6595
-		end_freq=7115
+		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			if [ "$local_channel" -gt "100" ]; then
+				test_band=$(echo $iter)
+				break;
+			fi
+		done
+		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		channels=$(echo $start_chan-$end_chan)
 		;;
 		*) echo "wrong band is given" > /dev/ttyMSM0
 		return;;
