@@ -1,5 +1,5 @@
 From 35b7a75128d0694b5f149e94547f463a079d110a Mon Sep 17 00:00:00 2001
-From: Vignesh C <quic_vignc@quicinc.com>
+From: Nagarajan Maran <quic_nmaran@quicinc.com>
 Date: Fri, 25 Apr 2025 13:09:51 +0530
 Subject: [PATCH] wifi: ath12k: n-link-mlo bridge vdev create and start
 MIME-Version: 1.0
@@ -71,11 +71,12 @@ bridge vdev creation. And even the second adjacent device cannot
 create bridge vdev, it will exit gracefully as in AP mode.
 
 Patch-dependency:
-	961-01-wifi-ath12k-n-link-mlo-bridge-vdev-basic-handling.patch
+	0327-01-wifi-ath12k-n-link-mlo-bridge-vdev-basic-handling.patch
 
 Tag: N_LINK_MLO
 
 Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
+Signed-off-by: Vignesh C <vignc@qti.qualcomm.com>
 ---
  drivers/net/wireless/ath/ath12k/core.c    |  14 +-
  drivers/net/wireless/ath/ath12k/core.h    |   3 +
@@ -146,7 +147,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	bool chanctx_peer_del_done;
  	u8 primary_link_id;
  	u8 hw_link_id;
-@@ -1153,6 +1155,7 @@ struct ath12k_wsi_info {
+@@ -1148,6 +1150,7 @@ struct ath12k_wsi_info {
  	u32 hw_link_id_base;
  	u32 num_adj_chips;
  	u32 adj_chip_idxs[ATH12K_MAX_ADJACENT_CHIPS];
@@ -162,7 +163,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	for_each_set_bit(link_id, &links_map,
 -			 IEEE80211_MLD_MAX_NUM_LINKS) {
 +			 ATH12K_NUM_MAX_LINKS) {
-+		if (link_id == ATH12K_DEFAULT_SCAN_LINK)
++		if (ATH12K_SCAN_LINKS_MASK & BIT(link_id))
 +			continue;
  		arvif = rcu_dereference_protected(ahvif->link[link_id],
  						  lockdep_is_held(&wiphy->mtx));
@@ -407,29 +408,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return;
  
-@@ -5882,11 +5981,21 @@ ath12k_mac_find_link_id_by_ar(struct ath
- 	 * scan requests to firmware based on device.
- 	 */
- 
-+	/* When it comes to STA vdev, make sure to pick the next available link.
-+	* There is cases where single scan req needs to be split in driver
-+	* and initiate seperate scan requests to firmware based on device.
-+	*/
-+	if (ahvif->vdev_type == WMI_VDEV_TYPE_STA)
-+		return ffs(~ahvif->links_map) - 1;
-+
- 	/* Set all non-scan links (0-14) of scan_links_map so that ffs() will
- 	 * choose an available link among scan links (i.e link id >= 15)
- 	 */
- 	scan_links_map = ahvif->links_map | ~ATH12K_SCAN_LINKS_MASK;
- 	return ffs(~scan_links_map) - 1;
-+	/* This is wrong as 16 and 17 is reserved only for Bridge vdevs and
-+	 * Mac vdev create will fail for vdev id 16 and 17 if its not Bridge.
-+	 */
- }
- 
- static int ath12k_mac_initiate_hw_scan(struct ieee80211_hw *hw,
-@@ -5926,7 +6035,7 @@ static int ath12k_mac_initiate_hw_scan(s
+@@ -5926,7 +6025,7 @@ static int ath12k_mac_initiate_hw_scan(s
  	if (link_id >= ATH12K_NUM_MAX_LINKS)
  		return -EBUSY;
  
@@ -438,7 +417,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	ath12k_dbg(ar->ab, ATH12K_DBG_MAC, "mac link ID %d selected for scan",
  		   arvif->link_id);
-@@ -5959,14 +6068,14 @@ static int ath12k_mac_initiate_hw_scan(s
+@@ -5959,14 +6058,14 @@ static int ath12k_mac_initiate_hw_scan(s
  		/* Previous arvif would've been cleared in radio switch block
  		 * above, assign arvif again for create.
  		 */
@@ -455,7 +434,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  		if (ret) {
  			ath12k_mac_unassign_link_vif(arvif);
  			ath12k_warn(ar->ab, "unable to create scan vdev %d\n", ret);
-@@ -7037,7 +7146,15 @@ void ath12k_mac_fill_reg_tpc_info(struct
+@@ -7037,7 +7136,15 @@ void ath12k_mac_fill_reg_tpc_info(struct
          u16 oper_freq = 0, start_freq = 0, center_freq = 0;
  	u8 reg_6g_power_mode;
  
@@ -471,7 +450,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
         /* For STA, 6g power mode will be present in the beacon, but for AP,
          * AP cant parse its own beacon. Hence, we get the 6g power mode
          * from the wdev corresponding to the struct ieee80211_vif
-@@ -7065,6 +7182,8 @@ void ath12k_mac_fill_reg_tpc_info(struct
+@@ -7065,6 +7172,8 @@ void ath12k_mac_fill_reg_tpc_info(struct
          start_freq = ath12k_mac_get_6g_start_frequency(&ctx->def);
          pwr_reduction = bss_conf->pwr_reduction;
  
@@ -480,7 +459,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
          if (ahvif->vdev_type == WMI_VDEV_TYPE_STA &&
  	    arvif->reg_tpc_info.num_pwr_levels) {
                  is_tpe_present = true;
-@@ -10899,6 +11018,9 @@ static int ath12k_mac_setup_vdev_params_
+@@ -10904,6 +11013,9 @@ static int ath12k_mac_setup_vdev_params_
  	struct ieee80211_vif *tx_vif;
  	struct ath12k_link_vif *tx_arvif;
  
@@ -490,7 +469,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	link_conf = ath12k_mac_get_link_bss_conf(arvif);
  	if (!link_conf) {
  		ath12k_warn(ar->ab, "unable to access bss link conf in set mbssid params for vif %pM link %u\n",
-@@ -10950,6 +11072,7 @@ static int ath12k_mac_setup_vdev_create_
+@@ -10955,6 +11067,7 @@ static int ath12k_mac_setup_vdev_create_
  	struct ath12k *ar = arvif->ar;
  	struct ath12k_pdev *pdev = ar->pdev;
  	struct ath12k_vif *ahvif = arvif->ahvif;
@@ -498,7 +477,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	int ret;
  
  	lockdep_assert_wiphy(ath12k_ar_to_hw(ar)->wiphy);
-@@ -10959,8 +11082,12 @@ static int ath12k_mac_setup_vdev_create_
+@@ -10964,8 +11077,12 @@ static int ath12k_mac_setup_vdev_create_
  	arg->subtype = arvif->vdev_subtype;
  	arg->pdev_id = pdev->pdev_id;
  
@@ -512,7 +491,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	if (!test_bit(WMI_TLV_SERVICE_MBSS_PARAM_IN_VDEV_START_SUPPORT,
  		      ar->ab->wmi_ab.svc_map)) {
  		ret = ath12k_mac_setup_vdev_params_mbssid(arvif,
-@@ -10987,7 +11114,8 @@ static int ath12k_mac_setup_vdev_create_
+@@ -10992,7 +11109,8 @@ static int ath12k_mac_setup_vdev_create_
  	arg->if_stats_id = ath12k_mac_get_vdev_stats_id(arvif);
  
  	if (ath12k_mac_is_ml_arvif(arvif)) {
@@ -522,7 +501,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  			ath12k_warn(ar->ab, "too many MLO links during setting up vdev: %d",
  				    ahvif->vif->valid_links);
  			return -EINVAL;
-@@ -11188,7 +11316,8 @@ void ath12k_mac_11d_scan_stop_all(struct
+@@ -11193,7 +11311,8 @@ void ath12k_mac_11d_scan_stop_all(struct
  	}
  }
  
@@ -532,7 +511,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  {
  	struct ath12k_hw *ah = ar->ah;
  	struct ath12k_base *ab = ar->ab;
-@@ -11206,6 +11335,7 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -11211,6 +11330,7 @@ int ath12k_mac_vdev_create(struct ath12k
  	struct ath12k_dp_link_vif *dp_link_vif = NULL;
  	u8 mac_addr[ETH_ALEN];
  	u8 mask[ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00};
@@ -540,7 +519,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	lockdep_assert_wiphy(hw->wiphy);
  
-@@ -11223,32 +11353,44 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -11228,32 +11348,44 @@ int ath12k_mac_vdev_create(struct ath12k
  	else
  		link_id = arvif->link_id;
  
@@ -607,7 +586,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	/* Send vdev stats offload commands to firmware before first vdev
  	 * creation. ie., when num_created_vdevs = 0
  	 */
-@@ -11277,8 +11419,8 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -11282,8 +11414,8 @@ int ath12k_mac_vdev_create(struct ath12k
  	/* Assume it as non-mbssid initially, well overwrite it later.
  	 */
  	arvif->tx_vdev_id = vdev_id;
@@ -617,7 +596,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	dp_link_vif = &ahvif->dp_vif.dp_link_vif[arvif->link_id];
  
  	dp_link_vif->vdev_id = arvif->vdev_id;
-@@ -11345,13 +11487,13 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -11350,13 +11482,13 @@ int ath12k_mac_vdev_create(struct ath12k
  		return ret;
  	}
  
@@ -633,7 +612,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	ar->allocated_vdev_map |= 1LL << arvif->vdev_id;
  
  	spin_lock_bh(&ar->data_lock);
-@@ -11442,10 +11584,7 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -11447,10 +11579,7 @@ int ath12k_mac_vdev_create(struct ath12k
  		break;
  	}
  
@@ -645,7 +624,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	ret = ath12k_mac_txpower_recalc(ar);
  	if (ret)
  		goto err_peer_del;
-@@ -11482,7 +11621,7 @@ err_vdev_del:
+@@ -11487,7 +11616,7 @@ err_vdev_del:
  		ar->monitor_vdev_created = false;
  		ar->monitor_vdev_id = -1;
  	}
@@ -654,7 +633,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  		WARN_ON(!ar->num_created_bridge_vdevs);
  		ar->num_created_bridge_vdevs--;
  	} else {
-@@ -11582,7 +11721,9 @@ static void ath12k_mac_vif_cache_flush(s
+@@ -11587,7 +11716,9 @@ static void ath12k_mac_vif_cache_flush(s
  
  static struct ath12k *ath12k_mac_assign_vif_to_vdev(struct ieee80211_hw *hw,
  						    struct ath12k_link_vif *arvif,
@@ -665,7 +644,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  {
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_vif *vif = ath12k_ahvif_to_vif(ahvif);
-@@ -11593,12 +11734,13 @@ static struct ath12k *ath12k_mac_assign_
+@@ -11598,12 +11729,13 @@ static struct ath12k *ath12k_mac_assign_
  	u8 link_id = arvif->link_id, scan_link;
  	unsigned long scan_link_map;
  	int ret;
@@ -680,8 +659,8 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	else if (ctx)
  		ar = ath12k_get_ar_by_ctx(hw, ctx);
  	else
-@@ -11614,7 +11756,7 @@ static struct ath12k *ath12k_mac_assign_
- 		scan_link_map = ahvif->links_map & ATH12K_DEFAULT_SCAN_LINK;
+@@ -11619,7 +11751,7 @@ static struct ath12k *ath12k_mac_assign_
+ 		scan_link_map = ahvif->links_map & ATH12K_SCAN_LINKS_MASK;
  		for_each_set_bit(scan_link, &scan_link_map, ATH12K_NUM_MAX_LINKS) {
  			scan_arvif = wiphy_dereference(hw->wiphy, ahvif->link[scan_link]);
 -			if (scan_arvif && scan_arvif->ar == ar) {
@@ -689,7 +668,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  				ar->scan.arvif = NULL;
  				ath12k_mac_remove_link_interface(hw, scan_arvif);
  				ath12k_mac_unassign_link_vif(scan_arvif);
-@@ -11650,7 +11792,7 @@ static struct ath12k *ath12k_mac_assign_
+@@ -11655,7 +11787,7 @@ static struct ath12k *ath12k_mac_assign_
  	/* Assign arvif again here since previous radio switch block
  	 * would've unassigned and cleared it.
  	 */
@@ -698,7 +677,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	if (vif->type == NL80211_IFTYPE_AP &&
  	    ar->num_peers > (ar->max_num_peers - 1)) {
  		ath12k_warn(ab, "failed to create vdev due to insufficient peer entry resource in firmware\n");
-@@ -11660,13 +11802,12 @@ static struct ath12k *ath12k_mac_assign_
+@@ -11665,13 +11797,12 @@ static struct ath12k *ath12k_mac_assign_
  	if (arvif->is_created)
  		goto flush;
  
@@ -713,7 +692,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	if (ret) {
  		ath12k_warn(ab, "failed to create vdev %pM ret %d", vif->addr, ret);
  		goto unlock;
-@@ -11677,7 +11818,10 @@ flush:
+@@ -11682,7 +11813,10 @@ flush:
  	 * add_interface(), Apply any parameters for the vdev which were received
  	 * after add_interface, corresponding to this vif.
  	 */
@@ -725,7 +704,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  unlock:
  	return arvif->ar;
  }
-@@ -11689,17 +11833,23 @@ int ath12k_mac_op_add_interface(struct i
+@@ -11694,17 +11828,23 @@ int ath12k_mac_op_add_interface(struct i
  	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
  	struct ath12k_vif *ahvif = ath12k_vif_to_ahvif(vif);
  	struct ath12k_link_vif *arvif;
@@ -751,7 +730,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	/* Allocate Default Queue now and reassign during actual vdev create */
  	vif->cab_queue = ATH12K_HW_DEFAULT_QUEUE;
-@@ -11819,6 +11969,8 @@ err_vdev_del:
+@@ -11824,6 +11964,8 @@ err_vdev_del:
  	/* Recalc txpower for remaining vdev */
  	ath12k_mac_txpower_recalc(ar);
  
@@ -760,7 +739,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	/* TODO: recal traffic pause state based on the available vdevs */
  	arvif->is_created = false;
  	arvif->ar = NULL;
-@@ -12164,10 +12316,14 @@ ath12k_mac_mlo_get_vdev_args(struct ath1
+@@ -12168,10 +12310,14 @@ ath12k_mac_mlo_get_vdev_args(struct ath1
  	 */
  	ml_arg->link_add = true;
  	ml_arg->ieee_link_id = arvif->link_id;
@@ -770,13 +749,13 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	links = ahvif->links_map;
 -	for_each_set_bit(link_id, &links, IEEE80211_MLD_MAX_NUM_LINKS) {
 +	for_each_set_bit(link_id, &links, ATH12K_NUM_MAX_LINKS) {
-+		if (link_id == ATH12K_DEFAULT_SCAN_LINK)
++		if (ATH12K_SCAN_LINKS_MASK & BIT(link_id))
 +			continue;
 +
  		arvif_p = wiphy_dereference(ahvif->ah->hw->wiphy, ahvif->link[link_id]);
  
  		if (WARN_ON(!arvif_p))
-@@ -12179,16 +12335,20 @@ ath12k_mac_mlo_get_vdev_args(struct ath1
+@@ -12183,16 +12329,20 @@ ath12k_mac_mlo_get_vdev_args(struct ath1
  		if (!arvif_p->is_created)
  			continue;
  
@@ -803,7 +782,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  		ml_arg->num_partner_links++;
  		partner_info++;
  	}
-@@ -12268,6 +12428,9 @@ ath12k_mac_vdev_config_after_start(struc
+@@ -12272,6 +12422,9 @@ ath12k_mac_vdev_config_after_start(struc
  	unsigned int dfs_cac_time;
  	int ret;
  
@@ -813,7 +792,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	/* Enable CAC Running Flag in the driver by checking all sub-channel's DFS
  	 * state as NL80211_DFS_USABLE which indicates CAC needs to be
  	 * done before channel usage. This flag is used to drop rx packets.
-@@ -12299,6 +12462,36 @@ ath12k_mac_vdev_config_after_start(struc
+@@ -12303,6 +12456,36 @@ ath12k_mac_vdev_config_after_start(struc
  	return ret;
  }
  
@@ -850,7 +829,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  static int
  ath12k_mac_vdev_start_restart(struct ath12k_link_vif *arvif,
  			      struct ieee80211_chanctx_conf *ctx,
-@@ -12307,19 +12500,26 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -12311,19 +12494,26 @@ ath12k_mac_vdev_start_restart(struct ath
  	struct ath12k *ar = arvif->ar;
  	struct ath12k_base *ab = ar->ab;
  	struct wmi_vdev_start_req_arg arg = {};
@@ -883,7 +862,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	}
  
  	reinit_completion(&ar->vdev_setup_done);
-@@ -12327,25 +12527,44 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -12331,25 +12521,44 @@ ath12k_mac_vdev_start_restart(struct ath
  	arg.vdev_id = arvif->vdev_id;
  	arg.dtim_period = arvif->dtim_period;
  	arg.bcn_intval = arvif->beacon_interval;
@@ -942,7 +921,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	arg.mbssid_tx_vdev_id = 0;
  	if (test_bit(WMI_TLV_SERVICE_MBSS_PARAM_IN_VDEV_START_SUPPORT,
  		     ar->ab->wmi_ab.svc_map)) {
-@@ -12361,10 +12580,14 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -12365,10 +12574,14 @@ ath12k_mac_vdev_start_restart(struct ath
  		arg.ssid_len = ahvif->u.ap.ssid_len;
  		arg.hidden_ssid = ahvif->u.ap.hidden_ssid;
  
@@ -961,7 +940,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  		arg.passive = arg.chan_radar;
  
-@@ -12375,7 +12598,10 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -12379,7 +12592,10 @@ ath12k_mac_vdev_start_restart(struct ath
  		/* TODO: Notify if secondary 80Mhz also needs radar detection */
  	}
  
@@ -973,7 +952,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	if (!restart)
  		ath12k_mac_mlo_get_vdev_args(arvif, &arg.ml);
-@@ -12399,7 +12625,7 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -12403,7 +12619,7 @@ ath12k_mac_vdev_start_restart(struct ath
  		return ret;
  	}
  
@@ -982,7 +961,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
              chandef->chan->band == NL80211_BAND_6GHZ &&
              (ahvif->vdev_type == WMI_VDEV_TYPE_STA || ahvif->vdev_type == WMI_VDEV_TYPE_AP) &&
              test_bit(WMI_TLV_SERVICE_EXT_TPC_REG_SUPPORT, ar->ab->wmi_ab.svc_map)) {
-@@ -12643,7 +12869,8 @@ void ath12k_mac_update_ru_punct_bitmap(s
+@@ -12647,7 +12863,8 @@ void ath12k_mac_update_ru_punct_bitmap(s
  	//lockdep_assert_held(&ah->conf_mutex);
  	//lockdep_assert_held(&ar->conf_mutex);
  
@@ -992,7 +971,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  		return;
  
  	ieee80211_iterate_stations_atomic(ah->hw,
-@@ -13292,11 +13519,12 @@ static int ath12k_start_vdev_delay(struc
+@@ -13296,11 +13513,12 @@ static int ath12k_start_vdev_delay(struc
  	return 0;
  }
  
@@ -1010,7 +989,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  {
  	struct ath12k_hw *ah = ath12k_hw_to_ah(hw);
  	struct ath12k *ar;
-@@ -13306,9 +13534,9 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13310,9 +13528,9 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	struct ieee80211_sta *sta;
  	struct ath12k_sta *ahsta;
  	struct ath12k_link_sta *arsta;
@@ -1021,7 +1000,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	enum ieee80211_ap_reg_power power_type;
  
  	lockdep_assert_wiphy(hw->wiphy);
-@@ -13316,13 +13544,17 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13320,13 +13538,17 @@ ath12k_mac_op_assign_vif_chanctx(struct
  	/* For multi radio wiphy, the vdev was not created during add_interface
  	 * create now since we have a channel ctx now to assign to a specific ar/fw
  	 */
@@ -1041,7 +1020,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	if (!ar) {
  		ath12k_hw_warn(ah, "failed to assign chanctx for vif %pM link id %u link vif is already started",
  			       vif->addr, link_id);
-@@ -13333,13 +13565,20 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13337,13 +13559,20 @@ ath12k_mac_op_assign_vif_chanctx(struct
  
  	ab = ar->ab;
  
@@ -1067,7 +1046,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
              (ahvif->vdev_type == WMI_VDEV_TYPE_STA ||
               ahvif->vdev_type == WMI_VDEV_TYPE_AP)) {
                  power_type = vif->bss_conf.power_type;
-@@ -13406,28 +13645,41 @@ ath12k_mac_op_assign_vif_chanctx(struct
+@@ -13410,28 +13639,41 @@ ath12k_mac_op_assign_vif_chanctx(struct
  		goto out;
  	}
  
@@ -1120,7 +1099,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  {
  	struct ath12k *ar;
  	struct ath12k_base *ab;
-@@ -13435,10 +13687,17 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -13439,10 +13681,17 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  	struct ath12k_link_vif *arvif;
  	struct ath12k_dp_link_peer *peer;
  	struct ath12k_dp *dp;
@@ -1140,7 +1119,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	arvif = wiphy_dereference(hw->wiphy, ahvif->link[link_id]);
  
-@@ -13459,9 +13718,14 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -13463,9 +13712,14 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return;
  
@@ -1158,7 +1137,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  
  	WARN_ON(!arvif->is_started);
  
-@@ -13513,8 +13777,462 @@ ath12k_mac_op_unassign_vif_chanctx(struc
+@@ -13517,8 +13771,462 @@ ath12k_mac_op_unassign_vif_chanctx(struc
  		ar->state_11d = ATH12K_11D_PREPARING;
  	}
  }
@@ -1186,7 +1165,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	ahvif = (void *)vif->drv_priv;
 +
 +	/* Proceed for bridge only after all the normal vdevs are removed */
-+	if (hweight16(ahvif->links_map & ~ATH12K_DEFAULT_SCAN_LINK_MASK) == 0) {
++	if (hweight16(ahvif->links_map & ~BIT(IEEE80211_MLD_MAX_NUM_LINKS)) == 0) {
 +		links = ahvif->links_map;
 +		for_each_set_bit_from(link_id, &links, ATH12K_NUM_MAX_LINKS) {
 +			arvif = ahvif->link[link_id];
@@ -1323,7 +1302,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
 +	arvif = list_first_entry_or_null(&ar->arvifs, struct ath12k_link_vif,
 +					 list);
 +
-+	if (arvif && arvif->link_id != ATH12K_DEFAULT_SCAN_LINK &&
++	if (arvif && !(ATH12K_SCAN_LINKS_MASK & BIT(arvif->link_id)) &&
 +	    arvif->chanctx.def.chan)
 +		return &arvif->chanctx;
 +	else
@@ -1621,7 +1600,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  int
  ath12k_mac_op_switch_vif_chanctx(struct ieee80211_hw *hw,
  				 struct ieee80211_vif_chanctx_switch *vifs,
-@@ -15056,7 +15774,7 @@ int ath12k_mac_op_remain_on_channel(stru
+@@ -15060,7 +15768,7 @@ int ath12k_mac_op_remain_on_channel(stru
  	 */
  
  	link_id = ath12k_mac_find_link_id_by_ar(ahvif, ar);
@@ -1630,7 +1609,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	/* If the vif is already assigned to a specific vdev of an ar,
  	 * check whether its already started, vdev which is started
  	 * are not allowed to switch to a new radio.
-@@ -15082,9 +15800,9 @@ int ath12k_mac_op_remain_on_channel(stru
+@@ -15086,9 +15794,9 @@ int ath12k_mac_op_remain_on_channel(stru
  	}
  
  	if (create) {
@@ -1685,7 +1664,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  				if (arvif->is_up && arvif->ahvif->vif->valid_links) {
  					critical_flag = cu_params->cu_vdev_map[hw_link_id] & (1 << i);
  					bpcc_bufp = cu_params->bpcc_bufp;
-@@ -11761,6 +11767,10 @@ ath12k_wmi_obss_color_collision_event(st
+@@ -11780,6 +11786,10 @@ ath12k_wmi_obss_color_collision_event(st
  				ev->vdev_id);
  		goto unlock;
  	}
@@ -1696,7 +1675,7 @@ Signed-off-by: Nagarajan Maran <quic_nmaran@quicinc.com>
  	switch (ev->evt_type) {
  	case WMI_BSS_COLOR_COLLISION_DETECTION:
  		ar = arvif->ar;
-@@ -11974,7 +11984,8 @@ static int ath12k_wmi_tbtt_offset_subtlv
+@@ -11993,7 +12003,8 @@ static int ath12k_wmi_tbtt_offset_subtlv
  	}
  
  	vif = arvif->ahvif->vif;
