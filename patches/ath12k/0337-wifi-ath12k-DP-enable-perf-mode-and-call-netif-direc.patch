@@ -35,7 +35,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -155,6 +155,7 @@ struct ath12k_skb_rxcb {
+@@ -158,6 +158,7 @@ struct ath12k_skb_rxcb {
  	bool is_continuation;
  	bool is_mcbc;
  	bool is_eapol;
@@ -83,7 +83,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  static ssize_t ath12k_write_simulate_radar(struct file *file,
  					   const char __user *user_buf,
  					   size_t count, loff_t *ppos)
-@@ -4345,6 +4376,8 @@ void ath12k_debugfs_pdev_create(struct a
+@@ -4347,6 +4378,8 @@ void ath12k_debugfs_pdev_create(struct a
  			    &fops_trace_qdss);
  	debugfs_create_file("device_dp_stats", 0600, ab->debugfs_soc, ab,
  			    &fops_device_dp_stats);
@@ -150,7 +150,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  	}
 --- a/drivers/net/wireless/ath/ath12k/dp_peer.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_peer.h
-@@ -121,6 +121,7 @@ struct ath12k_dp_link_peer {
+@@ -122,6 +122,7 @@ struct ath12k_dp_link_peer {
  struct ath12k_dp_peer {
  	struct list_head list;
  	struct ieee80211_sta *sta;
@@ -158,7 +158,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  	int peer_id;
  	u8 addr[ETH_ALEN];
  	bool is_mlo;
-@@ -179,7 +180,8 @@ int ath12k_dp_link_peer_rhash_add(struct
+@@ -180,7 +181,8 @@ int ath12k_dp_link_peer_rhash_add(struct
  int ath12k_dp_link_peer_rhash_delete(struct ath12k_dp *dp,
  				     struct ath12k_dp_link_peer *peer);
  int ath12k_dp_peer_create(struct ath12k_dp_hw *dp_hw, u8 *addr,
@@ -182,7 +182,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  	u16 seq_no;
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8482,7 +8482,7 @@ int ath12k_mac_op_sta_state(struct ieee8
+@@ -9062,7 +9062,7 @@ int ath12k_mac_op_sta_state(struct ieee8
  		}
  
  		dp_params.sta = sta;
@@ -193,7 +193,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  				       sta->addr);
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -275,7 +275,7 @@ int ath12k_peer_create(struct ath12k *ar
+@@ -276,7 +276,7 @@ int ath12k_peer_create(struct ath12k *ar
  
  	ath12k_dp_link_peer_assign(ar->ab->dp, ar->pdev_idx, arvif->vdev_id,
  				   sta ? sta->addr : NULL, arg->peer_addr,
@@ -276,7 +276,16 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  
  	tid = rx_desc_data->tid;
  	/* PN for multicast packets will be checked in mac80211 */
-@@ -699,6 +744,17 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
+@@ -690,6 +735,8 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
+ 	if (rx_desc_data->is_mcbc)
+ 		rxcb->peer_id = rx_desc_data->peer_id;
+ 
++	ath12k_wifi7_dp_rx_h_csum_offload(msdu, rx_desc_data);
++
+ 	rcu_read_lock();
+ 	spin_lock_bh(&dp->dp_lock);
+ 	peer = ath12k_dp_rx_h_find_peer_by_peerid_index(dp, dp_pdev, msdu);
+@@ -699,6 +746,17 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
  		 */
  		rxcb->is_mcbc = rx_desc_data->is_mcbc && !peer->is_reset_mcbc;
  
@@ -286,15 +295,15 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
 +		if (*fast_rx &&
 +		    ath12k_wifi7_dp_rx_check_fast_rx(dp->ab, msdu, rx_desc_data, link_peer)) {
 +			msdu->protocol = eth_type_trans(msdu, peer->dev);
-+			rcu_read_unlock();
 +			spin_unlock_bh(&dp->dp_lock);
++			rcu_read_unlock();
 +			netif_receive_skb(msdu);
 +			return;
 +		}
  
  		rx_desc_data->is_4addr_sta = peer->vdev_type_4addr & BIT(NL80211_IFTYPE_STATION);
  		if (rxcb->is_mcbc)
-@@ -720,6 +776,8 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
+@@ -720,6 +778,8 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
  	spin_unlock_bh(&dp->dp_lock);
  	rcu_read_unlock();
  
@@ -303,7 +312,15 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  	if (enctype != HAL_ENCRYPT_TYPE_OPEN && !err_bitmap)
  		is_decrypted = rx_desc_data->is_decrypted;
  
-@@ -917,7 +975,8 @@ static int ath12k_wifi7_dp_rx_process_ms
+@@ -746,7 +806,6 @@ static void ath12k_wifi7_dp_rx_h_mpdu(st
+ 					   RX_FLAG_PN_VALIDATED;
+ 	}
+ 
+-	ath12k_wifi7_dp_rx_h_csum_offload(msdu, rx_desc_data);
+ 	ath12k_wifi7_dp_rx_h_undecap(dp_pdev, msdu, rx_desc,
+ 				     enctype, rx_status, is_decrypted, rx_desc_data, peer);
+ 
+@@ -917,7 +976,8 @@ static int ath12k_wifi7_dp_rx_process_ms
  					   struct sk_buff *msdu,
  					   struct sk_buff_head *msdu_list,
  					   struct ieee80211_rx_status *rx_status,
@@ -313,7 +330,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  {
  	struct ath12k_dp *dp = dp_pdev->dp;
  	struct hal_rx_desc *rx_desc, *lrx_desc;
-@@ -980,8 +1039,12 @@ static int ath12k_wifi7_dp_rx_process_ms
+@@ -980,8 +1040,12 @@ static int ath12k_wifi7_dp_rx_process_ms
  		goto free_out;
  	}
  
@@ -327,7 +344,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  
  	if (rx_desc_data->is_drop_packet) {
  		ret = -EINVAL;
-@@ -1014,6 +1077,7 @@ ath12k_wifi7_dp_rx_process_received_pack
+@@ -1014,6 +1078,7 @@ ath12k_wifi7_dp_rx_process_received_pack
  	struct ath12k_dp *partner_dp;
  	u8 hw_link_id, pdev_id;
  	int ret;
@@ -335,7 +352,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  
  	if (skb_queue_empty(msdu_list))
  		return;
-@@ -1050,7 +1114,7 @@ ath12k_wifi7_dp_rx_process_received_pack
+@@ -1050,7 +1115,7 @@ ath12k_wifi7_dp_rx_process_received_pack
  					 ATH12K_DSCP_PRIORITY ? 0: rxcb->tid);
  
  		ret = ath12k_wifi7_dp_rx_process_msdu(dp_pdev, msdu, msdu_list,
@@ -344,7 +361,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  		if (ret) {
  			ath12k_dbg(partner_ab, ATH12K_DBG_DATA,
  				   "Unable to process msdu %d", ret);
-@@ -1058,7 +1122,8 @@ ath12k_wifi7_dp_rx_process_received_pack
+@@ -1058,7 +1123,8 @@ ath12k_wifi7_dp_rx_process_received_pack
  			continue;
  		}
  
@@ -354,7 +371,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  	}
  
  	rcu_read_unlock();
-@@ -1201,6 +1266,8 @@ try_again:
+@@ -1201,6 +1267,8 @@ try_again:
  					RX_MSDU_DESC_INFO0_LAST_MSDU_IN_MPDU);
  		rxcb->is_continuation = !!(le32_to_cpu(msdu_info->info0) &
  					   RX_MSDU_DESC_INFO0_MSDU_CONTINUATION);
@@ -363,7 +380,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  		rxcb->hw_link_id = hw_link_id;
  
  		rxcb->peer_id =
-@@ -2060,6 +2127,7 @@ static int ath12k_wifi7_dp_rx_h_null_q_d
+@@ -2060,6 +2128,7 @@ static int ath12k_wifi7_dp_rx_h_null_q_d
  	u8 l3pad_bytes = rx_desc_data->l3_pad_bytes;
  	struct ath12k_skb_rxcb *rxcb = ATH12K_SKB_RXCB(msdu);
  	u32 hal_rx_desc_sz = dp->ab->hal.hal_desc_sz;
@@ -371,7 +388,7 @@ Signed-off-by: Balamurugan S <bselvara@qti.qualcomm.com>
  
  	if (!rxcb->is_frag && ((msdu_len + hal_rx_desc_sz) > DP_RX_BUFFER_SIZE)) {
  		/* First buffer will be freed by the caller, so deduct it's length */
-@@ -2105,7 +2173,7 @@ static int ath12k_wifi7_dp_rx_h_null_q_d
+@@ -2105,7 +2174,7 @@ static int ath12k_wifi7_dp_rx_h_null_q_d
  
  	ath12k_wifi7_dp_rx_h_ppdu(dp_pdev, status, rx_desc_data);
  
