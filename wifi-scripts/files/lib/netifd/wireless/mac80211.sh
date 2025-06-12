@@ -87,6 +87,8 @@ he_6ghz_reg_pwr_type=
 #dpp
 dpp_ifaces=
 
+enable_epcs=
+
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
 }
@@ -179,6 +181,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int fils_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
+	config_add_boolean enable_epcs
 
 	# mesh
 	config_add_string mesh_id
@@ -843,6 +846,7 @@ mac80211_hostapd_setup_bss() {
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
 	json_get_vars unsol_bcast_presp fils_discovery
+	json_get_vars enable_epcs
 
 	set_default wds 0
 	set_default start_disabled 0
@@ -888,6 +892,50 @@ mac80211_hostapd_setup_bss() {
 
 	if [[ "$htmode" == "EHT"* ]]; then
 		append hostapd_cfg "mld_ap=1" "$N"
+
+		if [ -n "$enable_epcs" ]; then
+			append hostapd_cfg "enable_epcs=$enable_epcs" "$N"
+		fi
+
+		if [ "$enable_epcs" == "1" ]; then
+			append hostapd_cfg "epcs_he_mu_edca_ac_be_aifsn=8" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_be_aci=0" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_be_ecwmin=9" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_be_ecwmax=10" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_be_timer=255" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_bk_aifsn=15" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_bk_aci=1" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_bk_ecwmin=9" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_bk_ecwmax=10" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_bk_timer=255" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vi_ecwmin=5" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vi_ecwmax=7" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vi_aifsn=5" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vi_aci=2" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vi_timer=255" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vo_aifsn=5" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vo_aci=3" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vo_ecwmin=5" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vo_ecwmax=7" "$N"
+			append hostapd_cfg "epcs_he_mu_edca_ac_vo_timer=255" "$N"
+
+			append hostapd_cfg "epcs_wmm_ac_vo_cwmin=2" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vo_cwmax=3" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vo_aifs=2" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vo_txop_limit=102" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vi_cwmin=3" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vi_cwmax=4" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vi_aifs=2" "$N"
+			append hostapd_cfg "epcs_wmm_ac_vi_txop_limit=188" "$N"
+			append hostapd_cfg "epcs_wmm_ac_be_cwmin=4" "$N"
+			append hostapd_cfg "epcs_wmm_ac_be_cwmax=9" "$N"
+			append hostapd_cfg "epcs_wmm_ac_be_aifs=3" "$N"
+			append hostapd_cfg "epcs_wmm_ac_be_txop_limit=0" "$N"
+			append hostapd_cfg "epcs_wmm_ac_bk_cwmin=4" "$N"
+			append hostapd_cfg "epcs_wmm_ac_bk_cwmax=9" "$N"
+			append hostapd_cfg "epcs_wmm_ac_bk_aifs=7" "$N"
+			append hostapd_cfg "epcs_wmm_ac_bk_txop_limit=0" "$N"
+		fi
 	fi
 
 	case "$ppe_vp" in
