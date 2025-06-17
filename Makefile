@@ -190,7 +190,8 @@ define KernelPackage/mac80211
   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common \
 	+kmod-qca-nss-ppe \
 	+kmod-qca-nss-ppe-vp \
-	+kmod-qca-nss-ppe-ds
+	+kmod-qca-nss-ppe-ds \
+	+kmod-qca-nss-wifi-plugins
   KCONFIG:=\
 	CONFIG_AVERAGE=y \
 	CONFIG_QCOM_RPROC_DISABLE_MPD_SUPPORT=y \
