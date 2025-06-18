@@ -59,7 +59,7 @@ Signed-off-by: Ramanathan Choodamani <rchoodam@qti.qualcomm.com>
  };
  
  static u32 ath12k_ahb_read32(struct ath12k_base *ab, u32 offset)
-@@ -798,7 +806,124 @@ static void ath12k_ahb_free_ext_irq(stru
+@@ -799,7 +807,124 @@ static void ath12k_ahb_free_ext_irq(stru
  	}
  }
  
@@ -185,7 +185,7 @@ Signed-off-by: Ramanathan Choodamani <rchoodam@qti.qualcomm.com>
  	.start = ath12k_ahb_start,
  	.stop = ath12k_ahb_stop,
  	.read32 = ath12k_ahb_read32,
-@@ -812,6 +937,12 @@ static const struct ath12k_hif_ops ath12
+@@ -813,6 +938,12 @@ static const struct ath12k_hif_ops ath12
  	.ce_irq_disable = ath12k_ahb_ce_irqs_disable,
  	.ext_irq_setup = ath12k_ahb_config_ext_irq,
  	.ext_irq_cleanup = ath12k_ahb_free_ext_irq,
@@ -198,6 +198,19 @@ Signed-off-by: Ramanathan Choodamani <rchoodam@qti.qualcomm.com>
  };
  
  static const struct ath12k_hif_ops ath12k_ahb_hif_ops_qcn6432 = {
+@@ -835,6 +966,12 @@ static const struct ath12k_hif_ops ath12
+ 	.ce_irq_disable = ath12k_pcic_ce_irq_disable_sync,
+ 	.ext_irq_setup = ath12k_pcic_cfg_hybrid_ext_irq,
+ 	.ext_irq_cleanup = ath12k_pcic_free_ext_irq,
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	.ppeds_register_interrupts = ath12k_pcic_ppeds_register_interrupts,
++	.ppeds_free_interrupts = ath12k_pcic_ppeds_free_interrupts,
++	.ppeds_irq_enable = ath12k_pcic_ppeds_irq_enable,
++	.ppeds_irq_disable = ath12k_pcic_ppeds_irq_disable,
++#endif
+ };
+ 
+ static void ath12k_core_dump_crash_reason(struct ath12k_base *ab)
 --- a/drivers/net/wireless/ath/ath12k/ppe.h
 +++ b/drivers/net/wireless/ath/ath12k/ppe.h
 @@ -34,6 +34,7 @@ enum ppeds_irq_type {
@@ -233,12 +246,144 @@ Signed-off-by: Ramanathan Choodamani <rchoodam@qti.qualcomm.com>
  const struct ath12k_hw_hal_params ath12k_wifi7_hw_hal_params_ipq5332 = {
 --- a/drivers/net/wireless/ath/ath12k/wifi7/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/hw.c
-@@ -831,7 +831,7 @@ static const struct ath12k_hw_params ath
- 		.ftm_responder = true,
- 		.credit_flow = false,
- 		.is_plink_preferable = true,
--		.ds_support = true,
-+		.ds_support = false,
+@@ -262,7 +262,7 @@ static const struct ath12k_hw_ring_mask
+ 		0, 0, 0,
+ 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+ 	},
+-	#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
+ 	.ppe2tcl = {
+ 		0, 0, 0, 0,
+ 		0, 0, 0, 0,
+@@ -416,6 +416,23 @@ static struct ath12k_hw_ring_mask ath12k
+ 		ATH12K_TX_MON_RING_MASK_1,
+ 		0, 0, 0, 0, 0, 0, 0, 0, 0,
+ 	},
++#ifdef CPTCFG_ATH12K_PPE_DS_SUPPORT
++	.ppe2tcl = {
++		0, 0, 0, 0,
++		0, 0, 0, 0,
++		0, ATH12K_PPE2TCL_RING_MASK_0,
++	},
++	.reo2ppe = {
++		0, 0, 0, 0,
++		0, 0, 0, 0,
++		0, 0, ATH12K_REO2PPE_RING_MASK_0,
++	},
++	.wbm2sw6_ppeds_tx_cmpln = {
++		0, 0, 0, 0,
++		0, 0, 0, 0,
++		0, 0, 0, ATH12K_PPE_WBM2SW_RELEASE_RING_MASK_0,
++	},
++#endif
+ };
+ 
+ static const struct ce_ie_addr ath12k_wifi7_ce_ie_addr_ipq5332 = {
+--- a/drivers/net/wireless/ath/ath12k/pcic.c
++++ b/drivers/net/wireless/ath/ath12k/pcic.c
+@@ -387,6 +387,7 @@ int ath12k_pcic_ext_cfg_gic_msi_irq(stru
+ 	struct platform_device *pdev = ab->pdev;
+ 	int j, budget, ret = 0, num_vectors = 0;
+ 	struct net_device *napi_ndev;
++	int ring_num = 0, ring_type = 0;
+ 	u8 userpd_id;
+ 	u32 num_irq = 0;
+ 
+@@ -451,12 +452,13 @@ int ath12k_pcic_ext_cfg_gic_msi_irq(stru
+ 		if (ab->hw_params->ring_mask->ppe2tcl[i] ||
+ 		    ab->hw_params->ring_mask->wbm2sw6_ppeds_tx_cmpln[i] ||
+ 		    ab->hw_params->ring_mask->reo2ppe[i]) {
+-			ret = ath12k_pcic_get_msi_data(ab, msi_desc, i);
++			ret = ath12k_pcic_get_msi_data(ab, msi_desc, i, &ring_type, &ring_num);
+ 			if (ret) {
+ 				ath12k_err(ab, "failed to get msi data for irq %d: %d",
+ 					   msi_desc->irq, ret);
+ 				return ret;
+ 			}
++			ath12k_hif_ppeds_register_interrupts(ab, ring_type, 0, ring_num);
+ 		} else {
+ 			scnprintf(dp_irq_name[userpd_id][i], DP_IRQ_NAME_LEN,
+ 				  "pci%u_wlan_dp_%u", userpd_id, i);
+@@ -655,10 +657,10 @@ void ath12k_pcic_get_msi_address(struct
+ int ath12k_pcic_ppeds_register_interrupts(struct ath12k_base *ab, int type, int vector,
+ 					  int ring_num)
+ {
+-	int ret, irq;
++	struct platform_device *pdev;
+ 	struct ath12k_ahb *ab_ahb;
++	int ret, irq;
+ 	u8 bus_id;
+-	struct platform_device *pdev;
+ 
+ 	ab_ahb = ath12k_ab_to_ahb(ab);
+ 	bus_id = ab_ahb->userpd_id;
+@@ -757,19 +759,24 @@ irqreturn_t ath12k_pcic_dummy_irq_handle
+ }
+ 
+ int ath12k_pcic_get_msi_data(struct ath12k_base *ab, struct msi_desc *msi_desc,
+-			     int i)
++			     int i, int *hal_ring_type, int *ring_num)
+ {
+-	int ret, type;
++	int ret, type, hal_type, ring = 0;
+ 	struct platform_device *pdev = ab->pdev;
+ 
+-	if (ab->hw_params->ring_mask->ppe2tcl[i])
++	if (ab->hw_params->ring_mask->ppe2tcl[i]) {
+ 		type = PPEDS_IRQ_PPE2TCL;
+-	else if (ab->hw_params->ring_mask->reo2ppe[i])
++		hal_type = HAL_PPE2TCL;
++	} else if (ab->hw_params->ring_mask->reo2ppe[i]) {
+ 		type = PPEDS_IRQ_REO2PPE;
+-	else if (ab->hw_params->ring_mask->wbm2sw6_ppeds_tx_cmpln[i])
++		hal_type = HAL_REO2PPE;
++	} else if (ab->hw_params->ring_mask->wbm2sw6_ppeds_tx_cmpln[i]) {
+ 		type = PPEDS_IRQ_PPE_WBM2SW_REL;
+-	else
++		hal_type = HAL_WBM2SW_RELEASE;
++		ring = HAL_WBM2SW_PPEDS_TX_CMPLN_RING_NUM;
++	} else {
+ 		return -EINVAL;
++	}
+ 
+ 	/* For multi-platform device, to retrieve msi base address and irq data,
+ 	 * request a dummy irq  store the base address and data to
+@@ -787,7 +794,8 @@ int ath12k_pcic_get_msi_data(struct ath1
+ 	ab->ipci.dp_msi_data[i] = msi_desc->msg.data;
+ 	disable_irq_nosync(ab->dp->ppe.ppeds_irq[type]);
+ 	free_irq(ab->dp->ppe.ppeds_irq[type], (void *)ab);
+-
++	*hal_ring_type = hal_type;
++	*ring_num = ring;
+ 	return 0;
+ }
+ #endif
+--- a/drivers/net/wireless/ath/ath12k/pcic.h
++++ b/drivers/net/wireless/ath/ath12k/pcic.h
+@@ -40,12 +40,12 @@ static const struct ath12k_msi_config at
+ 		/* In DP, we use num_vectors as 9 (6 REGULAR DP INTERRUPTS + 3 PPEDS
+ 		 * INTERRUPTS)
+ 		 */
+-		.total_vectors = 15,
++		.total_vectors = 18,
+ 		.total_users = 3,
+ 		.users = (struct ath12k_msi_user[]) {
+ 			{ .name = "QDSS", .num_vectors = 1, .base_vector = 0 },
+ 			{ .name = "CE", .num_vectors = 5, .base_vector = 1 },
+-			{ .name = "DP", .num_vectors = 9, .base_vector = 6 },
++			{ .name = "DP", .num_vectors = 12, .base_vector = 6 },
+ 		},
  	},
  	{
- 		.name = "ipq5424 hw1.0",
+@@ -97,5 +97,10 @@ int ath12k_pcic_cfg_hybrid_ext_irq(struc
+ 				   struct ath12k_dp *dp);
+ void ath12k_pcic_free_ext_irq(struct ath12k_base *ab);
+ int ath12k_pcic_get_msi_data(struct ath12k_base *ab, struct msi_desc *msi_desc,
+-			     int i);
++			     int i, int *hal_ring_type, int *ring_num);
++int ath12k_pcic_ppeds_register_interrupts(struct ath12k_base *ab, int type, int vector,
++					  int ring_num);
++void ath12k_pcic_ppeds_irq_disable(struct ath12k_base *ab, enum ppeds_irq_type type);
++void ath12k_pcic_ppeds_irq_enable(struct ath12k_base *ab, enum ppeds_irq_type type);
++void ath12k_pcic_ppeds_free_interrupts(struct ath12k_base *ab);
+ #endif
