@@ -22,15 +22,12 @@ Signed-off-by: Balamurugan Ramar <quic_bramar@quicinc.com>
  net/mac80211/util.c       | 37 ++++++++++++++++++++++++++++++-------
  7 files changed, 69 insertions(+), 37 deletions(-)
 
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index 0855143..cb4b2f0 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -2204,9 +2204,21 @@ static inline bool ieee80211_vif_is_mesh(struct ieee80211_vif *vif)
-  */
+@@ -2205,8 +2205,20 @@ static inline bool ieee80211_vif_is_mesh
  struct ieee80211_vif *wdev_to_ieee80211_vif(struct wireless_dev *wdev);
  
-+/**
+ /**
 + * wdev_to_ieee80211_vlan_sta - return a sta for the AP_VLAN interface
 + *
 + * @wdev: the wdev to get the sta for vlan interface
@@ -41,14 +38,14 @@ index 0855143..cb4b2f0 100644
 +
 +struct ieee80211_sta *wdev_to_ieee80211_vlan_sta(struct wireless_dev *wdev);
 +
- /**
++/**
   * wdev_to_ieee80211_vif_vlan - return a vif struct from a wdev
   * @wdev: the wdev to get the vif for
 + * @is_add_vlan: Whether the callback is from op_add_interface or not
   *
   * This can be used by mac80211 drivers with direct cfg80211 APIs
   * (like the vendor commands) that get a wdev.
-@@ -2215,7 +2227,8 @@ struct ieee80211_vif *wdev_to_ieee80211_vif(struct wireless_dev *wdev);
+@@ -2215,7 +2227,8 @@ struct ieee80211_vif *wdev_to_ieee80211_
   * fetches the master interface and returns it. This API can be used for
   * non-ap/VLAN interfaces.
   */
@@ -75,11 +72,9 @@ index 0855143..cb4b2f0 100644
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 8332eb1..dffc810 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -2465,7 +2465,9 @@ static int ieee80211_change_station(struct wiphy *wiphy,
+@@ -2465,7 +2465,9 @@ static int ieee80211_change_station(stru
  			rcu_assign_pointer(vlansdata->u.vlan.sta, sta);
  			__ieee80211_check_fast_rx_iface(vlansdata);
  
@@ -90,11 +85,9 @@ index 8332eb1..dffc810 100644
  				drv_sta_set_4addr(local, vlansdata, &sta->sta,
  						  true);
  			} else {
-diff --git a/net/mac80211/debugfs.c b/net/mac80211/debugfs.c
-index 2bd0388..d7c9391 100644
 --- a/net/mac80211/debugfs.c
 +++ b/net/mac80211/debugfs.c
-@@ -632,6 +632,7 @@ static const char *hw_flag_names[] = {
+@@ -640,6 +640,7 @@ static const char *hw_flag_names[] = {
  	FLAG(SUPPORTS_AP_PS),
  	FLAG(HAS_TX_QUEUE),
  	FLAG(SUPPORT_ECM_REGISTRATION),
@@ -102,11 +95,19 @@ index 2bd0388..d7c9391 100644
  #undef FLAG
  };
  
-diff --git a/net/mac80211/driver-ops.c b/net/mac80211/driver-ops.c
-index 1acf54e..b1f206e 100644
 --- a/net/mac80211/driver-ops.c
 +++ b/net/mac80211/driver-ops.c
-@@ -135,7 +135,8 @@ int drv_sta_state(struct ieee80211_local *local,
+@@ -78,6 +78,9 @@ int drv_add_interface(struct ieee80211_l
+ 	if (!(sdata->flags & IEEE80211_SDATA_IN_DRIVER)) {
+ 		sdata->flags |= IEEE80211_SDATA_IN_DRIVER;
+ 
++		if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
++			return 0;
++
+ 		drv_vif_add_debugfs(local, sdata);
+ 		/* initially vif is not MLD */
+ 		ieee80211_link_debugfs_drv_add(&sdata->deflink);
+@@ -135,7 +138,8 @@ int drv_sta_state(struct ieee80211_local
  	might_sleep();
  	lockdep_assert_wiphy(local->hw.wiphy);
  
@@ -116,7 +117,7 @@ index 1acf54e..b1f206e 100644
  	    !(old_state == IEEE80211_STA_ASSOC &&
  	      new_state == IEEE80211_STA_AUTHORIZED))
  		sdata = get_bss_sdata(sdata);
-@@ -613,7 +614,7 @@ int drv_change_sta_links(struct ieee80211_local *local,
+@@ -613,7 +617,7 @@ int drv_change_sta_links(struct ieee8021
  	if (vif->type == NL80211_IFTYPE_AP_VLAN) {
  		struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
  		/* Update parent vif for further use when vif type is AP/VLAN */
@@ -125,11 +126,9 @@ index 1acf54e..b1f206e 100644
  
  		if (!vif)
  			return -EINVAL;
-diff --git a/net/mac80211/driver-ops.h b/net/mac80211/driver-ops.h
-index 57e8375..6eba090 100644
 --- a/net/mac80211/driver-ops.h
 +++ b/net/mac80211/driver-ops.h
-@@ -630,7 +630,8 @@ static inline void drv_sta_rate_tbl_update(struct ieee80211_local *local,
+@@ -630,7 +630,8 @@ static inline void drv_sta_rate_tbl_upda
  					   struct ieee80211_sub_if_data *sdata,
  					   struct ieee80211_sta *sta)
  {
@@ -139,8 +138,6 @@ index 57e8375..6eba090 100644
  		sdata = get_bss_sdata(sdata);
  
  	if (!check_sdata_in_driver(sdata))
-diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
-index d00388a..d9d721f 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
 @@ -38,9 +38,6 @@ bool ppe_vp_accel = false;
@@ -153,7 +150,7 @@ index d00388a..d9d721f 100644
  #endif
  
  /**
-@@ -698,7 +695,8 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
+@@ -697,7 +694,8 @@ static void ieee80211_do_stop(struct iee
  
  	switch (sdata->vif.type) {
  	case NL80211_IFTYPE_AP_VLAN:
@@ -163,7 +160,7 @@ index d00388a..d9d721f 100644
  		    going_down)
  			drv_remove_interface(local, sdata);
  		break;
-@@ -838,8 +836,8 @@ static int ieee80211_stop(struct net_device *dev)
+@@ -837,8 +835,8 @@ static int ieee80211_stop(struct net_dev
  		ieee80211_stop_mbssid(sdata, -1);
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
@@ -174,7 +171,7 @@ index d00388a..d9d721f 100644
  		ppe_vp_free(sdata->vif.ppe_vp_num);
  		sdata_info(sdata, "Destroyed PPE VP port no:%d for dev:%s\n",
  			   sdata->vif.ppe_vp_num, dev->name);
-@@ -1320,28 +1318,17 @@ static int ieee80211_ppe_vp_802_3_redir_vap(struct ieee80211_sub_if_data *sdata,
+@@ -1319,28 +1317,17 @@ static int ieee80211_ppe_vp_802_3_redir_
  
  	vpai.type = PPE_VP_TYPE_SW_L2;
  	vpai.net_dev_type = PPE_VP_NET_DEV_TYPE_WIFI;
@@ -209,7 +206,7 @@ index d00388a..d9d721f 100644
  	return vp;
  }
  #endif
-@@ -1467,7 +1454,8 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
+@@ -1458,7 +1445,8 @@ int ieee80211_do_open(struct wireless_de
  			if (dev)
  				netif_carrier_on(dev);
  
@@ -219,7 +216,7 @@ index d00388a..d9d721f 100644
  				ieee80211_set_sdata_offload_flags(sdata);
  				res = drv_add_interface(local, sdata);
  				if (res)
-@@ -1621,7 +1609,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
+@@ -1612,7 +1600,7 @@ int ieee80211_do_open(struct wireless_de
  
  #ifdef CPTCFG_MAC80211_PPE_SUPPORT
  	/* for PPE RFS, driver handles VP allocation for non VLAN interfaces */
@@ -228,11 +225,9 @@ index d00388a..d9d721f 100644
  		vp = ieee80211_ppe_vp_802_3_redir_vap(sdata, dev,
  						      wdev->ppe_vp_type);
  		if (vp > 0) {
-diff --git a/net/mac80211/util.c b/net/mac80211/util.c
-index a575c51..5b6b8af 100644
 --- a/net/mac80211/util.c
 +++ b/net/mac80211/util.c
-@@ -860,12 +860,28 @@ struct ieee80211_vif *wdev_to_ieee80211_vif(struct wireless_dev *wdev)
+@@ -860,12 +860,28 @@ struct ieee80211_vif *wdev_to_ieee80211_
  }
  EXPORT_SYMBOL_GPL(wdev_to_ieee80211_vif);
  
@@ -263,7 +258,7 @@ index a575c51..5b6b8af 100644
  		return NULL;
  
  	switch (sdata->vif.type) {
-@@ -1968,7 +1984,9 @@ int ieee80211_reconfig(struct ieee80211_local *local)
+@@ -1968,7 +1984,9 @@ int ieee80211_reconfig(struct ieee80211_
  		    !ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR))
  			continue;
  		if ((sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
@@ -274,7 +269,7 @@ index a575c51..5b6b8af 100644
  		    ieee80211_sdata_running(sdata)) {
  			res = drv_add_interface(local, sdata);
  			if (WARN_ON(res))
-@@ -1986,7 +2004,9 @@ int ieee80211_reconfig(struct ieee80211_local *local)
+@@ -1986,7 +2004,9 @@ int ieee80211_reconfig(struct ieee80211_
  			    !ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR))
  				continue;
  			if ((sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
@@ -285,7 +280,7 @@ index a575c51..5b6b8af 100644
  			    ieee80211_sdata_running(sdata))
  				drv_remove_interface(local, sdata);
  		}
-@@ -2045,9 +2065,12 @@ int ieee80211_reconfig(struct ieee80211_local *local)
+@@ -2045,9 +2065,11 @@ int ieee80211_reconfig(struct ieee80211_
  				sdata->vif.active_links = BIT(link_id);
  			}
  
@@ -293,14 +288,10 @@ index a575c51..5b6b8af 100644
 -					     sdata->vif.active_links,
 -					     old);
 +			if (sdata->vif.type != NL80211_IFTYPE_AP_VLAN ||
-+                            ieee80211_hw_check(&local->hw, SUPPORTS_NSS_OFFLOAD) ||
-+                            ieee80211_hw_check(&local->hw, SUPPORTS_VLAN_DATA_OFFLOAD))
++                            ieee80211_hw_check(&local->hw, SUPPORTS_NSS_OFFLOAD))
 +				drv_change_vif_links(local, sdata, 0,
 +						     sdata->vif.active_links,
 +						     old);
  		}
  
  		sdata->restart_active_links = active_links;
--- 
-2.34.1
-
