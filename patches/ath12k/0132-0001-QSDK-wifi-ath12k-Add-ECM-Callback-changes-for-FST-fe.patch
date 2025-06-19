@@ -28,8 +28,6 @@ Signed-off-by: Karthikeyan Periyasamy <quic_periyasa@quicinc.com>
  create mode 100644 drivers/net/wireless/ath/ath_fse.c
  create mode 100644 include/ath/ath_fse.h
 
-diff --git a/drivers/net/wireless/ath/Makefile b/drivers/net/wireless/ath/Makefile
-index 817d4cb1eac6..8b8453abb8cd 100644
 --- a/drivers/net/wireless/ath/Makefile
 +++ b/drivers/net/wireless/ath/Makefile
 @@ -17,7 +17,8 @@ ath-objs :=	main.o \
@@ -42,8 +40,6 @@ index 817d4cb1eac6..8b8453abb8cd 100644
  
  ath-$(CPTCFG_ATH_DEBUG) += debug.o
  ath-$(CPTCFG_ATH_TRACEPOINTS) += trace.o
-diff --git a/drivers/net/wireless/ath/ath12k/Makefile b/drivers/net/wireless/ath/ath12k/Makefile
-index a76cd8d62438..40e5e9e9059c 100644
 --- a/drivers/net/wireless/ath/ath12k/Makefile
 +++ b/drivers/net/wireless/ath/ath12k/Makefile
 @@ -21,7 +21,8 @@ ath12k-y += core.o \
@@ -56,8 +52,6 @@ index a76cd8d62438..40e5e9e9059c 100644
  
  ath12k-$(CPTCFG_ATH12K_AHB) += ahb.o
  
-diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
-index 6f101be0164e..cecb12f97410 100644
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
 @@ -23,6 +23,7 @@
@@ -68,7 +62,7 @@ index 6f101be0164e..cecb12f97410 100644
  
  unsigned int ath12k_debug_mask;
  module_param_named(debug_mask, ath12k_debug_mask, uint, 0644);
-@@ -848,6 +849,18 @@ static void ath12k_core_soc_destroy(struct ath12k_base *ab)
+@@ -848,6 +849,18 @@ static void ath12k_core_soc_destroy(stru
  	ath12k_qmi_deinit_service(ab);
  }
  
@@ -87,15 +81,23 @@ index 6f101be0164e..cecb12f97410 100644
  static int ath12k_core_pdev_create(struct ath12k_base *ab)
  {
  	int ret;
-@@ -977,6 +990,7 @@ static void ath12k_core_device_cleanup(struct ath12k_base *ab)
- 	mutex_lock(&ab->core_lock);
+@@ -992,6 +1005,15 @@ static void ath12k_core_hw_group_stop(st
+ 	clear_bit(ATH12K_GROUP_FLAG_REGISTERED, &ag->flags);
+ 	cancel_work_sync(&ag->reset_group_work);
  
- 	ath12k_hif_irq_disable(ab);
-+	ath12k_core_pdev_deinit(ab);
- 	ath12k_core_pdev_destroy(ab);
++	for (i = ag->num_devices - 1; i >= 0; i--) {
++		ab = ag->ab[i];
++		if (!ab)
++			continue;
++		mutex_lock(&ab->core_lock);
++		ath12k_core_pdev_deinit(ab);
++		mutex_unlock(&ab->core_lock);
++    }
++
+ 	ath12k_mac_unregister(ag);
  
- 	mutex_unlock(&ab->core_lock);
-@@ -1145,6 +1159,13 @@ core_pdev_create:
+ 	for (i = ag->num_devices - 1; i >= 0; i--) {
+@@ -1145,6 +1167,13 @@ core_pdev_create:
  			goto err;
  		}
  
@@ -108,8 +110,8 @@ index 6f101be0164e..cecb12f97410 100644
 +
  		ath12k_hif_irq_enable(ab);
  
- 		ret = ath12k_core_rfkill_config(ab);
-@@ -1347,6 +1368,7 @@ static int ath12k_core_reconfigure_on_crash(struct ath12k_base *ab)
+ 		if (ab->hw_params->en_qdsslog) {
+@@ -1352,6 +1381,7 @@ static int ath12k_core_reconfigure_on_cr
  	int ret;
  
  	mutex_lock(&ab->core_lock);
@@ -117,9 +119,6 @@ index 6f101be0164e..cecb12f97410 100644
  	ath12k_dp_pdev_free(ab);
  	ath12k_ce_cleanup_pipes(ab);
  	ath12k_wmi_detach(ab);
-diff --git a/drivers/net/wireless/ath/ath12k/fse.c b/drivers/net/wireless/ath/ath12k/fse.c
-new file mode 100644
-index 000000000000..118f78f8457c
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/fse.c
 @@ -0,0 +1,101 @@
@@ -224,9 +223,6 @@ index 000000000000..118f78f8457c
 +
 +	return ret;
 +}
-diff --git a/drivers/net/wireless/ath/ath12k/fse.h b/drivers/net/wireless/ath/ath12k/fse.h
-new file mode 100644
-index 000000000000..9ed496f70888
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath12k/fse.h
 @@ -0,0 +1,24 @@
@@ -254,9 +250,6 @@ index 000000000000..9ed496f70888
 +				 u32 *dest_ip, u32 dest_port,
 +				 u8 protocol, u8 version);
 +#endif
-diff --git a/drivers/net/wireless/ath/ath_fse.c b/drivers/net/wireless/ath/ath_fse.c
-new file mode 100644
-index 000000000000..3b5a328f38cf
 --- /dev/null
 +++ b/drivers/net/wireless/ath/ath_fse.c
 @@ -0,0 +1,179 @@
@@ -439,9 +432,6 @@ index 000000000000..3b5a328f38cf
 +	return false;
 +}
 +EXPORT_SYMBOL(ath_fse_delete_rule);
-diff --git a/include/ath/ath_fse.h b/include/ath/ath_fse.h
-new file mode 100644
-index 000000000000..e7e76bd45976
 --- /dev/null
 +++ b/include/ath/ath_fse.h
 @@ -0,0 +1,48 @@
@@ -493,6 +483,3 @@ index 000000000000..e7e76bd45976
 +bool ath_fse_delete_rule(struct ath_fse_flow_info *fse_info);
 +
 +#endif
--- 
-2.34.1
-
