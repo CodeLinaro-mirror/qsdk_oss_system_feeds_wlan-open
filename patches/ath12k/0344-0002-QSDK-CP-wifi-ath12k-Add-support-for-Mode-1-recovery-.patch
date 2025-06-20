@@ -61,7 +61,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  		for (i = 0; i < ag->num_hw; i++) {
  			ah = ath12k_ag_to_ah(ag, i);
  			ieee80211_restart_hw(ah->hw);
-@@ -2188,6 +2201,800 @@ exit_restart:
+@@ -2188,6 +2201,791 @@ exit_restart:
  	complete(&ab->restart_completed);
  }
  
@@ -130,19 +130,10 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
 +		sta_added = true;
 +	}
 +
-+	spin_lock_bh(&dp->dp_lock);
-+	peer = ath12k_dp_link_peer_find_by_vdev_id_and_addr(dp, arvif->vdev_id, arsta->addr);
-+	if (!peer) {
-+		ath12k_info(ab,"Failed to fetch the peer during reconfig\n");
-+		spin_unlock_bh(&dp->dp_lock);
-+		return;
-+	}
-+	spin_unlock_bh(&dp->dp_lock);
-+
 +key_add:
 +	if (sta_added)
 +		for (key_idx = 0; key_idx < WMI_MAX_KEY_INDEX; key_idx++) {
-+			key = peer->dp_peer->keys[key_idx];
++			key = arsta->keys[key_idx];
 +
 +			if (key) {
 +				/* BIP needs to be done in software */
@@ -822,7 +813,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
 +				spin_unlock_bh(&dp->dp_lock);
 +
 +				for (key_idx = 0; key_idx < WMI_MAX_KEY_INDEX; key_idx++) {
-+					key = peer->dp_peer->keys[key_idx];
++					key = arvif->keys[key_idx];
 +					if (key) {
 +						ath12k_dbg(ab, ATH12K_DBG_MODE1_RECOVERY,
 +								"key:%p cipher:%d idx:%d flags:%d\n",
@@ -862,7 +853,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  static void ath12k_core_trigger_bug_on(struct ath12k_base *ab)
  {
  	struct ath12k_hw_group *ag = ab->ag;
-@@ -2201,7 +3008,7 @@ static void ath12k_core_trigger_bug_on(s
+@@ -2201,7 +2999,7 @@ static void ath12k_core_trigger_bug_on(s
  		dump_count = atomic_read(&ath12k_coredump_ram_info.num_chip);
  		if (dump_count >= ATH12K_MAX_SOCS) {
  			ath12k_err(ab, "invalid chip number %d\n",
@@ -871,7 +862,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  			return;
  		}
  	}
-@@ -3201,6 +4008,7 @@ struct ath12k_base *ath12k_core_alloc(st
+@@ -3201,6 +3999,7 @@ struct ath12k_base *ath12k_core_alloc(st
  	init_waitqueue_head(&ab->qmi.cold_boot_waitq);
  	INIT_WORK(&ab->restart_work, ath12k_core_restart);
  	INIT_WORK(&ab->reset_work, ath12k_core_reset);
@@ -881,7 +872,25 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	INIT_WORK(&ab->update_11d_work, ath12k_update_11d);
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -1498,6 +1498,7 @@ struct ath12k_base {
+@@ -486,6 +486,8 @@ struct ath12k_link_vif {
+ 	u32 tx_vdev_id;
+ 	struct ath12k_prb_resp_tmpl_ml_info ml_info;
+ 	bool ftm_responder;
++	/* will be saved to use during recovery */
++	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
+ 
+ 	struct work_struct wmi_migration_cmd_work;
+ 	struct completion wmi_migration_event_resp;
+@@ -699,6 +701,8 @@ struct ath12k_link_sta {
+ 	bool is_bridge_peer;
+ 	/* For check disable fixed rate check for peer */
+ 	bool disable_fixed_rate;
++	/* will be saved to use during recovery */
++	struct ieee80211_key_conf *keys[WMI_MAX_KEY_INDEX + 1];
+ };
+ 
+ struct ath12k_sta_migration_data {
+@@ -1498,6 +1502,7 @@ struct ath12k_base {
  	u32 max_ml_peer_supported;
  	u32 max_ml_peer_ids;
  
@@ -1023,7 +1032,34 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  			      struct ath12k_link_vif *arvif,
  			      struct ath12k_link_sta *arsta,
  			      struct ieee80211_key_conf *key)
-@@ -7790,7 +7800,7 @@ void ath12k_mac_fill_reg_tpc_info(struct
+@@ -7027,6 +7037,8 @@ int ath12k_mac_op_set_key(struct ieee802
+ 							 arsta, key);
+ 				if (ret)
+ 					break;
++
++				arsta->keys[key->keyidx] = key;
+ 			}
+ 
+ 			return 0;
+@@ -7041,6 +7053,7 @@ int ath12k_mac_op_set_key(struct ieee802
+ 		if (ret)
+ 			return ret;
+ 
++		arsta->keys[key->keyidx] = key;
+ 		return 0;
+ 	}
+ 
+@@ -7068,6 +7081,9 @@ int ath12k_mac_op_set_key(struct ieee802
+ 	if (ret)
+ 		return ret;
+ 
++	/* if sta is null, consider it has self peer */
++	arvif->keys[key->keyidx] = key;
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(ath12k_mac_op_set_key);
+@@ -7790,7 +7806,7 @@ void ath12k_mac_fill_reg_tpc_info(struct
                  ath12k_ieee80211_ap_pwr_type_convert(reg_6g_power_mode);
  }
  
@@ -1032,7 +1068,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
                                          struct ieee80211_vif *vif,
                                          struct ieee80211_chanctx_conf *ctx)
  {
-@@ -9037,6 +9047,7 @@ static int ath12k_mac_handle_link_sta_st
+@@ -9041,6 +9057,7 @@ static int ath12k_mac_handle_link_sta_st
  {
  	struct ieee80211_vif *vif = ath12k_ahvif_to_vif(arvif->ahvif);
  	struct ath12k *ar = arvif->ar;
@@ -1040,7 +1076,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	int ret = 0;
  
  	lockdep_assert_wiphy(hw->wiphy);
-@@ -9044,6 +9055,11 @@ static int ath12k_mac_handle_link_sta_st
+@@ -9048,6 +9065,11 @@ static int ath12k_mac_handle_link_sta_st
  	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return -ESHUTDOWN;
  
@@ -1052,7 +1088,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	ath12k_dbg(ar->ab, ATH12K_DBG_PEER, "mac handle link %u sta %pM state %d -> %d\n",
  		   arsta->link_id, arsta->addr, old_state, new_state);
  
-@@ -9158,6 +9174,7 @@ int ath12k_mac_op_sta_state(struct ieee8
+@@ -9162,6 +9184,7 @@ int ath12k_mac_op_sta_state(struct ieee8
  	struct ath12k *ar = ah->radio;
  	bool is_recovery = false;
  	u8 link_id = 0, num_devices = ar->ab->ag->num_devices;
@@ -1060,23 +1096,26 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	u16 bridge_bitmap = 0;
  	int ret = -EINVAL;
  	struct ath12k_dp_peer_create_params dp_params = {0};
-@@ -9198,14 +9215,28 @@ int ath12k_mac_op_sta_state(struct ieee8
+@@ -9202,14 +9225,28 @@ int ath12k_mac_op_sta_state(struct ieee8
  	 */
  	if (old_state == IEEE80211_STA_NOTEXIST &&
  	    new_state == IEEE80211_STA_NONE) {
 -		memset(ahsta, 0, sizeof(*ahsta));
  
 -		arsta = &ahsta->deflink;
-+		/* FIXME: During recovery reconfig this memset have to be
-+		 * avoided so that the link_map won't be cleared.
-+		 */
-+		memset(ahsta, 0, sizeof(*ahsta));
- 		wiphy_work_init(&ahsta->set_4addr_wk, ath12k_sta_set_4addr_wk);
-+		arsta = &ahsta->deflink;
+-		wiphy_work_init(&ahsta->set_4addr_wk, ath12k_sta_set_4addr_wk);
++		if (!ahsta->links_map) {
++			memset(ahsta, 0, sizeof(*ahsta));
++			wiphy_work_init(&ahsta->set_4addr_wk, ath12k_sta_set_4addr_wk);
++			arsta = &ahsta->deflink;
++		}
  
  		/* ML sta */
- 		if (sta->mlo && !ahsta->links_map &&
- 		    (hweight16(sta->valid_links) == 1)) {
+-		if (sta->mlo && !ahsta->links_map &&
+-		    (hweight16(sta->valid_links) == 1)) {
++		if (sta->mlo && ((!ahsta->links_map &&
++		    (hweight16(sta->valid_links) == 1)) ||
++		     ahsta->links_map == sta->valid_links)) {
 +
 +		    	/*Add case to prevent MLO assoc from happening when UMAC recovery happens */
 +			for_each_set_bit(t_link_id, &ahvif->links_map, IEEE80211_MLD_MAX_NUM_LINKS){
@@ -1091,7 +1130,58 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  			ahsta->ml_peer_id = ath12k_peer_ml_alloc(ah);
  			if (ahsta->ml_peer_id == ATH12K_MLO_PEER_ID_INVALID) {
  				ath12k_hw_warn(ah, "unable to allocate ML peer id for sta %pM",
-@@ -10365,7 +10396,7 @@ exit:
+@@ -9232,29 +9269,30 @@ int ath12k_mac_op_sta_state(struct ieee8
+ 
+ 			goto ml_peer_id_free;
+ 		}
++		if (!test_bit(link_id,&ahsta->links_map)) {
++			ret = ath12k_mac_assign_link_sta(ah, ahsta, arsta, ahvif,
++							 link_id);
++			if (ret) {
++				ath12k_hw_warn(ah, "unable assign link %d for sta %pM",
++					       link_id, sta->addr);
++				goto peer_delete;
++			}
+ 
+-		ret = ath12k_mac_assign_link_sta(ah, ahsta, arsta, ahvif,
+-						 link_id);
+-		if (ret) {
+-			ath12k_hw_warn(ah, "unable assign link %d for sta %pM",
+-				       link_id, sta->addr);
+-			goto peer_delete;
+-		}
+-
+-		/* above arsta will get memset, hence do this after assign
+-		 * link sta
+-		 */
+-		if (sta->mlo) {
+-			arsta->is_assoc_link = true;
+-			ahsta->assoc_link_id = link_id;
+-			ahsta->primary_link_id = link_id;
++			/* above arsta will get memset, hence do this after assign
++			 * link sta
++			 */
++			if (sta->mlo) {
++				arsta->is_assoc_link = true;
++				ahsta->assoc_link_id = link_id;
++				ahsta->primary_link_id = link_id;
+ 
+-			init_completion(&ahsta->dp_migration_event);
+-			INIT_WORK(&ahsta->migration_wk, ath12k_sta_migration_wk);
++				init_completion(&ahsta->dp_migration_event);
++				INIT_WORK(&ahsta->migration_wk, ath12k_sta_migration_wk);
+ 
+-			ath12k_dbg(NULL, ATH12K_DBG_MAC,
+-				   "mac ML STA %pM primary link (reconfig) set to %u\n",
+-				   sta->addr, ahsta->primary_link_id);
++				ath12k_dbg(NULL, ATH12K_DBG_MAC,
++					   "mac ML STA %pM primary link (reconfig) set to %u\n",
++					   sta->addr, ahsta->primary_link_id);
++			}
+ 		}
+ 	}
+ 
+@@ -10371,7 +10409,7 @@ exit:
  	return ret;
  }
  
@@ -1100,7 +1190,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  			      const struct ieee80211_tx_queue_params *params)
  {
  	struct wmi_wmm_params_arg *p = NULL;
-@@ -11857,7 +11888,7 @@ static int ath12k_mac_config_mon_status_
+@@ -11863,7 +11901,7 @@ static int ath12k_mac_config_mon_status_
  	return ret;
  }
  
@@ -1109,7 +1199,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  {
  	struct ath12k_hw *ah = ar->ah;
  	struct ath12k_base *ab = ar->ab;
-@@ -11992,8 +12023,10 @@ static void ath12k_drain_tx(struct ath12
+@@ -11998,8 +12036,10 @@ static void ath12k_drain_tx(struct ath12
  
  	lockdep_assert_wiphy(ah->hw->wiphy);
  
@@ -1122,7 +1212,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  }
  
  int ath12k_mac_op_start(struct ieee80211_hw *hw)
-@@ -12026,16 +12059,22 @@ int ath12k_mac_op_start(struct ieee80211
+@@ -12032,16 +12072,22 @@ int ath12k_mac_op_start(struct ieee80211
  	}
  
  	for_each_ar(ah, ar, i) {
@@ -1133,15 +1223,15 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
 +		 * is already done and do mac_start for only asserted ab in case of Mode-1
 +		 * can be allowed
 +		 */
-+
-+		if (ar->ab->ag->recovery_mode != ATH12K_MLO_RECOVERY_MODE1 || ar->ab->is_reset) {
-+			ret = ath12k_mac_start(ar);
-+			if (ret) {
-+				ah->state = ATH12K_HW_STATE_OFF;
  
 -			ath12k_err(ar->ab, "fail to start mac operations in pdev idx %d ret %d\n",
 -				   ar->pdev_idx, ret);
 -			goto fail_start;
++		if (ar->ab->ag->recovery_mode != ATH12K_MLO_RECOVERY_MODE1 || ar->ab->is_reset) {
++			ret = ath12k_mac_start(ar);
++			if (ret) {
++				ah->state = ATH12K_HW_STATE_OFF;
++
 +				ath12k_err(ar->ab, "fail to start mac operations in pdev idx %d ret %d\n",
 +					   ar->pdev_idx, ret);
 +				goto fail_start;
@@ -1152,7 +1242,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	return 0;
  
  fail_start:
-@@ -12692,7 +12731,14 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -12698,7 +12744,14 @@ int ath12k_mac_vdev_create(struct ath12k
  	ar->allocated_vdev_map |= 1LL << arvif->vdev_id;
  
  	spin_lock_bh(&ar->data_lock);
@@ -1168,7 +1258,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	spin_unlock_bh(&ar->data_lock);
  
  	ath12k_mac_update_vif_offload(arvif);
-@@ -12873,7 +12919,7 @@ free_cache:
+@@ -12879,7 +12932,7 @@ free_cache:
  	}
  }
  
@@ -1177,7 +1267,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  {
  	struct ath12k_vif *ahvif = arvif->ahvif;
  	struct ieee80211_vif *vif = ath12k_ahvif_to_vif(ahvif);
-@@ -13428,6 +13474,10 @@ static int ath12k_mac_ampdu_action(struc
+@@ -13434,6 +13487,10 @@ static int ath12k_mac_ampdu_action(struc
  	if (unlikely(test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
  		return -ESHUTDOWN;
  
@@ -1188,7 +1278,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  	switch (params->action) {
  	case IEEE80211_AMPDU_RX_START:
  		ret = ath12k_dp_rx_ampdu_start(ar, params, link_id);
-@@ -13962,7 +14012,7 @@ ath12k_mac_vdev_start_restart(struct ath
+@@ -13968,7 +14025,7 @@ ath12k_mac_vdev_start_restart(struct ath
  	return 0;
  }
  
@@ -1197,7 +1287,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  				 struct ieee80211_chanctx_conf *ctx)
  {
  	return ath12k_mac_vdev_start_restart(arvif, ctx, false);
-@@ -16815,15 +16865,15 @@ out:
+@@ -16821,15 +16878,15 @@ out:
  EXPORT_SYMBOL(ath12k_mac_op_set_bitrate_mask);
  
  void
@@ -1221,7 +1311,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  
  	lockdep_assert_wiphy(hw->wiphy);
  
-@@ -16836,11 +16886,21 @@ ath12k_mac_op_reconfig_complete(struct i
+@@ -16842,11 +16899,21 @@ ath12k_mac_op_reconfig_complete(struct i
  		return;
  
  	ah->state = ATH12K_HW_STATE_ON;
@@ -1244,7 +1334,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  		ath12k_warn(ar->ab, "pdev %d successfully recovered\n",
  			    ar->pdev->pdev_id);
  
-@@ -16852,53 +16912,64 @@ ath12k_mac_op_reconfig_complete(struct i
+@@ -16858,53 +16925,64 @@ ath12k_mac_op_reconfig_complete(struct i
  			ath12k_wmi_send_set_current_country_cmd(ar, &arg);
  		}
  
@@ -1403,7 +1493,7 @@ Signed-off-by: Avula Sri Charan <asrichar@qti.qualcomm.com>
  #endif
 --- a/drivers/net/wireless/ath/ath12k/peer.c
 +++ b/drivers/net/wireless/ath/ath12k/peer.c
-@@ -397,7 +397,8 @@ int ath12k_peer_mlo_link_peers_delete(st
+@@ -398,7 +398,8 @@ int ath12k_peer_mlo_link_peers_delete(st
  			continue;
  
  		if (test_bit(ATH12K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags) ||
