@@ -100,6 +100,7 @@ mac80211_update_mld_iface_config() {
 	config_get mld_key "$mld_name" key
 	config_get mld_sae "$mld_name" sae_pwe
 	config_get mld_vp "$mld_name" ppe_vp
+	config_get mld_enable_epcs "$mld_name" enable_epcs
 	if [ -n "$mld_ssid" ]; then
 		uci_set wireless "$vif_name" ssid "$mld_ssid"
 	fi
@@ -114,6 +115,9 @@ mac80211_update_mld_iface_config() {
 	fi
 	if [ -n "$mld_vp" ]; then
 		uci_set wireless "$vif_name" ppe_vp "$mld_vp"
+	fi
+	if [ -n "$mld_enable_epcs" ];then
+		uci_set wireless "$vif_name" enable_epcs "$mld_enable_epcs"
 	fi
 	uci commit wireless
 }
