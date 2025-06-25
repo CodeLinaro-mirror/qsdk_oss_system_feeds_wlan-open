@@ -35,8 +35,8 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
 
 --- a/drivers/net/wireless/ath/ath12k/core.h
 +++ b/drivers/net/wireless/ath/ath12k/core.h
-@@ -517,6 +517,11 @@ struct ath12k_vif {
- 	unsigned long links_map;
+@@ -516,6 +516,11 @@ struct ath12k_vif {
+ 	u32 links_map;
  	u8 last_scan_link;
  	bool chanctx_peer_del_done;
 +	u8 primary_link_id;
@@ -49,7 +49,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -4235,6 +4235,78 @@ static const struct file_operations ath1
+@@ -4246,6 +4246,79 @@ static const struct file_operations ath1
  	.open = simple_open
  };
  
@@ -63,6 +63,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
 +	struct ath12k_link_vif *arvif;
 +	u8 primary_link, link_id = 0;
 +	bool is_link_found = false;
++	unsigned long links_map = ahvif->links_map;
 +
 +	if (kstrtou8_from_user(user_buf, count, 0, &primary_link))
 +		return -EINVAL;
@@ -78,7 +79,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
 +		return count;
 +	}
 +
-+	for_each_set_bit_from(link_id, &ahvif->links_map, ATH12K_NUM_MAX_LINKS) {
++	for_each_set_bit_from(link_id, &links_map, ATH12K_NUM_MAX_LINKS) {
 +		arvif = ahvif->link[link_id];
 +		if (!arvif)
 +			continue;
@@ -128,7 +129,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  void ath12k_debugfs_add_interface(struct ath12k_link_vif *arvif)
  {
  	struct ath12k_vif *ahvif = arvif->ahvif;
-@@ -4245,6 +4317,9 @@ void ath12k_debugfs_add_interface(struct
+@@ -4256,6 +4329,9 @@ void ath12k_debugfs_add_interface(struct
  	if (link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
  		return;
  
@@ -138,7 +139,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	if (vif->type != NL80211_IFTYPE_AP)
  		return;
  
-@@ -4277,9 +4352,35 @@ void ath12k_debugfs_add_interface(struct
+@@ -4288,9 +4364,35 @@ void ath12k_debugfs_add_interface(struct
  
  	debugfs_create_file("resume_dialog", 0200, arvif->debugfs_twt,
  			    arvif, &ath12k_fops_twt_resume_dialog);
@@ -237,7 +238,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  struct ath12k_hw_ops {
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -3753,8 +3753,10 @@ static void ath12k_peer_assoc_h_mlo(stru
+@@ -3758,8 +3758,10 @@ static void ath12k_peer_assoc_h_mlo(stru
  	ml->enabled = true;
  	ml->assoc_link = arsta->is_assoc_link;
  
@@ -250,7 +251,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	ml->peer_id_valid = true;
  	ml->logical_link_idx_valid = true;
  
-@@ -3784,8 +3786,11 @@ static void ath12k_peer_assoc_h_mlo(stru
+@@ -3790,8 +3792,11 @@ static void ath12k_peer_assoc_h_mlo(stru
  		ml->partner_info[i].vdev_id = arvif->vdev_id;
  		ml->partner_info[i].hw_link_id = arvif->ar->pdev->hw_link_id;
  		ml->partner_info[i].assoc_link = arsta_p->is_assoc_link;
@@ -264,7 +265,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  		ml->partner_info[i].logical_link_idx = arsta_p->link_idx;
  		ml->num_partner_links++;
  
-@@ -8439,6 +8444,7 @@ int ath12k_mac_op_sta_state(struct ieee8
+@@ -8453,6 +8458,7 @@ int ath12k_mac_op_sta_state(struct ieee8
  		if (sta->mlo) {
  			arsta->is_assoc_link = true;
  			ahsta->assoc_link_id = link_id;
@@ -272,7 +273,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  		}
  	}
  
-@@ -8759,6 +8765,25 @@ int ath12k_mac_op_change_sta_links(struc
+@@ -8774,6 +8780,25 @@ int ath12k_mac_op_change_sta_links(struc
  	if (WARN_ON(ahsta->links_map == 0))
  		return -EINVAL;
  
@@ -298,7 +299,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	valid_links = new_links;
  	for_each_set_bit(link_id, &valid_links, IEEE80211_MLD_MAX_NUM_LINKS) {
  		if (ahsta->links_map & BIT(link_id))
-@@ -10218,7 +10243,7 @@ u8 ath12k_mac_get_tx_link(struct ieee802
+@@ -10233,7 +10258,7 @@ u8 ath12k_mac_get_tx_link(struct ieee802
  	 */
  	if (info_flags & IEEE80211_TX_CTL_HW_80211_ENCAP ||
  	    ieee80211_is_data(hdr->frame_control))
@@ -357,7 +358,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	},
  	{
  		.name = "wcn7850 hw2.0",
-@@ -524,6 +525,7 @@ static const struct ath12k_hw_params ath
+@@ -516,6 +517,7 @@ static const struct ath12k_hw_params ath
  		.support_ce_manual_poll=true,
  		.ftm_responder = false,
  		.credit_flow = false,
@@ -365,7 +366,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	},
  	{
  		.name = "qcn9274 hw2.0",
-@@ -622,6 +624,7 @@ static const struct ath12k_hw_params ath
+@@ -614,6 +616,7 @@ static const struct ath12k_hw_params ath
  		.support_ce_manual_poll=true,
  		.ftm_responder = true,
  		.credit_flow = false,
@@ -373,7 +374,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	},
  	{
  		.name = "ipq5332 hw1.0",
-@@ -711,6 +714,7 @@ static const struct ath12k_hw_params ath
+@@ -703,6 +706,7 @@ static const struct ath12k_hw_params ath
  		.support_ce_manual_poll=true,
  		.ftm_responder = false,
  		.credit_flow = false,
@@ -381,7 +382,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	},
  	{
  		.name = "qcn6432 hw1.0",
-@@ -780,6 +784,7 @@ static const struct ath12k_hw_params ath
+@@ -772,6 +776,7 @@ static const struct ath12k_hw_params ath
  		.support_ce_manual_poll=true,
  		.ftm_responder = true,
  		.credit_flow = false,
@@ -389,7 +390,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  	},
  	{
  		.name = "ipq5424 hw1.0",
-@@ -869,6 +874,7 @@ static const struct ath12k_hw_params ath
+@@ -861,6 +866,7 @@ static const struct ath12k_hw_params ath
  		.support_ce_manual_poll=true,
  		.ftm_responder = false,
  		.credit_flow = false,
@@ -399,7 +400,7 @@ Signed-off-by: Rajat Soni <rajson@qti.qualcomm.com>
  
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -2674,7 +2674,7 @@ struct ieee80211_sta {
+@@ -2675,7 +2675,7 @@ struct ieee80211_sta {
  
  	struct ieee80211_txq *txq[IEEE80211_NUM_TIDS + 1];
  
