@@ -61,6 +61,8 @@ vht_max_mpdu=
 vht_link_adapt=
 vht_max_a_mpdu_len_exp=
 disable_eml_cap=
+enable_aal=
+ml_max_rec_links=
 eht_ulmumimo_80mhz=
 eht_ulmumimo_160mhz=
 eht_ulmumimo_320mhz=
@@ -208,6 +210,9 @@ drv_mac80211_init_iface_config() {
 	config_add_int $MP_CONFIG_INT
 	config_add_boolean $MP_CONFIG_BOOL
 	config_add_string $MP_CONFIG_STRING
+
+	config_add_boolean enable_aal
+	config_add_int ml_max_rec_links
 }
 
 mac80211_add_capabilities() {
@@ -866,7 +871,7 @@ mac80211_hostapd_setup_bss() {
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -936,6 +941,11 @@ mac80211_hostapd_setup_bss() {
 		fi
 		if [ -n "$ttlm_enable" ]; then
 			append hostapd_cfg "ttlm_enable=$ttlm_enable" "$N"
+		fi
+
+		[ -n "$enable_aal" ] && append hostapd_cfg "enable_aal=$enable_aal" "$N"
+		if [ "$ml_max_rec_links" -gt 0 ] && [ "$ml_max_rec_links" -le 3 ]; then
+			append hostapd_cfg "ml_max_rec_links=$ml_max_rec_links" "$N"
 		fi
 	fi
 
