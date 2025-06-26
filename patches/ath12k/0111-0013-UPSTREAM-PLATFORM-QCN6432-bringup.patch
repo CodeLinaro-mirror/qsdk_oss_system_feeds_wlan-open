@@ -62,9 +62,9 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  
  #define ATH12K_IRQ_CE0_OFFSET 4
  #define ATH12K_MAX_UPDS 1
-@@ -432,10 +433,14 @@ static int ath12k_ahb_power_up(struct at
- 	ret = qcom_mdt_load_no_init(dev, fw2, fw2_name, pasid, mem_region, mem_phys,
- 				    mem_size, &mem_phys);
+@@ -433,10 +434,14 @@ static int ath12k_ahb_power_up(struct at
+ 				    ab_ahb->mem_region, ab_ahb->mem_phys,
+ 				    ab_ahb->mem_size, &ab_ahb->mem_phys);
  	if (ret) {
 -		ath12k_err(ab, "Failed to load MDT segments: %d\n", ret);
 +		ath12k_err(ab, "Failed to load MDT segments with no init : %d\n", ret);
@@ -78,7 +78,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	if (ab_ahb->scm_auth_enabled) {
  		/* Authenticate FW image using peripheral ID */
  		ret = qcom_scm_pas_auth_and_reset(pasid);
-@@ -458,7 +463,7 @@ static int ath12k_ahb_power_up(struct at
+@@ -459,7 +464,7 @@ static int ath12k_ahb_power_up(struct at
  	if (!time_left) {
  		ath12k_err(ab, "UserPD spawn wait timed out\n");
  		ret = -ETIMEDOUT;
@@ -87,7 +87,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	}
  
  	time_left = wait_for_completion_timeout(&ab_ahb->userpd_ready,
-@@ -466,13 +471,14 @@ static int ath12k_ahb_power_up(struct at
+@@ -467,13 +472,14 @@ static int ath12k_ahb_power_up(struct at
  	if (!time_left) {
  		ath12k_err(ab, "UserPD ready wait timed out\n");
  		ret = -ETIMEDOUT;
@@ -106,7 +106,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  err_fw2:
  	release_firmware(fw2);
  err_fw:
-@@ -508,17 +514,30 @@ static void ath12k_ahb_power_down(struct
+@@ -509,17 +515,30 @@ static void ath12k_ahb_power_down(struct
  			ath12k_err(ab, "scm pas shutdown failed for userPD%d\n",
  				   ab_ahb->userpd_id);
  	}
@@ -137,7 +137,17 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  }
  
  #if LINUX_VERSION_IS_GEQ(6,13,0)
-@@ -676,6 +695,11 @@ static int ath12k_ahb_config_irq(struct
+@@ -537,6 +556,9 @@ static irqreturn_t ath12k_ahb_ce_interru
+ {
+ 	struct ath12k_ce_pipe *ce_pipe = arg;
+ 
++	if (unlikely(!ce_pipe->ab->ce_pipe_init_done))
++		return IRQ_HANDLED;
++
+ 	/* last interrupt received for this CE */
+ 	ce_pipe->timestamp = jiffies;
+ 
+@@ -677,6 +699,11 @@ static int ath12k_ahb_config_irq(struct
  	int irq, irq_idx, i;
  	int ret;
  
@@ -149,7 +159,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	/* Configure CE irqs */
  	for (i = 0; i < ab->hw_params->ce_count; i++) {
  		struct ath12k_ce_pipe *ce_pipe = &ab->ce.ce_pipe[i];
-@@ -750,6 +774,28 @@ static const struct ath12k_hif_ops ath12
+@@ -751,6 +778,28 @@ static const struct ath12k_hif_ops ath12
  	.map_service_to_pipe = ath12k_ahb_map_service_to_pipe,
  	.power_up = ath12k_ahb_power_up,
  	.power_down = ath12k_ahb_power_down,
@@ -178,7 +188,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  };
  
  static irqreturn_t ath12k_userpd_irq_handler(int irq, void *data)
-@@ -839,6 +885,10 @@ static int ath12k_ahb_register_rproc_not
+@@ -840,6 +889,10 @@ static int ath12k_ahb_register_rproc_not
  	ab_ahb->root_pd_nb.notifier_call = ath12k_ahb_root_pd_state_notifier;
  	init_completion(&ab_ahb->rootpd_ready);
  
@@ -189,7 +199,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	ab_ahb->root_pd_notifier = qcom_register_ssr_notifier(ab_ahb->tgt_rproc->name,
  							      &ab_ahb->root_pd_nb);
  	if (IS_ERR(ab_ahb->root_pd_notifier))
-@@ -851,6 +901,9 @@ static void ath12k_ahb_unregister_rproc_
+@@ -852,6 +905,9 @@ static void ath12k_ahb_unregister_rproc_
  {
  	struct ath12k_ahb *ab_ahb = ath12k_ab_to_ahb(ab);
  
@@ -199,7 +209,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	if (!ab_ahb->root_pd_notifier) {
  		ath12k_err(ab, "Rproc notifier not registered\n");
  		return;
-@@ -931,7 +984,11 @@ static int ath12k_ahb_configure_rproc(st
+@@ -932,7 +988,11 @@ static int ath12k_ahb_configure_rproc(st
  		}
  	}
  
@@ -212,7 +222,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  
  err_unreg_notifier:
  	ath12k_ahb_unregister_rproc_notifier(ab);
-@@ -955,6 +1012,9 @@ static int ath12k_ahb_resource_init(stru
+@@ -956,6 +1016,9 @@ static int ath12k_ahb_resource_init(stru
  	struct resource *mem_res;
  	int ret;
  
@@ -222,7 +232,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	ab->mem = devm_platform_get_and_ioremap_resource(pdev, 0, &mem_res);
  	if (IS_ERR(ab->mem)) {
  		ret = dev_err_probe(&pdev->dev, PTR_ERR(ab->mem), "ioremap error\n");
-@@ -1027,28 +1087,76 @@ ath12k_ahb_get_device_family(const struc
+@@ -1028,28 +1091,76 @@ ath12k_ahb_get_device_family(const struc
  	return ATH12K_DEVICE_FAMILY_MAX;
  }
  
@@ -305,7 +315,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	platform_set_drvdata(pdev, ab);
  
  	device_id = ath12k_ahb_get_device_family(pdev);
-@@ -1148,6 +1256,9 @@ static void ath12k_ahb_free_resources(st
+@@ -1149,6 +1260,9 @@ static void ath12k_ahb_free_resources(st
  {
  	struct platform_device *pdev = ab->pdev;
  
@@ -360,15 +370,7 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	ring_params->flags |= HAL_SRNG_FLAGS_MSI_INTR;
  }
  
-@@ -715,6 +723,7 @@ void ath12k_ce_free_pipes(struct ath12k_
- 			pipe->status_ring = NULL;
- 		}
- 	}
-+	ab->ce_pipe_init_done = false;
- }
- 
- int ath12k_ce_alloc_pipes(struct ath12k_base *ab)
-@@ -741,6 +750,7 @@ int ath12k_ce_alloc_pipes(struct ath12k_
+@@ -669,6 +677,7 @@ int ath12k_ce_init_pipes(struct ath12k_b
  		}
  	}
  
@@ -376,6 +378,14 @@ Signed-off-by: Sowmiya Sree Elavalagan <quic_ssreeela@quicinc.com>
  	return 0;
  }
  
+@@ -715,6 +724,7 @@ void ath12k_ce_free_pipes(struct ath12k_
+ 			pipe->status_ring = NULL;
+ 		}
+ 	}
++	ab->ce_pipe_init_done = false;
+ }
+ 
+ int ath12k_ce_alloc_pipes(struct ath12k_base *ab)
 --- a/drivers/net/wireless/ath/ath12k/ce.h
 +++ b/drivers/net/wireless/ath/ath12k/ce.h
 @@ -8,6 +8,8 @@
