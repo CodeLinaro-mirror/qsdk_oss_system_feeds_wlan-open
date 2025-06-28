@@ -87,7 +87,19 @@ he_6ghz_reg_pwr_type=
 #dpp
 dpp_ifaces=
 
+#epcs params
 enable_epcs=
+epcs_params="epcs_he_mu_edca_ac_be_aifsn epcs_he_mu_edca_ac_be_aci epcs_he_mu_edca_ac_be_ecwmin
+	     epcs_he_mu_edca_ac_be_ecwmax epcs_he_mu_edca_ac_be_timer epcs_he_mu_edca_ac_bk_aifsn
+	     epcs_he_mu_edca_ac_bk_aci epcs_he_mu_edca_ac_bk_ecwmin epcs_he_mu_edca_ac_bk_ecwmax
+	     epcs_he_mu_edca_ac_bk_timer epcs_he_mu_edca_ac_vi_ecwmin epcs_he_mu_edca_ac_vi_ecwmax
+	     epcs_he_mu_edca_ac_vi_aifsn epcs_he_mu_edca_ac_vi_aci epcs_he_mu_edca_ac_vi_timer
+	     epcs_he_mu_edca_ac_vo_aifsn epcs_he_mu_edca_ac_vo_aci epcs_he_mu_edca_ac_vo_ecwmin
+	     epcs_he_mu_edca_ac_vo_ecwmax epcs_he_mu_edca_ac_vo_timer epcs_wmm_ac_be_cwmin
+	     epcs_wmm_ac_be_cwmax epcs_wmm_ac_be_aifs epcs_wmm_ac_be_txop_limit epcs_wmm_ac_bk_cwmin
+	     epcs_wmm_ac_bk_cwmax epcs_wmm_ac_bk_aifs epcs_wmm_ac_bk_txop_limit epcs_wmm_ac_vi_cwmin
+	     epcs_wmm_ac_vi_cwmax epcs_wmm_ac_vi_aifs epcs_wmm_ac_vi_txop_limit epcs_wmm_ac_vo_cwmin
+	     epcs_wmm_ac_vo_cwmax epcs_wmm_ac_vo_aifs epcs_wmm_ac_vo_txop_limit"
 
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
@@ -182,6 +194,12 @@ drv_mac80211_init_iface_config() {
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_boolean enable_epcs
+
+	#epcs
+	config_add_boolean enable_epcs
+	for param in $epcs_params; do
+		config_add_int "$param"
+	done
 
 	# mesh
 	config_add_string mesh_id
@@ -848,6 +866,12 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs
 
+	#epcs params
+	json_get_vars enable_epcs
+	for param in $epcs_params; do
+		json_get_vars "$param"
+	done
+
 	set_default wds 0
 	set_default start_disabled 0
 
@@ -898,43 +922,15 @@ mac80211_hostapd_setup_bss() {
 		fi
 
 		if [ "$enable_epcs" == "1" ]; then
-			append hostapd_cfg "epcs_he_mu_edca_ac_be_aifsn=8" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_be_aci=0" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_be_ecwmin=9" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_be_ecwmax=10" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_be_timer=255" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_bk_aifsn=15" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_bk_aci=1" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_bk_ecwmin=9" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_bk_ecwmax=10" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_bk_timer=255" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vi_ecwmin=5" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vi_ecwmax=7" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vi_aifsn=5" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vi_aci=2" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vi_timer=255" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vo_aifsn=5" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vo_aci=3" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vo_ecwmin=5" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vo_ecwmax=7" "$N"
-			append hostapd_cfg "epcs_he_mu_edca_ac_vo_timer=255" "$N"
 
-			append hostapd_cfg "epcs_wmm_ac_vo_cwmin=2" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vo_cwmax=3" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vo_aifs=2" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vo_txop_limit=102" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vi_cwmin=3" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vi_cwmax=4" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vi_aifs=2" "$N"
-			append hostapd_cfg "epcs_wmm_ac_vi_txop_limit=188" "$N"
-			append hostapd_cfg "epcs_wmm_ac_be_cwmin=4" "$N"
-			append hostapd_cfg "epcs_wmm_ac_be_cwmax=9" "$N"
-			append hostapd_cfg "epcs_wmm_ac_be_aifs=3" "$N"
-			append hostapd_cfg "epcs_wmm_ac_be_txop_limit=0" "$N"
-			append hostapd_cfg "epcs_wmm_ac_bk_cwmin=4" "$N"
-			append hostapd_cfg "epcs_wmm_ac_bk_cwmax=9" "$N"
-			append hostapd_cfg "epcs_wmm_ac_bk_aifs=7" "$N"
-			append hostapd_cfg "epcs_wmm_ac_bk_txop_limit=0" "$N"
+			for param in $epcs_params; do
+				eval "value=\$$param"
+				if [ -n "$value" ]; then
+					append hostapd_cfg "$param=$value" "$N"
+				else
+					append hostapd_cfg "$param=0" "$N"
+				fi
+			done
 		fi
 	fi
 

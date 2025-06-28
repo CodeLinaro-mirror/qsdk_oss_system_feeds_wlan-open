@@ -118,6 +118,17 @@ mac80211_update_mld_iface_config() {
 	fi
 	if [ -n "$mld_enable_epcs" ];then
 		uci_set wireless "$vif_name" enable_epcs "$mld_enable_epcs"
+
+		if [ "$mld_enable_epcs" = "1" ]; then
+			for param in $epcs_params; do
+				config_get "mld_$param" "$mld_name" "$param"
+				mld_value_var="mld_$param"
+				eval "value=\$$mld_value_var"
+				if [ -n "$value" ]; then
+					uci_set wireless "$vif_name" "$param" "$value"
+				fi
+			done
+		fi
 	fi
 	uci commit wireless
 }
