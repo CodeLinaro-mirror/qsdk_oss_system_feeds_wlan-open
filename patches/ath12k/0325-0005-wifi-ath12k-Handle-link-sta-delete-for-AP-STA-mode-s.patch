@@ -30,7 +30,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 
 --- a/drivers/net/wireless/ath/ath12k/debugfs.c
 +++ b/drivers/net/wireless/ath/ath12k/debugfs.c
-@@ -4380,7 +4380,15 @@ ap_and_sta_debugfs_file:
+@@ -4391,7 +4391,15 @@ ap_and_sta_debugfs_file:
  
  void ath12k_debugfs_remove_interface(struct ath12k_link_vif *arvif)
  {
@@ -51,12 +51,12 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  }
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -8763,10 +8763,11 @@ int ath12k_mac_op_change_sta_links(struc
+@@ -8767,10 +8767,11 @@ int ath12k_mac_op_change_sta_links(struc
  	struct ath12k_sta *ahsta = ath12k_sta_to_ahsta(sta);
  	struct ath12k_hw *ah = hw->priv;
  	struct ath12k_link_vif *arvif;
 -	struct ath12k_link_sta *arsta;
-+	struct ath12k_link_sta *arsta, *tmp_arsta;
++	struct ath12k_link_sta *arsta, *tmp_arsta, *def_arsta;
  	unsigned long valid_links;
  	struct ath12k *ar;
 -	u8 link_id;
@@ -65,7 +65,7 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
  	int ret;
  
  	lockdep_assert_wiphy(hw->wiphy);
-@@ -8774,64 +8775,138 @@ int ath12k_mac_op_change_sta_links(struc
+@@ -8778,64 +8779,142 @@ int ath12k_mac_op_change_sta_links(struc
  	if (!sta->valid_links)
  		return -EINVAL;
  
@@ -242,18 +242,22 @@ Signed-off-by: Manish Dharanenthiran <quic_mdharane@quicinc.com>
 +		    hweight32(ahsta->links_map) >= 1) {
 +			tmp_link_id = ffs(ahsta->links_map) - 1;
 +
-+			tmp_arsta = ahsta->link[tmp_link_id];
++			tmp_arsta = wiphy_dereference(ah->hw->wiphy, ahsta->link[tmp_link_id]);
 +			if (tmp_arsta) {
++				wiphy_work_cancel(ar->ah->hw->wiphy, &tmp_arsta->update_wk);
 +				memcpy(&ahsta->deflink, tmp_arsta,
 +				       sizeof(*tmp_arsta));
++				def_arsta = &ahsta->deflink;
++				wiphy_work_init(&def_arsta->update_wk, ath12k_sta_rc_update_wk);
 +				ahsta->assoc_link_id = tmp_arsta->link_id;
-+				ahsta->link[tmp_link_id] = &ahsta->deflink;
++				rcu_assign_pointer(ahsta->link[tmp_link_id], &ahsta->deflink);
++				synchronize_rcu();
 +				kfree(tmp_arsta);
 +			}
  		}
  	}
  
-@@ -8839,6 +8914,21 @@ int ath12k_mac_op_change_sta_links(struc
+@@ -8843,6 +8922,21 @@ int ath12k_mac_op_change_sta_links(struc
  }
  EXPORT_SYMBOL(ath12k_mac_op_change_sta_links);
  
