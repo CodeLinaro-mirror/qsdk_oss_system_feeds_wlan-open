@@ -101,6 +101,7 @@ mac80211_update_mld_iface_config() {
 	config_get mld_sae "$mld_name" sae_pwe
 	config_get mld_vp "$mld_name" ppe_vp
 	config_get mld_enable_epcs "$mld_name" enable_epcs
+	config_get mld_ttlm_enable "$mld_name" ttlm_enable
 	if [ -n "$mld_ssid" ]; then
 		uci_set wireless "$vif_name" ssid "$mld_ssid"
 	fi
@@ -129,6 +130,9 @@ mac80211_update_mld_iface_config() {
 				fi
 			done
 		fi
+	fi
+	if [ -n "$mld_ttlm_enable" ];then
+		uci_set wireless "$vif_name" ttlm_enable "$mld_ttlm_enable"
 	fi
 	uci commit wireless
 }

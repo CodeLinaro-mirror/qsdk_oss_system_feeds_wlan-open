@@ -100,6 +100,7 @@ epcs_params="epcs_he_mu_edca_ac_be_aifsn epcs_he_mu_edca_ac_be_aci epcs_he_mu_ed
 	     epcs_wmm_ac_bk_cwmax epcs_wmm_ac_bk_aifs epcs_wmm_ac_bk_txop_limit epcs_wmm_ac_vi_cwmin
 	     epcs_wmm_ac_vi_cwmax epcs_wmm_ac_vi_aifs epcs_wmm_ac_vi_txop_limit epcs_wmm_ac_vo_cwmin
 	     epcs_wmm_ac_vo_cwmax epcs_wmm_ac_vo_aifs epcs_wmm_ac_vo_txop_limit"
+ttlm_enable=
 
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
@@ -194,6 +195,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_boolean enable_epcs
+	config_add_boolean ttlm_enable
 
 	#epcs
 	config_add_boolean enable_epcs
@@ -864,7 +866,7 @@ mac80211_hostapd_setup_bss() {
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs
+	json_get_vars enable_epcs ttlm_enable
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -931,6 +933,9 @@ mac80211_hostapd_setup_bss() {
 					append hostapd_cfg "$param=0" "$N"
 				fi
 			done
+		fi
+		if [ -n "$ttlm_enable" ]; then
+			append hostapd_cfg "ttlm_enable=$ttlm_enable" "$N"
 		fi
 	fi
 
