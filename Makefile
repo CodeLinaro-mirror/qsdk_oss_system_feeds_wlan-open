@@ -130,6 +130,9 @@ define KernelPackage/cfg80211/install
 	$(INSTALL_DATA) ./files/lib/wifi/telemetry/config.json $(1)/lib/wifi/sawf/telemetry/
 	$(INSTALL_DATA) ./files/lib/wifi/telemetry/sla.json $(1)/lib/wifi/sawf/telemetry/
 	$(INSTALL_DATA) ./files/lib/wifi/telemetry/sla_detect.json $(1)/lib/wifi/sawf/telemetry/
+ifeq ($(CONFIG_KERNEL_FTRACE),y)
+	$(INSTALL_DATA) ./files/lib/ftrace_enable_events.sh $(1)/lib
+endif
 ifneq ($(wildcard ./files/lib/wifi/pre_post_wifi_operations.sh),)
 	$(INSTALL_DATA) ./files/lib/wifi/pre_post_wifi_operations.sh $(1)/lib/wifi/
 endif

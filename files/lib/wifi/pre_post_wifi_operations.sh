@@ -962,6 +962,9 @@ pre_wifi_updown() {
 }
 
 post_wifi_updown() {
+	if [ -f "/lib/ftrace_enable_events.sh" ]; then
+                sh /lib/ftrace_enable_events.sh
+        fi
 	:
 }
 
