@@ -26,8 +26,6 @@ Signed-off-by: Balamurugan Ramar <quic_bramar@quicinc.com>
  net/wireless/wext-compat.c |  2 +-
  11 files changed, 41 insertions(+), 24 deletions(-)
 
-diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
-index a1bd9d5..7c0b12c 100644
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
 @@ -4877,7 +4877,8 @@ struct cfg80211_ops {
@@ -40,11 +38,9 @@ index a1bd9d5..7c0b12c 100644
  	int	(*get_tx_power)(struct wiphy *wiphy, struct wireless_dev *wdev,
  				unsigned int link_id, int *dbm);
  
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index 2d184c0..a9ed96d 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -3203,7 +3203,8 @@ static int ieee80211_set_wiphy_params(struct wiphy *wiphy, u8 radio_id, u32 chan
+@@ -3203,7 +3203,8 @@ static int ieee80211_set_wiphy_params(st
  
  static int ieee80211_set_tx_power(struct wiphy *wiphy,
  				  struct wireless_dev *wdev, u8 radio_id,
@@ -54,7 +50,7 @@ index 2d184c0..a9ed96d 100644
  {
  	struct ieee80211_local *local = wiphy_priv(wiphy);
  	struct ieee80211_sub_if_data *sdata;
-@@ -3213,6 +3214,7 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
+@@ -3213,6 +3214,7 @@ static int ieee80211_set_tx_power(struct
  	bool has_monitor = false;
  	int user_power_level;
  	int old_power = local->user_power_level;
@@ -62,7 +58,7 @@ index 2d184c0..a9ed96d 100644
  
  	lockdep_assert_wiphy(local->hw.wiphy);
  
-@@ -3234,6 +3236,10 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
+@@ -3234,6 +3236,10 @@ static int ieee80211_set_tx_power(struct
  	if (wdev) {
  		sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
  
@@ -73,25 +69,115 @@ index 2d184c0..a9ed96d 100644
  		if (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
  		    !ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR)) {
  			if (!ieee80211_hw_check(&local->hw, WANT_MONITOR_VIF))
-@@ -3261,7 +3267,7 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
- 				link->conf->txpower_type = txp_type;
- 			}
+@@ -3245,24 +3251,20 @@ static int ieee80211_set_tx_power(struct
+ 				return -EOPNOTSUPP;
+ 		}
+ 
+-		for (int link_id = 0;
+-		     link_id < ARRAY_SIZE(sdata->link);
+-		     link_id++) {
+-			struct ieee80211_link_data *link =
+-				wiphy_dereference(wiphy, sdata->link[link_id]);
+-
+-			if (!link)
+-				continue;
++		struct ieee80211_link_data *link =
++			wiphy_dereference(wiphy, sdata->link[link_id]);
+ 
+-			link->user_power_level = user_power_level;
++		if (!link)
++			return -ENOLINK;
+ 
+-			if (txp_type != link->conf->txpower_type) {
+-				update_txp_type = true;
+-				link->conf->txpower_type = txp_type;
+-			}
++		link->user_power_level = user_power_level;
  
 -			ieee80211_recalc_txpower(link, update_txp_type);
-+			ieee80211_recalc_txpower(link, update_txp_type, link_id);
++		if (txp_type != link->conf->txpower_type) {
++			update_txp_type = true;
++			link->conf->txpower_type = txp_type;
  		}
++
++		ieee80211_recalc_txpower(link, update_txp_type, link_id);
  		return 0;
  	}
-@@ -3316,7 +3322,7 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
- 					continue;
- 			}
+ 
+@@ -3275,49 +3277,41 @@ static int ieee80211_set_tx_power(struct
+ 			continue;
+ 		}
+ 
+-		for (int link_id = 0;
+-		     link_id < ARRAY_SIZE(sdata->link);
+-		     link_id++) {
+-			struct ieee80211_link_data *link =
+-				wiphy_dereference(wiphy, sdata->link[link_id]);
+-
+-			if (!link)
+-				continue;
++		struct ieee80211_link_data *link =
++			wiphy_dereference(wiphy, sdata->link[link_id]);
+ 
+-			if (radio_id < wiphy->n_radio) {
+-				conf = wiphy_dereference(wiphy, link->conf->chanctx_conf);
+-				if (!conf || conf->radio_idx != radio_id)
+-					continue;
+-			}
++		if (!link)
++			return -ENOLINK;
+ 
+-			link->user_power_level = local->user_power_level;
+-			if (txp_type != link->conf->txpower_type)
+-				update_txp_type = true;
+-			link->conf->txpower_type = txp_type;
++		if (radio_id < wiphy->n_radio) {
++			conf = wiphy_dereference(wiphy, link->conf->chanctx_conf);
++			if (!conf || conf->radio_idx != radio_id)
++				continue;
+ 		}
++
++		link->user_power_level = local->user_power_level;
++		if (txp_type != link->conf->txpower_type)
++			update_txp_type = true;
++		link->conf->txpower_type = txp_type;
+ 	}
+ 	list_for_each_entry(sdata, &local->interfaces, list) {
+ 		if (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
+ 		    !ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR))
+ 			continue;
+ 
+-		for (int link_id = 0;
+-		     link_id < ARRAY_SIZE(sdata->link);
+-		     link_id++) {
+-			struct ieee80211_link_data *link =
+-				wiphy_dereference(wiphy, sdata->link[link_id]);
++		struct ieee80211_link_data *link =
++			wiphy_dereference(wiphy, sdata->link[link_id]);
+ 
+-			if (!link)
+-				continue;
+-
+-			if (radio_id < wiphy->n_radio) {
+-				conf = wiphy_dereference(wiphy, link->conf->chanctx_conf);
+-				if (!conf || conf->radio_idx != radio_id)
+-					continue;
+-			}
++		if (!link)
++			return -ENOLINK;
  
 -			ieee80211_recalc_txpower(link, update_txp_type);
-+			ieee80211_recalc_txpower(link, update_txp_type, link_id);
++		if (radio_id < wiphy->n_radio) {
++			conf = wiphy_dereference(wiphy, link->conf->chanctx_conf);
++			if (!conf || conf->radio_idx != radio_id)
++				continue;
  		}
++
++		ieee80211_recalc_txpower(link, update_txp_type, link_id);
  	}
  
-@@ -3330,7 +3336,7 @@ static int ieee80211_set_tx_power(struct wiphy *wiphy,
+ 	if (has_monitor) {
+@@ -3330,7 +3324,7 @@ static int ieee80211_set_tx_power(struct
  			sdata->vif.bss_conf.txpower_type = txp_type;
  
  			ieee80211_recalc_txpower(&sdata->deflink,
@@ -100,11 +186,9 @@ index 2d184c0..a9ed96d 100644
  		}
  	}
  
-diff --git a/net/mac80211/chan.c b/net/mac80211/chan.c
-index 9ea04eb..3310f68 100644
 --- a/net/mac80211/chan.c
 +++ b/net/mac80211/chan.c
-@@ -942,7 +942,7 @@ static int ieee80211_assign_link_chanctx(struct ieee80211_link_data *link,
+@@ -940,7 +940,7 @@ static int ieee80211_assign_link_chanctx
  	}
  
  	if (new_ctx && ieee80211_chanctx_num_assigned(local, new_ctx) > 0) {
@@ -113,7 +197,7 @@ index 9ea04eb..3310f68 100644
  		ieee80211_recalc_chanctx_min_def(local, new_ctx, NULL, false);
  	}
  
-@@ -1768,7 +1768,7 @@ static int ieee80211_vif_use_reserved_switch(struct ieee80211_local *local)
+@@ -1766,7 +1766,7 @@ static int ieee80211_vif_use_reserved_sw
  								  link,
  								  changed);
  
@@ -122,11 +206,9 @@ index 9ea04eb..3310f68 100644
  		}
  
  		ieee80211_recalc_chanctx_chantype(local, ctx);
-diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
-index 369109c..7de5d96 100644
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -2085,9 +2085,10 @@ void ieee80211_sdata_stop(struct ieee80211_sub_if_data *sdata);
+@@ -2093,9 +2093,10 @@ void ieee80211_sdata_stop(struct ieee802
  int ieee80211_add_virtual_monitor(struct ieee80211_local *local);
  void ieee80211_del_virtual_monitor(struct ieee80211_local *local);
  
@@ -139,11 +221,9 @@ index 369109c..7de5d96 100644
  void ieee80211_recalc_offload(struct ieee80211_local *local);
  
  static inline bool ieee80211_sdata_running(struct ieee80211_sub_if_data *sdata)
-diff --git a/net/mac80211/iface.c b/net/mac80211/iface.c
-index 59ed12a..d9e3920 100644
 --- a/net/mac80211/iface.c
 +++ b/net/mac80211/iface.c
-@@ -50,7 +50,8 @@ MODULE_PARM_DESC(nss_redirect, "module param to enable NSS Redirect; 1-enable, 0
+@@ -50,7 +50,8 @@ MODULE_PARM_DESC(nss_redirect, "module p
  
  static void ieee80211_iface_work(struct wiphy *wiphy, struct wiphy_work *work);
  
@@ -153,7 +233,7 @@ index 59ed12a..d9e3920 100644
  {
  	struct ieee80211_chanctx_conf *chanctx_conf;
  	int power;
-@@ -80,9 +81,9 @@ bool __ieee80211_recalc_txpower(struct ieee80211_link_data *link)
+@@ -80,9 +81,9 @@ bool __ieee80211_recalc_txpower(struct i
  }
  
  void ieee80211_recalc_txpower(struct ieee80211_link_data *link,
@@ -165,11 +245,9 @@ index 59ed12a..d9e3920 100644
  	    (update_bss && ieee80211_sdata_running(link->sdata)))
  		ieee80211_link_info_change_notify(link->sdata, link,
  						  BSS_CHANGED_TXPOWER);
-diff --git a/net/mac80211/link.c b/net/mac80211/link.c
-index a3192e2..a0a6c1f 100644
 --- a/net/mac80211/link.c
 +++ b/net/mac80211/link.c
-@@ -79,6 +79,7 @@ void ieee80211_link_init(struct ieee80211_sub_if_data *sdata,
+@@ -88,6 +88,7 @@ void ieee80211_link_init(struct ieee8021
  			 struct ieee80211_link_data *link,
  			 struct ieee80211_bss_conf *link_conf)
  {
@@ -177,7 +255,7 @@ index a3192e2..a0a6c1f 100644
  	bool deflink = link_id < 0;
  
  	if (link_id < 0)
-@@ -123,6 +124,9 @@ skip_vlan_conf:
+@@ -127,6 +128,9 @@ void ieee80211_link_init(struct ieee8021
  	wiphy_delayed_work_init(&link->dfs_cac_timer_work,
  				ieee80211_dfs_cac_timer_work);
  
@@ -187,11 +265,9 @@ index a3192e2..a0a6c1f 100644
  	if (!deflink) {
  		switch (sdata->vif.type) {
  		case NL80211_IFTYPE_AP:
-diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
-index 7e90033..d18da95 100644
 --- a/net/mac80211/mlme.c
 +++ b/net/mac80211/mlme.c
-@@ -2997,7 +2997,7 @@ static u64 ieee80211_handle_pwr_constr(struct ieee80211_link_data *link,
+@@ -2997,7 +2997,7 @@ static u64 ieee80211_handle_pwr_constr(s
  	}
  
  	link->ap_power_level = new_ap_level;
@@ -200,11 +276,9 @@ index 7e90033..d18da95 100644
  		return BSS_CHANGED_TXPOWER;
  	return 0;
  }
-diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
-index 736ced8..ef947d5 100644
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -3936,7 +3936,7 @@ static int nl80211_set_wiphy(struct sk_buff *skb, struct genl_info *info)
+@@ -3936,7 +3936,7 @@ static int nl80211_set_wiphy(struct sk_b
  				goto out;
  			}
  
@@ -213,7 +287,7 @@ index 736ced8..ef947d5 100644
  			if (result) {
  				goto out;
  			}
-@@ -3944,14 +3944,14 @@ static int nl80211_set_wiphy(struct sk_buff *skb, struct genl_info *info)
+@@ -3944,14 +3944,14 @@ static int nl80211_set_wiphy(struct sk_b
  			if (!info->attrs[NL80211_ATTR_MLO_LINK_ID]) {
  				if (txp_wdev) {
  					result = rdev_set_tx_power(rdev, txp_wdev, radio_id,
@@ -230,11 +304,9 @@ index 736ced8..ef947d5 100644
  
  						if (result)
  							goto out;
-diff --git a/net/wireless/rdev-ops.h b/net/wireless/rdev-ops.h
-index 1d5ee7e..4131642 100644
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -590,11 +590,12 @@ rdev_set_wiphy_params(struct cfg80211_registered_device *rdev, u8 radio_id, u32
+@@ -590,11 +590,12 @@ rdev_set_wiphy_params(struct cfg80211_re
  
  static inline int rdev_set_tx_power(struct cfg80211_registered_device *rdev,
  				    struct wireless_dev *wdev, u8 radio_id,
@@ -250,11 +322,9 @@ index 1d5ee7e..4131642 100644
  	trace_rdev_return_int(&rdev->wiphy, ret);
  	return ret;
  }
-diff --git a/net/wireless/trace.h b/net/wireless/trace.h
-index e381d02..9d7b29a 100644
 --- a/net/wireless/trace.h
 +++ b/net/wireless/trace.h
-@@ -1723,14 +1723,16 @@ DEFINE_EVENT(wiphy_wdev_link_evt, rdev_get_tx_power,
+@@ -1723,14 +1723,16 @@ DEFINE_EVENT(wiphy_wdev_link_evt, rdev_g
  
  TRACE_EVENT(rdev_set_tx_power,
  	TP_PROTO(struct wiphy *wiphy, struct wireless_dev *wdev, u8 radio_id,
@@ -287,11 +357,9 @@ index e381d02..9d7b29a 100644
  );
  
  TRACE_EVENT(rdev_return_int_int,
-diff --git a/net/wireless/wext-compat.c b/net/wireless/wext-compat.c
-index 3f1112f..59fcfea 100644
 --- a/net/wireless/wext-compat.c
 +++ b/net/wireless/wext-compat.c
-@@ -893,7 +893,7 @@ static int cfg80211_wext_siwtxpower(struct net_device *dev,
+@@ -893,7 +893,7 @@ static int cfg80211_wext_siwtxpower(stru
  	guard(wiphy)(&rdev->wiphy);
  
  	return rdev_set_tx_power(rdev, wdev, NL80211_WIPHY_RADIO_ID_MAX, type,
@@ -300,6 +368,3 @@ index 3f1112f..59fcfea 100644
  }
  
  static int cfg80211_wext_giwtxpower(struct net_device *dev,
--- 
-2.34.1
-
