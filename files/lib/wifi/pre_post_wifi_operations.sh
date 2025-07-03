@@ -1005,9 +1005,7 @@ pre_mac80211() {
 			if [ -f "$MLD_VAP_DETAILS" ]; then
 				rm -rf $MLD_VAP_DETAILS
 			fi
-			sawf_supp="/sys/module/ath12k/parameters/sawf"
-			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ] && \
-			   [ -f "/tmp/svc_configured" ]; then
+			if [ -f "/tmp/svc_configured" ]; then
 				configure_service_class 0
 				rm /tmp/svc_configured
 			fi
@@ -1038,13 +1036,9 @@ post_mac80211() {
 
 	case "${action}" in
 		enable)
-			sawf_supp="/sys/module/ath12k/parameters/sawf"
-			if [ -f $sawf_supp ] && [ $(cat $sawf_supp) == "Y" ]; then
+			if [ ! -f "/tmp/svc_configured" ]; then
 				configure_service_class 1
 				touch /tmp/svc_configured
-				configure_telemetry_sla_samples
-				configure_telemetry_sla_thersholds
-				configure_telemetry_sla_detect
 			fi
 			set_primary_link
 		;;
