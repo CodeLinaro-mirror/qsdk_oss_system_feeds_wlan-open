@@ -701,7 +701,11 @@ hostapd_set_bss_options() {
 		;;
 		ft-sae-ext-key|sae-ext-key)
 			set_default ieee80211w 2
-			set_default sae_pwe 2
+			if [ "$band" = "6g" ]; then
+				set_default sae_pwe 1
+			else
+				set_default sae_pwe 2
+			fi
 		;;
 	esac
 
