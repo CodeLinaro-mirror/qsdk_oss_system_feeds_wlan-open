@@ -35,7 +35,12 @@ PKG_BUILD_PARALLEL:=1
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
 PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
 PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
-EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
+
+ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
+else
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
+endif
 
 PKG_DRIVERS = \
 	mac80211-hwsim
@@ -95,7 +100,7 @@ PKG_CONFIG_DEPENDS += \
 define KernelPackage/cfg80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=cfg80211 - wireless configuration API
-  DEPENDS+= +iw-full +iwinfo +wifi-scripts +wireless-regdb +USE_RFKILL:kmod-rfkill
+  DEPENDS+= +iw-full +iwinfo +!USE_PRPLMESH_WHM:wifi-scripts +wireless-regdb +USE_RFKILL:kmod-rfkill
   ABI_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
