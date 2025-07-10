@@ -1068,6 +1068,9 @@ post_mac80211() {
 			if [ ! -f "/tmp/svc_configured" ]; then
 				configure_service_class 1
 				touch /tmp/svc_configured
+				configure_telemetry_sla_samples
+				configure_telemetry_sla_thersholds
+				configure_telemetry_sla_detect
 			fi
 			set_primary_link
 		;;
