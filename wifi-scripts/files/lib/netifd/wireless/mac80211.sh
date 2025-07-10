@@ -205,6 +205,8 @@ drv_mac80211_init_iface_config() {
 		config_add_int "$param"
 	done
 
+	config_add_int twt_responder
+
 	# mesh
 	config_add_string mesh_id
 	config_add_int $MP_CONFIG_INT
@@ -879,6 +881,8 @@ mac80211_hostapd_setup_bss() {
 		json_get_vars "$param"
 	done
 
+	json_get_vars twt_responder
+
 	set_default wds 0
 	set_default start_disabled 0
 
@@ -947,6 +951,10 @@ mac80211_hostapd_setup_bss() {
 		if [ "$ml_max_rec_links" -gt 0 ] && [ "$ml_max_rec_links" -le 3 ]; then
 			append hostapd_cfg "ml_max_rec_links=$ml_max_rec_links" "$N"
 		fi
+	fi
+
+	if [ -n "$twt_responder" ]; then
+		append hostapd_cfg "twt_responder_caps=$twt_responder" "$N"
 	fi
 
 	case "$ppe_vp" in
