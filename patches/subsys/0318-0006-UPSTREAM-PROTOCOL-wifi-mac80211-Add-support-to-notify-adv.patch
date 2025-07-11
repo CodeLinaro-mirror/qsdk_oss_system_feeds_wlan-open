@@ -27,11 +27,9 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  net/mac80211/link.c        |  2 ++
  4 files changed, 80 insertions(+)
 
-diff --git a/include/net/mac80211.h b/include/net/mac80211.h
-index f9ff264..80020cc 100644
 --- a/include/net/mac80211.h
 +++ b/include/net/mac80211.h
-@@ -8366,4 +8366,20 @@ int ieee80211_6ghz_power_mode_change(struct wiphy *wiphy,
+@@ -8408,4 +8408,20 @@ int ieee80211_6ghz_power_mode_change(str
  void ieee80211_link_removal_count_update(struct ieee80211_vif *vif,
  					 unsigned int link_id, u16 count);
  
@@ -52,11 +50,9 @@ index f9ff264..80020cc 100644
 +				     unsigned int link_id);
 +
  #endif /* MAC80211_H */
-diff --git a/net/mac80211/cfg.c b/net/mac80211/cfg.c
-index a3382f1..fce6ed7 100644
 --- a/net/mac80211/cfg.c
 +++ b/net/mac80211/cfg.c
-@@ -209,6 +209,23 @@ static int ieee80211_set_ap_mbssid_options(struct ieee80211_sub_if_data *sdata,
+@@ -209,6 +209,23 @@ static int ieee80211_set_ap_mbssid_optio
  	return 0;
  }
  
@@ -65,22 +61,22 @@ index a3382f1..fce6ed7 100644
 +{
 +	struct ieee80211_link_data *link =
 +		container_of(work, struct ieee80211_link_data,
-+			     u.ap.advertised_ttlm_evt_notify_work);
++			     advertised_ttlm_evt_notify_work);
 +	struct ieee80211_sub_if_data *sdata = link->sdata;
 +
 +	if (!ieee80211_sdata_running(sdata))
 +		return;
 +
 +	cfg80211_adv_ttlm_evt_notify(sdata->dev, GFP_KERNEL,
-+				     link->u.ap.advertised_ttlm_status,
-+				     link->u.ap.advertised_ttlm_mst_tsf,
++				     link->advertised_ttlm_status,
++				     link->advertised_ttlm_mst_tsf,
 +				     link->link_id);
 +}
 +
  static struct wireless_dev *ieee80211_add_iface(struct wiphy *wiphy,
  						const char *name,
  						unsigned char name_assign_type,
-@@ -5652,6 +5669,43 @@ ieee80211_obss_color_collision_notify(struct ieee80211_vif *vif,
+@@ -5698,6 +5715,43 @@ ieee80211_obss_color_collision_notify(st
  }
  EXPORT_SYMBOL_GPL(ieee80211_obss_color_collision_notify);
  
@@ -111,11 +107,11 @@ index a3382f1..fce6ed7 100644
 +		return;
 +	}
 +
-+	link->u.ap.advertised_ttlm_status = status;
-+	link->u.ap.advertised_ttlm_mst_tsf = mst_tsf;
++	link->advertised_ttlm_status = status;
++	link->advertised_ttlm_mst_tsf = mst_tsf;
 +
 +	wiphy_work_queue(sdata->local->hw.wiphy,
-+			 &link->u.ap.advertised_ttlm_evt_notify_work);
++			 &link->advertised_ttlm_evt_notify_work);
 +
 +	rcu_read_unlock();
 +}
@@ -124,23 +120,20 @@ index a3382f1..fce6ed7 100644
  static int
  ieee80211_color_change(struct wiphy *wiphy, struct net_device *dev,
  		       struct cfg80211_color_change_settings *params,
-diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
-index 14deaff..a126380 100644
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
-@@ -1061,6 +1061,11 @@ struct ieee80211_link_data_ap {
- 	/* to be used after channel switch. */
- 	struct cfg80211_beacon_data *next_beacon;
- 	bool after_beacon_cu;
-+
+@@ -1119,6 +1119,10 @@ struct ieee80211_link_data {
+ #ifdef CPTCFG_MAC80211_DEBUGFS
+ 	struct dentry *debugfs_dir;
+ #endif
 +	/* advertised ttlm event info */
 +	u16 advertised_ttlm_mst_tsf;
 +	enum advertised_ttlm_status_type advertised_ttlm_status;
 +	struct wiphy_work advertised_ttlm_evt_notify_work;
  };
  
- struct ieee80211_link_data {
-@@ -2127,6 +2132,9 @@ void ieee80211_color_change_finalize_work(struct wiphy *wiphy,
+ struct ieee80211_sub_if_data {
+@@ -2136,6 +2140,9 @@ void ieee80211_color_change_finalize_wor
  void ieee80211_color_collision_detection_work(struct wiphy *wiphy,
  					      struct wiphy_work *work);
  
@@ -150,19 +143,23 @@ index 14deaff..a126380 100644
  /* interface handling */
  #define MAC80211_SUPPORTED_FEATURES_TX	(NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM | \
  					 NETIF_F_HW_CSUM | NETIF_F_SG | \
-diff --git a/net/mac80211/link.c b/net/mac80211/link.c
-index c24233c..f1cb54d 100644
 --- a/net/mac80211/link.c
 +++ b/net/mac80211/link.c
-@@ -141,6 +141,8 @@ skip_vlan_conf:
+@@ -127,6 +127,8 @@ void ieee80211_link_init(struct ieee8021
  			ieee80211_color_change_finalize_work);
  	wiphy_delayed_work_init(&link->color_collision_detect_work,
  				ieee80211_color_collision_detection_work);
-+	wiphy_work_init(&link->u.ap.advertised_ttlm_evt_notify_work,
++	wiphy_work_init(&link->advertised_ttlm_evt_notify_work,
 +			ieee80211_advertised_ttlm_evt_notify_work);
  	INIT_LIST_HEAD(&link->assigned_chanctx_list);
  	INIT_LIST_HEAD(&link->reserved_chanctx_list);
  	wiphy_work_init(&link->dfs_cac_timer_work,
--- 
-2.34.1
-
+@@ -162,6 +164,8 @@ void ieee80211_link_stop(struct ieee8021
+ 	if (link->sdata->vif.type == NL80211_IFTYPE_STATION)
+ 		ieee80211_mgd_stop_link(link);
+ 
++	wiphy_work_cancel(link->sdata->local->hw.wiphy,
++			  &link->advertised_ttlm_evt_notify_work);
+ 	wiphy_delayed_work_cancel(link->sdata->local->hw.wiphy,
+ 				  &link->color_collision_detect_work);
+ 	wiphy_work_cancel(link->sdata->local->hw.wiphy,
