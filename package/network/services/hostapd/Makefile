@@ -67,6 +67,11 @@ ifeq ($(LOCAL_VARIANT),mesh)
   CONFIG_VARIANT:=full
 endif
 
+FILE_DIR_HOSTAPD:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
+ifneq ("$(wildcard $(FILE_DIR_HOSTAPD)/wlan-hostapd.mk)","")
+   include $(FILE_DIR_HOSTAPD)/wlan-hostapd.mk
+endif
+
 include $(INCLUDE_DIR)/package.mk
 
 STAMP_CONFIGURED:=$(STAMP_CONFIGURED)_$(CONFIG_WPA_MSG_MIN_PRIORITY)
