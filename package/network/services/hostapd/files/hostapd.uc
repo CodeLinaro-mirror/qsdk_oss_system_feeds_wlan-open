@@ -1141,4 +1141,96 @@ return {
 			hostapd.data.auth_obj.notify("sta_connected", msg, data_cb, null, null, 1000);
 		return ret;
 	},
+	config_nft_table: function(table, add) {
+                let add_del = {};
+                let ret = {};
+                if (add)
+                        add_del = "add";
+                else
+                        add_del = "delete";
+
+                ret = system(`nft ${add_del} table netdev ${table}`);
+	},
+	config_nft_chain: function(table, chain, iface, add) {
+                let add_del = {};
+                let hook = {};
+                let ret = {};
+                if (add) {
+                        add_del = "add";
+                } else {
+                        add_del = "delete";
+                }
+
+                hook = "{ type filter hook egress device " + iface + " priority 0\\; }";
+                ret = system(`nft ${add_del} chain netdev ${table} ${chain} ${hook}`);
+	},
+	config_nft_rule: function(table, chain, iface, add,
+				  dst_mac_addr, proto,
+				  v6_src_addr, v6_dst_addr, v4_src_addr, v4_dst_addr,
+				  sport, dport, mark, esp_spi, dscp) {
+		let cmd = {};
+		if (add) {
+                let rule = "nft add rule netdev" + " " + table + " " + chain;
+
+		if (dst_mac_addr)
+			rule = rule + " ether daddr " + dst_mac_addr;
+
+                if (v6_src_addr)
+                        rule = rule + " ip6 saddr " + v6_src_addr;
+
+                if (v6_dst_addr)
+                        rule = rule + " ip6 daddr " + v6_dst_addr;
+
+                if (v4_src_addr)
+                        rule = rule + " ip saddr " + v4_src_addr;
+
+                if (v4_dst_addr)
+                        rule = rule + " ip daddr " + v4_dst_addr;
+
+		if (proto == 6)
+			rule = rule + " tcp ";
+
+		if (proto == 17)
+			rule = rule + " udp ";
+
+                if (sport)
+                        rule = rule + " sport " + sport;
+
+                if (dport)
+                        rule = rule + " dport " + dport;
+
+                rule = rule + " meta mark set " + mark + " counter";
+
+                hostapd.printf(`${rule}`);
+		system(`${rule}`);
+
+		} else {
+			let cmd = `nft -a list chain  netdev wifi_qos_table ${chain} > /tmp/nft_info`;
+			system(`${cmd}`);
+
+			if (!mark || !dst_mac_addr) {
+				hostapd.printf(`ERROR: NFT Delete Rule, mandatory info not provided `);
+			} else {
+				let mark_hex = sprintf("%x", mark);
+				let f = open("/tmp/nft_info", "r");
+                                let line;
+                                while ((line = rtrim(f.read("line"), "\n")) != null) {
+					let rule = "nft delete rule netdev" + " " + table + " " + chain;
+					let handle;
+                                        if (match(line, regexp(mark_hex)) && match(line, regexp(dst_mac_addr))) {
+						handle = split(line, "#")[1];
+						rule = rule + handle;
+						hostapd.printf(`${rule}`);
+						system(`${rule}`);
+                                        }
+                                }
+                                f.close();
+
+			}
+
+			cmd = "rm /tmp/nft_info";
+			system(`${cmd}`);
+
+		}
+	},
 };
