@@ -197,6 +197,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_boolean enable_epcs
+	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
 
 	#epcs
@@ -873,7 +874,7 @@ mac80211_hostapd_setup_bss() {
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -924,6 +925,10 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "$fils_cfg" "$N"
 		fi
         fi
+
+	if [ -n "$enable_scs" ]; then
+		append hostapd_cfg "enable_scs=$enable_scs" "$N"
+	fi
 
 	if [[ "$htmode" == "EHT"* ]]; then
 		append hostapd_cfg "mld_ap=1" "$N"
