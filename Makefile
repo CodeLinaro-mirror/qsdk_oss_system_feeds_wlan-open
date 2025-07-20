@@ -120,6 +120,9 @@ define Package/ath-legacy-wifi-scripts/install
 	$(INSTALL_DIR) $(1)/lib/wifi/
 	$(INSTALL_DIR) $(1)/lib/netifd/
 	$(INSTALL_DIR) $(1)/lib/netifd/wireless/
+ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
+	sed -i 's/OpenWrt/prplOS/g' ./files/lib/wifi/mac80211.sh
+endif
 	$(INSTALL_BIN) ./files/lib/wifi/mac80211.sh $(1)/lib/wifi/mac80211.sh
 	$(INSTALL_BIN) ./files/lib/netifd-wlan/wireless/mac80211.sh $(1)/lib/netifd/wireless/
 	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/hostapd.sh $(1)/lib/netifd/hostapd.sh
