@@ -137,6 +137,31 @@ mac80211_update_mld_iface_config() {
 	uci commit wireless
 }
 
+mac80211_update_qos_configs()
+{
+	local iflist
+	config_load wireless
+	mac80211_update_qos_cfg() {
+		append iflist "$1"
+	}
+	config_foreach mac80211_update_qos_cfg wifi-iface
+	for name in $iflist
+	do
+		config_get device "$name" device
+		config_get ht_mode "$device" htmode
+		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]] || [[ "$ht_mode" == "HE"* ]]); then
+			config_get enable_scs "$name" enable_scs
+			if [ -n "$enable_scs" ]; then
+				# SCS is configured, use the config
+				uci_set wireless "$name" enable_scs "$enable_scs"
+			else
+				# SCS is not configured, enable by default
+				uci_set wireless "$name" enable_scs "1"
+			fi
+		fi
+	done
+}
+
 mac80211_update_mld_configs() {
 	local iflist
 	config_load wireless
@@ -973,6 +998,7 @@ configure_telemetry_sla_samples() {
 
 pre_wifi_updown() {
 	mac80211_update_mld_configs
+	mac80211_update_qos_configs
 	:
 }
 
