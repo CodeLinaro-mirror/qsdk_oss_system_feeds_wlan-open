@@ -57,6 +57,7 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_IWLWIFI_DEBUG \
 	CONFIG_PACKAGE_IWLWIFI_DEBUGFS \
 	CONFIG_PACKAGE_RTLWIFI_DEBUG \
+	CONFIG_PACKAGE_QCN_EXTN \
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -261,6 +262,10 @@ define KernelPackage/mac80211/config
                 help
                   This option enables ATHDEBUG module support.
 
+	config PACKAGE_QCN_EXTN
+		bool "Enable QCN extensions support"
+		default y
+
   endif
 endef
 
@@ -305,6 +310,7 @@ config-$(CONFIG_PACKAGE_MAC80211_DEBUG_MENU) += MAC80211_DEBUG_MENU
 config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_PS_DEBUG) += MAC80211_PS_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG) += MAC80211_ATHMEMDEBUG
+config-$(CONFIG_PACKAGE_QCN_EXTN) += QCN_EXTN
 
 config-$(call config_package,mac80211-hwsim) += MAC80211_HWSIM
 
@@ -374,9 +380,19 @@ define Build/Patch
 	$(if $(QUILT),rm -rf $(PKG_BUILD_DIR)/patches; mkdir -p $(PKG_BUILD_DIR)/patches)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/build,build/)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/subsys,subsys/)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/subsys/patches,patches/)
+endif
 #	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath,ath/)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath11k,ath11k/)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath12k,ath12k/)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/patches,patches/)
+	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/patches,patches/)
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+endif
 	$(if $(QUILT),touch $(PKG_BUILD_DIR)/.quilt_used)
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
@@ -392,9 +408,16 @@ endef
 define Quilt/Refresh/Package
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/build,build/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/subsys,subsys/)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/subsys/patches,patches/)
+endif
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath,ath/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath11k,ath11k/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath12k,ath12k/)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/patches,patches/)
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/patches,patches/)
+endif
 endef
 
 define Build/refactor
