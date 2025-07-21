@@ -20,6 +20,9 @@ PKG_SOURCE_SUBMODULES:=skip
 PKG_BUILD_PARALLEL:=1
 PKG_ASLR_PIE_REGULAR:=1
 
+HOSTAPD_PATCH_DIR:=$(TOPDIR)/package/network/services/hostapd/patches
+EXTENSIONS_DIR:=$(TOPDIR)/qca/src/wlan-app-extns/hostapd
+
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_hostapd \
 	CONFIG_PACKAGE_hostapd-basic \
@@ -597,6 +600,16 @@ ifneq ($(wildcard $(PKG_BUILD_DIR)/.config_*),$(subst .configured_,.config_,$(ST
 	touch $(subst .configured_,.config_,$(STAMP_CONFIGURED))
   endef
 endif
+
+
+define Build/Patch
+	$(call PatchDir,$(PKG_BUILD_DIR),$(HOSTAPD_PATCH_DIR),patches/)
+	$(call PatchDir,$(PKG_BUILD_DIR),$(FILE_DIR_HOSTAPD)/patches,patches/)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(call PatchDir,$(PKG_BUILD_DIR),$(EXTENSIONS_DIR)/patches,patches/)
+	$(CP) $(EXTENSIONS_DIR)/src $(PKG_BUILD_DIR)/qcn_extns
+endif
+endef
 
 define Build/Configure
 	$(Build/Configure/rebuild)
