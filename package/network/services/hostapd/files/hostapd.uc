@@ -1167,10 +1167,11 @@ return {
 	config_nft_rule: function(table, chain, iface, add,
 				  dst_mac_addr, proto,
 				  v6_src_addr, v6_dst_addr, v4_src_addr, v4_dst_addr,
-				  sport, dport, mark, esp_spi, dscp) {
+				  sport, dport, mark, esp_spi, dscp, ip_family) {
 		let cmd = {};
 		if (add) {
                 let rule = "nft add rule netdev" + " " + table + " " + chain;
+		let pr = {};
 
 		if (dst_mac_addr)
 			rule = rule + " ether daddr " + dst_mac_addr;
@@ -1187,17 +1188,42 @@ return {
                 if (v4_dst_addr)
                         rule = rule + " ip daddr " + v4_dst_addr;
 
-		if (proto == 6)
-			rule = rule + " tcp ";
+		if (proto) {
+			let temp = {};
 
-		if (proto == 17)
-			rule = rule + " udp ";
+			if (ip_family == 4)
+				temp = " ip protocol ";
+			else
+				temp = " ip6 nexthdr ";
 
-                if (sport)
-                        rule = rule + " sport " + sport;
+			if (proto == 6)
+				pr = " tcp ";
 
-                if (dport)
-                        rule = rule + " dport " + dport;
+			if (proto == 17)
+				pr = " udp ";
+
+			if (proto == 50)
+				pr = " esp ";
+
+			if (pr) {
+				rule = rule + temp + pr;
+			}
+		}
+
+		if (pr) {
+			if (sport)
+				rule = rule + pr +" sport " + sport;
+
+	                if (proto == 17 && dport == 4500) {
+				rule = rule + pr + " dport { 4500, 5200 } ";
+			} else if (dport) {
+				rule = rule + pr + " dport " + dport;
+			}
+		}
+
+		if (esp_spi && proto == 50) {
+			rule = rule + " esp spi " + esp_spi;
+		}
 
                 rule = rule + " meta mark set " + mark + " counter";
 
