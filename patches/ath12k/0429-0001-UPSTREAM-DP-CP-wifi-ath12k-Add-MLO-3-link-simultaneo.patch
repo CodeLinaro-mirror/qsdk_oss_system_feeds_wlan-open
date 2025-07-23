@@ -495,53 +495,6 @@ Signed-off-by: Adwait Nayak <adwaitn@qti.qualcomm.com>
  #include "../dp_stats.h"
  #include "../dp_peer.h"
  
-@@ -250,6 +251,8 @@ ath12k_wifi7_dp_tx(struct ath12k_pdev_dp
- 	struct ath12k_dp_link_vif *dp_link_vif = &dp_vif->dp_link_vif[arvif->link_id];
- 	struct dp_tx_ring *tx_ring;
- 	struct ath12k_sta *ahsta;
-+	struct ath12k_dp_peer *dp_peer;
-+	u32 msduq_id, qos_id;
- 	u8 pool_id;
- 	u8 hal_ring_id;
- 	int ret;
-@@ -394,6 +397,24 @@ tcl_ring_sel:
- 		return DP_TX_ENQ_DROP_SW_DESC_NA;
- 	}
- 
-+	if (skb->mark & SDWF_VALID_MASK) {
-+		msduq_id = u32_get_bits(skb->mark, SDWF_MSDUQ_ID);
-+		peer_id = u32_get_bits(skb->mark, SDWF_PEER_ID);
-+		if (msduq_id < (ab->max_tid_msduq * SDWF_MAX_TID_SUPPORT)) {
-+			spin_lock_bh(&dp->dp_lock);
-+			dp_peer = ath12k_dp_peer_find_by_peerid_index(dp, dp_pdev, peer_id);
-+			if (unlikely(!dp_peer))
-+				ath12k_dbg(ab, ATH12K_DBG_QOS,
-+					   "peer_id %u not found\n", peer_id);
-+			else {
-+				qos_id = dp_peer_msduq_qos_id(dp->ab, dp_peer->qos, msduq_id);
-+				ti.meta_data_flags =
-+					ath12k_qos_get_metadata(qos_id - 1);
-+			}
-+			spin_unlock_bh(&dp->dp_lock);
-+		}
-+	}
-+
- 	ti.bank_id = dp_link_vif->bank_id;
- 
- 	if (gsn_valid && !(ti.lookup_override)) {
-@@ -670,8 +691,10 @@ skip_htt_metadata:
- 	ath12k_wifi7_hal_tx_cmd_desc_setup(ab, hal_tcl_desc, &ti);
- 
- 	if (unlikely(skb->mark & SDWF_VALID_MASK)) {
--		ath12k_dp_qos_update(dp, dp_pdev, skb->mark, hal_tcl_desc,
--				     0, NULL);
-+		msduq_id = u32_get_bits(skb->mark, SDWF_MSDUQ_ID);
-+		if (msduq_id < (ab->max_tid_msduq * SDWF_MAX_TID_SUPPORT)) {
-+			hal_tcl_desc->info3 |= ath12k_qos_get_tcl_cmd(msduq_id);
-+		}
- 		goto qos_done;
- 	}
- 
 --- a/drivers/net/wireless/ath/ath12k/wifi7/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/hw.c
 @@ -673,6 +673,7 @@ static struct ath12k_hw_params ath12k_wi
