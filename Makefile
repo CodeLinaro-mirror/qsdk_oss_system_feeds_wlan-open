@@ -378,9 +378,11 @@ define Build/Patch
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath11k,ath11k/)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath12k,ath12k/)
 	$(if $(QUILT),touch $(PKG_BUILD_DIR)/.quilt_used)
-ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
- ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
+ ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
+  ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
 	$(Build/refactor)
+  endif
  endif
 endif
 endef
