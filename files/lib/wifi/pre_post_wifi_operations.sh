@@ -158,6 +158,14 @@ mac80211_update_qos_configs()
 				# SCS is not configured, enable by default
 				uci_set wireless "$name" enable_scs "1"
 			fi
+			config_get enable_mscs "$name" enable_mscs
+			if [ -n "$enable_mscs" ]; then
+				# MSCS is configured, use the config
+				uci_set wireless "$name" enable_mscs "$enable_mscs"
+			else
+				# MSCS is not configured, enable by default
+				uci_set wireless "$name" enable_mscs "1"
+			fi
 		fi
 	done
 }
