@@ -106,15 +106,15 @@ Signed-off-by: Adwait Nayak <adwaitn@qti.qualcomm.com>
  /**
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
-@@ -35,6 +35,7 @@
- #include "ppe.h"
+@@ -36,6 +36,7 @@
  #include "cfr.h"
  #include "ini.h"
+ #include "erp.h"
 +#include "sdwf.h"
  
  #define ATH12K_NUM_POOL_PPEDS_TX_DESC_DEFAULT 0x8000
  #define ATH12K_PPEDS_HOTLIST_LEN_MAX_DEFAULT 1024
-@@ -125,6 +126,10 @@ unsigned int ath12k_cfr_enable_bmap = 0;
+@@ -126,6 +127,10 @@ unsigned int ath12k_cfr_enable_bmap = 0;
  module_param_named(cfr_enable_bmap, ath12k_cfr_enable_bmap, uint, 0644);
  MODULE_PARM_DESC(cfr_enable_bmap, "cfr_enable_bmap: 0-disable, enable-(0x7 for 3 chipsets)");
  
@@ -182,7 +182,7 @@ Signed-off-by: Adwait Nayak <adwaitn@qti.qualcomm.com>
  struct ath12k_hw_ops {
 --- a/drivers/net/wireless/ath/ath12k/mac.c
 +++ b/drivers/net/wireless/ath/ath12k/mac.c
-@@ -13851,6 +13851,17 @@ int ath12k_mac_start(struct ath12k *ar)
+@@ -13934,6 +13934,17 @@ int ath12k_mac_start(struct ath12k *ar)
  		goto err;
  	}
  
@@ -200,7 +200,7 @@ Signed-off-by: Adwait Nayak <adwaitn@qti.qualcomm.com>
  	ret = ath12k_dp_rx_pkt_type_filter(ar, ATH12K_PKT_TYPE_EAP,
  					   ATH12K_ROUTE_EAP_METADATA);
  	if (ret) {
-@@ -14759,6 +14770,20 @@ int ath12k_mac_vdev_create(struct ath12k
+@@ -14842,6 +14853,20 @@ int ath12k_mac_vdev_create(struct ath12k
  	if (ret)
  		goto err_peer_del;
  
@@ -494,53 +494,6 @@ Signed-off-by: Adwait Nayak <adwaitn@qti.qualcomm.com>
 +#include "../sdwf.h"
  #include "../dp_stats.h"
  #include "../dp_peer.h"
- 
-@@ -250,6 +251,8 @@ ath12k_wifi7_dp_tx(struct ath12k_pdev_dp
- 	struct ath12k_dp_link_vif *dp_link_vif = &dp_vif->dp_link_vif[arvif->link_id];
- 	struct dp_tx_ring *tx_ring;
- 	struct ath12k_sta *ahsta;
-+	struct ath12k_dp_peer *dp_peer;
-+	u32 msduq_id, qos_id;
- 	u8 pool_id;
- 	u8 hal_ring_id;
- 	int ret;
-@@ -394,6 +397,24 @@ tcl_ring_sel:
- 		return DP_TX_ENQ_DROP_SW_DESC_NA;
- 	}
- 
-+	if (skb->mark & SDWF_VALID_MASK) {
-+		msduq_id = u32_get_bits(skb->mark, SDWF_MSDUQ_ID);
-+		peer_id = u32_get_bits(skb->mark, SDWF_PEER_ID);
-+		if (msduq_id < (ab->max_tid_msduq * SDWF_MAX_TID_SUPPORT)) {
-+			spin_lock_bh(&dp->dp_lock);
-+			dp_peer = ath12k_dp_peer_find_by_peerid_index(dp, dp_pdev, peer_id);
-+			if (unlikely(!dp_peer))
-+				ath12k_dbg(ab, ATH12K_DBG_QOS,
-+					   "peer_id %u not found\n", peer_id);
-+			else {
-+				qos_id = dp_peer_msduq_qos_id(dp->ab, dp_peer->qos, msduq_id);
-+				ti.meta_data_flags =
-+					ath12k_qos_get_metadata(qos_id - 1);
-+			}
-+			spin_unlock_bh(&dp->dp_lock);
-+		}
-+	}
-+
- 	ti.bank_id = dp_link_vif->bank_id;
- 
- 	if (gsn_valid && !(ti.lookup_override)) {
-@@ -670,8 +691,10 @@ skip_htt_metadata:
- 	ath12k_wifi7_hal_tx_cmd_desc_setup(ab, hal_tcl_desc, &ti);
- 
- 	if (unlikely(skb->mark & SDWF_VALID_MASK)) {
--		ath12k_dp_qos_update(dp, dp_pdev, skb->mark, hal_tcl_desc,
--				     0, NULL);
-+		msduq_id = u32_get_bits(skb->mark, SDWF_MSDUQ_ID);
-+		if (msduq_id < (ab->max_tid_msduq * SDWF_MAX_TID_SUPPORT)) {
-+			hal_tcl_desc->info3 |= ath12k_qos_get_tcl_cmd(msduq_id);
-+		}
- 		goto qos_done;
- 	}
  
 --- a/drivers/net/wireless/ath/ath12k/wifi7/hw.c
 +++ b/drivers/net/wireless/ath/ath12k/wifi7/hw.c
