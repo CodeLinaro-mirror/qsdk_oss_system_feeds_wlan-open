@@ -381,7 +381,9 @@ define Build/Patch
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
   ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+   ifeq ($(QUILT),)
 	$(Build/refactor)
+   endif
   endif
  endif
 endif
