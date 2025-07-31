@@ -170,7 +170,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  	rcu_read_unlock();
 --- a/drivers/net/wireless/ath/ath12k/dp_peer.h
 +++ b/drivers/net/wireless/ath/ath12k/dp_peer.h
-@@ -197,10 +197,12 @@ struct ath12k_dp_peer {
+@@ -205,10 +205,12 @@ struct ath12k_dp_peer {
  #define MSDUQ_WHO_CL_INFO	GENMASK(5, 4)
  
  #define QOS_NW_DELAY_MAX	0x3FFFF
@@ -341,7 +341,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  
  struct ath12k_wifi7_tx_status_entry {
  	struct hal_wbm_completion_ring_tx tx_status;
-@@ -270,6 +271,407 @@ ath12k_dp_sdwftx_ingress_stats_update(st
+@@ -270,6 +271,412 @@ ath12k_dp_sdwftx_ingress_stats_update(st
  	*skb_mark = u32_encode_bits((u32_get_bits(*skb_mark, QOS_NW_TAG_SHIFT)), QOS_TAG_ID) | (qos_nw_delay << QOS_NW_DELAY_SHIFT) | msduq;
  }
  
@@ -603,6 +603,10 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
 +	spin_lock_bh(&dp_hw->peer_lock);
 +
 +	mld_qos = &mld_peer->mld_qos_stats[tid][q_id];
++
++	if (!link_peer->peer_stats.qos_stats)
++		goto out;
++
 +	qos_tx = &link_peer->peer_stats.qos_stats->qos_tx[tid][q_id];
 +
 +	switch (ts->status) {
@@ -678,7 +682,8 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
 +	} else {
 +		spin_lock_bh(&dp_pdev->dp->dp_lock);
 +		pri_peer = rcu_dereference(mld_peer->link_peers[pri_link_id]);
-+		pri_peer->peer_stats.qos_stats->qos_tx[tid][q_id].queue_depth--;
++		if (pri_peer && pri_peer->peer_stats.qos_stats)
++			pri_peer->peer_stats.qos_stats->qos_tx[tid][q_id].queue_depth--;
 +		spin_unlock_bh(&dp_pdev->dp->dp_lock);
 +	}
 +
@@ -749,7 +754,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  #define HTT_META_DATA_ALIGNMENT 0x8
  
  /* Preparing HTT Metadata when utilized with ext MSDU */
-@@ -988,6 +1390,12 @@ ath12k_wifi7_dp_tx_htt_tx_complete_buf(s
+@@ -988,6 +1395,12 @@ ath12k_wifi7_dp_tx_htt_tx_complete_buf(s
  		status.sta = peer->sta;
  	spin_unlock_bh(&dp->dp_lock);
  
@@ -762,7 +767,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  	status.info = info;
  	status.skb = msdu;
  	ieee80211_tx_status_ext(ath12k_dp_pdev_to_hw(dp_pdev), &status);
-@@ -1317,6 +1725,8 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -1317,6 +1730,8 @@ static void ath12k_wifi7_dp_tx_complete_
  	/* skip tx rate update from ieee80211_status*/
  	info->status.rates[0].idx = -1;
  
@@ -771,7 +776,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  	peer = ath12k_dp_peer_find_by_peerid_index(dp, dp_pdev, ts->peer_id);
  	if (peer) {
  		link_id = ath12k_dp_get_link_id(dp_pdev, ts, peer);
-@@ -1329,6 +1739,10 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -1329,6 +1744,10 @@ static void ath12k_wifi7_dp_tx_complete_
  				ath12k_dp_tx_comp_update_peer_stats(peer, ts,
  								    ring,
  								    tx_desc_flags);
@@ -782,7 +787,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  		}
  	} else {
  		DP_DEVICE_STATS_INC(dp, tx_err.tx_comp_err[DP_TX_COMP_ERR_INVALID_PEER][ring], 1);
-@@ -1370,7 +1784,6 @@ static void ath12k_wifi7_dp_tx_complete_
+@@ -1370,7 +1789,6 @@ static void ath12k_wifi7_dp_tx_complete_
  	 * Might end up reporting it out-of-band from HTT stats.
  	 */
  
@@ -790,7 +795,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  	if (ath12k_debugfs_is_extd_tx_stats_enabled(ar)) {
  		if (ts->flags & HAL_TX_STATUS_FLAGS_FIRST_MSDU) {
  			if (ar->last_ppdu_id == 0) {
-@@ -1460,6 +1873,9 @@ ath12k_wifi7_dp_tx_status_parse(struct a
+@@ -1460,6 +1878,9 @@ ath12k_wifi7_dp_tx_status_parse(struct a
  	ts->tid = FIELD_GET(HAL_WBM_RELEASE_TX_INFO3_TID, desc->info3);
  	ts->transmit_cnt = le32_get_bits(desc->info1,
  					 HAL_WBM_COMPL_TX_INFO1_TRANSMIT_COUNT);
@@ -921,7 +926,7 @@ Signed-off-by: Nagarajan Maran <nmaran@qti.qualcomm.com>
  		.alloc_cacheable_memory = true,
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
 +++ b/drivers/net/wireless/ath/ath12k/wmi.c
-@@ -12413,6 +12413,8 @@ skip_lookup:
+@@ -12397,6 +12397,8 @@ skip_lookup:
  	ar->mlo_setup_status = le32_to_cpu(ev->status);
  	max_ml_peer_ids = le32_to_cpu(ev->max_ml_peer_ids);
  	ar->ah->max_ml_peer_ids = max_ml_peer_ids ? max_ml_peer_ids : ATH12K_MAX_MLO_PEERS;
