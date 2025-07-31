@@ -263,7 +263,7 @@ package/symlinks-clean:
 help:
 	cat README.md
 
-distclean: clean kernel
+distclean: clean_kernel
 	rm -rf bin build_dir .ccache .config* dl feeds key-build* logs package/feeds target/linux/feeds staging_dir tmp
 	@$(_SINGLE)$(SUBMAKE) -C scripts/config clean
 
