@@ -29,7 +29,7 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
 
 --- a/include/net/cfg80211.h
 +++ b/include/net/cfg80211.h
-@@ -5408,6 +5408,7 @@ struct cfg80211_qm_resp_data {
+@@ -5422,6 +5422,7 @@ struct cfg80211_qm_resp_data {
   *
   * @get_afc_eirp_pwr: Get the EIRP power received in the AFC payload for the
   *	given freq
@@ -37,18 +37,18 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
   */
  struct cfg80211_ops {
  	int	(*suspend)(struct wiphy *wiphy, struct cfg80211_wowlan *wow);
-@@ -5793,6 +5794,8 @@ struct cfg80211_ops {
+@@ -5808,6 +5809,8 @@ struct cfg80211_ops {
  				    struct cfg80211_qm_resp_data *qm_resp);
  	int	(*get_afc_eirp_pwr)(struct wiphy *wiphy,
  				    u32 freq, u32 *eirp);
-+	int	(*get_6ghz_dev_deployment_type)(struct wiphy *wiphy,
-+						enum nl80211_6ghz_dev_deployment_type *dep_type);
++	enum nl80211_6ghz_dev_deployment_type
++		(*get_6ghz_dev_deployment_type)(struct wiphy *wiphy);
  };
  
  /*
 --- a/include/uapi/linux/nl80211.h
 +++ b/include/uapi/linux/nl80211.h
-@@ -3049,6 +3049,9 @@ enum nl80211_commands {
+@@ -3058,6 +3058,9 @@ enum nl80211_commands {
   *	APs Support". Drivers may set additional flags that they support
   *	in the kernel or device.
   *
@@ -58,7 +58,7 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
   * @NUM_NL80211_ATTR: total number of nl80211_attrs available
   * @NL80211_ATTR_MAX: highest attribute number currently defined
   * @__NL80211_ATTR_AFTER_LAST: internal use
-@@ -3646,6 +3649,8 @@ enum nl80211_attrs {
+@@ -3656,6 +3659,8 @@ enum nl80211_attrs {
  
  	NL80211_ATTR_ASSOC_MLD_EXT_CAPA_OPS,
  
@@ -67,7 +67,7 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  	/* add attributes here, update the policy in nl80211.c */
  
  	__NL80211_ATTR_AFTER_LAST,
-@@ -8915,4 +8920,17 @@ enum nl80211_6ghz_txpower_attr {
+@@ -8955,4 +8960,17 @@ enum nl80211_6ghz_txpower_attr {
  		__NL80211_6GHZ_TXPOWER_ATTR_AFTER_LAST - 1
  };
  
@@ -87,20 +87,17 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  #endif /* __LINUX_NL80211_H */
 --- a/net/wireless/nl80211.c
 +++ b/net/wireless/nl80211.c
-@@ -3031,6 +3031,28 @@ nl80211_put_6ghz_power_mode_channels(str
+@@ -3035,6 +3035,25 @@ nl80211_put_6ghz_power_mode_channels(str
  	return 0;
  }
  
 +static int nl80211_send_6ghz_dev_deployment_type(struct sk_buff *msg,
 +						 struct cfg80211_registered_device *rdev)
 +{
-+	int ret;
 +	enum nl80211_6ghz_dev_deployment_type dev_deployment_type =
 +		NL80211_6GHZ_DEV_DEPLOYMENT_TYPE_UNKNOWN;
 +
-+	ret = rdev_get_6ghz_dev_deployment_type(rdev, &dev_deployment_type);
-+	if (ret)
-+		return ret;
++	dev_deployment_type = rdev_get_6ghz_dev_deployment_type(rdev);
 +
 +	if (dev_deployment_type < NL80211_6GHZ_DEV_DEPLOYMENT_TYPE_UNKNOWN ||
 +	    dev_deployment_type > NL80211_6GHZ_DEV_DEPLOYMENT_TYPE_OUTDOOR)
@@ -116,7 +113,7 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
  			      enum nl80211_commands cmd,
  			      struct sk_buff *msg, u32 portid, u32 seq,
-@@ -3203,6 +3225,7 @@ static int nl80211_send_wiphy(struct cfg
+@@ -3207,6 +3226,7 @@ static int nl80211_send_wiphy(struct cfg
  			default:
  				if (state->chan_start == -1)
  					break;
@@ -124,7 +121,7 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  				/* add frequencies */
  				nl_freqs = nla_nest_start_noflag(msg,
  								 NL80211_BAND_ATTR_FREQS);
-@@ -3665,6 +3688,11 @@ static int nl80211_send_wiphy(struct cfg
+@@ -3669,6 +3689,11 @@ static int nl80211_send_wiphy(struct cfg
  		if (nl80211_put_multi_hw_support(&rdev->wiphy, msg))
  			goto nla_put_failure;
  
@@ -138,25 +135,24 @@ Signed-off-by: Amith A <amitajit@qti.qualcomm.com>
  	}
 --- a/net/wireless/rdev-ops.h
 +++ b/net/wireless/rdev-ops.h
-@@ -1659,4 +1659,20 @@ rdev_get_afc_eirp_pwr(struct cfg80211_re
+@@ -1660,4 +1660,19 @@ rdev_get_afc_eirp_pwr(struct cfg80211_re
  	trace_rdev_return_int(&rdev->wiphy, ret);
  	return ret;
  }
 +
-+static inline int
-+rdev_get_6ghz_dev_deployment_type(struct cfg80211_registered_device *rdev,
-+				  enum nl80211_6ghz_dev_deployment_type *dep_type)
++static inline enum nl80211_6ghz_dev_deployment_type
++rdev_get_6ghz_dev_deployment_type(struct cfg80211_registered_device *rdev)
 +{
-+	int ret;
++	enum nl80211_6ghz_dev_deployment_type dep_type =
++		NL80211_6GHZ_DEV_DEPLOYMENT_TYPE_UNKNOWN;
 +
 +	if (!rdev->ops->get_6ghz_dev_deployment_type)
-+		return -EOPNOTSUPP;
++		return dep_type;
 +
 +	trace_rdev_get_6ghz_dev_deployment_type(&rdev->wiphy);
-+	ret = rdev->ops->get_6ghz_dev_deployment_type(&rdev->wiphy,
-+						      dep_type);
-+	trace_rdev_return_enum(&rdev->wiphy, ret);
-+	return ret;
++	dep_type = rdev->ops->get_6ghz_dev_deployment_type(&rdev->wiphy);
++	trace_rdev_return_int(&rdev->wiphy, (int)dep_type);
++	return dep_type;
 +}
  #endif /* __CFG80211_RDEV_OPS */
 --- a/net/wireless/trace.h
