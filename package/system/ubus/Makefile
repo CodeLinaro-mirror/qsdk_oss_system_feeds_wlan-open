@@ -70,6 +70,7 @@ endef
 define Package/libubus/install
 	$(INSTALL_DIR) $(1)/lib
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libubus.so.* $(1)/lib/
+	ln -s $(PKG_INSTALL_DIR)/usr/lib/libubus.so.$(PKG_ABI_VERSION)  $(1)/lib/libubus.so.20231128
 endef
 
 define Package/libubus-lua/install

@@ -62,6 +62,7 @@ CMAKE_OPTIONS += \
 define Package/libuci/install
 	$(INSTALL_DIR) $(1)/lib
 	$(CP) $(PKG_BUILD_DIR)/libuci.so.* $(1)/lib/
+	ln -s $(PKG_BUILD_DIR)/libuci.so.$(PKG_ABI_VERSION) $(1)/lib/libuci.so
 endef
 
 define Package/libuci-lua/install
