@@ -1477,6 +1477,12 @@ mac80211_setup_monitor() {
                         bw=160
                         center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
                         ;;
+		EHT320)
+			if [ "$band" = "6g" ]; then
+				bw=320
+				center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 320)")
+			fi
+			;;
         esac
 
         if [ $is_wiphy_multi_radio -eq 1 ]; then
