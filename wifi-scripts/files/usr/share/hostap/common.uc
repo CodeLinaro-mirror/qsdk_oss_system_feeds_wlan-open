@@ -80,6 +80,22 @@ function find_reusable_wdev(phyidx)
 	return null;
 }
 
+function wdev_get_radio_mask(name)
+{
+	nl80211.error(); // Clear previous errors
+	let wdev = nl80211.request(nl80211.const.NL80211_CMD_GET_INTERFACE,
+				   0,
+				   { dev: name });
+
+	let error = nl80211.error();
+	if (error || !wdev) {
+		hostapd.printf(`error: Failed to get radio mask, iface ${name} error ${error} wdev ${wdev}`);
+		return null;
+	}
+
+	return wdev.vif_radio_mask;
+}
+
 function wdev_set_radio_mask(name, mask)
 {
 	nl80211.request(nl80211.const.NL80211_CMD_SET_INTERFACE, 0, {
@@ -107,8 +123,8 @@ function wdev_create(phy, name, data)
 		req["4addr"] = data["4addr"];
 	if (data.macaddr)
 		req.mac = data.macaddr;
-	if (data.mode == "mesh" && data.radio != null && data.radio >= 0)
-               req.vif_radio_mask = 1 << data.radio;
+	if (data.radio != null && data.radio >= 0)
+		req.vif_radio_mask = 1 << data.radio;
 
 	nl80211.error();
 
@@ -442,4 +458,4 @@ function vlist_new(cb) {
 	}, vlist_proto);
 }
 
-export { wdev_remove, wdev_create, wdev_set_mesh_params, wdev_set_radio_mask, wdev_set_up, is_equal, vlist_new, phy_is_fullmac, phy_open };
+export { wdev_remove, wdev_create, wdev_set_mesh_params, wdev_get_radio_mask, wdev_set_radio_mask, wdev_set_up, is_equal, vlist_new, phy_is_fullmac, phy_open };
