@@ -54,16 +54,6 @@ disable_stats_n_qdss_trace() {
 				echo 0 > "$dir/trace_qdss"
 			fi
 		fi
-
-		#Check if mesh metric offload is set to disable link metrics for mesh
-		if [[ "$dir" == *ath12k* ]]; then
-			if [ $(cat /sys/module/ath12k/parameters/mesh_metric_offload) -eq 1 ]; then
-				if [ -f "$dir/link_metrics_update" ]; then
-					#Disable Link metrics update for mesh
-					echo disable > "$dir/link_metrics_update"
-				fi
-			fi
-		fi
 	done
 }
 
