@@ -502,6 +502,11 @@ ifeq ($(FORCED_BACKPORTS),false)
 $(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(call getLocalBackport))
 endif
 
+ifeq (,$(wildcard $(DL_DIR)/$(PKG_SOURCE)))
+$(shell [ -f "$(NFS_MIRROR_SERVER)/$(PKG_SOURCE)" ] && \
+	cp "$(NFS_MIRROR_SERVER)/$(PKG_SOURCE)" "$(TOPDIR)/dl/")
+endif
+
 ifeq ($(PKG_BUILD_MLO_SUPPORT),1)
   define backports_mlo_support
         $(info Backports mlo support enabled)
