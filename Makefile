@@ -390,6 +390,8 @@ endif
 ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/patches,patches/)
 	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/patches,patches/)
+	# The below line is not required when the frameworks changes adding wifi7 is downstreamed through package upgrade.
+	mkdir -p $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7
 	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
