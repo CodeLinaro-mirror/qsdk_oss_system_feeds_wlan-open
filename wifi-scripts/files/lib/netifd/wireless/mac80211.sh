@@ -931,10 +931,14 @@ mac80211_hostapd_setup_bss() {
 
 	if [ -n "$enable_scs" ]; then
 		append hostapd_cfg "enable_scs=$enable_scs" "$N"
+	else
+		append hostapd_cfg "enable_scs=1" "$N"
 	fi
 
 	if [ -n "$enable_mscs" ]; then
 		append hostapd_cfg "enable_mscs=$enable_mscs" "$N"
+	else
+		append hostapd_cfg "enable_mscs=1" "$N"
 	fi
 
 	if [ -n "$enable_dscp_policy_capa" ]; then
