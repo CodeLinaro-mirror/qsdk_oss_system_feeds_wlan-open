@@ -135,6 +135,8 @@ define KernelPackage/cfg80211/install
 	$(INSTALL_DIR) $(1)/lib/wifi $(1)/lib/netifd/wireless
 	$(INSTALL_DIR) $(1)/lib/wifi/sawf
 	$(INSTALL_DIR) $(1)/lib/wifi/sawf/telemetry
+	$(INSTALL_DIR) $(1)/ini
+	$(INSTALL_DIR) $(1)/ini/internal
 	$(INSTALL_DATA) ./files/lib/wifi/def_service_classes.json $(1)/lib/wifi/sawf/
 	$(INSTALL_DATA) ./files/lib/wifi/service_classes.json $(1)/lib/wifi/sawf/
 	$(INSTALL_DATA) ./files/lib/wifi/telemetry/config.json $(1)/lib/wifi/sawf/telemetry/
@@ -164,6 +166,8 @@ endif
 	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-supplicant-event-update.sh $(1)/lib/netifd/dpp-supplicant-event-update
 	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
+	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
+	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
 endef
 
 define KernelPackage/cfg80211/description
