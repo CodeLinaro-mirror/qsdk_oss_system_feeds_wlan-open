@@ -21,6 +21,10 @@ STOP=94
 
 boot()
 {
+	# Add path so ini framework will read the files from the /ini folder
+	if ! echo -n "/ini" > /sys/module/firmware_class/parameters/path; then
+		echo "Failed to set path for ini framework" > /dev/console
+	fi
 	ath12k="/etc/modules.d/ath12k"
 	if [ -e $ath12k ];
 	then
