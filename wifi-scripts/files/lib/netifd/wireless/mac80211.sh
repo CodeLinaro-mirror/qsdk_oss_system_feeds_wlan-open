@@ -105,6 +105,9 @@ epcs_params="epcs_he_mu_edca_ac_be_aifsn epcs_he_mu_edca_ac_be_aci epcs_he_mu_ed
 ttlm_enable=
 enable_dscp_policy_capa=
 
+#atf commands
+atf_offload=
+
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
 }
@@ -203,6 +206,11 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean enable_mscs
 	config_add_boolean enable_dscp_policy_capa
 
+	#atf
+	config_add_boolean commitatf
+	config_add_boolean atfssidsched
+	config_add_boolean atfssidgroup
+
 	#epcs
 	config_add_boolean enable_epcs
 	for param in $epcs_params; do
@@ -289,6 +297,159 @@ band_match && $3 == "MHz" {
         }
 }
 ' | tr '\n' ' '
+}
+
+cfg_append() {
+        echo "$1" >> "$2"
+}
+
+mac80211_prepare_atf_config() {
+	local config_file="/var/run/hostapd-atf-$phy$vif_phy_suffix.conf"
+	local hostapd_config_file=$1
+	local cfg=
+	local hostapd_cfg=
+	config_load wireless
+
+	config_get atf_offload atf_offload Enable
+
+
+	[ -z "$atf_offload" ] && return
+	[ -n "$atf_offload" ] && [ "$atf_offload" -le 0 ] && return
+
+	append hostapd_cfg "atf_offload=1" "$N"
+	append hostapd_cfg "atf_offload_config=$config_file" "$N"
+
+	atf_group_configcfg80211() {
+		local cmd
+		local group
+		local ssid
+		local airtime
+		local atf_device
+
+		config_get atf_device "$1" device
+
+		if [[ "$device" != "$atf_device" ]]; then
+			return
+		fi
+
+		config_get cmd "$1" command
+		config_get group "$1" group
+		config_get ssid "$1" ssid
+		config_get airtime "$1" airtime
+
+		if [ -z "$cmd" ] || [ -z "$group" ] ; then
+			echo "Invalid ATF GROUP Configuration" > /dev/ttyMSM0
+			return
+		fi
+
+		if [ "$cmd" == "delgroup" ]; then
+			append cfg "atf-del-group=$group" "$N"
+		fi
+
+		if [ "$cmd" == "addgroup" ] && [ -n "$ssid" ] && [ -n "$airtime" ]; then
+			# Validate airtime is a number between 0 and 100
+			if ! [[ "$airtime" =~ ^[0-9]+$ ]] || [ "$airtime" -lt 0 ] || [ "$airtime" -gt 100 ]; then
+				echo "Invalid airtime value: $airtime. Must be between 0 and 100" > /dev/ttyMSM0
+				return
+			fi
+			append cfg "atf-group=$group" "$N"
+			append cfg "atf-group-command=$cmd" "$N"
+			append cfg "atf-group-ssid=$ssid" "$N"
+			append cfg "atf-group-airtime=$airtime" "$N"
+		fi	
+	}
+	config_foreach atf_group_configcfg80211 atf-config-group
+
+	atf_ssid_configcfg80211() {
+		local cmd
+		local ssid
+		local airtime
+		local atf_device
+
+		config_get atf_device "$1" device
+
+		if [[ "$device" != "$atf_device" ]]; then
+                        return
+		fi
+
+		config_get cmd "$1" command
+		config_get ssid "$1" ssid
+		config_get airtime "$1" airtime
+
+		if [ -z "$cmd" ] || [ -z "$ssid" ] ; then
+			echo "Invalid ATF SSID Configuration" > /dev/ttyMSM0
+		fi
+
+		if [ "$cmd" == "addssid" ] && [ -n "$airtime" ]; then
+			# Validate airtime is a number between 0 and 100
+			if ! [[ "$airtime" =~ ^[0-9]+$ ]] || [ "$airtime" -lt 0 ] || [ "$airtime" -gt 100 ]; then
+				echo "Invalid airtime value: $airtime. Must be between 0 and 100" > /dev/ttyMSM0
+				return
+			fi
+
+			append cfg "atf-ssid=$ssid" "$N"
+			append cfg "atf-ssid-command=$cmd" "$N"
+			append cfg "atf-ssid-airtime=$airtime" "$N"
+		fi
+
+		if [ "$cmd" == "delssid" ]; then
+			append cfg "atf-del-ssid=$ssid" "$N"
+		fi
+
+	}
+	config_foreach atf_ssid_configcfg80211 atf-config-ssid
+
+	atf_sta_configcfg80211() {
+		local cmd
+		local ssid
+		local airtime
+		local atf_device
+		local mac
+
+		config_get atf_device "$1" device
+		if [[ "$device" != "$atf_device" ]]; then
+			return
+		fi
+
+		config_get cmd "$1" command
+		config_get airtime "$1" airtime
+		config_get ssid "$1" ssid
+		config_get mac "$1" macaddr
+
+		if [ -z "$cmd" ] || [ -z "$mac" ] ; then
+			echo "Invalid ATF STA Configuration"
+			return
+		fi
+
+		if [ "$cmd" == "addsta" ] && [ -n "$airtime" ]; then
+			# Validate airtime is a number between 0 and 100
+			if ! [[ "$airtime" =~ ^[0-9]+$ ]] || [ "$airtime" -lt 0 ] || [ "$airtime" -gt 100 ]; then
+				echo "Invalid airtime value: $airtime. Must be between 0 and 100" > /dev/ttyMSM0
+				return
+			fi
+			append cfg "atf-sta=$mac" "$N"
+			append cfg "atf-sta-command=$cmd" "$N"
+			append cfg "atf-sta-airtime=$airtime" "$N"
+			append cfg "atf-sta-ssid=$ssid" "$N"
+		fi
+
+		if [ "$cmd" == "delsta" ]; then
+			append cfg "atf-del-sta=$mac" "$N"
+		fi
+	}
+	config_foreach atf_sta_configcfg80211 atf-config-sta
+
+	cat >>  "$hostapd_config_file" <<EOF
+
+$hostapd_cfg
+
+EOF
+
+	cat > "$config_file" <<EOF
+$cfg
+
+EOF
+
 }
 
 mac80211_hostapd_setup_base() {
@@ -839,6 +1000,7 @@ $base_cfg
 
 EOF
 	json_select ..
+	mac80211_prepare_atf_config "$hostapd_conf_file" "$radio"
 }
 
 mac80211_wds_support_check() {
@@ -878,6 +1040,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
+	json_get_vars commitatf atfssidsched atfssidgroup
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -987,6 +1150,10 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "ppe_vp=3" "$N"
 			;;
 	esac
+
+        [ -n "$commitatf" ] && append hostapd_cfg "commitatf=$commitatf" "$N"
+        [ -n "$atfssidsched" ] && append hostapd_cfg "atfssidsched=$atfssidsched" "$N"
+        [ -n "$atfssidgroup" ] && append hostapd_cfg "atfssidgroup=$atfssidgroup" "$N"
 
 	cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
 $hostapd_cfg
@@ -1990,6 +2157,7 @@ _sta_radios=
 mac80211_derive_ml_info() {
 	local _mlds
 	local sta_mldevices
+
 	config_load wireless
 
 	mac80211_get_wifi_mlds() {
