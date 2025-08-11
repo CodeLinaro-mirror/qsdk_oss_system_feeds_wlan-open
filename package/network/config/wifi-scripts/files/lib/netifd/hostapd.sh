@@ -1440,12 +1440,14 @@ wpa_supplicant_add_network() {
 
 	json_get_vars \
 		ssid bssid key \
-		basic_rate mcast_rate \
+		mcast_rate \
 		ieee80211w ieee80211r fils ocv \
 		multi_ap \
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection
+
+	json_get_values basic_rate_list basic_rate
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1743,6 +1745,21 @@ wpa_supplicant_add_network() {
 			wpa_supplicant_add_rate rate_list "$br"
 		done
 		[ -n "$rate_list" ] && append network_data "rates=$rate_list" "$N$T"
+	[ -n "$basic_rate_list" ] && {
+		local br rate rate_list=
+
+		if [ "$mode" = mesh ]; then
+			for br in $basic_rate_list; do
+				rate="$(($br / 100))"
+				append rate_list "$rate" " "
+			done
+			[ -n "$rate_list" ] && append network_data "mesh_basic_rates=$rate_list" "$N$T"
+		else
+			for br in $basic_rate_list; do
+				wpa_supplicant_add_rate rate_list "$br"
+			done
+			[ -n "$rate_list" ] && append network_data "rates=$rate_list" "$N$T"
+		fi
 	}
 
 	[ -n "$mcast_rate" ] && {

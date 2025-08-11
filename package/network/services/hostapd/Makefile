@@ -95,8 +95,7 @@ DRIVER_MAKEOPTS= \
 	CONFIG_IEEE80211AC=$(HOSTAPD_IEEE80211AC) \
 	CONFIG_IEEE80211AX=$(HOSTAPD_IEEE80211AX) \
 	CONFIG_MBO=$(CONFIG_WPA_MBO_SUPPORT) \
-	CONFIG_UCODE=y \
-	CONFIG_ATF_OFFLOAD=y
+	CONFIG_UCODE=y
 
 ifeq ($(SSL_VARIANT),openssl)
   DRIVER_MAKEOPTS += CONFIG_TLS=openssl CONFIG_SAE=y
@@ -776,33 +775,16 @@ Package/hostapd-wolfssl/conffiles = $(Package/hostapd-full/conffiles)
 Package/hostapd-mbedtls/conffiles = $(Package/hostapd-full/conffiles)
 endif
 
-#Select hostapd.uc file from external hostapd dir if available
-ifneq ("$(wildcard $(FILE_DIR_HOSTAPD)/files/hostapd.uc)","")
-define Install/hostapd
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/hostap
-	$(INSTALL_DATA) $(FILE_DIR_HOSTAPD)/files/hostapd.uc $(1)/usr/share/hostap/
-	$(if $(findstring full,$(CONFIG_VARIANT)),$(Install/hostapd/full))
-endef
-else
 define Install/hostapd
 	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/hostap
 	$(INSTALL_DATA) ./files/hostapd.uc $(1)/usr/share/hostap/
 	$(if $(findstring full,$(CONFIG_VARIANT)),$(Install/hostapd/full))
 endef
-endif
 
-#Select wpa_supplicant.uc file from external hostapd dir if available
-ifneq ("$(wildcard $(FILE_DIR_HOSTAPD)/files/wpa_supplicant.uc)","")
-define Install/supplicant
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/hostap
-	$(INSTALL_DATA) $(FILE_DIR_HOSTAPD)/files/wpa_supplicant.uc $(1)/usr/share/hostap/
-endef
-else
 define Install/supplicant
 	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/hostap
 	$(INSTALL_DATA) ./files/wpa_supplicant.uc $(1)/usr/share/hostap/
 endef
-endif
 
 define Package/hostapd-common/install
 	$(INSTALL_DIR) $(1)/etc/capabilities $(1)/etc/rc.button $(1)/etc/hotplug.d/ieee80211 $(1)/etc/init.d $(1)/lib/netifd  $(1)/usr/share/acl.d $(1)/usr/share/hostap
