@@ -380,6 +380,7 @@ ifneq ($(CONFIG_PACKAGE_kmod-cfg80211),)
 endif
 
 EXTERNAL_PATCH_DIR:=$(TOPDIR)/openwrt-patches/package/kernel/mac80211/patches
+SPATCH?=1
 
 define Build/Patch
 	$(if $(QUILT),rm -rf $(PKG_BUILD_DIR)/patches; mkdir -p $(PKG_BUILD_DIR)/patches)
@@ -405,7 +406,9 @@ ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
   ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
    ifeq ($(QUILT),)
+    ifeq ($(SPATCH),1)
 	$(Build/refactor)
+    endif
    endif
   endif
  endif
