@@ -33,4 +33,30 @@ boot()
 			sed -i '1s/ath12k/ath12k dyndbg=+p/' $ath12k
 		fi
 	fi
+	update_ath12k_module_params_from_cmdline
+}
+
+# this function is to parse the bootargs and update ath12k
+# module params
+
+update_ath12k_module_params_from_cmdline() {
+    ath12k="/etc/modules.d/ath12k"
+    if [ -e "$ath12k" ]; then
+        content=$(head -n 1 "$ath12k")
+        cmdline=$(cat /proc/cmdline)
+
+        for param in $cmdline; do
+            if [[ "$param" == ath12k_* ]]; then
+                option="${param#ath12k_}"
+                # Validate option format (basic check)
+                if [[ "$option" =~ ^[a-zA-Z0-9_]+=.+$ ]]; then
+                    if [[ "$content" != *"$option"* ]]; then
+                        sed -i "1s/$/ $option/" "$ath12k"
+                        # Refresh content after update
+                        content=$(head -n 1 "$ath12k")
+                    fi
+                fi
+            fi
+        done
+    fi
 }
