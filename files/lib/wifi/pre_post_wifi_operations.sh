@@ -194,7 +194,7 @@ mlo_add_link() {
 
 	case "$2" in
 		2g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -205,7 +205,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -216,7 +216,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gl)
-		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -lt "65" ]; then
@@ -234,7 +234,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gh)
-		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -gt "65" ]; then
@@ -252,7 +252,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -263,7 +263,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gl)
-		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -lt "100" ]; then
@@ -281,7 +281,7 @@ mlo_add_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gh)
-		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -gt "100" ]; then
@@ -602,7 +602,7 @@ mlo_remove_link() {
 
 	case "$2" in
 		2g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -613,7 +613,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -624,7 +624,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gl)
-		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -lt "65" ]; then
@@ -642,7 +642,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		5gh)
-		test_band=$(uci show wireless | grep 5g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -gt "65" ]; then
@@ -660,7 +660,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6g)
-		test_band=$(uci show wireless | grep $2 | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
 		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
@@ -671,7 +671,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gl)
-		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -lt "100" ]; then
@@ -689,7 +689,7 @@ mlo_remove_link() {
 		channels=$(echo $start_chan-$end_chan)
 		;;
 		6gh)
-		test_band=$(uci show wireless | grep 6g | cut -d "." -f 2)
+		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
 			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
 			if [ "$local_channel" -gt "100" ]; then
