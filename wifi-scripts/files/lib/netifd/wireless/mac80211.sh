@@ -431,8 +431,8 @@ mac80211_prepare_atf_config() {
 			fi
 			append cfg "atf-sta=$mac" "$N"
 			append cfg "atf-sta-command=$cmd" "$N"
-			append cfg "atf-sta-airtime=$airtime" "$N"
 			append cfg "atf-sta-ssid=$ssid" "$N"
+			append cfg "atf-sta-airtime=$airtime" "$N"
 		fi
 
 		if [ "$cmd" == "delsta" ]; then
