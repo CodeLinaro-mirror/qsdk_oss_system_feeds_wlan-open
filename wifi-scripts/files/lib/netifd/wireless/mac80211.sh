@@ -210,7 +210,7 @@ drv_mac80211_init_iface_config() {
 
 	#atf
 	config_add_boolean commitatf
-	config_add_boolean atfssidsched
+	config_add_int atfssidsched
 	config_add_boolean atfssidgroup
 
 	#epcs
