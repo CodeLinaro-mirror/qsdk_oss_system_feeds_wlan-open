@@ -44,23 +44,30 @@ boot()
 # module params
 
 update_ath12k_module_params_from_cmdline() {
-    ath12k="/etc/modules.d/ath12k"
-    if [ -e "$ath12k" ]; then
-        content=$(head -n 1 "$ath12k")
-        cmdline=$(cat /proc/cmdline)
+	ath12k="/etc/modules.d/ath12k"
+	if [ -e "$ath12k" ]; then
+		content=$(head -n 1 "$ath12k")
+		cmdline=$(cat /proc/cmdline)
 
-        for param in $cmdline; do
-            if [[ "$param" == ath12k_* ]]; then
-                option="${param#ath12k_}"
-                # Validate option format (basic check)
-                if [[ "$option" =~ ^[a-zA-Z0-9_]+=.+$ ]]; then
-                    if [[ "$content" != *"$option"* ]]; then
-                        sed -i "1s/$/ $option/" "$ath12k"
-                        # Refresh content after update
-                        content=$(head -n 1 "$ath12k")
-                    fi
-                fi
-            fi
-        done
-    fi
+		for param in $cmdline; do
+			if [[ "$param" == ath12k_* ]]; then
+				option="${param#ath12k_}"
+				# Append the option if not already present
+				if [[ "$option" =~ ^[a-zA-Z0-9_]+=.+$ ]]; then
+					if [[ "$content" != *"$option"* ]]; then
+						sed -i "1s/$/ $option/" "$ath12k"
+						# Refresh content after update
+						content=$(head -n 1 "$ath12k")
+					fi
+				fi
+				# Handle the ftm case: wifi_ftm_mode
+			elif [[ "$param" == "wifi_ftm_mode" ]]; then
+				# Add ftm_mode=1 if not already present
+				if [[ "$content" != *"ftm_mode=1"* ]]; then
+					sed -i "1s/$/ ftm_mode=1/" "$ath12k"
+					content=$(head -n 1 "$ath12k")
+				fi
+			fi
+		done
+	fi
 }
