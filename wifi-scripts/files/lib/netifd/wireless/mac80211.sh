@@ -1134,7 +1134,7 @@ mac80211_hostapd_setup_bss() {
 		fi
 
 		[ -n "$enable_aal" ] && append hostapd_cfg "enable_aal=$enable_aal" "$N"
-		if [ "$ml_max_rec_links" -gt 0 ] && [ "$ml_max_rec_links" -le 3 ]; then
+		if [ "$ml_max_rec_links" -ge 0 ] && [ "$ml_max_rec_links" -le 3 ]; then
 			append hostapd_cfg "ml_max_rec_links=$ml_max_rec_links" "$N"
 		fi
 	fi
