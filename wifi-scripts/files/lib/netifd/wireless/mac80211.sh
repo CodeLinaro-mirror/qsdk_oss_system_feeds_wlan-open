@@ -1352,7 +1352,9 @@ mac80211_prepare_vif() {
         if [ $mode == "mesh" ] && [ $ppe_vp == "ds" ]; then
                 ppe_vp="passive"
         fi
-
+        if [ $mode == "monitor" ]; then
+                 append mon_ifname "$ifname"
+        fi
 
 	append active_ifnames "$ifname"
 	set_default wds 0
@@ -1750,6 +1752,7 @@ wpa_supplicant_add_interface() {
 wpa_supplicant_set_config() {
 	local phy="$1"
 	local radio="$2"
+	local mon_if_name="$3"
 	local prev
 
 	json_set_namespace wpa_supp prev
@@ -1759,6 +1762,7 @@ wpa_supplicant_set_config() {
 	json_add_int num_global_macaddr "$num_global_macaddr"
 	json_add_boolean defer 1
 	[ -n "$mld" ] && json_add_boolean is_ml 1
+	json_add_string mon_if_name "$mon_if_name"
 	local data="$(json_dump)"
 
 	json_cleanup
@@ -2092,11 +2096,13 @@ drv_mac80211_setup() {
 
 	mac80211_prepare_iw_htmode
 	active_ifnames=
+	mon_ifname=
+
 	for_each_interface "ap" mac80211_prepare_vif
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
-	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio"
+	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio" "$mon_ifname"
 	[ -x /usr/sbin/hostapd ] && hostapd_set_config "$phy" "$radio"
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_start "$phy" "$radio"
