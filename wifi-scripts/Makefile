@@ -34,7 +34,7 @@ endef
 define Package/wifi-scripts/install
 	$(INSTALL_DIR) $(1)
 ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
-        sed -i 's/OpenWrt/prplOS/g' ./files/lib/wifi/mac80211.uc
+	sed -i 's/OpenWrt/prplOS/g' ./files/lib/wifi/mac80211.uc
 endif
 	$(CP) ./files/* $(1)/
 endef
