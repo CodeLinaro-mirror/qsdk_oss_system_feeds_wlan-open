@@ -992,6 +992,10 @@ post_wifi_updown() {
 	if [ -f "/lib/ftrace_enable_events.sh" ]; then
                 sh /lib/ftrace_enable_events.sh
         fi
+        if ubus list | grep -q 'udebug'; then
+                ubus call udebug set_config '{"service": {"hostapd": {"enabled": "1"}}}'
+                udebug set_flag hostapd:wpa_nl_rx rx_frame=1
+        fi
 	:
 }
 
