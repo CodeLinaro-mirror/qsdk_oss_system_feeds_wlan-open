@@ -1071,6 +1071,9 @@ hostapd_set_bss_options() {
 		case "$ieee80211w" in
 			[012])
 				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout
+				if [[ "$auth_type" == "sae" || "$auth_type" == "ft-sae-ext-key" || "$auth_type" == "sae-ext-key" ]]; then
+					ieee80211w=2
+				fi
 				append bss_conf "ieee80211w=$ieee80211w" "$N"
 				[ "$ieee80211w" -gt "0" ] && {
 					if [ "$auth_type" = "eap192" ]; then
