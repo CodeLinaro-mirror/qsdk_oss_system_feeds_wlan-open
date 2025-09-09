@@ -25,49 +25,53 @@ boot()
 	if ! echo -n "/ini" > /sys/module/firmware_class/parameters/path; then
 		echo "Failed to set path for ini framework" > /dev/console
 	fi
-	ath12k="/etc/modules.d/ath12k"
-	if [ -e $ath12k ];
-	then
-		# Read first line only
-		content=$(head -n 1 $ath12k)
 
-		# If first line does not have "dyndbg" substr in it
-		if [[ $content != *"dyndbg"* ]];
-		then
-			sed -i '1s/ath12k/ath12k dyndbg=+p/' $ath12k
-		fi
-	fi
-	update_ath12k_module_params_from_cmdline
+	update_ath12k_module_parameters
 }
 
 # this function is to parse the bootargs and update ath12k
 # module params
 
-update_ath12k_module_params_from_cmdline() {
-	ath12k="/etc/modules.d/ath12k"
-	if [ -e "$ath12k" ]; then
-		content=$(head -n 1 "$ath12k")
-		cmdline=$(cat /proc/cmdline)
+update_ath12k_module_parameters()
+{
+	ath12k_config_file="/etc/modules.d/ath12k"
+	[ ! -e "$ath12k_config_file" ] && {
+		echo "Error: ath12k config file not found at $ath12k_config_file" > /dev/console
+		return
+	}
 
-		for param in $cmdline; do
-			if [[ "$param" == ath12k_* ]]; then
-				option="${param#ath12k_}"
-				# Append the option if not already present
-				if [[ "$option" =~ ^[a-zA-Z0-9_]+=.+$ ]]; then
-					if [[ "$content" != *"$option"* ]]; then
-						sed -i "1s/$/ $option/" "$ath12k"
-						# Refresh content after update
-						content=$(head -n 1 "$ath12k")
-					fi
-				fi
-				# Handle the ftm case: wifi_ftm_mode
-			elif [[ "$param" == "wifi_ftm_mode" ]]; then
-				# Add ftm_mode=1 if not already present
-				if [[ "$content" != *"ftm_mode=1"* ]]; then
-					sed -i "1s/$/ ftm_mode=1/" "$ath12k"
-					content=$(head -n 1 "$ath12k")
-				fi
-			fi
-		done
-	fi
+	boot_arguments=$(cat /proc/cmdline)
+	ftm_mode_enabled=0
+	module_params=""
+
+	# Parse boot arguments to extract ath12k-specific parameters
+	for argument in $boot_arguments; do
+		case "$argument" in
+			wifi_ftm_mode|ath12k_ftm_mode=1)
+				ftm_mode_enabled=1
+				;;
+			ath12k_*=*)
+				param="${argument#ath12k_}"
+				module_params="$module_params $param"
+				;;
+		esac
+	done
+
+	first_line="ath12k dyndbg=+p"
+	[ "$ftm_mode_enabled" -eq 1 ] && first_line="$first_line ftm_mode=1"
+
+	# Append all unique ath12k_* parameters to the first line
+	for param in $module_params; do
+		if ! echo "$first_line" | grep -qw "$param"; then
+			first_line="$first_line $param"
+		fi
+	done
+
+	# Replace only the first line of the config file, preserving the rest
+	tail -n +2 "$ath12k_config_file" > /tmp/ath12k_rest
+	{
+		echo "$first_line"
+		cat /tmp/ath12k_rest
+	} > "$ath12k_config_file"
+	rm -f /tmp/ath12k_rest
 }
