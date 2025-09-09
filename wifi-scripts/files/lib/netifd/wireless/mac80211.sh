@@ -584,10 +584,15 @@ mac80211_hostapd_setup_base() {
 			fi
 		;;
 		VHT40|HE40|EHT40)
-			case "$(( (($channel / 4) + $chan_ofs) % 2 ))" in
-				1) idx=$(($channel + 2));;
-				0) idx=$(($channel - 2));;
-			esac
+			if [ "$channel" -le 2 ]; then
+				idx=$(($channel + 2))
+			else
+
+				case "$(( (($channel / 4) + $chan_ofs) % 2 ))" in
+					1) idx=$(($channel + 2));;
+					0) idx=$(($channel - 2));;
+				esac
+			fi
 			enable_ac=1
 			vht_oper_chwidth=0
 			vht_center_seg0=$idx
