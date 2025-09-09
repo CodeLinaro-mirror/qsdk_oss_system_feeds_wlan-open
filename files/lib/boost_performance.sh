@@ -55,6 +55,9 @@ disable_stats_n_qdss_trace() {
 			fi
 		fi
 	done
+
+	#Disable Global dp stats
+	echo 0 > /sys/kernel/debug/ieee80211/phy00/dp_stats_mask
 }
 
 boost_performance() {
