@@ -33,6 +33,7 @@ enable_color=
 #ACS DFS
 acs_exclude_dfs=
 
+updated_chanlist=
 min_tx_power=
 noscan=
 ht_coex=
@@ -108,6 +109,43 @@ enable_dscp_policy_capa=
 
 #atf commands
 atf_offload=
+
+mac80211_freq_to_channel() {
+        local freq=$1
+
+        if [ "$freq" -lt 1000 ]; then
+		echo 0
+		return
+        fi
+        if [ "$freq" -eq 2484 ]; then
+		echo 14
+		return
+        fi
+        if [ "$freq" -eq 5935 ]; then
+		echo 2
+		return
+        fi
+        if [ "$freq" -lt 2484 ]; then
+		echo $(((freq-2407)/5))
+		return
+        fi
+        if [ "$freq" -ge 4910 ] && [ "$freq" -le 4980 ]; then
+		echo $(((freq-4000)/5))
+		return
+        fi
+        if [ "$freq" -lt 5950 ]; then
+		echo $(((freq-5000)/5))
+		return
+        fi
+        if [ "$freq" -le 45000 ]; then
+		echo $(((freq-5950)/5))
+		return
+        fi
+        if [ "$freq" -ge 58320 ] && [ "$freq" -le 70200 ]; then
+		echo $(((freq-56160)/5))
+		return
+        fi
+}
 
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
@@ -998,6 +1036,9 @@ mac80211_hostapd_setup_base() {
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
+
+	[ -n "$updated_chanlist" ] && channel_list=$(echo $updated_chanlist)
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${channel_list:+chanlist=$channel_list}
@@ -2037,10 +2078,30 @@ drv_mac80211_setup() {
 				iw reg set "$country"
 				sleep 1
 			fi
-
 		}
 	fi
 
+	Update_channel_list() {
+		local start_freq end_freq start_chan end_chan
+		local device_name=$1
+		local radio=$(uci get wireless.$device_name.radio)
+		start_chan=0
+		end_chan=0
+		#Fetch all the radio names and iterate for each radio to update channel list
+		start_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		if [ "$start_chan" != "0" ] && [ "$end_chan" != "0" ]; then
+			uci set wireless.$device_name.channels=$start_chan-$end_chan
+			uci commit wireless
+		fi
+	}
+
+	config_foreach Update_channel_list wifi-device
+	updated_chanlist=$(uci get wireless.$device.channels)
 	hostapd_conf_file="/var/run/hostapd-$phy$vif_phy_suffix.conf"
 
 	macidx=0
