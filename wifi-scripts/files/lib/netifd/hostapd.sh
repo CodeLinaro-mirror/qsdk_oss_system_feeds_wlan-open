@@ -84,6 +84,14 @@ hostapd_append_wpa_key_mgmt() {
 			append wpa_key_mgmt "SAE"
 			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-SAE"
 		;;
+		psk-sae-sae_ext_key)
+			append wpa_key_mgmt "WPA-PSK SAE SAE-EXT-KEY"
+			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-PSK FT-SAE FT-SAE-EXT-KEY"
+			[ "${ieee80211w:-0}" -eq 2 ] && append wpa_key_mgmt "WPA-PSK-SHA256"
+		;;
+		sae-sae_ext_key)
+			append wpa_key_mgmt "SAE SAE-EXT-KEY"
+		;;
 		owe)
 			append wpa_key_mgmt "OWE"
 		;;
@@ -694,12 +702,12 @@ hostapd_set_bss_options() {
 			set_default sae_require_mfp 1
 			set_default sae_pwe 2
 		;;
-		psk-sae|eap-eap2)
+		psk-sae-sae_ext_key|psk-sae|eap-eap2)
 			set_default ieee80211w 1
 			set_default sae_require_mfp 1
 			set_default sae_pwe 2
 		;;
-		ft-sae-ext-key|sae-ext-key)
+		ft-sae-ext-key|sae-ext-key|sae-sae_ext_key)
 			set_default ieee80211w 2
 			if [ "$band" = "6g" ]; then
 				set_default sae_pwe 1
@@ -1003,7 +1011,7 @@ hostapd_set_bss_options() {
 			set_default reassociation_deadline 1000
 
 			case "$auth_type" in
-				psk|sae|psk-sae)
+				psk|sae|psk-sae|psk-sae-sae_ext_key)
 					set_default ft_psk_generate_local 1
 				;;
 				*)
@@ -1459,7 +1467,7 @@ wpa_supplicant_add_network() {
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
 			set_default ieee80211w 2
 		;;
-		psk-sae)
+		psk-sae|psk-sae-sae_ext_key)
 			set_default ieee80211w 1
 		;;
 	esac

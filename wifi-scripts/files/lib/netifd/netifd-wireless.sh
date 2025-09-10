@@ -237,7 +237,7 @@ wireless_vif_parse_encryption() {
 	case "$encryption" in
 		*tkip+aes|*tkip+ccmp|*aes+tkip|*ccmp+tkip) wpa_cipher="CCMP TKIP";;
 		*ccmp256) wpa_cipher="CCMP-256";;
-		*gcmp | *sae-ext-key) wpa_cipher="GCMP CCMP GCMP-256";;
+		*gcmp | *sae-ext-key | akm24*) wpa_cipher="GCMP CCMP GCMP-256";;
 		*gcmp256 | wpa3-192*) wpa_cipher="GCMP-256";;
 		*aes|*ccmp| psk2 | wpa2 | sae* | owe | dpp) wpa_cipher="CCMP";;
 		*tkip | wpa | psk) wpa_cipher="TKIP";;
@@ -287,6 +287,12 @@ wireless_vif_parse_encryption() {
 		;;
 		psk3-mixed*|sae-mixed*)
 			auth_type=psk-sae
+		;;
+		sae-sae_ext_key)
+			auth_type=sae-sae_ext_key
+		;;
+		akm24-sae-mixed)
+			auth_type=psk-sae-sae_ext_key
 		;;
 		sae-ext-key)
 			auth_type=sae-ext-key
