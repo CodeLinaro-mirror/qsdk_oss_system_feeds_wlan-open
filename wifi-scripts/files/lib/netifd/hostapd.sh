@@ -49,7 +49,7 @@ hostapd_append_wpa_key_mgmt() {
 		psk|eap)
 			append wpa_key_mgmt "WPA-$auth_type_l"
 			[ "${wpa:-2}" -ge 2 ] && [ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-${auth_type_l}"
-			[ "${ieee80211w:-0}" -gt 0 ] && append wpa_key_mgmt "WPA-${auth_type_l}-SHA256"
+			[ "${ieee80211w:-0}" -gt 0 ] && [ "${rsn_override_mfp:-0}" -eq 0 ] && append wpa_key_mgmt "WPA-${auth_type_l}-SHA256"
 		;;
 		eap192)
 			append wpa_key_mgmt "WPA-EAP-SUITE-B-192"
@@ -711,7 +711,6 @@ hostapd_set_bss_options() {
 
 	#rsn override used for sae encryption only
 	[ -n "$rsn_override_key_mgmt" ] && {
-		set_default ieee80211w 1
 		set_default sae_pwe 2
 		set_default rsn_override_mfp 1
 		set_default rsn_override_pairwise CCMP
@@ -723,7 +722,6 @@ hostapd_set_bss_options() {
 
 	#rsn override 2 used for sae-ext-key and ft-sae-ext-key
 	[ -n "$rsn_override_key_mgmt_2" ] && {
-		set_default ieee80211w 1
 		set_default sae_pwe 2
 		set_default rsn_override_mfp_2 2
 		set_default rsn_override_pairwise_2 GCMP
