@@ -1,0 +1,41 @@
+From f9dcfdf78114e50d9ac401878bd32eea7b2b44f3 Mon Sep 17 00:00:00 2001
+From: Balamurugan Ramar <bramar@qti.qualcomm.com>
+Date: Mon, 15 Sep 2025 12:47:17 +0530
+Subject: [PATCH] UPSTREAM: wifi: ath12k: CP: stop STA vdev on chanctx unassign
+ when started but not up
+
+mac80211 can unassign the channel context while a STA vdev is in the
+"started" state (vdev_start sent) but not yet "up" (vdev_up not issued),
+for example on association failures, aborts, CSA, or teardown. In this
+corner case ath12k did not stop the vdev, leaving firmware with a vdev
+running on the old channel and causing driver/FW state to diverge. A
+subsequent (re)start could fail or trigger spurious errors.
+
+Ensure stop the STA vdev in ath12k_mac_unassign_vif_chanctx_handle()
+whenever arvif->is_started && !arvif->is_up.
+
+Signed-off-by: Balamurugan Ramar <bramar@qti.qualcomm.com>
+---
+ drivers/net/wireless/ath/ath12k/mac.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/ath12k/mac.c
+index 8940be5..da6a07d 100644
+--- a/drivers/net/wireless/ath/ath12k/mac.c
++++ b/drivers/net/wireless/ath/ath12k/mac.c
+@@ -18371,6 +18371,12 @@ ath12k_mac_unassign_vif_chanctx_handle(struct ieee80211_hw *hw,
+ 		if (ret)
+ 			ath12k_warn(ab, "failed to stop vdev %i: %d\n",
+ 				    arvif->vdev_id, ret);
++	} else if (ahvif->vdev_type == WMI_VDEV_TYPE_STA &&
++		   arvif->is_started && !arvif->is_up) {
++		ret = ath12k_mac_vdev_stop(arvif);
++		if (ret)
++			ath12k_warn(ab, "failed to stop vdev %i: %d\n",
++				    arvif->vdev_id, ret);
+ 	}
+ 
+ 	ath12k_ppeds_detach_link_vif(arvif, arvif->ppe_vp_profile_idx);
+-- 
+2.34.1
+
