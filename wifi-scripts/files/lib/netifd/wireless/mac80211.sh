@@ -8,9 +8,75 @@
 . /lib/netifd/hostapd.sh
 . /lib/functions/system.sh
 
+mac80211_update_mld_iface_config() {
+	vif_name=$1
+	mld_name=$2
+	# Get the following from section wifi-mld
+	config_get mld_ssid "$mld_name" ssid
+	config_get mld_encryption "$mld_name" encryption
+	config_get mld_key "$mld_name" key
+	config_get mld_sae "$mld_name" sae_pwe
+	config_get mld_vp "$mld_name" ppe_vp
+	config_get mld_enable_epcs "$mld_name" enable_epcs
+	config_get mld_ttlm_enable "$mld_name" ttlm_enable
+	if [ -n "$mld_ssid" ]; then
+		uci_set wireless "$vif_name" ssid "$mld_ssid"
+	fi
+	if [ -n "$mld_encryption" ]; then
+		uci_set wireless "$vif_name" encryption "$mld_encryption"
+	fi
+	if [ -n "$mld_key" ]; then
+		uci_set wireless "$vif_name" key "$mld_key"
+	fi
+	if [ -n "$mld_sae" ]; then
+		uci_set wireless "$vif_name" sae_pwe "$mld_sae"
+	fi
+	if [ -n "$mld_vp" ]; then
+		uci_set wireless "$vif_name" ppe_vp "$mld_vp"
+	fi
+	if [ -n "$mld_enable_epcs" ];then
+		uci_set wireless "$vif_name" enable_epcs "$mld_enable_epcs"
+
+		if [ "$mld_enable_epcs" = "1" ]; then
+			for param in $epcs_params; do
+				config_get "mld_$param" "$mld_name" "$param"
+				mld_value_var="mld_$param"
+				eval "value=\$$mld_value_var"
+				if [ -n "$value" ]; then
+					uci_set wireless "$vif_name" "$param" "$value"
+				fi
+			done
+		fi
+	fi
+	if [ -n "$mld_ttlm_enable" ];then
+		uci_set wireless "$vif_name" ttlm_enable "$mld_ttlm_enable"
+	fi
+	uci commit wireless
+}
+
+mac80211_update_mld_configs() {
+	local iflist
+	config_load wireless
+	mac80211_update_mld_cfg() {
+		append iflist "$1"
+	}
+	config_foreach mac80211_update_mld_cfg wifi-iface
+	for name in $iflist
+	do
+		config_get mld_name "$name" mld
+		config_get ml_device "$name" device
+		config_get ht_mode "$ml_device" htmode
+		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]  && [ -n "$mld_name" ]); then
+			append mld_names "$mld_name"
+			mac80211_update_mld_iface_config "$name" "$mld_name"
+		fi
+	done
+}
+
 mlo_add_flag=0
 [ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 if [ $mlo_add_flag -eq 0 ]; then
+	mac80211_update_mld_configs
 	init_wireless_driver "$@"
 fi
 
