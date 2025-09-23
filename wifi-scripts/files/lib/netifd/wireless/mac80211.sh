@@ -1157,7 +1157,7 @@ mac80211_hostapd_setup_bss() {
 		append hostapd_cfg "enable_dscp_policy_capa=$enable_dscp_policy_capa" "$N"
 	fi
 
-	if [[ "$htmode" == "EHT20" ] || [ "$htmode" == "EHT40" ] || [ "$htmode" == "EHT80" ] || [ "$htmode" == "EHT160" ] || [ "$htmode" == "EHT320" ]]; then
+	if [[ "$htmode" == "EHT"* ]]; then
 		append hostapd_cfg "mld_ap=1" "$N"
 
 		if [ -n "$enable_epcs" ]; then
