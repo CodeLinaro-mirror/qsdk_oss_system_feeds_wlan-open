@@ -2168,6 +2168,8 @@ drv_mac80211_setup() {
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
+	echo 3 > /sys/kernel/debug/ecm/ecm_classifier_default/accel_delay_pkts
+
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio" "$mon_ifname"
 	[ -x /usr/sbin/hostapd ] && hostapd_set_config "$phy" "$radio"
 
