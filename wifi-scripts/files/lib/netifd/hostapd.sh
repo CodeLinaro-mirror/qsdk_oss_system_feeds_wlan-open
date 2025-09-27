@@ -180,6 +180,7 @@ hostapd_prepare_device_config() {
 	set_default legacy_rates 0
 	set_default airtime_mode 0
 	set_default cell_density 0
+	set_default country "US"
 
 	[ -n "$country" ] && [ "$country" != "00" ] && {
 		append base_cfg "country_code=$country" "$N"
