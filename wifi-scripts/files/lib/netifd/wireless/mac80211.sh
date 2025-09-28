@@ -1676,7 +1676,7 @@ get_seg0_freq() {
 }
 
 mac80211_setup_monitor() {
-	local prev
+	local prev idx
 	json_set_namespace wdev_uc prev
 
 	json_add_object "$ifname"
@@ -1702,7 +1702,12 @@ mac80211_setup_monitor() {
 		EHT320)
 			if [ "$band" = "6g" ]; then
 				bw=320
-				center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 320)")
+				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
+					idx="$ccfs"
+				elif [ -z "$ccfs" ] || [ "$ccfs" -eq "0" ]; then
+					idx="$(mac80211_get_seg0 "320")"
+				fi
+				center_freq=$(get_seg0_freq "$freq" "$channel" "$idx")
 			fi
 			;;
         esac
