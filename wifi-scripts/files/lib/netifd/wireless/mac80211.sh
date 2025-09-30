@@ -1788,6 +1788,37 @@ mac80211_setup_monitor() {
 	json_set_namespace "$prev"
 }
 
+get_link_id() {
+	local target_mac_addr=$1
+	local target_ifname=$2
+	local link_ids
+	local link_mac
+
+	if [ -z "$target_mac_addr" ]; then
+		echo ""
+		return
+	fi
+
+	if [ -z "$target_ifname" ]; then
+		echo ""
+		return
+	fi
+
+	link_ids=$(iw dev $target_ifname info | grep link | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+	if [ -n "$link_ids" ]; then
+		for i in $link_ids
+		do
+			link_mac=$(iw dev $target_ifname info | grep -A 2 "link $i:" | grep "addr" | awk '{print $2}')
+			if [ "$link_mac" == "$target_mac_addr" ]; then
+				echo "$i"
+				return
+			fi
+		done
+	fi
+
+	echo ""
+}
+
 mac80211_set_vif_txpower() {
 	local name="$1"
 
@@ -1798,10 +1829,30 @@ mac80211_set_vif_txpower() {
 	json_select ..
 
 	set_default vif_txpower "$txpower"
+
+	local link_id=""
+	case "$htmode" in
+		EHT20|EHT40|EHT80|EHT160|EHT320)
+			json_select config
+			json_get_var link_mac_addr _macaddr
+			json_select ..
+
+			link_id=$(get_link_id "$link_mac_addr" "$ifname")
+		;;
+	esac
+
 	if [ -n "$vif_txpower" ]; then
-		iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
+		if [ -n "$link_id" ]; then
+			iw dev "$ifname" set txpower -l "$link_id" fixed "${vif_txpower%%.*}00"
+		else
+			iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
+		fi
 	else
-		iw dev "$ifname" set txpower auto
+		if [ -n "$link_id" ]; then
+			iw dev "$ifname" set txpower -l "$link_id" auto
+		else
+			iw dev "$ifname" set txpower auto
+		fi
 	fi
 
 	iw dev "$ifname" set_intf_offload type "$ppe_vp"
