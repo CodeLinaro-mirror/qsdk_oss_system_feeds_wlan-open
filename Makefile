@@ -31,12 +31,12 @@ PKG_SUBDIR:=$(MAC80211_PKG_SUBDIR)
 PKG_RELEASE:=1
 PKG_BUILD_ID:=1
 
-PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)
+PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 PKG_BUILD_PARALLEL:=1
 
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
 PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
-PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+LOCAL_SRC:=$(TOPDIR)/qca/src/mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 
 ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
@@ -351,26 +351,26 @@ $(call ConfigVars,m)$(call ConfigVars,y)
 endef
 $(eval $(call shexport,mac80211_config))
 
+SPATCH?=1
 define Build/Prepare
 	rm -rf $(PKG_BUILD_DIR)
 	mkdir -p $(PKG_BUILD_DIR)
-	$(PKG_UNPACK)
-	$(Build/Patch)
-	rm -rf \
-		$(PKG_BUILD_DIR)/include/linux/ssb \
-		$(PKG_BUILD_DIR)/include/linux/bcma \
-		$(PKG_BUILD_DIR)/include/net/bluetooth
+	cp -rf $(LOCAL_SRC)/* $(PKG_BUILD_DIR)
+ifdef CONFIG_PACKAGE_QCN_EXTN
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
+	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+endif
+ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
+ ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
+  ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+    ifeq ($(SPATCH),1)
+	$(Build/refactor)
+    endif
+  endif
+ endif
+endif
 
-	rm -f \
-		$(PKG_BUILD_DIR)/include/linux/cordic.h \
-		$(PKG_BUILD_DIR)/include/linux/crc8.h \
-		$(PKG_BUILD_DIR)/include/linux/eeprom_93cx6.h \
-		$(PKG_BUILD_DIR)/include/linux/wl12xx.h \
-		$(PKG_BUILD_DIR)/include/linux/mhi.h \
-		$(PKG_BUILD_DIR)/include/net/ieee80211.h \
-		$(PKG_BUILD_DIR)/backport-include/linux/bcm47xx_nvram.h
-
-	echo 'compat-wireless-$(PKG_VERSION)-$(PKG_RELEASE)-$(REVISION)' > $(PKG_BUILD_DIR)/compat_version
 endef
 
 ifneq ($(CONFIG_PACKAGE_kmod-cfg80211),)
@@ -381,40 +381,6 @@ ifneq ($(CONFIG_PACKAGE_kmod-cfg80211),)
 endif
 
 EXTERNAL_PATCH_DIR:=$(TOPDIR)/openwrt-patches/package/kernel/mac80211/patches
-SPATCH?=1
-
-define Build/Patch
-	$(if $(QUILT),rm -rf $(PKG_BUILD_DIR)/patches; mkdir -p $(PKG_BUILD_DIR)/patches)
-	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/build,build/)
-	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/subsys,subsys/)
-ifdef CONFIG_PACKAGE_QCN_EXTN
-	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/subsys/patches,patches/)
-endif
-#	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath,ath/)
-	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath11k,ath11k/)
-	$(call PatchDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath12k,ath12k/)
-ifdef CONFIG_PACKAGE_QCN_EXTN
-	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/patches,patches/)
-	$(call PatchDir,$(PKG_BUILD_DIR),$(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/patches,patches/)
-	# The below line is not required when the frameworks changes adding wifi7 is downstreamed through package upgrade.
-	mkdir -p $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7
-	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
-	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
-	$(CP) $(TOPDIR)/qca/src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
-endif
-	$(if $(QUILT),touch $(PKG_BUILD_DIR)/.quilt_used)
-ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
- ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
-  ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
-   ifeq ($(QUILT),)
-    ifeq ($(SPATCH),1)
-	$(Build/refactor)
-    endif
-   endif
-  endif
- endif
-endif
-endef
 
 define Quilt/Refresh/Package
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/build,build/)
@@ -507,81 +473,11 @@ else
   endef
 endif
 
-getLocalBackport ?= $(shell wget $(SERVER_PATH)/$(PKG_SOURCE) -P $(TOPDIR)/dl/);
-ifeq ($(FORCED_BACKPORTS),false)
-$(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(call getLocalBackport))
-endif
 
 ifeq (,$(wildcard $(DL_DIR)/$(PKG_SOURCE)))
 $(shell [ -f "$(NFS_MIRROR_SERVER)/$(PKG_SOURCE)" ] && \
 	cp "$(NFS_MIRROR_SERVER)/$(PKG_SOURCE)" "$(TOPDIR)/dl/")
 endif
-
-ifeq ($(PKG_BUILD_MLO_SUPPORT),1)
-  define backports_mlo_support
-        $(info Backports mlo support enabled)
-        sed -i 's/struct ieee80211_tx_info \*info;/ktime_t ack_hwtstamp;/' \
-                        $(1)/patches/0097-skb-list/mac80211-status.patch
-        sed -i 's/struct sk_buff \*skb;/u8 n_rates;/' \
-                        $(1)/patches/0097-skb-list/mac80211-status.patch
-        sed -i '13s/.*/ /' \
-                        $(1)/patches/0097-skb-list/mac80211-status.patch
-        sed -i '58,75d' $(1)/patches/0099-netlink-range/mac80211.patch
-  endef
-else
-  define backports_mlo_support
-        $(info Backports mlo support disabled)
-  endef
-endif
-
-define DownloadBackports
-  $(eval $(Download/Defaults))
-  $(eval $(Download/backports))
-
-  $(foreach dep,$(DOWNLOAD_RDEP),
-    $(dep): $(DL_DIR)/$(FILE)
-  )
-  download: $(DL_DIR)/$(FILE)
-
-  $(DL_DIR)/$(FILE):
-	mkdir -p $(TMP_DIR)/dl/$(PKG_NAME)-$(PKG_VERSION)
-	$(call FastCloneKernel,$(PKG_KERNEL_SOURCE_URL),$(TMP_DIR)/dl/$(PKG_NAME)-kernel)
-	(cd $(TMP_DIR)/dl/$(PKG_NAME)-kernel && git checkout $(PKG_KERNEL_VERSION))
-
-	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source || \
-	(rm -rf $(TMP_DIR)/dl/$(PKG_NAME)-source && \
-	git clone $(PKG_BACKPORTS_SOURCE_URL) $(TMP_DIR)/dl/$(PKG_NAME)-source)
-	cp files/copy-list.ath $(TMP_DIR)/dl/$(PKG_NAME)-source
-	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && git checkout $(PKG_BACKPORTS_VERSION) && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0073-netdevice-mtu-range.cocci && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0075-ndo-stats-64.cocci && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0105-remove-const-from-rchan_callbacks.patch) && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0004-disable-wext-kconfig.patch && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0013-fix-makefile-includes/wireless.patch && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0028-select_queue/mac80211.patch && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0097-skb-list/mac80211-status.patch && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0099-netlink-range/mac80211.patch && \
-	rm -f $(TMP_DIR)/dl/$(PKG_NAME)-source/patches/0111-wireless-build-unquote.patch
-
-	$(call backports_mlo_support,$(TMP_DIR)/dl/$(PKG_NAME)-source)
-	(cd $(TMP_DIR)/dl/$(PKG_NAME)-source && \
-	python3 gentree.py --clean --copy-list ./copy-list.ath \
-	$(TMP_DIR)/dl/$(PKG_NAME)-kernel $(TMP_DIR)/dl/$(SUBDIR))
-ifeq ($(CONFIG_LINUX_4_4),y)
-	(cd $(TMP_DIR)/dl; $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)))
-else
-	(cd $(TMP_DIR)/dl ; if [ -z "$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR))" ]; then $(call dl_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)); else : ; fi; \
-	$(call dl_tar_pack,$(TMP_DIR)/dl/$(FILE),$(SUBDIR)) )
-endif
-	mv $(TMP_DIR)/dl/$(FILE) $(DL_DIR)
-	rm -rf $(TMP_DIR)/dl
-endef
-
-define Download/backports
-  FILE:=$(PKG_SOURCE)
-  SUBDIR:=$(PKG_SUBDIR)
-endef
-$(if $(wildcard $(DL_DIR)/$(PKG_SOURCE)),,$(eval $(call DownloadBackports,backports)))
 
 $(eval $(foreach drv,$(PKG_DRIVERS),$(call KernelPackage,$(drv))))
 $(eval $(call KernelPackage,cfg80211))
