@@ -29,6 +29,10 @@ target_specific_settings() {
 			echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0003\:01\:00.0/rx_hash
 			echo 0x71c71c > /sys/kernel/debug/ath11k/qcn9074\ hw1.0_0004\:01\:00.0/rx_hash
 			;;
+		ap-al06)
+			#case for rdp476 alder
+			echo 0x69a2d1 > /sys/kernel/debug/ath11k/ahb-c000000.wifi/rx_hash
+			;;
 		*)
 			#no settings
 			;;
