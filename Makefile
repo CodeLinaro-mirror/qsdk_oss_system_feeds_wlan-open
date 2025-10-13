@@ -429,6 +429,7 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 endif
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
