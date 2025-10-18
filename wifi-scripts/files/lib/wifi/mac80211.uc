@@ -51,6 +51,13 @@ function radio_exists(path, macaddr, phy) {
 	for (let name, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
+
+		/* For multi-radio case: if we find any radio0_bandX device, */
+		/* it means this phy has already been processed */
+		if (match(name, /^radio[0-9]+_band[0-9]+$/)) {
+			return true;
+		}
+
 		if (s.macaddr & lc(s.macaddr) == lc(macaddr))
 			return true;
 		if (s.phy == phy)
@@ -77,6 +84,247 @@ function get_band(freq) {
 function get_channel_list(start_freq, end_freq) {
 	channels = freq_to_channel(start_freq) + "-" + freq_to_channel(end_freq);
 	return channels;
+}
+
+/* ADDED: helpers for proprietary→ath-ud translator */
+function parse_ht_width(val) {
+	if (!val)
+		return null;
+
+	let m = match(val, /([0-9]+)/, "s");
+	return m ? m[1] : null;
+}
+
+function map_hwmode_to_htmode(hwmode, curr_htmode) {
+	if (!hwmode)
+		return null;
+
+	let width = parse_ht_width(curr_htmode);
+
+	/* 11be (EHT): ensure 11bea+HT80->EHT80; 11beg+HT40->EHT40 else EHT20 */
+	if (match(hwmode, /^11be/, "s")) {
+		if (width)
+			return "EHT" + width;
+		return (hwmode == "11beg") ? "EHT20" : "EHT80";
+	}
+
+	/* 11ax (HE): ensure 11axa+HT40->HE40 else HE20 */
+	if (match(hwmode, /^11ax/, "s")) {
+		if (width)
+			return "HE" + width;
+		return "HE20";
+	}
+
+	/* 11ac (VHT): map width generically (e.g., HT80 -> VHT80) */
+	if (match(hwmode, /^11ac/, "s")) {
+		if (width)
+			return "VHT" + width;
+		/* default to VHT80 if not specified */
+		return "VHT80";
+	}
+
+	/* 11na (HT on 5GHz): map width generically (e.g., HT40 -> HT40) */
+	if (match(hwmode, /^11na/, "s")) {
+		if (width)
+			return "HT" + width;
+		/* default similar to legacy: HT40 for 11na */
+		return "HT40";
+	}
+
+	/* 11ng (HT on 2.4GHz): map width generically (e.g., HT20/HT40) */
+	if (match(hwmode, /^11ng/, "s")) {
+		if (width)
+			return "HT" + width;
+		/* default: HT20 for 11ng */
+		return "HT20";
+	}
+
+	return null;
+}
+
+/* ADDED: run translator only if proprietary QCA type present */
+function has_qca_cfg80211() {
+	for (let secname, s in config) {
+		if (s[".type"] != "wifi-device")
+			continue;
+		if (lc(s.type ?? "") == "qcawificfg80211")
+			return true;
+	}
+	return false;
+}
+
+/* ADDED: proprietary → ath-ud translator (UCI batch emitter) */
+function translate_proprietary_to_ath_ud() {
+	let changed = false;
+
+	/* Build a map of radio configs from board.json */
+	let radio_map = {};
+	if (board && board.wlan) {
+		for (let phy_name, phy in board.wlan) {
+			/* Currently supports single phy */
+			if (!phy.multi_radio)
+				continue;
+
+			let multi_radio = phy.multi_radio;
+			let hw_idx;
+			for (let radio_name in multi_radio) {
+				let radio_idx = multi_radio[radio_name];
+				if (radio_idx && radio_idx.idx != null) {
+					/* Derive band from frequency (same as generate_config) */
+					let freq = radio_idx.first_freq;
+					let band_name = get_band(freq);
+
+					/* Map radio names to expected band numbers and radio indices */
+					let band_num, mapped_radio_idx;
+					if (radio_name == "radio0") {
+						/* radio0_band0: 2G, radio=3 */
+						band_num = "0";
+						mapped_radio_idx = radio_idx.idx ;
+					} else if (radio_name == "radio1") {
+						/* radio0_band1: 5G, radio=0 */
+						band_num = "1";
+						mapped_radio_idx = radio_idx.idx ;
+					} else if (radio_name == "radio2") {
+						/* radio0_band2: 5G, radio=1 */
+						band_num = "2";
+						mapped_radio_idx = radio_idx.idx ;
+					} else if (radio_name == "radio3") {
+						/* radio0_band3: 6G, radio=2 */
+						band_num = "3";
+						mapped_radio_idx = radio_idx.idx ;
+					} else {
+						/* Skip unknown radios */
+						continue;
+					}
+
+					/* Calculate channels from frequency range from board.json */
+					let channels = get_channel_list(radio_idx.first_freq, radio_idx.last_freq);
+
+					radio_map[band_num] = {
+						path: phy.path,
+						band: lc(band_name),
+						radio: mapped_radio_idx,
+						channels: channels
+					};
+				}
+			}
+		}
+	}
+
+	for (let secname, s in config) {
+		if (s[".type"] == "wifi-device") {
+			if (lc(s.type ?? "") != "mac80211" || s.hwmode || !s.band || !s.radio || !s.channels) {
+				/* Extract band number from section name (e.g., radio0_band2 -> 2) */
+				let m = match(secname ?? "", /band([0-9]+)/, "s");
+				let band_num = m ? m[1] : null;
+
+				/* Look up radio config from board.json */
+				let radio_cfg = band_num ? radio_map[band_num] : null;
+
+				if (!radio_cfg) {
+					/* Skip if no board.json data available */
+					continue;
+				}
+
+				print(`set wireless.${secname}.type='mac80211'\n`);
+				print(`set wireless.${secname}.path='${radio_cfg.path}'\n`);
+				print(`set wireless.${secname}.band='${radio_cfg.band}'\n`);
+				print(`set wireless.${secname}.radio='${radio_cfg.radio}'\n`);
+				print(`set wireless.${secname}.channels='${radio_cfg.channels}'\n`);
+
+				if (s.hwmode) {
+					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
+					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
+					print(`delete wireless.${secname}.hwmode\n`);
+				}
+
+                		/* remove device-level MAC address */
+				if (s.macaddr)
+					print(`delete wireless.${secname}.macaddr\n`);
+
+				changed = true;
+			}
+			continue;
+		}
+
+		if (s[".type"] == "wifi-iface") {
+			let key = s.key;
+			if (!key && s.sae_password && s.sae_password[0])
+				key = s.sae_password[0];
+
+			print(`set wireless.${secname}.mode='ap'\n`);
+			print(`set wireless.${secname}.sae='1'\n`);
+			print(`set wireless.${secname}.sae_pwe='1'\n`);
+			print(`set wireless.${secname}.encryption='sae'\n`);
+			if (key) print(`set wireless.${secname}.key='${key}'\n`);
+
+			if (s.sae_groups && length(s.sae_groups)) {
+				print(`delete wireless.${secname}.sae_groups\n`);
+				for (let g in s.sae_groups)
+					print(`add_list wireless.${secname}.sae_groups='${g}'\n`);
+			}
+			if (s.sae_password && length(s.sae_password))
+				print(`delete wireless.${secname}.sae_password\n`);
+
+			changed = true;
+		}
+	}
+
+	for (let secname, s in config) {
+		if (s[".type"] != "wifi-mld")
+			continue;
+
+		if (s.mld_ssid) {
+			print(`set wireless.${secname}.ssid='${s.mld_ssid}'\n`);
+			print(`delete wireless.${secname}.mld_ssid\n`);
+			changed = true;
+		}
+		if (s.mld_macaddr) {
+			print(`delete wireless.${secname}.mld_macaddr\n`);
+			changed = true;
+		}
+	}
+
+	if (changed)
+		commit = true;
+}
+
+/* ADDED: rename wifi0/1/2/3 → radio0_band0/1/2/3 and rebind iface.device */
+function rename_devices_and_rebind_ifaces() {
+	let map = {
+		wifi0: "radio0_band0",
+		wifi1: "radio0_band1",
+		wifi2: "radio0_band2",
+		wifi3: "radio0_band3"
+	};
+
+	let renamed = false;
+
+	for (let secname, s in config) {
+		if (s[".type"] != "wifi-device")
+			continue;
+		let newname = map[secname];
+		if (!newname)
+			continue;
+		print(`rename wireless.${secname}='${newname}'\n`);
+		renamed = true;
+		commit = true;
+	}
+
+	if (renamed) {
+		for (let secname, s in config) {
+			if (s[".type"] != "wifi-iface")
+				continue;
+			let olddev = s.device;
+			if (!olddev)
+				continue;
+			let newdev = map[olddev];
+			if (!newdev)
+				continue;
+			print(`set wireless.${secname}.device='${newdev}'\n`);
+			commit = true;
+		}
+	}
 }
 
 function generate_config(info, name, single_wiphy, id, radio_idx) {
@@ -178,7 +426,11 @@ set ${si}.encryption='none'
 		set ${si}.key='0123456789'
 `);
 	}
+}
 
+if (has_qca_cfg80211()) {
+	translate_proprietary_to_ath_ud();
+	rename_devices_and_rebind_ifaces();
 }
 
 for (let phy_name, phy in board.wlan) {
