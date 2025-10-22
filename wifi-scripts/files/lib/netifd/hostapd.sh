@@ -84,6 +84,14 @@ hostapd_append_wpa_key_mgmt() {
 			append wpa_key_mgmt "SAE"
 			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-SAE"
 		;;
+		psk-sae-sae_ext_key)
+			append wpa_key_mgmt "WPA-PSK SAE SAE-EXT-KEY"
+			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-PSK FT-SAE FT-SAE-EXT-KEY"
+			[ "${ieee80211w:-0}" -eq 2 ] && append wpa_key_mgmt "WPA-PSK-SHA256"
+		;;
+		sae-sae_ext_key)
+			append wpa_key_mgmt "SAE SAE-EXT-KEY"
+		;;
 		owe)
 			append wpa_key_mgmt "OWE"
 		;;
@@ -172,6 +180,7 @@ hostapd_prepare_device_config() {
 	set_default legacy_rates 0
 	set_default airtime_mode 0
 	set_default cell_density 0
+	set_default country "US"
 
 	[ -n "$country" ] && [ "$country" != "00" ] && {
 		append base_cfg "country_code=$country" "$N"
@@ -694,12 +703,12 @@ hostapd_set_bss_options() {
 			set_default sae_require_mfp 1
 			set_default sae_pwe 2
 		;;
-		psk-sae|eap-eap2)
+		psk-sae-sae_ext_key|psk-sae|eap-eap2)
 			set_default ieee80211w 1
 			set_default sae_require_mfp 1
 			set_default sae_pwe 2
 		;;
-		ft-sae-ext-key|sae-ext-key)
+		ft-sae-ext-key|sae-ext-key|sae-sae_ext_key)
 			set_default ieee80211w 2
 			if [ "$band" = "6g" ]; then
 				set_default sae_pwe 1
@@ -1003,7 +1012,7 @@ hostapd_set_bss_options() {
 			set_default reassociation_deadline 1000
 
 			case "$auth_type" in
-				psk|sae|psk-sae)
+				psk|sae|psk-sae|psk-sae-sae_ext_key)
 					set_default ft_psk_generate_local 1
 				;;
 				*)
@@ -1071,6 +1080,9 @@ hostapd_set_bss_options() {
 		case "$ieee80211w" in
 			[012])
 				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout
+				if [[ "$auth_type" == "sae" || "$auth_type" == "ft-sae-ext-key" || "$auth_type" == "sae-ext-key" ]]; then
+					ieee80211w=2
+				fi
 				append bss_conf "ieee80211w=$ieee80211w" "$N"
 				[ "$ieee80211w" -gt "0" ] && {
 					if [ "$auth_type" = "eap192" ]; then
@@ -1459,7 +1471,7 @@ wpa_supplicant_add_network() {
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
 			set_default ieee80211w 2
 		;;
-		psk-sae)
+		psk-sae|psk-sae-sae_ext_key)
 			set_default ieee80211w 1
 		;;
 	esac
@@ -1806,6 +1818,7 @@ $rsn_override
 ppe_vp=$ppe_vp_type
 $freq_list
 $update_config
+ignore_old_scan_res=1
 network={
 	$scan_ssid
 	ssid="$ssid"

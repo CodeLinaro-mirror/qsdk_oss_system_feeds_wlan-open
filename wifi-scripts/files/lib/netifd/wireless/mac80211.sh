@@ -8,9 +8,75 @@
 . /lib/netifd/hostapd.sh
 . /lib/functions/system.sh
 
+mac80211_update_mld_iface_config() {
+	vif_name=$1
+	mld_name=$2
+	# Get the following from section wifi-mld
+	config_get mld_ssid "$mld_name" ssid
+	config_get mld_encryption "$mld_name" encryption
+	config_get mld_key "$mld_name" key
+	config_get mld_sae "$mld_name" sae_pwe
+	config_get mld_vp "$mld_name" ppe_vp
+	config_get mld_enable_epcs "$mld_name" enable_epcs
+	config_get mld_ttlm_enable "$mld_name" ttlm_enable
+	if [ -n "$mld_ssid" ]; then
+		uci_set wireless "$vif_name" ssid "$mld_ssid"
+	fi
+	if [ -n "$mld_encryption" ]; then
+		uci_set wireless "$vif_name" encryption "$mld_encryption"
+	fi
+	if [ -n "$mld_key" ]; then
+		uci_set wireless "$vif_name" key "$mld_key"
+	fi
+	if [ -n "$mld_sae" ]; then
+		uci_set wireless "$vif_name" sae_pwe "$mld_sae"
+	fi
+	if [ -n "$mld_vp" ]; then
+		uci_set wireless "$vif_name" ppe_vp "$mld_vp"
+	fi
+	if [ -n "$mld_enable_epcs" ];then
+		uci_set wireless "$vif_name" enable_epcs "$mld_enable_epcs"
+
+		if [ "$mld_enable_epcs" = "1" ]; then
+			for param in $epcs_params; do
+				config_get "mld_$param" "$mld_name" "$param"
+				mld_value_var="mld_$param"
+				eval "value=\$$mld_value_var"
+				if [ -n "$value" ]; then
+					uci_set wireless "$vif_name" "$param" "$value"
+				fi
+			done
+		fi
+	fi
+	if [ -n "$mld_ttlm_enable" ];then
+		uci_set wireless "$vif_name" ttlm_enable "$mld_ttlm_enable"
+	fi
+	uci commit wireless
+}
+
+mac80211_update_mld_configs() {
+	local iflist
+	config_load wireless
+	mac80211_update_mld_cfg() {
+		append iflist "$1"
+	}
+	config_foreach mac80211_update_mld_cfg wifi-iface
+	for name in $iflist
+	do
+		config_get mld_name "$name" mld
+		config_get ml_device "$name" device
+		config_get ht_mode "$ml_device" htmode
+		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]  && [ -n "$mld_name" ]); then
+			append mld_names "$mld_name"
+			mac80211_update_mld_iface_config "$name" "$mld_name"
+		fi
+	done
+}
+
 mlo_add_flag=0
 [ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 if [ $mlo_add_flag -eq 0 ]; then
+	mac80211_update_mld_configs
 	init_wireless_driver "$@"
 fi
 
@@ -33,6 +99,7 @@ enable_color=
 #ACS DFS
 acs_exclude_dfs=
 
+updated_chanlist=
 min_tx_power=
 noscan=
 ht_coex=
@@ -108,6 +175,43 @@ enable_dscp_policy_capa=
 
 #atf commands
 atf_offload=
+
+mac80211_freq_to_channel() {
+        local freq=$1
+
+        if [ "$freq" -lt 1000 ]; then
+		echo 0
+		return
+        fi
+        if [ "$freq" -eq 2484 ]; then
+		echo 14
+		return
+        fi
+        if [ "$freq" -eq 5935 ]; then
+		echo 2
+		return
+        fi
+        if [ "$freq" -lt 2484 ]; then
+		echo $(((freq-2407)/5))
+		return
+        fi
+        if [ "$freq" -ge 4910 ] && [ "$freq" -le 4980 ]; then
+		echo $(((freq-4000)/5))
+		return
+        fi
+        if [ "$freq" -lt 5950 ]; then
+		echo $(((freq-5000)/5))
+		return
+        fi
+        if [ "$freq" -le 45000 ]; then
+		echo $(((freq-5950)/5))
+		return
+        fi
+        if [ "$freq" -ge 58320 ] && [ "$freq" -le 70200 ]; then
+		echo $(((freq-56160)/5))
+		return
+        fi
+}
 
 wdev_tool() {
 	ucode /usr/share/hostap/wdev.uc "$@"
@@ -998,6 +1102,9 @@ mac80211_hostapd_setup_base() {
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
+
+	[ -n "$updated_chanlist" ] && channel_list=$(echo $updated_chanlist)
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${channel_list:+chanlist=$channel_list}
@@ -1136,6 +1243,8 @@ mac80211_hostapd_setup_bss() {
 		fi
 		if [ -n "$ttlm_enable" ]; then
 			append hostapd_cfg "ttlm_enable=$ttlm_enable" "$N"
+		else
+			append hostapd_cfg "ttlm_enable=1" "$N"
 		fi
 
 		[ -n "$enable_aal" ] && append hostapd_cfg "enable_aal=$enable_aal" "$N"
@@ -1635,7 +1744,7 @@ get_seg0_freq() {
 }
 
 mac80211_setup_monitor() {
-	local prev
+	local prev idx
 	json_set_namespace wdev_uc prev
 
 	json_add_object "$ifname"
@@ -1661,7 +1770,12 @@ mac80211_setup_monitor() {
 		EHT320)
 			if [ "$band" = "6g" ]; then
 				bw=320
-				center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 320)")
+				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
+					idx="$ccfs"
+				elif [ -z "$ccfs" ] || [ "$ccfs" -eq "0" ]; then
+					idx="$(mac80211_get_seg0 "320")"
+				fi
+				center_freq=$(get_seg0_freq "$freq" "$channel" "$idx")
 			fi
 			;;
         esac
@@ -1676,6 +1790,37 @@ mac80211_setup_monitor() {
 	json_set_namespace "$prev"
 }
 
+get_link_id() {
+	local target_mac_addr=$1
+	local target_ifname=$2
+	local link_ids
+	local link_mac
+
+	if [ -z "$target_mac_addr" ]; then
+		echo ""
+		return
+	fi
+
+	if [ -z "$target_ifname" ]; then
+		echo ""
+		return
+	fi
+
+	link_ids=$(iw dev $target_ifname info | grep link | cut -d':' -f 1 2> /dev/null  | cut -d ' ' -f 2)
+	if [ -n "$link_ids" ]; then
+		for i in $link_ids
+		do
+			link_mac=$(iw dev $target_ifname info | grep -A 2 "link $i:" | grep "addr" | awk '{print $2}')
+			if [ "$link_mac" == "$target_mac_addr" ]; then
+				echo "$i"
+				return
+			fi
+		done
+	fi
+
+	echo ""
+}
+
 mac80211_set_vif_txpower() {
 	local name="$1"
 
@@ -1686,10 +1831,30 @@ mac80211_set_vif_txpower() {
 	json_select ..
 
 	set_default vif_txpower "$txpower"
+
+	local link_id=""
+	case "$htmode" in
+		EHT20|EHT40|EHT80|EHT160|EHT320)
+			json_select config
+			json_get_var link_mac_addr _macaddr
+			json_select ..
+
+			link_id=$(get_link_id "$link_mac_addr" "$ifname")
+		;;
+	esac
+
 	if [ -n "$vif_txpower" ]; then
-		iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
+		if [ -n "$link_id" ]; then
+			iw dev "$ifname" set txpower -l "$link_id" fixed "${vif_txpower%%.*}00"
+		else
+			iw dev "$ifname" set txpower fixed "${vif_txpower%%.*}00"
+		fi
 	else
-		iw dev "$ifname" set txpower auto
+		if [ -n "$link_id" ]; then
+			iw dev "$ifname" set txpower -l "$link_id" auto
+		else
+			iw dev "$ifname" set txpower auto
+		fi
 	fi
 
 	iw dev "$ifname" set_intf_offload type "$ppe_vp"
@@ -2037,10 +2202,30 @@ drv_mac80211_setup() {
 				iw reg set "$country"
 				sleep 1
 			fi
-
 		}
 	fi
 
+	Update_channel_list() {
+		local start_freq end_freq start_chan end_chan
+		local device_name=$1
+		local radio=$(uci get wireless.$device_name.radio)
+		start_chan=0
+		end_chan=0
+		#Fetch all the radio names and iterate for each radio to update channel list
+		start_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $3}')
+		start_freq=$((start_freq+10))
+		end_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $6}')
+		end_freq=$((end_freq-10))
+		start_chan=$(mac80211_freq_to_channel $start_freq)
+		end_chan=$(mac80211_freq_to_channel $end_freq)
+		if [ "$start_chan" != "0" ] && [ "$end_chan" != "0" ]; then
+			uci set wireless.$device_name.channels=$start_chan-$end_chan
+			uci commit wireless
+		fi
+	}
+
+	config_foreach Update_channel_list wifi-device
+	updated_chanlist=$(uci get wireless.$device.channels)
 	hostapd_conf_file="/var/run/hostapd-$phy$vif_phy_suffix.conf"
 
 	macidx=0
@@ -2106,6 +2291,8 @@ drv_mac80211_setup() {
 	for_each_interface "ap" mac80211_prepare_vif
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
+
+	echo 3 > /sys/kernel/debug/ecm/ecm_classifier_default/accel_delay_pkts
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio" "$mon_ifname"
 	[ -x /usr/sbin/hostapd ] && hostapd_set_config "$phy" "$radio"
