@@ -487,7 +487,6 @@ define Build/refactor
 	spatch -sp_file alloc.cocci --in-place $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wmi.c
 	spatch -sp_file alloc.cocci --in-place $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wow.c
 	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7
-	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8
 endef
 
 define Build/Compile
