@@ -79,6 +79,17 @@ do
 	esac
 done
 
+# Check if valid compression type is passed
+case "${COMPRESS}" in
+    none|gzip|bzip2|lzma|lzo|lz4)
+        ;; 
+    *)
+        echo "Error: Invalid compression type '${COMPRESS}'" >&2
+        echo "Valid types: none, gzip, bzip2, lzma, lzo, lz4" >&2
+        exit 1
+        ;;
+esac
+
 # Make sure user entered all required parameters
 if [ -z "${ARCH}" ] || [ -z "${COMPRESS}" ] || [ -z "${LOAD_ADDR}" ] || \
 	[ -z "${ENTRY_ADDR}" ] || [ -z "${VERSION}" ] || [ -z "${KERNEL}" ] || \
@@ -175,7 +186,7 @@ OVCONFIGS=""
 	"
 done
 
-GEN_CONF_FUNC_USED=""
+GEN_CONF_FUNC_USED=0
 Generate_Config() {
 	GEN_CONF_FUNC_USED=1
 
@@ -193,25 +204,34 @@ Generate_Config() {
 
 # Conditionally create fdt information
 if [ -n "${DTB}" ]; then
-	CONFIG_ID=$DTB
-	multiDTB=$(echo $DTB | wc -w)
+	set -- $DTB
+	multiDTB=$#
+	counter=1
+	
 	for dtb in $DTB
 	do
-	if [ $multiDTB -gt 1 ]; then
-		CONFIG_ID=$(basename ${dtb%%.gz} .dtb | sed -e 's/^\([^-]*-\)\{1\}//g');
-	else
-		CONFIG_ID=1
-	fi
-	COMPRESSION_DATA_FIELD=""
-	if [ "${COMPRESS}" != "none" ]; then
-		COMPRESSION_DATA_FIELD="compression= \"${DTB_COMPRESS}\"
-			load = <${DTB_LOAD_ADDR}>;"
-	else
+		if [ ! -f "$dtb" ]; then
+			echo "Warning: DTB file not found: $dtb" >&2
+			counter=$((counter + 1))
+			continue
+		fi
+		
+		if [ "$multiDTB" -gt 1 ]; then
+			CONFIG_ID=$(basename "${dtb%%.gz}" .dtb | sed -e 's/^\([^-]*-\)\{1\}//g')
+			[ -z "$CONFIG_ID" ] && CONFIG_ID="$counter"
+		else
+			CONFIG_ID=1
+		fi
+		
+		# Initialize with default value
 		COMPRESSION_DATA_FIELD="compression = \"none\";"
-	fi
-	COMPRESSION_DATA_FIELD="compression = \"none\";"
-
-	FDT_NODE="$FDT_NODE
+		
+		if [ "${COMPRESS}" != "none" ] && [ -n "${DTADDR}" ]; then
+			COMPRESSION_DATA_FIELD="compression = \"${COMPRESS}\";
+			load = <${DTADDR}>;"
+		fi
+		
+		FDT_NODE="$FDT_NODE
 		fdt${REFERENCE_CHAR}$CONFIG_ID {
 			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} device tree blob\";
 			data = /incbin/(\"${dtb}\");
@@ -227,8 +247,9 @@ if [ -n "${DTB}" ]; then
 			};
 		};
 "
-	FDT_PROP="fdt = \"fdt${REFERENCE_CHAR}$CONFIG_ID\";"
-	Generate_Config
+		FDT_PROP="fdt = \"fdt${REFERENCE_CHAR}$CONFIG_ID\";"
+		Generate_Config
+		counter=$((counter + 1))
 	done
 fi
 
