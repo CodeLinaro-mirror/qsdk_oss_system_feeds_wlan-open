@@ -431,6 +431,7 @@ hostapd_common_add_bss_config() {
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 
+	config_add_int wps_cred_add_sae
 }
 
 hostapd_set_vlan_file() {
@@ -778,7 +779,6 @@ hostapd_set_bss_options() {
 				wireless_setup_vif_failed INVALID_WPA_PSK
 				return 1
 			fi
-			[ -z "$wpa_psk_file" ] && set_default wpa_psk_file /var/run/hostapd-$ifname.psk
 			[ -n "$wpa_psk_file" ] && {
 				[ -e "$wpa_psk_file" ] || touch "$wpa_psk_file"
 				append bss_conf "wpa_psk_file=$wpa_psk_file" "$N"
@@ -1747,6 +1747,9 @@ wpa_supplicant_add_network() {
 	json_get_values bssid_whitelist bssid_whitelist
 	json_get_var sae_pwe sae_pwe
 	json_get_var rsn_overriding rsn_overriding
+	append wps_cred_add_sae "wps_cred_add_sae=1" "$N$T"
+	json_get_var wps_pushbutton wps_pushbutton
+	[ "$wps_pushbutton" -gt 0 ] && append update_config "update_config=1" "$N$T"
 	json_get_var disable_reconfig disable_reconfig
 
 	[ -n "$bssid_blacklist" ] && append network_data "bssid_blacklist=$bssid_blacklist" "$N$T"
@@ -1815,6 +1818,7 @@ $user_mpm
 $disable_csa_dfs
 $saepwe
 $rsn_override
+$wps_cred_add_sae
 ppe_vp=$ppe_vp_type
 $freq_list
 $update_config

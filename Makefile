@@ -45,10 +45,10 @@ endif
 
 LOCAL_SRC:=$(TOPDIR)/$(SRCPREFIX)src/mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 
-ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
+ifeq ($(CONFIG_TARGET_sdx85),y)
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
+else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
-else ifeq ($(CONFIG_TARGET_sdx85),y)
-        EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
 else
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
 endif
@@ -379,7 +379,7 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 endif
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized"
 
   MAKE_OPTS:= \
 	-C $(LINUX_DIR) M="$(PKG_BUILD_DIR)" \
