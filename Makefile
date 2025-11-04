@@ -161,6 +161,7 @@ endif
 	$(INSTALL_BIN) ./files/lib/performance.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/smp_affinity_settings.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/boost_performance.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/mandatory_dp_stats.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 ifeq ($(CONFIG_KERNEL_ATHMEMDEBUG),y)
