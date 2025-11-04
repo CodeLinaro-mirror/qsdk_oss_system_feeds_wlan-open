@@ -1243,6 +1243,8 @@ mac80211_hostapd_setup_bss() {
 		fi
 		if [ -n "$ttlm_enable" ]; then
 			append hostapd_cfg "ttlm_enable=$ttlm_enable" "$N"
+		else
+			append hostapd_cfg "ttlm_enable=1" "$N"
 		fi
 
 		[ -n "$enable_aal" ] && append hostapd_cfg "enable_aal=$enable_aal" "$N"
