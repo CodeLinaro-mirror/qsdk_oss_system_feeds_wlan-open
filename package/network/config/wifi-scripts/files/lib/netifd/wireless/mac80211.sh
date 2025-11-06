@@ -72,6 +72,7 @@ he_bss_color_enabled=
 he_spr_non_srg_obss_pd_max_offset=
 disable_csa_dfs=
 discard_6g_awgn_event=
+skip_cac=
 wds=
 wds_bridge=
 start_disabled=
@@ -154,7 +155,8 @@ drv_mac80211_init_device_config() {
 		dsss_cck_40 \
 		disable_eml_cap \
 		disable_csa_dfs \
-		discard_6g_awgn_event
+		discard_6g_awgn_event \
+		skip_cac
 }
 
 drv_mac80211_init_iface_config() {
@@ -267,7 +269,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs skip_cac
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -788,6 +790,7 @@ mac80211_hostapd_setup_base() {
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
+	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 	cat >> "$hostapd_conf_file" <<EOF
