@@ -385,6 +385,8 @@ function iface_hostapd_notify(phy, radio, ifname, iface, state)
 			msg.center_freq2 = status.center_freq2;
 		if (status.punct_bitmap != null)
 			msg.punct_bitmap = status.punct_bitmap;
+		if (status.is_dfs != null)
+			msg.is_dfs = status.is_dfs;
 		break;
 	default:
 		return;
