@@ -1642,8 +1642,15 @@ wpa_supplicant_set_fixed_freq() {
 
 wpa_supplicant_add_network() {
 	local ifname="$1"
-	local freq="$2"
-	local htmode="$3"
+
+	if [ "$_w_mode" = "sta" ]; then
+		local athnewind="$2"
+		local rptr_mgr_mode="$3"
+	else
+		local freq="$2"
+		local htmode="$3"
+	fi
+
 	local noscan="$4"
 	local disable_40mhz_scan=0
 	local ru_punct_bitmap=$5
@@ -2060,6 +2067,8 @@ network={
 	$reconfig
 	$freq_list
 }
+athnewind=$athnewind
+rptr_mgr_mode=$rptr_mgr_mode
 EOF
 	fi
 	return 0
