@@ -153,6 +153,8 @@ start_disabled=
 dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
+bss_load_update_period=
+chan_util_avg_period=
 
 #dpp
 dpp_ifaces=
@@ -275,7 +277,9 @@ drv_mac80211_init_device_config() {
 		ccfs \
 		multiple_bssid \
 		mbssid_group_size \
-		he_6ghz_reg_pwr_type
+		he_6ghz_reg_pwr_type \
+		bss_load_update_period \
+		chan_util_avg_period
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -573,7 +577,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -1096,6 +1100,24 @@ mac80211_hostapd_setup_base() {
 			fi
 		fi
 	fi
+
+	[ -n "$bss_load_update_period" ] && [ "$bss_load_update_period" -gt "0" ] && {
+		if [ "$bss_load_update_period" -le "100" ];then
+			append base_cfg "bss_load_update_period=$bss_load_update_period" "$N"
+		else
+			append base_cfg "bss_load_update_period=100" "$N"
+			bss_load_update_period=100
+		fi
+		if [ -n "$chan_util_avg_period" ] && [ "$chan_util_avg_period" -gt "0" ]; then
+			local remainder=$((chan_util_avg_period % bss_load_update_period))
+			if [ "$remainder" -eq "0" ]; then
+				append base_cfg "chan_util_avg_period=$chan_util_avg_period" "$N"
+			else
+				local nearest_multiple=$((chan_util_avg_period + bss_load_update_period - remainder))
+				append base_cfg "chan_util_avg_period=$nearest_multiple" "$N"
+			fi
+		fi
+	}
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
