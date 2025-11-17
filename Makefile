@@ -433,9 +433,11 @@ endif
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
   ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+   ifeq ($(CONFIG_QCA_MINIDUMP),y)
     ifeq ($(SPATCH),1)
 	$(Build/refactor)
     endif
+   endif
   endif
  endif
 endif
