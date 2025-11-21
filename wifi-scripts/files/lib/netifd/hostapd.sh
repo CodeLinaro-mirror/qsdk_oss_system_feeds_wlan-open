@@ -138,7 +138,6 @@ hostapd_add_log_config() {
 hostapd_common_add_device_config() {
 	config_add_array basic_rate
 	config_add_array supported_rates
-	config_add_string beacon_rate
 
 	config_add_string country country3
 	config_add_boolean country_ie doth
@@ -169,7 +168,7 @@ hostapd_prepare_device_config() {
 
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
-		rts_threshold beacon_rate rssi_reject_assoc_rssi rssi_ignore_probe_request maxassoc \
+		rts_threshold rssi_reject_assoc_rssi rssi_ignore_probe_request maxassoc \
 		mbssid:0
 
 	hostapd_set_log_options base_cfg
@@ -265,7 +264,6 @@ hostapd_prepare_device_config() {
 
 	[ -n "$rssi_reject_assoc_rssi" ] && append base_cfg "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
 	[ -n "$rssi_ignore_probe_request" ] && append base_cfg "rssi_ignore_probe_request=$rssi_ignore_probe_request" "$N"
-	[ -n "$beacon_rate" ] && append base_cfg "beacon_rate=$beacon_rate" "$N"
 	append base_cfg "beacon_int=$beacon_int" "$N"
 	[ -n "$rts_threshold" ] && append base_cfg "rts_threshold=$rts_threshold" "$N"
 	[ "$airtime_mode" -gt 0 ] && append base_cfg "airtime_mode=$airtime_mode" "$N"
@@ -312,6 +310,8 @@ hostapd_common_add_bss_config() {
 	config_add_int acct_interval
 
 	config_add_int bss_load_update_period chan_util_avg_period
+
+	config_add_string beacon_rate
 
 	config_add_string dae_client
 	config_add_string dae_secret
@@ -620,7 +620,8 @@ hostapd_set_bss_options() {
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
-		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2
+		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
+		beacon_rate
 
 
 	json_get_values sae_groups sae_groups
@@ -678,6 +679,8 @@ hostapd_set_bss_options() {
 	append bss_conf "utf8_ssid=$utf8_ssid" "$N"
 	append bss_conf "multi_ap=$multi_ap" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
+
+	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
 
 	[ "$tdls_prohibit" -gt 0 ] && append bss_conf "tdls_prohibit=$tdls_prohibit" "$N"
 
