@@ -145,8 +145,8 @@ endif
 define git_mirror_download
 	GIT_NAME=$$$$(echo $(URL) | sed -e s:.*/::g -e s/.git$$$$//g); \
 	[ -n "${CONFIG_GIT_MIRROR}" ] && \
-	git clone $(if $(BRANCH),-b $(BRANCH)) $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(SUBDIR) --recursive && \
-	(cd $(SUBDIR) && git remote -v && git checkout $(VERSION))
+	git clone $(if $(BRANCH),-b $(BRANCH)) $(CONFIG_GIT_MIRROR)$$$$GIT_NAME $(SUBDIR) $(if $(filter skip,$(SUBMODULES)),,--recursive) && \
+	(cd $(SUBDIR) && git remote -v && git checkout $(SOURCE_VERSION))
 endef
 
 define DownloadMethod/unknown
