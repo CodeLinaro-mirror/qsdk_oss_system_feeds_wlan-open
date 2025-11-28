@@ -369,6 +369,7 @@ hostapd_common_add_bss_config() {
 	config_add_int mcast_rate
 	config_add_array basic_rate
 	config_add_array supported_rates
+	config_add_array basic_rates
 
 	config_add_boolean sae_require_mfp
 	config_add_int sae_pwe
@@ -681,6 +682,19 @@ hostapd_set_bss_options() {
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
+
+	# Per-VAP supported/basic rates (string or array)
+	# Supported rates (array or string)
+	local supported_rates_list
+	json_get_values supported_rates_list supported_rates
+	[ -z "$supported_rates_list" ] && json_get_var supported_rates_list supported_rates
+	[ -n "$supported_rates_list" ] && append bss_conf "supported_rates=$supported_rates_list" "$N"
+	
+	# Basic rates (array or string)
+	local basic_rates_list
+	json_get_values basic_rates_list basic_rates
+	[ -z "$basic_rates_list" ] && json_get_var basic_rates_list basic_rates
+	[ -n "$basic_rates_list" ] && append bss_conf "basic_rates=$basic_rates_list" "$N"
 
 	[ "$tdls_prohibit" -gt 0 ] && append bss_conf "tdls_prohibit=$tdls_prohibit" "$N"
 
