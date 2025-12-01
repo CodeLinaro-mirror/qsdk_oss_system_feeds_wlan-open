@@ -961,6 +961,7 @@ hostapd_set_bss_options() {
 		append bss_conf "wnm_sleep_mode=1" "$N"
 		[ "$wnm_sleep_mode_no_keys" -eq "1" ] && append bss_conf "wnm_sleep_mode_no_keys=1" "$N"
 	fi
+	[ "$mbo" -eq "1" ] && bss_transition=1
 	[ "$bss_transition" -eq "1" ] && append bss_conf "bss_transition=1" "$N"
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
 
