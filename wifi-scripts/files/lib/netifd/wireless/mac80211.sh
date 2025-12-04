@@ -98,6 +98,8 @@ enable_color=
 
 #ACS DFS
 acs_exclude_dfs=
+# ACS retry scan count (device-level)
+acs_retry_interval=
 
 updated_chanlist=
 min_tx_power=
@@ -238,17 +240,21 @@ ubus_call() {
 	flock /var/run/hostapd.lock ubus call "$@"
 }
 
-drv_mac80211_init_device_config() {
-	hostapd_common_add_device_config
+	drv_mac80211_init_device_config() {
+		hostapd_common_add_device_config
 
-	config_add_string path phy 'macaddr:macaddr'
-	config_add_string tx_burst
-	config_add_string distance band
-	config_add_int radio beacon_int chanbw frag rts
-	config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
-	config_add_int num_global_macaddr multiple_bssid
-	config_add_boolean use_driver_vendor_addr
-	config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
+		config_add_string path phy 'macaddr:macaddr'
+		config_add_string tx_burst
+		config_add_string distance band
+		# User override for HT40 capability in hostapd: HT40PLUS/HT40MINUS/HT40
+		config_add_string ht40
+		config_add_int radio beacon_int chanbw frag rts
+		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
+		config_add_int num_global_macaddr multiple_bssid
+		config_add_boolean use_driver_vendor_addr
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
+	# ACS behavior tuning
+	config_add_int acs_retry_interval acs_retry_count
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_array scan_list
@@ -612,15 +618,22 @@ mac80211_hostapd_setup_base() {
 
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 
-	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs
+	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count
 	[ -n "$acs_exclude_dfs" ] && [ "$acs_exclude_dfs" -gt 0 ] &&
 		append base_cfg "acs_exclude_dfs=1" "$N"
+
+	# Pass through ACS retry scan count when ACS is enabled
+	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
+	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
+
+	# Optional user override for HT40 capability string
+	json_get_vars ht40
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -648,7 +661,7 @@ mac80211_hostapd_setup_base() {
 		ht_capab=
 		case "$htmode" in
 			VHT20|HT20|HE20|EHT20|UHR20) ;;
-			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320|UHR40|UHR80|UHR160|UHR320)
+			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320|UHR40|UHR80|UHR160|UHR320|EHT40*)
 				case "$hwmode" in
 					a)
 						case "$(( (($channel / 4) + $chan_ofs) % 2 ))" in
@@ -670,7 +683,19 @@ mac80211_hostapd_setup_base() {
 						esac
 					;;
 				esac
-				[ "$auto_channel" -gt 0 ] && ht_capab="[HT40+]"
+				[ "$auto_channel" -gt 0 ] && ht_capab="[HT40+][HT40-]"
+				# If user specified ht40 override, honor it regardless of auto_channel
+				case "${htmode}" in
+					HT40|EHT40)
+						ht_capab="[HT40+][HT40-]"
+						;;
+					HT40PLUS|EHT40PLUS)
+						ht_capab="[HT40+]"
+						;;
+					HT40MINUS|EHT40MINUS)
+						ht_capab="[HT40-]"
+						;;
+				esac
 			;;
 			*) ieee80211n= ;;
 		esac
