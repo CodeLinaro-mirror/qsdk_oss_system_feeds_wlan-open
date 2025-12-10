@@ -79,6 +79,7 @@ start_disabled=
 dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
+use_driver_vendor_addr=
 
 #dpp
 dpp_ifaces=
@@ -100,6 +101,7 @@ drv_mac80211_init_device_config() {
 	config_add_int radio beacon_int chanbw frag rts
 	config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
 	config_add_int num_global_macaddr multiple_bssid
+	config_add_boolean use_driver_vendor_addr
 	config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
 	config_add_array ht_capab
 	config_add_array channels
@@ -176,6 +178,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int fils_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
+	config_add_int bss_index
 
 	# mesh
 	config_add_string mesh_id
@@ -269,7 +272,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs skip_cac
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs skip_cac use_driver_vendor_addr
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -791,6 +794,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
+	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 	cat >> "$hostapd_conf_file" <<EOF
@@ -840,6 +844,7 @@ mac80211_hostapd_setup_bss() {
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
+	json_get_vars bss_index
 	json_get_vars unsol_bcast_presp fils_discovery
 
 	set_default wds 0
@@ -886,6 +891,10 @@ mac80211_hostapd_setup_bss() {
 
 	if [[ "$htmode" == "EHT"* ]]; then
 		append hostapd_cfg "mld_ap=1" "$N"
+		if [ -n "$mld" ]; then
+			config_get mld_macaddr "$mld" mld_macaddr
+			[ -n "$mld_macaddr" ] && append hostapd_cfg "mld_addr=$mld_macaddr" "$N"
+		fi
 	fi
 
 	case "$ppe_vp" in
@@ -903,13 +912,26 @@ mac80211_hostapd_setup_bss() {
 			;;
 	esac
 
-	cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
+	if [ "$use_driver_vendor_addr" = "1" ] && [ -n "$bss_index" ]; then
+		append hostapd_cfg "bss_index=$bss_index" "$N"
+	fi
+
+	if [ "$use_driver_vendor_addr" = "1" ]; then
+		cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
+$hostapd_cfg
+${default_macaddr:+#default_macaddr}
+${dtim_period:+dtim_period=$dtim_period}
+${max_listen_int:+max_listen_interval=$max_listen_int}
+EOF
+	else
+		cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
 $hostapd_cfg
 bssid=$macaddr
 ${default_macaddr:+#default_macaddr}
 ${dtim_period:+dtim_period=$dtim_period}
 ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
+	fi
 }
 
 mac80211_get_addr() {
@@ -1102,6 +1124,12 @@ mac80211_prepare_vif() {
 	json_add_string _ppe_vp "$ppe_vp"
 
 	default_macaddr=
+
+	if [ "$mode" = "sta" ] && [ -n "$mld" ] && [[ "$htmode" == EHT* ]]; then
+		config_get mld_macaddr "$mld" mld_macaddr
+		[ -n "$mld_macaddr" ] && macaddr="$mld_macaddr"
+	fi
+
 	if [ -z "$macaddr" ]; then
 		macaddr="$(mac80211_generate_mac $phy $mode)"
 		macidx="$(($macidx + 1))"
@@ -1726,6 +1754,18 @@ drv_mac80211_setup() {
 	}
 
 	mac80211_set_suffix
+
+	if [ -n "$macaddr" ]; then
+		radio_idx="$radio"
+		[ "$radio_idx" = "-1" ] && radio_idx=0
+
+		if command -v cfg80211tool >/dev/null 2>&1; then
+			cfg80211tool "${phy}:${radio_idx}" setHwaddr "$macaddr" >/dev/null 2>&1 || \
+			echo "setHwaddr failed for ${phy}:${radio_idx}" > /dev/console
+		else
+			echo "cfg80211tool not found; MAC not set for ${phy}:${radio_idx}" > /dev/console
+		fi
+	fi
 
 	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 	if [ $mlo_add_flag -eq 0 ]; then
