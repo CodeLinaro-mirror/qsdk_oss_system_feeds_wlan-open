@@ -433,6 +433,7 @@ hostapd_common_add_bss_config() {
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 
 	config_add_int wps_cred_add_sae
+	config_add_string scan_freq bgscan bgscan_freq
 }
 
 hostapd_set_vlan_file() {
@@ -1427,11 +1428,15 @@ wpa_supplicant_prepare_interface() {
 	else
 		[ -e "$multiap_flag_file" ] && rm "$multiap_flag_file"
 	fi
+	local ctrl_intf_str=
+	[ "$mode" = sta ] && ctrl_intf_str="ctrl_interface=${_rpath}"
+
 	wpa_supplicant_teardown_interface "$ifname"
 	cat > "$_config" <<EOF
 ${scan_list:+freq_list=$scan_list}
 $ap_scan
 $country_str
+$ctrl_intf_str
 EOF
 	return 0
 }
@@ -1483,7 +1488,8 @@ wpa_supplicant_add_network() {
 		multi_ap \
 		default_disabled dpp \
 		ppe_vp \
-		ssid_protection
+		ssid_protection \
+		scan_freq bgscan bgscan_freq
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1520,6 +1526,33 @@ wpa_supplicant_add_network() {
 		[ -n "$freq_list" ] && {
 			freq_list="freq_list=$freq_list"
 		}
+		# Append per-network scan/bgscan parameters when provided via UCI
+		json_get_vars scan_freq bgscan_freq bgscan
+		[ -n "$scan_freq" ] && {
+			if echo "$scan_freq" | grep -qE '^[0-9]+([ ][0-9]+)*$'; then
+				append network_data "scan_freq=$scan_freq" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_SCAN_FREQ
+				return 1
+			fi
+		}
+		[ -n "$bgscan" ] && {
+			if echo "$bgscan" | grep -qE '^[a-z]+:[0-9:-]+$'; then
+				append network_data "bgscan=\"${bgscan}\"" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_BGSCAN
+				return 1
+			fi
+		}
+		[ -n "$bgscan_freq" ] && {
+			if echo "$bgscan_freq" | grep -qE '^[0-9]+([ ][0-9]+)*$'; then
+				append network_data "bgscan_freq=$bgscan_freq" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_BGSCAN_FREQ
+				return 1
+			fi
+		}
+		([ -n "$scan_freq" ] || [ -n "$bgscan" ] || [ -n "$bgscan_freq" ]) && append update_config "update_config=1" "$N$T"
 	}
 
 	[ "$_w_mode" = "mesh" ] && {
