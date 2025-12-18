@@ -218,7 +218,7 @@ mlo_add_link() {
 		5gl)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -lt "65" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -236,7 +236,7 @@ mlo_add_link() {
 		5gh)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -gt "65" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -265,7 +265,7 @@ mlo_add_link() {
 		6gl)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -lt "100" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -283,7 +283,7 @@ mlo_add_link() {
 		6gh)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -gt "100" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -626,7 +626,7 @@ mlo_remove_link() {
 		5gl)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -lt "65" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -644,7 +644,7 @@ mlo_remove_link() {
 		5gh)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -gt "65" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -673,7 +673,7 @@ mlo_remove_link() {
 		6gl)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -lt "100" ]; then
 				test_band=$(echo $iter)
 				break;
@@ -691,7 +691,7 @@ mlo_remove_link() {
 		6gh)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channel | cut -d "'" -f 2)
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
 			if [ "$local_channel" -gt "100" ]; then
 				test_band=$(echo $iter)
 				break;
