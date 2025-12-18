@@ -431,6 +431,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
+	config_add_string vht_mcs_nss_set ht_mcs_nss_set
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
@@ -623,7 +624,7 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate
+		beacon_rate vht_mcs_nss_set ht_mcs_nss_set
 
 
 	json_get_values sae_groups sae_groups
@@ -683,6 +684,9 @@ hostapd_set_bss_options() {
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
+
+	[ -n "$vht_mcs_nss_set" ] && append bss_conf "vht_mcs_nss_set=$vht_mcs_nss_set" "$N"
+	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
 
 	# Per-VAP supported/basic rates (string or array)
 	# Supported rates (array or string)
