@@ -50,7 +50,7 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
 else
-	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/openwrt-patches/package/network/services/hostapd/
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/qca/feeds/wlan-hostapd/hostapd/
 endif
 
 PKG_DRIVERS = \
