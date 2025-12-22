@@ -153,7 +153,12 @@ define KernelPackage/ath12k
 ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
 endif
+ifeq ($(CONFIG_TARGET_sdx85),y)
+  # Manual loading via init script, for SDX
+  AUTOLOAD:=$(call AutoProbe)
+else
   AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 ath_debug)
+endif
 endef
 
 define KernelPackage/ath12k/description

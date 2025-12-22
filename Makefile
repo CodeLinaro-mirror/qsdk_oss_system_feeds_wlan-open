@@ -189,6 +189,7 @@ endif
 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
 	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
 ifeq ($(CONFIG_TARGET_sdx85),y)
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_install_ko.sh $(1)/etc/init.d
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/compat/compat.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
