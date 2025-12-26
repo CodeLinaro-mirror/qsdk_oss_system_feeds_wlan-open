@@ -29,11 +29,16 @@ boot()
 	update_ath12k_module_parameters
 	board_name=$(cat /tmp/sysinfo/board_name)
 	case "$board_name" in
-		ap-sdxkova*)
+		ap-sdxkova-qcn9224-V1)
 			create_caldata
 			caldata_symlink_creation "$board_name" "1"
 			caldata_symlink_creation "$board_name" "2"
 			caldata_symlink_creation "$board_name" "3"
+		;;
+		ap-sdxkova-qcn9224-V2)
+			create_caldata
+			caldata_symlink_creation "$board_name" "1"
+			caldata_symlink_creation "$board_name" "2"
 		;;
 	esac
 }
@@ -115,9 +120,13 @@ caldata_symlink_creation(){
 				break
 			fi
 		fi
-	done < /lib/firmware/ftm.conf
+	done < /data/vendor/wifi/caldata/ftm.conf
 
-	if [ -e /lib/firmware/qcn9224/caldata_$art_slot.b$brdid ]; then
-		ln -sf /lib/firmware/qcn9224/caldata_$art_slot.b$brdid /lib/firmware/ath12k/QCN92XX/hw1.0/cal-pci-000$pciid:01:00.0.bin
+	if [ -e /data/vendor/wifi/caldata/qcn9224/caldata_$art_slot.b$brdid ]; then
+		if [ ! -e /data/vendor/wifi/caldata/.qcn9224-work ]; then
+			mkdir /data/vendor/wifi/caldata/.qcn9224-work
+		fi
+		mount -t overlay overlay -o rw,lowerdir=/lib/firmware/ath12k/QCN92XX/hw1.0,upperdir=/data/vendor/wifi/caldata/qcn9224,workdir=/data/vendor/wifi/caldata/.qcn9224-work /lib/firmware/ath12k/QCN92XX/hw1.0
+		ln -sf /lib/firmware/ath12k/QCN92XX/hw1.0/caldata_$art_slot.b$brdid /lib/firmware/ath12k/QCN92XX/hw1.0/cal-pci-000$pciid:01:00.0.bin
 	fi
 }
