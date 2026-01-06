@@ -178,6 +178,7 @@ endif
 	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-supplicant-event-update.sh $(1)/lib/netifd/dpp-supplicant-event-update
 	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_module_add.sh $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
 	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
 ifeq ($(CONFIG_TARGET_sdx85),y)
