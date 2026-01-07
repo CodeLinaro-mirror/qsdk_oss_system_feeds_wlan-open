@@ -464,6 +464,7 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
 endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
