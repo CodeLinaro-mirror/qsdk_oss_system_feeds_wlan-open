@@ -178,7 +178,7 @@ define KernelPackage/ath12k/config
 
 	config PACKAGE_EXT_IPA_OFFLOAD
 		bool "Enable IPA Offload"
-		depends on PACKAGE_kmod-ath12k
+		default y
 		help
 		  Enable IPA offload for SDX.
 endef
