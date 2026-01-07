@@ -44,6 +44,7 @@ config-$(call config_package,ath12k) += ATH12K
 
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
 config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
+config-$(CONFIG_PACKAGE_EXT_IPA_OFFLOAD) += EXT_IPA_OFFLOAD
 config-$(CONFIG_PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO) += ATH12K_TEST_FW_FOR_11S_MLO
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH12K_MEM_PROFILE_512M
@@ -174,6 +175,12 @@ define KernelPackage/ath12k/config
 		help
 			This option enables support for 11S MLO Host Test Framework
 			in ATH12K.
+
+	config PACKAGE_EXT_IPA_OFFLOAD
+		bool "Enable IPA Offload"
+		depends on PACKAGE_kmod-ath12k
+		help
+		  Enable IPA offload for SDX.
 endef
 
 define KernelPackage/ath11k-ahb
