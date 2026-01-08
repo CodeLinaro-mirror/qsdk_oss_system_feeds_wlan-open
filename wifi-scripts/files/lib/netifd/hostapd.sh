@@ -1738,7 +1738,10 @@ wpa_supplicant_add_network() {
 	}
 
 	[ "$_w_mode" = "sta" ] && {
-		[ "$multi_ap" = 1 ] && append network_data "multi_ap_backhaul_sta=1" "$N$T"
+		[ "$multi_ap" = 1 ] && {
+			append network_data "multi_ap_backhaul_sta=1" "$N$T"
+			append network_data "enable_4addr_mode=1" "$N$T"
+		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 	}
 
