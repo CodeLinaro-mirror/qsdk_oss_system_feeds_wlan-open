@@ -311,7 +311,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int bss_load_update_period chan_util_avg_period
 
-	config_add_string beacon_rate
+	config_add_int oce
+	config_add_string beacon_rate probe_resp_rate
 
 	config_add_string dae_client
 	config_add_string dae_secret
@@ -647,7 +648,7 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate vht_mcs_nss_set ht_mcs_nss_set \
+		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -722,7 +723,20 @@ hostapd_set_bss_options() {
 	append bss_conf "multi_ap=$multi_ap" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
+	[ -n "$oce" ] && {
+		# Set oce=4 to enable OCE_AP
+		append bss_conf "oce=4" "$N"
+
+		# Set default Beacon and Probe Resp Rate for 2.4 GHz band as per OCE spec 2.0
+		if [ "$band" = "2g" ]; then
+			[ -z "$beacon_rate" ] && append bss_conf "beacon_rate=55" "$N"
+			[ -z "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=55" "$N"
+		fi
+	}
+
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
+
+	[ -n "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=$probe_resp_rate" "$N"
 
 	[ -n "$vht_mcs_nss_set" ] && append bss_conf "vht_mcs_nss_set=$vht_mcs_nss_set" "$N"
 	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
