@@ -420,12 +420,6 @@ else
   SPATCH?=1
 endif
 
-PKG_HWHDRS_SOURCE_URL ?= http://vm-cnsswebserv/cnss_win/santaclara/dev01/trestles/v1/E2R56/
-DEST       ?= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/hwhdrs
-PARENT     := $(abspath $(DEST)/..)
-WGET       ?= wget
-WGET_FLAGS ?= -q -r -np -nH --cut-dirs=6 --reject "index.html*"
-
 define Build/Prepare
 	rm -rf $(PKG_BUILD_DIR)
 	mkdir -p $(PKG_BUILD_DIR)
@@ -435,10 +429,6 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 endif
-
-	mkdir -p "$(DEST)"
-	$(WGET) $(WGET_FLAGS) -P "$(DEST)" "$(PKG_HWHDRS_SOURCE_URL)"
-	if [ -f "$(DEST)/hwhdrs.h" ]; then mv -f "$(DEST)/hwhdrs.h" "$(PARENT)/"; fi
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
