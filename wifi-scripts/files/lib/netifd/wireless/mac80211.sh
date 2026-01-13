@@ -608,8 +608,8 @@ mac80211_hostapd_setup_base() {
 		ieee80211n=1
 		ht_capab=
 		case "$htmode" in
-			VHT20|HT20|HE20|EHT20) ;;
-			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320)
+			VHT20|HT20|HE20|EHT20|UHR20) ;;
+			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320|UHR40|UHR80|UHR160|UHR320)
 				case "$hwmode" in
 					a)
 						case "$(( (($channel / 4) + $chan_ofs) % 2 ))" in
@@ -684,10 +684,12 @@ mac80211_hostapd_setup_base() {
 	vht_center_seg0=
 	eht_oper_chwidth=0
 	eht_center_seg0=
+	uhr_oper_chwidth=0
+	uhr_center_seg0=
 
 	idx="$channel"
 	case "$htmode" in
-		VHT20|HE20|EHT20)
+		VHT20|HE20|EHT20|UHR20)
 			enable_ac=1
 			if [ "$hwmode" = "a" ]; then
 				vht_oper_chwidth=0
@@ -695,7 +697,7 @@ mac80211_hostapd_setup_base() {
 				eht_center_seg0=$idx
 			fi
 		;;
-		VHT40|HE40|EHT40)
+		VHT40|HE40|EHT40|UHR40)
 			if [ "$channel" -le 2 ]; then
 				idx=$(($channel + 2))
 			else
@@ -713,7 +715,7 @@ mac80211_hostapd_setup_base() {
 				vht_center_seg0=$idx
 			fi
 		;;
-		VHT80|HE80|EHT80)
+		VHT80|HE80|EHT80|UHR80)
 			case "$(( (($channel / 4) + $chan_ofs) % 4 ))" in
 				1) idx=$(($channel + 6));;
 				2) idx=$(($channel + 2));;
@@ -724,7 +726,7 @@ mac80211_hostapd_setup_base() {
 			vht_oper_chwidth=1
 			vht_center_seg0=$idx
 		;;
-		VHT160|HE160|EHT160|EHT320)
+		VHT160|HE160|EHT160|EHT320|UHR160|UHR320)
 			if [ "$band" = "6g" ]; then
 				case "$channel" in
 					1|5|9|13|17|21|25|29) idx=15;;
@@ -753,29 +755,44 @@ mac80211_hostapd_setup_base() {
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 	}
 
-	if [ "$htmode" = "EHT320" ]; then
-		eht_oper_chwidth=9
-		if [ "$freq" -ge 5500 ] && [ "$freq" -le 5730 ]; then
-			eht_center_seg0=130
-		else
+	case "$htmode" in
+		EHT320|UHR320)
+			eht_oper_chwidth=9
+			if [ "$freq" -ge 5500 ] && [ "$freq" -le 5730 ]; then
+				eht_center_seg0=130
+			else
+				eht_center_seg0=$vht_center_seg0
+			fi
+			;;
+		*)
+			eht_oper_chwidth=$vht_oper_chwidth
 			eht_center_seg0=$vht_center_seg0
+			;;
+	esac
+
+	if [ "$htmode" = "UHR320" ]; then
+		uhr_oper_chwidth=9
+		if [ "$freq" -ge 5500 ] && [ "$freq" -le 5730 ]; then
+			uhr_center_seg0=130
+		else
+			uhr_center_seg0=$vht_center_seg0
 		fi
 	else
-		eht_oper_chwidth=$vht_oper_chwidth
-		eht_center_seg0=$vht_center_seg0
+		uhr_oper_chwidth=$vht_oper_chwidth
+		uhr_center_seg0=$vht_center_seg0
 	fi
 
 	[ "$band" = "6g" ] && {
 		op_class=
 		case "$htmode" in
-			HE20|EHT20)
+			HE20|EHT20|UHR20)
 				if [ "$freq" == "5935" ]; then
 					op_class=136
 				else
 					op_class=131
 				fi
 			;;
-			EHT320)
+			EHT320|UHR320)
 				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
 					idx="$ccfs"
 				elif [ -z "$ccfs" ] || [ "$ccfs" -eq "0" ]; then
@@ -785,8 +802,13 @@ mac80211_hostapd_setup_base() {
 				op_class=137
 				eht_center_seg0=$idx
 				eht_oper_chwidth=9
+
+				if [ "$htmode" = "UHR320" ]; then
+					uhr_center_seg0=$idx
+					uhr_oper_chwidth=9
+				fi
 			;;
-			HE*|EHT*) op_class=$((132 + $vht_oper_chwidth));;
+			HE*|EHT*|UHR*) op_class=$((132 + $vht_oper_chwidth));;
 		esac
 		[ -n "$op_class" ] && append base_cfg "op_class=$op_class" "$N"
 	}
@@ -867,7 +889,7 @@ mac80211_hostapd_setup_base() {
 		# supported Channel widths
 		vht160_hw=0
 		case "$htmode" in
-			VHT160|HE160|EHT160|EHT320)
+			VHT160|HE160|EHT160|EHT320|UHR160|UHR320)
 				([ "$(($vht_cap & 12))" -eq 4 ] && [ 1 -le "$vht160" ]) && \
 				vht160_hw=1
 				[ "$vht160_hw" = 1 ] && vht_capab="$vht_capab[VHT160]"
@@ -921,9 +943,13 @@ mac80211_hostapd_setup_base() {
 	# 802.11ax
 	enable_ax=0
 	enable_be=0
+	enable_bn=0
 	case "$htmode" in
 		HE*) enable_ax=1 ;;
 		EHT*) enable_ax=1; enable_be=1
+		      [ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"
+		;;
+		UHR*) enable_ax=1; enable_be=1; enable_bn=1
 		      [ -n "$disable_eml_cap" ] && append base_cfg "disable_eml_cap=$disable_eml_cap" "$N"
 		;;
 	esac
@@ -1080,6 +1106,14 @@ mac80211_hostapd_setup_base() {
 			fi
 
 			[ -n "$use_ru_puncture_dfs" ] && append base_cfg "use_ru_puncture_dfs=$use_ru_puncture_dfs" "$N"
+		fi
+
+		if [ "$enable_bn" != "0" ]; then
+			append base_cfg "ieee80211bn=1" "$N"
+			[ "$hwmode" = "a" ] && {
+				append base_cfg "uhr_oper_chwidth=$uhr_oper_chwidth" "$N"
+				append base_cfg "uhr_oper_centr_freq_seg0_idx=$uhr_center_seg0" "$N"
+			}
 		fi
 
 		if [ "$band" = "6g" ]; then
@@ -1253,7 +1287,8 @@ mac80211_hostapd_setup_bss() {
 		append hostapd_cfg "enable_dscp_policy_capa=$enable_dscp_policy_capa" "$N"
 	fi
 
-	if [[ "$htmode" == "EHT"* ]]; then
+	case "$htmode" in
+		EHT*|UHR*)
 		append hostapd_cfg "mld_ap=1" "$N"
 
 		if [ -n "$mld" ]; then
@@ -1286,7 +1321,7 @@ mac80211_hostapd_setup_bss() {
 		if [ "$ml_max_rec_links" -ge 0 ] && [ "$ml_max_rec_links" -le 3 ]; then
 			append hostapd_cfg "ml_max_rec_links=$ml_max_rec_links" "$N"
 		fi
-	fi
+	esac
 
 	if [ -n "$twt_responder" ]; then
 		append hostapd_cfg "twt_responder_caps=$twt_responder" "$N"
@@ -1444,7 +1479,7 @@ mac80211_get_band_name() {
 
 	[ "$radio_id" = "-1" ] && return $band
 
-	freq_range=$(iw ${phy} info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3, $6}')
+	freq_range=$(iw ${phy} info | grep -A 1 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3, $6}')
 	set -- $freq_range
 	freq1=$1
 	freq2=$2
@@ -1488,7 +1523,7 @@ mac80211_prepare_vif() {
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
-                        if [[ "$htmode" == EHT* ]] && [ -n "$mld" ]; then
+                        if [[ "$htmode" == EHT* || "$htmode" == UHR* ]] && [ -n "$mld" ]; then
 				config_get mld_ifname "$mld" ifname
 				if [ -z "$mld_ifname" ]; then
 					ifname=$phy-$mld
@@ -1816,18 +1851,18 @@ mac80211_setup_monitor() {
 	[ -n "$freq" ] && json_add_string freq "$freq"
 	json_add_string htmode "$htmode"
 	case "$htmode" in
-                VHT20|HT20|HE20|EHT20)
+                VHT20|HT20|HE20|EHT20|UHR20)
                         bw=20
                         ;;
-                HT40*|VHT40|HE40|EHT40)
+                HT40*|VHT40|HE40|EHT40|UHR40)
                         bw=40
 			center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 40)")
                         ;;
-                VHT80|HE80|EHT80)
+                VHT80|HE80|EHT80|UHR80)
                         bw=80
                         center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 80)")
                         ;;
-                VHT160|HE160|EHT160)
+                VHT160|HE160|EHT160|UHR160)
                         bw=160
                         center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
                         ;;
