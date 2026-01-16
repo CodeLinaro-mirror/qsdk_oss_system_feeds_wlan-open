@@ -104,6 +104,9 @@ hostapd_append_wpa_key_mgmt() {
 		dpp)
 			append wpa_key_mgmt "DPP"
 		;;
+		eppk)
+			append wpa_key_mgmt "EPPKE"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -435,6 +438,11 @@ hostapd_common_add_bss_config() {
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
+
+	config_add_int eppk
+	config_add_int assoc_frame_encryption
+	config_add_int eap_using_authentication_frames
+	config_add_int pmksa_caching_privacy
 }
 
 hostapd_set_vlan_file() {
@@ -624,7 +632,7 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate vht_mcs_nss_set ht_mcs_nss_set
+		beacon_rate vht_mcs_nss_set ht_mcs_nss_set eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
 
 
 	json_get_values sae_groups sae_groups
@@ -763,6 +771,9 @@ hostapd_set_bss_options() {
 		append bss_conf "rsn_override_mfp_2=$rsn_override_mfp_2" "$N"
 	}
 
+	[ -n "$assoc_frame_encryption" ] && append bss_conf "assoc_frame_encryption=$assoc_frame_encryption" "$N"
+	[ -n "$pmksa_caching_privacy" ] && append bss_conf "pmksa_caching_privacy=$pmksa_caching_privacy" "$N"
+	[ -n "$eap_using_authentication_frames" ] && append bss_conf "eap_using_authentication_frames=$eap_using_authentication_frames" "$N"
 	[ -n "$sae_require_mfp" ] && append bss_conf "sae_require_mfp=$sae_require_mfp" "$N"
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
@@ -1023,6 +1034,7 @@ hostapd_set_bss_options() {
 
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
+		[ "$eppk" -eq "1" ] && append wpa_key_mgmt "EPPKE"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
 	fi
 
