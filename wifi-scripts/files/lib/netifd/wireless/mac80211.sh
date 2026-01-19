@@ -341,6 +341,9 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean enable_aal
 	config_add_int ml_max_rec_links
 	config_add_int bss_index
+
+	config_add_boolean dynamic_vlan vlan_naming
+	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
 }
 
 mac80211_add_capabilities() {
@@ -1182,6 +1185,8 @@ mac80211_hostapd_setup_bss() {
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
+	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
+	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
@@ -1217,6 +1222,14 @@ mac80211_hostapd_setup_bss() {
 		[ -n "$wds_bridge" ] && append hostapd_cfg "wds_bridge=$wds_bridge" "$N"
 	}
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
+
+	[ "$dynamic_vlan" = "1" ] && append hostapd_cfg "dynamic_vlan=1" "$N"
+	[ -n "$vlan_tagged_interface" ] && append hostapd_cfg "vlan_tagged_interface=$vlan_tagged_interface" "$N"
+	[ -n "$vlan_bridge" ] && append hostapd_cfg "vlan_bridge=$vlan_bridge" "$N"
+	[ "$vlan_naming" = "1" ] && append hostapd_cfg "vlan_naming=1" "$N"
+	[ -n "$accept_mac_file" ] && [ -f "$accept_mac_file" ] && append hostapd_cfg "accept_mac_file=$accept_mac_file" "$N"
+	[ -n "$wpa_psk_file" ] && [ -f "$wpa_psk_file" ] && append hostapd_cfg "wpa_psk_file=$wpa_psk_file" "$N"
+	[ -n "$sae_password_file" ] && [ -f "$sae_password_file" ] && append hostapd_cfg "sae_password_file=$sae_password_file" "$N"
 
 	if [ "$band" = "6g" ]; then
 		fils_cfg=
