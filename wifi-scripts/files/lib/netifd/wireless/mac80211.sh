@@ -179,6 +179,17 @@ enable_dscp_policy_capa=
 #atf commands
 atf_offload=
 
+#qacs commands
+qacs_enable=
+acs_rank_en=
+acs_6g_only_psc=
+acs_wradar=
+acsmin_dwell=
+acsmax_dwell=
+acs_dwelltime=
+acs_dbgtrace=
+acs_txpwr_opt=
+
 mac80211_freq_to_channel() {
         local freq=$1
 
@@ -258,7 +269,11 @@ drv_mac80211_init_device_config() {
 		he_spr_psr_enabled \
 		he_bss_color_enabled \
 		he_twt_required \
-		use_ru_puncture_dfs
+		use_ru_puncture_dfs \
+		qacs_enable \
+		acs_rank_en \
+		acs_6g_only_psc \
+		acs_wradar
 	config_add_int \
 		beamformer_antennas \
 		beamformee_antennas \
@@ -281,7 +296,12 @@ drv_mac80211_init_device_config() {
 		mbssid_group_size \
 		he_6ghz_reg_pwr_type \
 		bss_load_update_period \
-		chan_util_avg_period
+		chan_util_avg_period \
+		acsmin_dwell \
+		acsmax_dwell \
+		acs_dwelltime \
+		acs_dbgtrace \
+		acs_txpwr_opt
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -585,6 +605,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr
+	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -1131,6 +1152,42 @@ mac80211_hostapd_setup_base() {
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
 	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
+
+	if [ "$qacs_enable" -eq "1" ]; then
+		append base_cfg "qacs_enable=$qacs_enable" "$N"
+	fi
+
+	if [ -n "$acs_rank_en" ]; then
+		append base_cfg "acs_rank_en=$acs_rank_en" "$N"
+	fi
+
+	if [ -n "$acs_6g_only_psc" ]; then
+		append base_cfg "acs_exclude_6ghz_non_psc=$acs_6g_only_psc" "$N"
+	fi
+
+	if [ -n "$acs_wradar" ]; then
+		append base_cfg "acs_wradar=$acs_wradar" "$N"
+	fi
+
+	if [ -n "$acsmin_dwell" ]; then
+		append base_cfg "acsmin_dwell=$acsmin_dwell" "$N"
+	fi
+
+	if [ -n "$acsmax_dwell" ]; then
+		append base_cfg "acsmax_dwell=$acsmax_dwell" "$N"
+	fi
+
+	if [ -n "$acs_dwelltime" ]; then
+		append base_cfg "acs_dwelltime=$acs_dwelltime" "$N"
+	fi
+
+	if [ -n "$acs_dbgtrace" ]; then
+		append base_cfg "acs_dbgtrace=$acs_dbgtrace" "$N"
+	fi
+
+	if [ -n "$acs_txpwr_opt" ]; then
+		append base_cfg "acs_txpwr_opt=$acs_txpwr_opt" "$N"
+	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 
