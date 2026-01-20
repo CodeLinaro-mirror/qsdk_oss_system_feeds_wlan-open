@@ -197,6 +197,9 @@ acs_dwelltime=
 acs_dbgtrace=
 acs_txpwr_opt=
 
+#dcs enable command
+dcs_enable=
+
 mac80211_freq_to_channel() {
         local freq=$1
 
@@ -314,7 +317,8 @@ ubus_call() {
 		acs_dbgtrace \
 		acs_txpwr_opt \
 		athnewind \
-		rptr_mgr_mode
+		rptr_mgr_mode \
+		dcs_enable
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -633,7 +637,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 
 	# Optional user override for HT40 capability string
@@ -1269,6 +1273,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$acs_txpwr_opt" ]; then
 		append base_cfg "acs_txpwr_opt=$acs_txpwr_opt" "$N"
+	fi
+
+	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
+		append base_cfg "dcs_enable=$dcs_enable" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
