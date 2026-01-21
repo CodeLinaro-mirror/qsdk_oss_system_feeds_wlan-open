@@ -379,7 +379,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_boolean iw_enabled iw_internet iw_asra iw_esr iw_uesa
 	config_add_int iw_access_network_type iw_venue_group iw_venue_type
-	config_add_int iw_ipaddr_type_availability iw_gas_address3
+	config_add_int iw_ipaddr_type_availability iw_gas_address3 iw_bss_priority iw_bss_priority_status
 	config_add_string iw_hessid iw_network_auth_type iw_qos_map_set
 	config_add_array iw_roaming_consortium iw_domain_name iw_anqp_3gpp_cell_net iw_nai_realm
 	config_add_array iw_anqp_elem iw_venue_name iw_venue_url
@@ -432,6 +432,27 @@ hostapd_common_add_bss_config() {
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 	config_add_string vht_mcs_nss_set ht_mcs_nss_set
+# WMM AC params
+	config_add_int \
+		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
+		wmm_ac_be_txop_limit wmm_ac_be_acm \
+		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
+		wmm_ac_bk_txop_limit wmm_ac_bk_acm \
+		wmm_ac_vi_aifs wmm_ac_vi_cwmin wmm_ac_vi_cwmax \
+		wmm_ac_vi_txop_limit wmm_ac_vi_acm \
+		wmm_ac_vo_aifs wmm_ac_vo_cwmin wmm_ac_vo_cwmax \
+		wmm_ac_vo_txop_limit wmm_ac_vo_acm
+
+	# tx_queue_dataX params + noack for all ACs (0..3)
+	config_add_int \
+		tx_queue_data0_aifs tx_queue_data0_cwmin tx_queue_data0_cwmax \
+		tx_queue_data0_burst tx_queue_data0_acm tx_queue_data0_noack \
+		tx_queue_data1_aifs tx_queue_data1_cwmin tx_queue_data1_cwmax \
+		tx_queue_data1_burst tx_queue_data1_acm tx_queue_data1_noack \
+		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
+		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
+		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
@@ -624,7 +645,23 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate vht_mcs_nss_set ht_mcs_nss_set
+		beacon_rate vht_mcs_nss_set ht_mcs_nss_set \
+		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
+		wmm_ac_be_txop_limit wmm_ac_be_acm \
+		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
+		wmm_ac_bk_txop_limit wmm_ac_bk_acm \
+		wmm_ac_vi_aifs wmm_ac_vi_cwmin wmm_ac_vi_cwmax \
+		wmm_ac_vi_txop_limit wmm_ac_vi_acm \
+		wmm_ac_vo_aifs wmm_ac_vo_cwmin wmm_ac_vo_cwmax \
+		wmm_ac_vo_txop_limit wmm_ac_vo_acm \
+		tx_queue_data0_aifs tx_queue_data0_cwmin tx_queue_data0_cwmax \
+		tx_queue_data0_burst tx_queue_data0_acm tx_queue_data0_noack \
+		tx_queue_data1_aifs tx_queue_data1_cwmin tx_queue_data1_cwmax \
+		tx_queue_data1_burst tx_queue_data1_acm tx_queue_data1_noack \
+		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
+		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
+		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack
 
 
 	json_get_values sae_groups sae_groups
@@ -1176,7 +1213,7 @@ hostapd_set_bss_options() {
 	json_get_vars iw_hessid iw_venue_group iw_venue_type iw_network_auth_type
 	json_get_vars iw_roaming_consortium iw_domain_name iw_anqp_3gpp_cell_net iw_nai_realm
 	json_get_vars iw_anqp_elem iw_qos_map_set iw_ipaddr_type_availability iw_gas_address3
-	json_get_vars iw_venue_name iw_venue_url
+	json_get_vars iw_venue_name iw_venue_url iw_bss_priority iw_bss_priority_status
 
 	set_default iw_enabled 0
 	if [ "$iw_enabled" = "1" ]; then
@@ -1224,6 +1261,119 @@ hostapd_set_bss_options() {
 		*) iw_qos_map_set="";;
 	esac
 	[ -n "$iw_qos_map_set" ] && append bss_conf "qos_map_set=$iw_qos_map_set" "$N"
+
+	set_default iw_bss_priority 0
+	set_default iw_bss_priority_status 0
+
+# WMM AC defaults
+	set_default wmm_ac_be_aifs       3
+	set_default wmm_ac_be_cwmin      4
+	set_default wmm_ac_be_cwmax      10
+	set_default wmm_ac_be_txop_limit 0
+	set_default wmm_ac_be_acm        0
+
+	set_default wmm_ac_bk_aifs       7
+	set_default wmm_ac_bk_cwmin      4
+	set_default wmm_ac_bk_cwmax      10
+	set_default wmm_ac_bk_txop_limit 0
+	set_default wmm_ac_bk_acm        0
+
+	set_default wmm_ac_vi_aifs       2
+	set_default wmm_ac_vi_cwmin      3
+	set_default wmm_ac_vi_cwmax      4
+	set_default wmm_ac_vi_txop_limit 94
+	set_default wmm_ac_vi_acm        0
+
+	set_default wmm_ac_vo_aifs       2
+	set_default wmm_ac_vo_cwmin      2
+	set_default wmm_ac_vo_cwmax      3
+	set_default wmm_ac_vo_txop_limit 47
+	set_default wmm_ac_vo_acm        0
+
+# TX queue defaults (including acm / noack)
+	set_default tx_queue_data0_aifs   1
+	set_default tx_queue_data0_cwmin  3
+	set_default tx_queue_data0_cwmax  7
+	set_default tx_queue_data0_burst  1.5
+	set_default tx_queue_data0_acm    0
+	set_default tx_queue_data0_noack  0
+
+	set_default tx_queue_data1_aifs   1
+	set_default tx_queue_data1_cwmin  7
+	set_default tx_queue_data1_cwmax  15
+	set_default tx_queue_data1_burst  3.0
+	set_default tx_queue_data1_acm    0
+	set_default tx_queue_data1_noack  0
+
+	set_default tx_queue_data2_aifs   3
+	set_default tx_queue_data2_cwmin  15
+	set_default tx_queue_data2_cwmax  63
+	set_default tx_queue_data2_burst  0
+	set_default tx_queue_data2_acm    0
+	set_default tx_queue_data2_noack  0
+
+	set_default tx_queue_data3_aifs   7
+	set_default tx_queue_data3_cwmin  15
+	set_default tx_queue_data3_cwmax  1023
+	set_default tx_queue_data3_burst  0
+	set_default tx_queue_data3_acm    0
+	set_default tx_queue_data3_noack  0
+
+	[ -n "$iw_bss_priority" ] && append bss_conf "bss_priority=$iw_bss_priority" "$N"
+	[ -n "$iw_bss_priority_status" ] && append bss_conf "bss_priority_status=$iw_bss_priority_status" "$N"
+	# WMM per-AC parameters
+	[ -n "$wmm_ac_be_aifs" ]       && append bss_conf "wmm_ac_be_aifs=$wmm_ac_be_aifs" "$N"
+	[ -n "$wmm_ac_be_cwmin" ]      && append bss_conf "wmm_ac_be_cwmin=$wmm_ac_be_cwmin" "$N"
+	[ -n "$wmm_ac_be_cwmax" ]      && append bss_conf "wmm_ac_be_cwmax=$wmm_ac_be_cwmax" "$N"
+	[ -n "$wmm_ac_be_txop_limit" ] && append bss_conf "wmm_ac_be_txop_limit=$wmm_ac_be_txop_limit" "$N"
+	[ -n "$wmm_ac_be_acm" ]        && append bss_conf "wmm_ac_be_acm=$wmm_ac_be_acm" "$N"
+
+	[ -n "$wmm_ac_bk_aifs" ]       && append bss_conf "wmm_ac_bk_aifs=$wmm_ac_bk_aifs" "$N"
+	[ -n "$wmm_ac_bk_cwmin" ]      && append bss_conf "wmm_ac_bk_cwmin=$wmm_ac_bk_cwmin" "$N"
+	[ -n "$wmm_ac_bk_cwmax" ]      && append bss_conf "wmm_ac_bk_cwmax=$wmm_ac_bk_cwmax" "$N"
+	[ -n "$wmm_ac_bk_txop_limit" ] && append bss_conf "wmm_ac_bk_txop_limit=$wmm_ac_bk_txop_limit" "$N"
+	[ -n "$wmm_ac_bk_acm" ]        && append bss_conf "wmm_ac_bk_acm=$wmm_ac_bk_acm" "$N"
+
+	[ -n "$wmm_ac_vi_aifs" ]       && append bss_conf "wmm_ac_vi_aifs=$wmm_ac_vi_aifs" "$N"
+	[ -n "$wmm_ac_vi_cwmin" ]      && append bss_conf "wmm_ac_vi_cwmin=$wmm_ac_vi_cwmin" "$N"
+	[ -n "$wmm_ac_vi_cwmax" ]      && append bss_conf "wmm_ac_vi_cwmax=$wmm_ac_vi_cwmax" "$N"
+	[ -n "$wmm_ac_vi_txop_limit" ] && append bss_conf "wmm_ac_vi_txop_limit=$wmm_ac_vi_txop_limit" "$N"
+	[ -n "$wmm_ac_vi_acm" ]        && append bss_conf "wmm_ac_vi_acm=$wmm_ac_vi_acm" "$N"
+
+	[ -n "$wmm_ac_vo_aifs" ]       && append bss_conf "wmm_ac_vo_aifs=$wmm_ac_vo_aifs" "$N"
+	[ -n "$wmm_ac_vo_cwmin" ]      && append bss_conf "wmm_ac_vo_cwmin=$wmm_ac_vo_cwmin" "$N"
+	[ -n "$wmm_ac_vo_cwmax" ]      && append bss_conf "wmm_ac_vo_cwmax=$wmm_ac_vo_cwmax" "$N"
+	[ -n "$wmm_ac_vo_txop_limit" ] && append bss_conf "wmm_ac_vo_txop_limit=$wmm_ac_vo_txop_limit" "$N"
+	[ -n "$wmm_ac_vo_acm" ]        && append bss_conf "wmm_ac_vo_acm=$wmm_ac_vo_acm" "$N"
+
+	# TX queue parameters for data0..data3 (0..3)
+	[ -n "$tx_queue_data0_aifs" ]       && append bss_conf "tx_queue_data0_aifs=$tx_queue_data0_aifs" "$N"
+	[ -n "$tx_queue_data0_cwmin" ]      && append bss_conf "tx_queue_data0_cwmin=$tx_queue_data0_cwmin" "$N"
+	[ -n "$tx_queue_data0_cwmax" ]      && append bss_conf "tx_queue_data0_cwmax=$tx_queue_data0_cwmax" "$N"
+	[ -n "$tx_queue_data0_burst" ] 	    && append bss_conf "tx_queue_data0_burst=$tx_queue_data0_burst" "$N"
+	[ -n "$tx_queue_data0_acm" ]        && append bss_conf "tx_queue_data0_acm=$tx_queue_data0_acm" "$N"
+	[ -n "$tx_queue_data0_noack" ]      && append bss_conf "tx_queue_data0_noack=$tx_queue_data0_noack" "$N"
+
+	[ -n "$tx_queue_data1_aifs" ]       && append bss_conf "tx_queue_data1_aifs=$tx_queue_data1_aifs" "$N"
+	[ -n "$tx_queue_data1_cwmin" ]      && append bss_conf "tx_queue_data1_cwmin=$tx_queue_data1_cwmin" "$N"
+	[ -n "$tx_queue_data1_cwmax" ]      && append bss_conf "tx_queue_data1_cwmax=$tx_queue_data1_cwmax" "$N"
+	[ -n "$tx_queue_data1_burst" ]	    && append bss_conf "tx_queue_data1_burst=$tx_queue_data1_burst" "$N"
+	[ -n "$tx_queue_data1_acm" ]        && append bss_conf "tx_queue_data1_acm=$tx_queue_data1_acm" "$N"
+	[ -n "$tx_queue_data1_noack" ]      && append bss_conf "tx_queue_data1_noack=$tx_queue_data1_noack" "$N"
+
+	[ -n "$tx_queue_data2_aifs" ]       && append bss_conf "tx_queue_data2_aifs=$tx_queue_data2_aifs" "$N"
+	[ -n "$tx_queue_data2_cwmin" ]      && append bss_conf "tx_queue_data2_cwmin=$tx_queue_data2_cwmin" "$N"
+	[ -n "$tx_queue_data2_cwmax" ]      && append bss_conf "tx_queue_data2_cwmax=$tx_queue_data2_cwmax" "$N"
+	[ -n "$tx_queue_data2_burst" ]      && append bss_conf "tx_queue_data2_burst=$tx_queue_data2_burst" "$N"
+	[ -n "$tx_queue_data2_acm" ]        && append bss_conf "tx_queue_data2_acm=$tx_queue_data2_acm" "$N"
+	[ -n "$tx_queue_data2_noack" ]      && append bss_conf "tx_queue_data2_noack=$tx_queue_data2_noack" "$N"
+
+	[ -n "$tx_queue_data3_aifs" ]       && append bss_conf "tx_queue_data3_aifs=$tx_queue_data3_aifs" "$N"
+	[ -n "$tx_queue_data3_cwmin" ]      && append bss_conf "tx_queue_data3_cwmin=$tx_queue_data3_cwmin" "$N"
+	[ -n "$tx_queue_data3_cwmax" ]      && append bss_conf "tx_queue_data3_cwmax=$tx_queue_data3_cwmax" "$N"
+	[ -n "$tx_queue_data3_burst" ]      && append bss_conf "tx_queue_data3_burst=$tx_queue_data3_burst" "$N"
+	[ -n "$tx_queue_data3_acm" ]        && append bss_conf "tx_queue_data3_acm=$tx_queue_data3_acm" "$N"
+	[ -n "$tx_queue_data3_noack" ]      && append bss_conf "tx_queue_data3_noack=$tx_queue_data3_noack" "$N"
 
 	local hs20 disable_dgaf osen anqp_domain_id hs20_deauth_req_timeout \
 		osu_ssid hs20_wan_metrics hs20_operating_class hs20_t_c_filename hs20_t_c_timestamp \
@@ -1588,7 +1738,10 @@ wpa_supplicant_add_network() {
 	}
 
 	[ "$_w_mode" = "sta" ] && {
-		[ "$multi_ap" = 1 ] && append network_data "multi_ap_backhaul_sta=1" "$N$T"
+		[ "$multi_ap" = 1 ] && {
+			append network_data "multi_ap_backhaul_sta=1" "$N$T"
+			append network_data "enable_4addr_mode=1" "$N$T"
+		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 	}
 

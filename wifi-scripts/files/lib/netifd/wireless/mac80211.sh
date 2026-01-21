@@ -155,6 +155,7 @@ max_listen_int=
 he_6ghz_reg_pwr_type=
 bss_load_update_period=
 chan_util_avg_period=
+use_driver_vendor_addr=
 
 #dpp
 dpp_ifaces=
@@ -232,6 +233,7 @@ drv_mac80211_init_device_config() {
 	config_add_int radio beacon_int chanbw frag rts
 	config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
 	config_add_int num_global_macaddr multiple_bssid
+	config_add_boolean use_driver_vendor_addr
 	config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
 	config_add_array ht_capab
 	config_add_array channels
@@ -338,6 +340,7 @@ drv_mac80211_init_iface_config() {
 
 	config_add_boolean enable_aal
 	config_add_int ml_max_rec_links
+	config_add_int bss_index
 }
 
 mac80211_add_capabilities() {
@@ -578,7 +581,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -1124,6 +1127,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
+	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 
@@ -1139,6 +1143,7 @@ $base_cfg
 
 EOF
 	json_select ..
+
 	mac80211_prepare_atf_config "$hostapd_conf_file" "$radio"
 }
 
@@ -1177,6 +1182,7 @@ mac80211_hostapd_setup_bss() {
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
 	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
+	json_get_vars bss_index
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
 	json_get_vars commitatf atfssidsched atfssidgroup
@@ -1250,6 +1256,11 @@ mac80211_hostapd_setup_bss() {
 	if [[ "$htmode" == "EHT"* ]]; then
 		append hostapd_cfg "mld_ap=1" "$N"
 
+		if [ -n "$mld" ]; then
+			config_get mld_macaddr "$mld" mld_macaddr
+			[ -n "$mld_macaddr" ] && append hostapd_cfg "mld_addr=$mld_macaddr" "$N"
+		fi
+
 		if [ -n "$enable_epcs" ]; then
 			append hostapd_cfg "enable_epcs=$enable_epcs" "$N"
 		fi
@@ -1300,13 +1311,26 @@ mac80211_hostapd_setup_bss() {
         [ -n "$atfssidsched" ] && append hostapd_cfg "atfssidsched=$atfssidsched" "$N"
         [ -n "$atfssidgroup" ] && append hostapd_cfg "atfssidgroup=$atfssidgroup" "$N"
 
-	cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
+	if [ "$use_driver_vendor_addr" = "1" ] && [ -n "$bss_index" ]; then
+		append hostapd_cfg "bss_index=$bss_index" "$N"
+	fi
+
+	if [ "$use_driver_vendor_addr" = "1" ]; then
+		cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
+$hostapd_cfg
+${default_macaddr:+#default_macaddr}
+${dtim_period:+dtim_period=$dtim_period}
+${max_listen_int:+max_listen_interval=$max_listen_int}
+EOF
+	else
+		cat >> /var/run/hostapd-$phy$vif_phy_suffix.conf <<EOF
 $hostapd_cfg
 bssid=$macaddr
 ${default_macaddr:+#default_macaddr}
 ${dtim_period:+dtim_period=$dtim_period}
 ${max_listen_int:+max_listen_interval=$max_listen_int}
 EOF
+	fi
 }
 
 mac80211_get_addr() {
@@ -1460,7 +1484,7 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
@@ -1501,6 +1525,12 @@ mac80211_prepare_vif() {
 	json_add_string _ppe_vp "$ppe_vp"
 
 	default_macaddr=
+
+	if [ "$mode" = "sta" ] && [ -n "$mld" ] && [[ "$htmode" == EHT* ]]; then
+		config_get mld_macaddr "$mld" mld_macaddr
+		[ -n "$mld_macaddr" ] && macaddr="$mld_macaddr"
+	fi
+
 	if [ -z "$macaddr" ]; then
 		macaddr="$(mac80211_generate_mac $phy $mode)"
 		macidx="$(($macidx + 1))"
@@ -1511,6 +1541,16 @@ mac80211_prepare_vif() {
 	json_add_string _macaddr "$macaddr"
 	json_add_string _default_macaddr "$default_macaddr"
 	json_select ..
+
+	case "$mode" in
+		ap|sta|adhoc|mesh)
+			if [ -n "$bss_index" ]; then
+				append reserved_bss_list "$bss_index"
+			else
+				unreserved_apsta_count=$((unreserved_apsta_count + 1))
+			fi
+			;;
+	esac
 
 	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 	if [ $mlo_add_flag -eq 0 ]; then
@@ -1812,6 +1852,71 @@ mac80211_setup_monitor() {
 	json_close_object
 
 	json_set_namespace "$prev"
+}
+
+mac80211_apply_monitor_mac() {
+	json_select config
+	json_get_var ifname _ifname
+	json_get_vars mode bss_index
+	json_select ..
+
+	[ "$mode" = "monitor" ] || return 0
+	[ "$use_driver_vendor_addr" = "1" ] || return 0
+
+	local ridx mon_mac i flags_path mac_path flags_val
+
+	ridx="$radio"
+	[ "$ridx" = "-1" ] && ridx=0
+
+	skipped=0
+	for i in $(seq 0 16); do
+		if [ -n "$reserved_bss_list" ]; then
+			echo " $reserved_bss_list " | grep -q " $i " && continue
+		fi
+
+		if [ -n "$unreserved_apsta_count" ] && [ "$skipped" -lt "$unreserved_apsta_count" ]; then
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		flags_path="/sys/class/ieee80211/${phy}/device/radio${ridx}/vifs/vif${i}/flags"
+		mac_path="/sys/class/ieee80211/${phy}/device/radio${ridx}/vifs/vif${i}/macaddr"
+		[ -f "$flags_path" ] || continue
+
+		flags_val="$(cat "$flags_path" 2>/dev/null)"
+		[ "$flags_val" = "0" ] || continue
+
+		[ -f "$mac_path" ] || continue
+		mon_mac="$(cat "$mac_path" 2>/dev/null | tr -d '\n' | tr -d '\r' | tr 'A-F' 'a-f')"
+
+		break
+	done
+
+	if [ -n "$mon_mac" ] && [ -n "$ifname" ]; then
+		ip link set dev "$ifname" address "$mon_mac" >/dev/null 2>&1 || {
+			ip link set dev "$ifname" down >/dev/null 2>&1 || true
+			ip link set dev "$ifname" address "$mon_mac" >/dev/null 2>&1 || true
+			ip link set dev "$ifname" up >/dev/null 2>&1 || true
+		}
+
+		if [ -n "$i" ]; then
+			flags_path="/sys/class/ieee80211/${phy}/device/radio${ridx}/vifs/vif${i}/flags"
+			[ -f "$flags_path" ] && echo "1" > "$flags_path" 2>/dev/null || true
+		fi
+	fi
+}
+
+mac80211_reclaim_all_vif_macs() {
+	local ridx i flags_path
+
+	ridx="$radio"
+	[ "$ridx" = "-1" ] && ridx=0
+
+	for i in $(seq 0 16); do
+		flags_path="/sys/class/ieee80211/${phy}/device/radio${ridx}/vifs/vif${i}/flags"
+		[ -f "$flags_path" ] || continue
+		echo "0" > "$flags_path" 2>/dev/null || true
+	done
 }
 
 get_link_id() {
@@ -2185,6 +2290,18 @@ drv_mac80211_setup() {
 
 	mac80211_set_suffix
 
+	if [ -n "$macaddr" ]; then
+		radio_idx="$radio"
+		[ "$radio_idx" = "-1" ] && radio_idx=0
+
+		if command -v cfg80211tool >/dev/null 2>&1; then
+			cfg80211tool "${phy}:${radio_idx}" setHwaddr "$macaddr" >/dev/null 2>&1 || \
+			echo "setHwaddr failed for ${phy}:${radio_idx}" > /dev/console
+		else
+			echo "cfg80211tool not found; MAC not set for ${phy}:${radio_idx}" > /dev/console
+		fi
+	fi
+
 	[ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 	if [ $mlo_add_flag -eq 0 ]; then
 		if [ "$(cat /sys/module/ath12k/parameters/ppe_rfs_support)" == 'Y' ]; then
@@ -2311,6 +2428,8 @@ drv_mac80211_setup() {
 	mac80211_prepare_iw_htmode
 	active_ifnames=
 	mon_ifname=
+	reserved_bss_list=
+	unreserved_apsta_count=0
 
 	for_each_interface "ap" mac80211_prepare_vif
 	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
@@ -2326,6 +2445,8 @@ drv_mac80211_setup() {
 	json_set_namespace wdev_uc prev
 	wdev_tool "$phy$phy_suffix" set_config "$(json_dump)" $active_ifnames
 	json_set_namespace "$prev"
+
+	for_each_interface "monitor" mac80211_apply_monitor_mac
 
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_set_vif_txpower
 
@@ -2379,6 +2500,7 @@ drv_mac80211_teardown() {
 	}
 
 	mac80211_set_suffix
+	mac80211_reclaim_all_vif_macs
 	mac80211_reset_config "$phy"
 }
 
