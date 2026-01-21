@@ -589,6 +589,15 @@ EOF
 
 }
 
+mac80211_check_oce_ap() {
+	json_select config
+	json_get_vars oce
+
+	[ -n "$oce" ] && oce_ap=1
+
+	json_select ..
+}
+
 mac80211_hostapd_setup_base() {
 	local phy="$1"
 	local sedString=
@@ -1227,6 +1236,10 @@ mac80211_hostapd_setup_base() {
 
 	[ -n "$updated_chanlist" ] && channel_list=$(echo $updated_chanlist)
 
+	# According to OCE Specification 2.0, when OCE is enabled, ACS should select channels 1, 6, or 11 in 2GHz band
+	if [ -n "$oce_ap" ] && [ "$band" = "2g" ]; then
+		channel_list="1,6,11"
+	fi
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${channel_list:+chanlist=$channel_list}
@@ -2511,10 +2524,12 @@ drv_mac80211_setup() {
 	ap_ifname=
 	hostapd_noscan=
 	wpa_supp_init=
+	oce_ap=
 	for_each_interface "ap" mac80211_check_ap
 
 	[ -f "$hostapd_conf_file" ] && mv "$hostapd_conf_file" "$hostapd_conf_file.prev"
 
+	for_each_interface "ap" mac80211_check_oce_ap
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy"
 
