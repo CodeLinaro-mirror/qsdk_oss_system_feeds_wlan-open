@@ -191,7 +191,8 @@ function macaddr_split(str)
 
 function macaddr_join(addr)
 {
-	return join(":", map(addr, (val) => sprintf("%02x", val)));
+	/* Clamp each octet to 8 bits before formatting */
+	return join(":", map(addr, (val) => sprintf("%02x", val & 0xff)));
 }
 
 function wdev_macaddr(wdev)
@@ -291,6 +292,7 @@ const phy_proto = {
 				idx--;
 			addr[0] |= 2;
 			addr[0] ^= idx << 2;
+			addr[0] %= 256;
 			break;
 		case "b5":
 			if (mbssid) {
@@ -299,8 +301,11 @@ const phy_proto = {
 				let B = addr[5] % size;
 				let loct = addr[5];
 				addr[5] = loct - B + ((B+idx) % size);
+				addr[5] %= 256;
 			} else {
+				/* Ensure last octet remains within 0..255 */
 				addr[5] ^= idx;
+				addr[5] %= 256;
 			}
 			break;
 		default:
