@@ -1646,12 +1646,13 @@ wpa_supplicant_add_network() {
 	if [ "$_w_mode" = "sta" ]; then
 		local athnewind="$2"
 		local rptr_mgr_mode="$3"
+		local channel="$4"
 	else
 		local freq="$2"
 		local htmode="$3"
+		local noscan="$4"
 	fi
 
-	local noscan="$4"
 	local disable_40mhz_scan=0
 	local ru_punct_bitmap=$5
 	local disable_csa_dfs=$6
@@ -2069,6 +2070,7 @@ network={
 }
 athnewind=$athnewind
 rptr_mgr_mode=$rptr_mgr_mode
+channel=$channel
 EOF
 	fi
 	return 0
