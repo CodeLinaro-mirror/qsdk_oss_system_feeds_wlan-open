@@ -156,6 +156,9 @@ he_6ghz_reg_pwr_type=
 bss_load_update_period=
 chan_util_avg_period=
 use_driver_vendor_addr=
+athnewind=
+skip_cac=
+rptr_mgr_mode=
 
 #dpp
 dpp_ifaces=
@@ -301,7 +304,9 @@ drv_mac80211_init_device_config() {
 		acsmax_dwell \
 		acs_dwelltime \
 		acs_dbgtrace \
-		acs_txpwr_opt
+		acs_txpwr_opt \
+		athnewind \
+		rptr_mgr_mode
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -311,7 +316,8 @@ drv_mac80211_init_device_config() {
 		dsss_cck_40 \
 		disable_eml_cap \
 		disable_csa_dfs \
-		discard_6g_awgn_event
+		discard_6g_awgn_event \
+		skip_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
 }
@@ -613,7 +619,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
@@ -1195,6 +1201,9 @@ mac80211_hostapd_setup_base() {
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
 	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
+	config_get athnewind mac80211 athnewind 0
+	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
+	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 
 	if [ "$qacs_enable" -eq "1" ]; then
 		append base_cfg "qacs_enable=$qacs_enable" "$N"
@@ -2237,9 +2246,11 @@ mac80211_setup_supplicant() {
 	local add_sp=0
 
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
+	config_get athnewind mac80211 athnewind 0
+	config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -2362,6 +2373,75 @@ mac80211_set_suffix() {
 	set_default radio -1
 }
 
+mac80211_is_last_enabled_radio() {
+	local max_radio=-1
+	local section type disabled r
+
+	config_load wireless
+	__scan_wifi_dev() {
+		section="$1"
+		config_get type "$section" type
+		[ "$type" != "mac80211" ] && return 0
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+		config_get r "$section" radio
+		[ -z "$r" ] && return 0
+		[ "$r" -gt "$max_radio" ] && max_radio="$r"
+	}
+	config_foreach __scan_wifi_dev wifi-device
+	[ "$radio" = "$max_radio" ]
+}
+
+# Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
+is_repeater=0
+
+# Update global repeater flag once based on current wireless config
+mac80211_update_is_repeater_flag() {
+	[ "$is_repeater" = "1" ] && return 0
+
+	config_load wireless
+
+	__scan_dev() {
+		local section="$1"
+		local type disabled dev
+
+		config_get type "$section" type
+		[ "$type" != "mac80211" ] && return 0
+
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+
+		dev="$section"
+		local ap=0
+		local sta=0
+
+		__scan_iface() {
+			local iface="$1"
+			local if_device mode if_disabled
+
+			config_get if_device "$iface" device
+			[ "$if_device" != "$dev" ] && return 0
+
+			config_get mode "$iface" mode
+			config_get if_disabled "$iface" disabled 0
+			[ "$if_disabled" -eq 1 ] && return 0
+
+			case "$mode" in
+				ap) ap=1 ;;
+				sta) sta=1 ;;
+			esac
+		}
+
+		config_foreach __scan_iface wifi-iface
+
+		if [ "$ap" -eq 1 ] && [ "$sta" -eq 1 ]; then
+			is_repeater=1
+		fi
+	}
+
+	config_foreach __scan_dev wifi-device
+}
+
 drv_mac80211_setup() {
 	local device=$1
 
@@ -2380,6 +2460,8 @@ drv_mac80211_setup() {
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
+
+	mac80211_update_is_repeater_flag
 
 	if [ ${#device} -eq 12 ]; then
 		is_wiphy_multi_radio=1
@@ -2528,6 +2610,7 @@ drv_mac80211_setup() {
 	for_each_interface "ap" mac80211_check_ap
 
 	[ -f "$hostapd_conf_file" ] && mv "$hostapd_conf_file" "$hostapd_conf_file.prev"
+	[ "$is_repeater" -ne "1" ] && config_set mac80211 athnewind 0
 
 	for_each_interface "ap" mac80211_check_oce_ap
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
@@ -2590,6 +2673,17 @@ drv_mac80211_setup() {
 
 	for_each_interface "ap mesh" mac80211_set_fq_limit
 	wireless_set_up
+
+	# Update repeater flag and start rptr-mgr only once: on highest enabled radio id
+	if mac80211_is_last_enabled_radio && [ "$is_repeater" = "1" ]; then
+		if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
+			set_default skip_cac 0
+			config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+			config_get athnewind mac80211 athnewind 0
+			sh /lib/wifi/rptr_mgr.sh $skip_cac $rptr_mgr_mode $athnewind
+			rptr-mgr > /dev/console 2>&1 &
+		fi
+	fi
 }
 
 _list_phy_interfaces() {
@@ -2622,6 +2716,8 @@ drv_mac80211_teardown() {
 	mac80211_set_suffix
 	mac80211_reclaim_all_vif_macs
 	mac80211_reset_config "$phy"
+	killall rptr-mgr
+	rm /var/run/rptr_mgr.conf
 }
 
 _sta_radios=
