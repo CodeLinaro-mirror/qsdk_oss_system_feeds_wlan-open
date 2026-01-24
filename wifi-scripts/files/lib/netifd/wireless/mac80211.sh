@@ -1562,7 +1562,7 @@ mac80211_get_band_name() {
 
 	[ "$radio_id" = "-1" ] && return $band
 
-	freq_range=$(iw ${phy} info | grep -A 1 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3, $6}')
+	freq_range=$(iw ${phy} info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3, $6}')
 	set -- $freq_range
 	freq1=$1
 	freq2=$2
