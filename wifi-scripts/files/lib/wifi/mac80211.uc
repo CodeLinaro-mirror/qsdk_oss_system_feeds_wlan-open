@@ -300,6 +300,16 @@ function translate_proprietary_to_ath_ud() {
 				print(`set wireless.${secname}.radio='${radio_cfg.radio}'\n`);
 				print(`set wireless.${secname}.channels='${radio_cfg.channels}'\n`);
 
+				/* Preserve channel if set (including 'auto' and 0) */
+				if (s.channel != null && s.channel != '') {
+					print(`set wireless.${secname}.channel='${s.channel}'\n`);
+				}
+
+				/* Preserve disabled state */
+				if (s.disabled != null) {
+					print(`set wireless.${secname}.disabled='${s.disabled}'\n`);
+				}
+
 				if (s.hwmode) {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
@@ -377,18 +387,28 @@ function rename_devices_and_rebind_ifaces() {
 	};
 
 	let renamed = false;
+	let renames = [];
 
+	/* Collect all renames first to avoid modifying during iteration */
 	for (let secname, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
 		let newname = map[secname];
 		if (!newname)
 			continue;
-		print(`rename wireless.${secname}='${newname}'\n`);
+		renames[length(renames)] = { old: secname, new: newname, cfg: s };
+	}
+
+	/* Apply renames (print + in-memory update) */
+	for (let r in renames) {
+		print(`rename wireless.${r.old}='${r.new}'\n`);
+		config[r.new] = r.cfg;
+		delete config[r.old];
 		renamed = true;
 		commit = true;
 	}
 
+	/* Rebind iface.device after all device renames */
 	if (renamed) {
 		for (let secname, s in config) {
 			if (s[".type"] != "wifi-iface")
@@ -400,6 +420,8 @@ function rename_devices_and_rebind_ifaces() {
 			if (!newdev)
 				continue;
 			print(`set wireless.${secname}.device='${newdev}'\n`);
+			/* Keep in-memory config consistent */
+			s.device = newdev;
 			commit = true;
 		}
 	}
@@ -507,8 +529,13 @@ set ${si}.encryption='none'
 }
 
 if (has_qca_cfg80211()) {
-	translate_proprietary_to_ath_ud();
+	/* Rename first so band extraction works in translation */
 	rename_devices_and_rebind_ifaces();
+	translate_proprietary_to_ath_ud();
+	/* Exit after translation to prevent generate_config from overwriting */
+	if (commit)
+		print("commit wireless\\n");
+	exit(0);
 }
 
 for (let phy_name, phy in board.wlan) {
