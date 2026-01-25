@@ -1470,20 +1470,14 @@ mac80211_get_addr() {
 mac80211_generate_mac() {
 	local phy="$1"
 	local id="${macidx:-0}"
-	local group_size
 	local mode="$2"
 	local mbssid=""
-	if [ -n "mbssid_group_size" ]; then
-		group_size="$mbssid_group_size"
-	else
-		group_size="$has_ap"
-	fi
 
 	if [ "$mode" = "ap" ]; then
 		mbssid=$multiple_bssid
 	fi
 
-	wdev_tool "$phy$phy_suffix" get_macaddr id=$id num_global=$num_global_macaddr mbssid=$mbssid mbssid_group_size=$group_size
+	wdev_tool "$phy$phy_suffix" get_macaddr id=$id num_global=$num_global_macaddr mbssid=$mbssid mbssid_group_size=$has_ap
 }
 
 get_board_phy_name() (
