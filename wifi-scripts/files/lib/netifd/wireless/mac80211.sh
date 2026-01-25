@@ -2248,9 +2248,10 @@ mac80211_setup_supplicant() {
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
 	config_get athnewind mac80211 athnewind 0
 	config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
