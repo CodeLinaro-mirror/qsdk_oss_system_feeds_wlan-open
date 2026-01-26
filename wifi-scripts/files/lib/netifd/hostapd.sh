@@ -148,6 +148,8 @@ hostapd_common_add_device_config() {
 	config_add_int cell_density
 	config_add_int rts_threshold
 	config_add_int rssi_reject_assoc_rssi
+	config_add_int rssi_reject_assoc_timeout
+	config_add_int rssi_deauth_grace_samples
 	config_add_int rssi_ignore_probe_request
 	config_add_int maxassoc
 
@@ -168,7 +170,7 @@ hostapd_prepare_device_config() {
 
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
-		rts_threshold rssi_reject_assoc_rssi rssi_ignore_probe_request maxassoc \
+		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
 		mbssid:0
 
 	hostapd_set_log_options base_cfg
@@ -263,6 +265,8 @@ hostapd_prepare_device_config() {
 	done
 
 	[ -n "$rssi_reject_assoc_rssi" ] && append base_cfg "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append base_cfg "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append base_cfg "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
 	[ -n "$rssi_ignore_probe_request" ] && append base_cfg "rssi_ignore_probe_request=$rssi_ignore_probe_request" "$N"
 	append base_cfg "beacon_int=$beacon_int" "$N"
 	[ -n "$rts_threshold" ] && append base_cfg "rts_threshold=$rts_threshold" "$N"
@@ -285,6 +289,7 @@ hostapd_common_add_bss_config() {
 	config_add_string 'bssid:macaddr' 'ssid:string'
 	config_add_boolean wds wmm uapsd hidden utf8_ssid ppsk
 
+	config_add_int rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 	config_add_int maxassoc max_inactivity
 	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll
 
@@ -664,7 +669,8 @@ hostapd_set_bss_options() {
 		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
 		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
 		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
-		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
+		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 
 
 	json_get_values sae_groups sae_groups
@@ -710,6 +716,10 @@ hostapd_set_bss_options() {
 	[ "$airtime_bss_weight" -gt 0 ] && append bss_conf "airtime_bss_weight=$airtime_bss_weight" "$N"
 	[ "$airtime_bss_limit" -gt 0 ] && append bss_conf "airtime_bss_limit=$airtime_bss_limit" "$N"
 	json_for_each_item append_airtime_sta_weight airtime_sta_weight
+
+	[ -n "$rssi_reject_assoc_rssi" ] && append bss_conf "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append bss_conf "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append bss_conf "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
 
 	#[ -n "$bss_load_update_period" ] && append bss_conf "bss_load_update_period=$bss_load_update_period" "$N"
 	append bss_conf "chan_util_avg_period=$chan_util_avg_period" "$N"
