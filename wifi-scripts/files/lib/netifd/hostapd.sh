@@ -383,6 +383,10 @@ hostapd_common_add_bss_config() {
 	config_add_int sae_pwe
 	config_add_int external_plugin_enable
 	config_add_int externally_triggered_m3
+	config_add_int external_plugin_auth_policy
+	config_add_int external_plugin_assoc_policy
+	config_add_int external_plugin_deauth_policy
+	config_add_int external_plugin_disassoc_policy
 
 	config_add_int control_frame_protection
 	config_add_int cip_padding_delay
@@ -654,6 +658,7 @@ hostapd_set_bss_options() {
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable externally_triggered_m3 \
+		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
 		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
@@ -708,6 +713,10 @@ hostapd_set_bss_options() {
 	set_default airtime_bss_limit 0
 	set_default eap_server 0
 	set_default apup 0
+	set_default external_plugin_auth_policy 0
+	set_default external_plugin_assoc_policy 0
+	set_default external_plugin_deauth_policy 0
+	set_default external_plugin_disassoc_policy 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
@@ -840,6 +849,10 @@ hostapd_set_bss_options() {
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
 	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
+	[ -n "$external_plugin_auth_policy" ] && append bss_conf "external_plugin_auth_policy=$external_plugin_auth_policy" "$N"
+	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
+	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
+	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
