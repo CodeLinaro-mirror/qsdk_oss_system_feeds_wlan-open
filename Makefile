@@ -48,7 +48,7 @@ LOCAL_SRC:=$(TOPDIR)/$(SRCPREFIX)src/mac80211/wlan-open/backports-6.1-$(MAC80211
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
 else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
-	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/feed-qca/qca/feeds/wlan-hostapd/hostapd/
 else
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/qca/feeds/wlan-hostapd/hostapd/
 endif
