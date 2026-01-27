@@ -160,6 +160,7 @@ chan_util_avg_period=
 use_driver_vendor_addr=
 athnewind=
 skip_cac=
+uplink_csa=
 rptr_mgr_mode=
 
 #dpp
@@ -323,7 +324,8 @@ ubus_call() {
 		disable_eml_cap \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
-		skip_cac
+		skip_cac \
+		uplink_csa
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
 }
@@ -626,7 +628,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
 	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
-	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
+	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac
@@ -1222,6 +1224,7 @@ mac80211_hostapd_setup_base() {
 	}
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
+	[ -n "$uplink_csa" ] && append base_cfg "uplink_csa=$uplink_csa" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
