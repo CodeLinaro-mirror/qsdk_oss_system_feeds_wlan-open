@@ -1955,6 +1955,15 @@ get_seg0_freq() {
 
 mac80211_setup_monitor() {
 	local prev idx
+
+	if [ "$auto_channel" -gt 0 ];then
+		freq_list=$(get_sta_freq_list "$phy" "$radio" "$band_name")
+		freq="${freq_list%% *}"
+		channel="$(mac80211_freq_to_channel $freq)"
+	elif [ -z "$freq" ] && [ -n "$channel"];then
+		freq="$(get_freq "$phy" "$channel" "$band")"
+	fi
+
 	json_set_namespace wdev_uc prev
 
 	json_add_object "$ifname"
