@@ -382,6 +382,9 @@ hostapd_common_add_bss_config() {
 	config_add_int external_plugin_enable
 	config_add_int externally_triggered_m3
 
+	config_add_int control_frame_protection
+	config_add_int cip_padding_delay
+
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
 
@@ -464,6 +467,9 @@ hostapd_common_add_bss_config() {
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
+
+	config_add_int control_frame_prot
+	config_add_int max_cip_padding_delay
 }
 
 hostapd_set_vlan_file() {
@@ -670,6 +676,7 @@ hostapd_set_bss_options() {
 		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
 		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
 		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
+		control_frame_prot max_cip_padding_delay
 		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 
 
@@ -1493,6 +1500,10 @@ hostapd_set_bss_options() {
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
+	[ -n "$control_frame_prot" ] && append bss_conf "control_frame_prot=$control_frame_prot" "$N"
+
+	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
+
 	append "$var" "$bss_conf" "$N"
 	return 0
 }
@@ -1679,7 +1690,9 @@ wpa_supplicant_add_network() {
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
-		scan_freq bgscan bgscan_freq
+		scan_freq bgscan bgscan_freq \
+		control_frame_protection \
+		cip_padding_delay
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -2032,6 +2045,10 @@ wpa_supplicant_add_network() {
 
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
+
+	[ -n "$control_frame_protection" ] && append network_data "control_frame_protection=$control_frame_protection" "$N$T"
+
+	[ -n "$cip_padding_delay" ] && append network_data "cip_padding_delay=$cip_padding_delay" "$N$T"
 
 	local ppe_vp_type=
 	case "$ppe_vp" in
