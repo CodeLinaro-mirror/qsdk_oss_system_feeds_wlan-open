@@ -150,6 +150,10 @@ define KernelPackage/ath12k
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
 	 $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
 
+ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko
+endif
+
 ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
 endif

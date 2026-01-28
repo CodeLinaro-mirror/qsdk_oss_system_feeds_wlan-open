@@ -10,7 +10,7 @@ import { readfile } from "fs";
 import * as uci from 'uci';
 
 const bands_order = [ "6G", "5G", "2G" ];
-const htmode_order = [ "EHT", "HE", "VHT", "HT" ];
+const htmode_order = [ "UHR", "EHT", "HE", "VHT", "HT" ];
 
 let board = json(readfile("/etc/board.json"));
 if (!board.wlan)
@@ -142,6 +142,74 @@ function map_hwmode_to_htmode(hwmode, curr_htmode) {
 	return null;
 }
 
+/* ADDED: convert proprietary encryption formats to mac80211 format */
+function map_encryption(enc) {
+	if (!enc)
+		return null;
+
+	let enc_lower = lc(enc);
+
+	/* WPA3 SAE variants */
+	if (match(enc_lower, /^sae-mixed/, "s"))
+		return "sae-mixed";  /* WPA2-PSK + WPA3-SAE */
+	if (match(enc_lower, /^sae/, "s"))
+		return "sae";  /* WPA3-SAE only */
+
+	/* WPA2-PSK variants -> psk+wpa2 */
+	if (match(enc_lower, /^psk2\+ccmp/, "s") || match(enc_lower, /^psk2\+aes/, "s"))
+		return "psk+wpa2";  /* WPA2-PSK with CCMP */
+	if (match(enc_lower, /^psk2\+tkip\+ccmp/, "s") || match(enc_lower, /^psk2\+tkip\+aes/, "s"))
+		return "psk+wpa2";  /* WPA2-PSK with TKIP+CCMP */
+	if (match(enc_lower, /^psk2/, "s"))
+		return "psk+wpa2";  /* WPA2-PSK (generic) */
+
+	/* WPA-PSK variants -> psk+wpa1 */
+	if (match(enc_lower, /^psk\+ccmp/, "s") || match(enc_lower, /^psk\+aes/, "s"))
+		return "psk+wpa1";  /* WPA-PSK with CCMP */
+	if (match(enc_lower, /^psk\+tkip/, "s"))
+		return "psk+wpa1";  /* WPA-PSK with TKIP */
+	if (match(enc_lower, /^psk-mixed/, "s"))
+		return "psk-mixed";  /* WPA/WPA2-PSK mixed */
+	if (match(enc_lower, /^psk/, "s"))
+		return "psk+wpa1";  /* WPA-PSK (generic) */
+
+	/* WPA Enterprise (802.1X) variants */
+	if (match(enc_lower, /^wpa2\+ccmp/, "s") || match(enc_lower, /^wpa2\+aes/, "s"))
+		return "wpa2+ccmp";  /* WPA2-Enterprise with CCMP */
+	if (match(enc_lower, /^wpa2\+tkip\+ccmp/, "s"))
+		return "wpa2+ccmp";  /* WPA2-Enterprise with TKIP+CCMP */
+	if (match(enc_lower, /^wpa2/, "s"))
+		return "wpa2";  /* WPA2-Enterprise (generic) */
+
+	if (match(enc_lower, /^wpa\+ccmp/, "s") || match(enc_lower, /^wpa\+aes/, "s"))
+		return "wpa+ccmp";  /* WPA-Enterprise with CCMP */
+	if (match(enc_lower, /^wpa\+tkip/, "s"))
+		return "wpa+tkip";  /* WPA-Enterprise with TKIP */
+	if (match(enc_lower, /^wpa-mixed/, "s"))
+		return "wpa-mixed";  /* WPA/WPA2-Enterprise mixed */
+	if (match(enc_lower, /^wpa/, "s"))
+		return "wpa";  /* WPA-Enterprise (generic) */
+
+	/* WEP variants (legacy) */
+	if (match(enc_lower, /^wep-open/, "s"))
+		return "wep-open";  /* WEP with open authentication */
+	if (match(enc_lower, /^wep-shared/, "s"))
+		return "wep-shared";  /* WEP with shared key authentication */
+	if (match(enc_lower, /^wep/, "s"))
+		return "wep";  /* WEP (generic) */
+
+	/* OWE (Opportunistic Wireless Encryption) */
+	if (match(enc_lower, /^owe/, "s"))
+		return "owe";  /* Enhanced Open / OWE */
+
+	/* No encryption */
+	if (match(enc_lower, /^none/, "s") || match(enc_lower, /^open/, "s"))
+		return "none";  /* Open network */
+
+	/* Return original if no mapping needed */
+	return enc;
+}
+
 /* ADDED: run translator only if proprietary QCA type present */
 function has_qca_cfg80211() {
 	for (let secname, s in config) {
@@ -232,6 +300,16 @@ function translate_proprietary_to_ath_ud() {
 				print(`set wireless.${secname}.radio='${radio_cfg.radio}'\n`);
 				print(`set wireless.${secname}.channels='${radio_cfg.channels}'\n`);
 
+				/* Preserve channel if set (including 'auto' and 0) */
+				if (s.channel != null && s.channel != '') {
+					print(`set wireless.${secname}.channel='${s.channel}'\n`);
+				}
+
+				/* Preserve disabled state */
+				if (s.disabled != null) {
+					print(`set wireless.${secname}.disabled='${s.disabled}'\n`);
+				}
+
 				if (s.hwmode) {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
@@ -252,21 +330,31 @@ function translate_proprietary_to_ath_ud() {
 			if (!key && s.sae_password && s.sae_password[0])
 				key = s.sae_password[0];
 
-			print(`set wireless.${secname}.mode='ap'\n`);
-			print(`set wireless.${secname}.sae='1'\n`);
-			print(`set wireless.${secname}.sae_pwe='1'\n`);
-			print(`set wireless.${secname}.encryption='sae'\n`);
-			if (key) print(`set wireless.${secname}.key='${key}'\n`);
-
-			if (s.sae_groups && length(s.sae_groups)) {
-				print(`delete wireless.${secname}.sae_groups\n`);
-				for (let g in s.sae_groups)
-					print(`add_list wireless.${secname}.sae_groups='${g}'\n`);
+			/* Handle encryption conversion */
+			if (s.encryption) {
+				let new_enc = map_encryption(s.encryption);
+				if (new_enc && new_enc != s.encryption) {
+					print(`set wireless.${secname}.encryption='${new_enc}'\n`);
+					changed = true;
+				}
 			}
-			if (s.sae_password && length(s.sae_password))
-				print(`delete wireless.${secname}.sae_password\n`);
 
-			changed = true;
+			if (s.sae && s.sae == '1') {
+				print(`set wireless.${secname}.sae='1'\n`);
+				print(`set wireless.${secname}.sae_pwe='1'\n`);
+				print(`set wireless.${secname}.encryption='sae'\n`);
+				if (key) print(`set wireless.${secname}.key='${key}'\n`);
+
+				if (s.sae_groups && length(s.sae_groups)) {
+					print(`delete wireless.${secname}.sae_groups\n`);
+					for (let g in s.sae_groups)
+						print(`add_list wireless.${secname}.sae_groups='${g}'\n`);
+				}
+				if (s.sae_password && length(s.sae_password))
+					print(`delete wireless.${secname}.sae_password\n`);
+
+				changed = true;
+			}
 		}
 	}
 
@@ -299,18 +387,28 @@ function rename_devices_and_rebind_ifaces() {
 	};
 
 	let renamed = false;
+	let renames = [];
 
+	/* Collect all renames first to avoid modifying during iteration */
 	for (let secname, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
 		let newname = map[secname];
 		if (!newname)
 			continue;
-		print(`rename wireless.${secname}='${newname}'\n`);
+		renames[length(renames)] = { old: secname, new: newname, cfg: s };
+	}
+
+	/* Apply renames (print + in-memory update) */
+	for (let r in renames) {
+		print(`rename wireless.${r.old}='${r.new}'\n`);
+		config[r.new] = r.cfg;
+		delete config[r.old];
 		renamed = true;
 		commit = true;
 	}
 
+	/* Rebind iface.device after all device renames */
 	if (renamed) {
 		for (let secname, s in config) {
 			if (s[".type"] != "wifi-iface")
@@ -322,6 +420,8 @@ function rename_devices_and_rebind_ifaces() {
 			if (!newdev)
 				continue;
 			print(`set wireless.${secname}.device='${newdev}'\n`);
+			/* Keep in-memory config consistent */
+			s.device = newdev;
 			commit = true;
 		}
 	}
@@ -429,8 +529,13 @@ set ${si}.encryption='none'
 }
 
 if (has_qca_cfg80211()) {
-	translate_proprietary_to_ath_ud();
+	/* Rename first so band extraction works in translation */
 	rename_devices_and_rebind_ifaces();
+	translate_proprietary_to_ath_ud();
+	/* Exit after translation to prevent generate_config from overwriting */
+	if (commit)
+		print("commit wireless\\n");
+	exit(0);
 }
 
 for (let phy_name, phy in board.wlan) {

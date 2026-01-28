@@ -311,7 +311,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int bss_load_update_period chan_util_avg_period
 
-	config_add_string beacon_rate
+	config_add_int oce
+	config_add_string beacon_rate probe_resp_rate
 
 	config_add_string dae_client
 	config_add_string dae_secret
@@ -373,6 +374,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_boolean sae_require_mfp
 	config_add_int sae_pwe
+	config_add_int external_plugin_enable
+	config_add_int externally_triggered_m3
 
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
@@ -637,7 +640,7 @@ hostapd_set_bss_options() {
 		macfilter ssid utf8_ssid wmm uapsd hidden short_preamble rsn_preauth \
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
-		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe \
+		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable externally_triggered_m3 \
 		multi_ap multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
@@ -645,7 +648,7 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate vht_mcs_nss_set ht_mcs_nss_set \
+		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -720,7 +723,20 @@ hostapd_set_bss_options() {
 	append bss_conf "multi_ap=$multi_ap" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
+	[ -n "$oce" ] && {
+		# Set oce=4 to enable OCE_AP
+		append bss_conf "oce=4" "$N"
+
+		# Set default Beacon and Probe Resp Rate for 2.4 GHz band as per OCE spec 2.0
+		if [ "$band" = "2g" ]; then
+			[ -z "$beacon_rate" ] && append bss_conf "beacon_rate=55" "$N"
+			[ -z "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=55" "$N"
+		fi
+	}
+
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
+
+	[ -n "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=$probe_resp_rate" "$N"
 
 	[ -n "$vht_mcs_nss_set" ] && append bss_conf "vht_mcs_nss_set=$vht_mcs_nss_set" "$N"
 	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
@@ -802,6 +818,8 @@ hostapd_set_bss_options() {
 
 	[ -n "$sae_require_mfp" ] && append bss_conf "sae_require_mfp=$sae_require_mfp" "$N"
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
+	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
+	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
@@ -1624,9 +1642,17 @@ wpa_supplicant_set_fixed_freq() {
 
 wpa_supplicant_add_network() {
 	local ifname="$1"
-	local freq="$2"
-	local htmode="$3"
-	local noscan="$4"
+
+	if [ "$_w_mode" = "sta" ]; then
+		local athnewind="$2"
+		local rptr_mgr_mode="$3"
+		local channel="$4"
+	else
+		local freq="$2"
+		local htmode="$3"
+		local noscan="$4"
+	fi
+
 	local disable_40mhz_scan=0
 	local ru_punct_bitmap=$5
 	local disable_csa_dfs=$6
@@ -2042,6 +2068,9 @@ network={
 	$reconfig
 	$freq_list
 }
+athnewind=$athnewind
+rptr_mgr_mode=$rptr_mgr_mode
+channel=$channel
 EOF
 	fi
 	return 0

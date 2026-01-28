@@ -53,8 +53,13 @@ else
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/qca/feeds/wlan-hostapd/hostapd/
 endif
 
+ifeq ($(CONFIG_TARGET_sdx85),y)
+PKG_DRIVERS = \
+	cfg80211 mac80211 mac80211-hwsim
+else
 PKG_DRIVERS = \
 	mac80211-hwsim
+endif
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_kmod-mac80211 \
@@ -167,7 +172,10 @@ endif
 ifeq ($(CONFIG_KERNEL_ATHMEMDEBUG),y)
 	$(INSTALL_BIN) ./files/lib/memleak_check.sh $(1)/lib
 endif
+
+ifneq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_BIN) ./files/coredump.sh $(1)/etc/hotplug.d/devcoredump
+endif
 	$(INSTALL_BIN) ./files/lib/wifi-config.sh $(1)/etc/hotplug.d/ieee80211/01-wifi-detect
 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_uboot_mod_params.sh $(1)/etc/init.d
@@ -178,6 +186,7 @@ endif
 	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-supplicant-event-update.sh $(1)/lib/netifd/dpp-supplicant-event-update
 	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_module_add.sh $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
 	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
 ifeq ($(CONFIG_TARGET_sdx85),y)
@@ -186,6 +195,10 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/compat/compat.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko $(1)/lib/modules/$(UNAME_VERSION)
+	# Export compat and cfg80211 to bin/targets
+	$(INSTALL_DIR) $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/compat/compat.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endif
 endef
 
@@ -312,6 +325,9 @@ define KernelPackage/mac80211/install
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko $(1)/lib/modules/$(UNAME_VERSION)
+	# Export mac80211.ko to bin/targets
+	$(INSTALL_DIR) $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endef
 
 define KernelPackage/ath12k/install
@@ -330,6 +346,12 @@ define KernelPackage/ath12k/install
 	ln -sf /firmware/image/qcn9224/board-2.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
 	ln -sf /firmware/image/qcn9224/m3.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
 	ln -sf /firmware/image/qcn9224/qdss_trace_config.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
+
+	# Export ath12k modules to bin/targets
+	$(INSTALL_DIR) $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endef
 endif
 
@@ -420,12 +442,6 @@ else
   SPATCH?=1
 endif
 
-PKG_HWHDRS_SOURCE_URL ?= http://vm-cnsswebserv/cnss_win/santaclara/dev01/trestles/v1/E2R56/
-DEST       ?= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/hwhdrs
-PARENT     := $(abspath $(DEST)/..)
-WGET       ?= wget
-WGET_FLAGS ?= -q -r -np -nH --cut-dirs=6 --reject "index.html*"
-
 define Build/Prepare
 	rm -rf $(PKG_BUILD_DIR)
 	mkdir -p $(PKG_BUILD_DIR)
@@ -436,10 +452,6 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 endif
-
-	mkdir -p "$(DEST)"
-	$(WGET) $(WGET_FLAGS) -P "$(DEST)" "$(PKG_HWHDRS_SOURCE_URL)"
-	if [ -f "$(DEST)/hwhdrs.h" ]; then mv -f "$(DEST)/hwhdrs.h" "$(PARENT)/"; fi
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
@@ -538,6 +550,10 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko $(1)/lib/modules/$(UNAME_VERSION)
+
+	# Export ath.ko to bin/targets
+	$(INSTALL_DIR) $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endif
 endef
 
@@ -576,6 +592,8 @@ $(shell [ -f "$(NFS_MIRROR_SERVER)/$(PKG_SOURCE)" ] && \
 endif
 
 $(eval $(foreach drv,$(PKG_DRIVERS),$(call KernelPackage,$(drv))))
+ifneq ($(CONFIG_TARGET_sdx85),y)
 $(eval $(call KernelPackage,cfg80211))
 $(eval $(call KernelPackage,mac80211))
+endif
 $(eval $(call BuildPackage,ath-legacy-wifi-scripts))
