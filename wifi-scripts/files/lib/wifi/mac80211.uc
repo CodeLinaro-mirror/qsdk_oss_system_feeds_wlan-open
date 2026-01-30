@@ -381,15 +381,24 @@ function translate_proprietary_to_ath_ud() {
 function rename_devices_and_rebind_ifaces() {
 	let map = {
 		wifi0: "radio0_band0",
-		wifi1: "radio0_band1",
-		wifi2: "radio0_band2",
+		wifi1: "radio0_band2",
+		wifi2: "radio0_band1",
 		wifi3: "radio0_band3"
 	};
 
 	let renamed = false;
 	let renames = [];
 
-	/* Collect all renames first to avoid modifying during iteration */
+	/* Collect all renames first to avoid modifying during iteration
+	 * Board override: ipq5332 → wifi1=5G (band1), wifi2=6G (band2)
+	 */
+	let bn = "";
+
+	bn = trim(readfile("/tmp/sysinfo/board_name")) ?? "";
+	if (match(lc(bn), /ipq5332/, "s")) {
+		map["wifi1"] = "radio0_band1";
+		map["wifi2"] = "radio0_band2";
+	}
 	for (let secname, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
@@ -534,7 +543,7 @@ if (has_qca_cfg80211()) {
 	translate_proprietary_to_ath_ud();
 	/* Exit after translation to prevent generate_config from overwriting */
 	if (commit)
-		print("commit wireless\\n");
+		print("commit wireless\n");
 	exit(0);
 }
 
