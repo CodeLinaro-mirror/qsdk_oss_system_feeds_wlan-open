@@ -344,6 +344,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int multi_ap
 
+	config_add_int multi_ap_vlanid
+
 	config_add_boolean wps_pushbutton wps_label ext_registrar wps_pbc_in_m1
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
@@ -652,7 +654,7 @@ hostapd_set_bss_options() {
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable externally_triggered_m3 \
-		multi_ap multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -738,6 +740,7 @@ hostapd_set_bss_options() {
 	append bss_conf "uapsd_advertisement_enabled=$uapsd" "$N"
 	append bss_conf "utf8_ssid=$utf8_ssid" "$N"
 	append bss_conf "multi_ap=$multi_ap" "$N"
+	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
 	[ -n "$oce" ] && {
