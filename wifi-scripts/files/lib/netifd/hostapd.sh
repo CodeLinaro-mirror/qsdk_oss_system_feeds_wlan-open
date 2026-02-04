@@ -678,7 +678,7 @@ hostapd_set_bss_options() {
 		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
 		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
 		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
-		control_frame_prot max_cip_padding_delay
+		control_frame_prot max_cip_padding_delay \
 		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 
 
