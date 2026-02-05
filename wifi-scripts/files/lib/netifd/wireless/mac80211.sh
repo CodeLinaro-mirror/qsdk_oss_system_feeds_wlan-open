@@ -2327,14 +2327,75 @@ wpa_supplicant_start() {
 	local phy="$1"
 	local radio="$2"
 	local is_mld="false"
+	local dpp_enabled=0
+	local managed_ifaces=""
+	local iface_name=""
+	local config_ifname=""
+	local config_dpp=""
+	local config_mode=""
+	local phy_for_iw=""
 
 	[ -n "$wpa_supp_init" ] || return 0
 	[ -n "$mld" ] && is_mld="true"
 
 	ubus_call wpa_supplicant config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "num_global_macaddr": '"$num_global_macaddr"', "is_ml": '"$is_mld"' }' > /dev/null
-	if [ "${dpp}" -eq 1 ]; then
-		/usr/sbin/wpa_cli -i $ifname -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
-	fi
+
+	# Convert phy name format from "phy00"/"phy01" to "phy#0"/"phy#1"
+	# Remove "phy" prefix and leading zeros, then add "phy#" prefix
+	phy_for_iw=$(echo "$phy" | sed 's/^phy0*\([0-9]\+\)/phy#\1/')
+
+	managed_ifaces="$(iw dev | awk -v phy="$phy_for_iw" -v typ="managed" '
+		$1 ~ /^phy#/      { cur_phy=$1; next }
+		$1 == "Interface" { cur_if=$2; next }
+		$1 == "type" && cur_phy==phy && $2==typ { print cur_if }
+	')"
+
+	# Function to check each wifi-iface section for DPP configuration
+	check_iface_dpp() {
+		local section="$1"
+		local target_iface="$2"
+		local config_mld=""
+		local mld_ifname=""
+		local config_mode config_ifname config_dpp
+
+		config_get config_mode "$section" mode
+		config_get config_ifname "$section" ifname
+		config_get config_dpp "$section" dpp 0
+		config_get _device "$section" device
+
+		phy_num="${phy_for_iw//[!0-9]/}"
+		#extract radio & band from "radioX_bandY" and ensure both match incoming phy and radio;
+
+		set -- ${_device#radio}; _phy="${1%%_*}"; _radio="${1#*_band}"; [ "$_phy" = "$phy_num" ] && [ "$_radio" = "$radio" ] || return 1
+
+		# If ifname is not available in wifi-iface section, try to get it from wifi-mld section
+		if [ -z "$config_ifname" ]; then
+			config_get config_mld "$section" mld
+			if [ -n "$config_mld" ]; then
+				config_get mld_ifname "$config_mld" ifname
+				config_ifname="$mld_ifname"
+			fi
+		fi
+
+		# If ifname is still not available, use the target interface name
+		[ -z "$config_ifname" ] && config_ifname="$target_iface"
+
+		# Match by interface name and check if it's a STA mode with DPP enabled
+		if [ "$config_mode" = "sta" ] && [ "$config_ifname" = "$target_iface" ] && [ "$config_dpp" -eq 1 ]; then
+			dpp_enabled=1  # DPP is enabled
+		fi
+	}
+
+	config_load wireless
+	# Check if any managed interface has DPP enabled
+	for iface_name in $managed_ifaces; do
+		dpp_enabled=0
+		config_foreach check_iface_dpp wifi-iface "$iface_name" "$phy" "$radio"
+		if [ "$dpp_enabled" -eq 1 ]; then
+			/usr/sbin/wpa_cli -i "$iface_name" -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
+			dpp_enabled=0
+		fi
+	done
 }
 
 mac80211_setup_supplicant() {
