@@ -2503,6 +2503,9 @@ mac80211_is_last_enabled_radio() {
 # Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
 is_repeater=0
 
+# Global skip_cac flag: set to 1 if any enabled 5 GHz radio has skip_cac enabled
+is_skip_cac=0
+
 # Update global repeater flag once based on current wireless config
 mac80211_update_is_repeater_flag() {
 	[ "$is_repeater" = "1" ] && return 0
@@ -2550,6 +2553,28 @@ mac80211_update_is_repeater_flag() {
 	config_foreach __scan_dev wifi-device
 }
 
+mac80211_update_is_skip_cac_flag() {
+	[ "$is_skip_cac" = "1" ] && return 0
+
+	config_load wireless
+
+	__skip_cac() {
+		local section="$1"
+		local disabled band skip
+
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+
+		config_get band "$section" band
+		[ "$band" != "5g" ] && return 0
+
+		config_get skip "$section" skip_cac 0
+		[ "$skip" -eq 1 ] && is_skip_cac=1
+	}
+
+	config_foreach __skip_cac wifi-device
+}
+
 drv_mac80211_setup() {
 	local device=$1
 
@@ -2570,6 +2595,7 @@ drv_mac80211_setup() {
 	json_select ..
 
 	mac80211_update_is_repeater_flag
+	mac80211_update_is_skip_cac_flag
 
 	if [ ${#device} -eq 12 ]; then
 		is_wiphy_multi_radio=1
@@ -2785,10 +2811,9 @@ drv_mac80211_setup() {
 	# Update repeater flag and start rptr-mgr only once: on highest enabled radio id
 	if mac80211_is_last_enabled_radio && [ "$is_repeater" = "1" ]; then
 		if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
-			set_default skip_cac 0
 			config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
 			config_get athnewind mac80211 athnewind 0
-			sh /lib/wifi/rptr_mgr.sh $skip_cac $rptr_mgr_mode $athnewind
+			sh /lib/wifi/rptr_mgr.sh $is_skip_cac $rptr_mgr_mode $athnewind
 			rptr-mgr > /dev/console 2>&1 &
 		fi
 	fi
