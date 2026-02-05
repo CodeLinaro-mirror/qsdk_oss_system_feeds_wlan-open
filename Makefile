@@ -401,11 +401,13 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 endif
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
+  LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
   EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized"
 
   MAKE_OPTS:= \
 	-C $(LINUX_DIR) M="$(PKG_BUILD_DIR)" \
-	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS)
+	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
+	KLIB_BUILD=$(LINUX_HDRS)
 
 define Build/PreCompile
 	echo "Pushing KLIB_BUILD before compilation"
@@ -519,7 +521,7 @@ endef
 define Build/Compile
 	$(SH_FUNC) var2file "$(call shvar,mac80211_config)" $(PKG_BUILD_DIR)/.config
 ifeq ($(CONFIG_TARGET_sdx85),y)
-	$(MAKE) -C $(PKG_BUILD_DIR) allnoconfig
+	$(MAKE) -C $(PKG_BUILD_DIR) KLIB_BUILD=$(LINUX_HDRS) allnoconfig
 else
 	$(MAKE) $(MAKE_OPTS) allnoconfig
 endif
