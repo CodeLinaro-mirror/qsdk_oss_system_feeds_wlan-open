@@ -162,6 +162,7 @@ athnewind=
 skip_cac=
 uplink_csa=
 rptr_mgr_mode=
+vap_submode=
 
 #dpp
 dpp_ifaces=
@@ -347,6 +348,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int fils_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
+	config_add_string vap_submode
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -1633,7 +1635,7 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
@@ -1714,23 +1716,30 @@ mac80211_prepare_vif() {
 	# It is far easier to delete and create the desired interface
 	case "$mode" in
 		ap)
-			# Hostapd will handle recreating the interface and
-			# subsequent virtual APs belonging to the same PHY
-			if [ -n "$hostapd_ctrl" ]; then
-				type=bss
+			# Check for Scan Radio VAP
+			json_get_vars vap_submode
+			if [ -n "$vap_submode" ] && [ "$vap_submode" = "scan" ]; then
+				# Skip hostapd setup for scan radio
+				:
 			else
-				type=interface
+				# Hostapd will handle recreating the interface and
+				# subsequent virtual APs belonging to the same PHY
+				if [ -n "$hostapd_ctrl" ]; then
+					type=bss
+				else
+					type=interface
+				fi
+
+				mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
+
+				[ -n "$dpp" ] && append dpp_ifaces $ifname
+
+				[ -n "$hostapd_ctrl" ] || {
+					ap_ifname="${ifname}"
+					hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
+				}
 			fi
-
-			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
-
-			[ -n "$dpp" ] && append dpp_ifaces $ifname
-
-			[ -n "$hostapd_ctrl" ] || {
-				ap_ifname="${ifname}"
-				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
-			}
-		;;
+			;;
 	esac
 
 	json_select ..
@@ -2011,6 +2020,62 @@ mac80211_setup_monitor() {
 
 	json_set_namespace "$prev"
 }
+
+
+mac80211_setup_scan_radio() {
+	local prev idx
+
+	json_set_namespace wdev_uc prev
+
+	json_add_object "$ifname"
+	json_add_string mode ap
+	[ -n "$freq" ] && json_add_string freq "$freq"
+	json_add_string htmode "$htmode"
+	[ -n "$vap_submode" ] && json_add_string vap_submode "$vap_submode"
+	json_add_string ssid "$ssid"
+	json_add_int beacon_interval "$beacon_int"
+	json_add_int dtim_period "$dtim_period"
+
+	case "$htmode" in
+                VHT20|HT20|HE20|EHT20|UHR20)
+                        bw=20
+                        ;;
+                HT40*|VHT40|HE40|EHT40|UHR40)
+                        bw=40
+			center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 40)")
+                        ;;
+                VHT80|HE80|EHT80|UHR80)
+                        bw=80
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 80)")
+                        ;;
+                VHT160|HE160|EHT160|UHR160)
+                        bw=160
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
+                        ;;
+		EHT320)
+			if [ "$band" = "6g" ]; then
+				bw=320
+				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
+					idx="$ccfs"
+				elif [ -z "$ccfs" ] || [ "$ccfs" -eq "0" ]; then
+					idx="$(mac80211_get_seg0 "320")"
+				fi
+				center_freq=$(get_seg0_freq "$freq" "$channel" "$idx")
+			fi
+			;;
+        esac
+
+	json_add_string bw "$bw"
+	[ -n "$center_freq" ] && json_add_string center_freq "$center_freq"
+
+        if [ $is_wiphy_multi_radio -eq 1 ]; then
+		json_add_boolean is_multi_radio 1
+        fi
+	json_close_object
+
+	json_set_namespace "$prev"
+}
+
 
 mac80211_apply_monitor_mac() {
 	json_select config
@@ -2300,7 +2365,7 @@ mac80211_setup_vif() {
 	json_get_var ifname _ifname
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
-	json_get_vars mode wds powersave mld
+	json_get_vars mode wds powersave mld ssid vap_submode
 
 	set_default powersave 0
 	set_default wds 0
@@ -2341,6 +2406,17 @@ mac80211_setup_vif() {
 		;;
 		monitor)
 			mac80211_setup_monitor
+		;;
+		ap)
+			# Check if this is a scan radio VAP
+			 json_get_vars ssid vap_submode
+
+			 if [ -n "$vap_submode" ] && [ "$vap_submode" = "scan" ]; then
+				 mac80211_setup_scan_radio
+			 else
+				 # Normal AP Handling
+				 :
+			 fi
 		;;
 	esac
 
