@@ -226,6 +226,26 @@ function map_encryption(enc) {
 	return enc;
 }
 
+/* Helper: determine if iface is station mode */
+function is_sta_iface(s) {
+	return (s && s.mode && lc(s.mode) == 'sta');
+}
+
+/* Helper: normalize station interface options */
+function normalize_sta_iface(secname, s) {
+	let changed = false;
+	/* Switch LAN->WAN only when extap is enabled and WDS is NOT enabled */
+	let extap_enabled = (s.extap && s.extap == '1');
+	let wds_enabled = (s.wds && s.wds == '1');
+	if (extap_enabled && !wds_enabled) {
+		if (!s.network || lc(s.network) == 'lan') {
+			print(`set wireless.${secname}.network='wan'\n`);
+			changed = true;
+		}
+	}
+	return changed;
+}
+
 /* ADDED: run translator only if proprietary QCA type present */
 function has_qca_cfg80211() {
 	for (let secname, s in config) {
@@ -356,6 +376,10 @@ function translate_proprietary_to_ath_ud() {
 			let key = s.key;
 			if (!key && s.sae_password && s.sae_password[0])
 				key = s.sae_password[0];
+
+			/* Normalize station (STA) interface defaults */
+			if (is_sta_iface(s))
+				changed = normalize_sta_iface(secname, s) || changed;
 
 			/* Handle encryption conversion */
 			if (s.encryption) {
