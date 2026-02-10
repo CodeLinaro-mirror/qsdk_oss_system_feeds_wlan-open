@@ -386,6 +386,9 @@ drv_mac80211_init_iface_config() {
 
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
+
+	#monitor
+	config_add_string monitor_flags
 }
 
 mac80211_add_capabilities() {
@@ -2019,6 +2022,7 @@ mac80211_setup_monitor() {
 
 	json_add_object "$ifname"
 	json_add_string mode monitor
+	[ -n "$monitor_flags" ] && json_add_string monitor_flags "$monitor_flags"
 	[ -n "$freq" ] && json_add_string freq "$freq"
 	json_add_string htmode "$htmode"
 	case "$htmode" in
@@ -2476,7 +2480,7 @@ mac80211_setup_vif() {
 	json_get_var ifname _ifname
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
-	json_get_vars mode wds powersave mld ssid vap_submode
+	json_get_vars mode wds powersave mld ssid vap_submode monitor_flags
 
 	set_default powersave 0
 	set_default wds 0
