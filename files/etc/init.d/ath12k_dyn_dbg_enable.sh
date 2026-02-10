@@ -48,6 +48,15 @@ boot()
 
 update_ath12k_module_parameters()
 {
+	# Set board name for sdx kobuk single-phy and split-phy
+	if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "SDXKOVA" /sys/firmware/devicetree/base/model) != 0 ]; then
+		if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "V2" /tmp/sysinfo/model) = 0 ]; then
+			echo "ap-sdxkova-qcn9224-V1" > /tmp/sysinfo/board_name
+		else
+			echo "ap-sdxkova-qcn9224-V2" > /tmp/sysinfo/board_name
+		fi
+	fi
+
 	ath12k_config_file="/etc/modules.d/ath12k"
 	[ ! -e "$ath12k_config_file" ] && {
 		echo "Error: ath12k config file not found at $ath12k_config_file" > /dev/console
@@ -88,15 +97,6 @@ update_ath12k_module_parameters()
 		cat /tmp/ath12k_rest
 	} > "$ath12k_config_file"
 	rm -f /tmp/ath12k_rest
-
-	# Set board name for sdx kobuk single-phy and split-phy
-	if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "SDXKOVA" /sys/firmware/devicetree/base/model) != 0 ]; then
-		if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "V2" /tmp/sysinfo/model) = 0 ]; then
-			echo "ap-sdxkova-qcn9224-V1" > /tmp/sysinfo/board_name
-		else
-			echo "ap-sdxkova-qcn9224-V2" > /tmp/sysinfo/board_name
-		fi
-	fi
 }
 
 create_caldata() {
