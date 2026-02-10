@@ -27,6 +27,15 @@ boot()
 	fi
 
 	update_ath12k_module_parameters
+	board_name=$(cat /tmp/sysinfo/board_name)
+	case "$board_name" in
+		ap-sdxkova*)
+			create_caldata
+			caldata_symlink_creation "$board_name" "1"
+			caldata_symlink_creation "$board_name" "2"
+			caldata_symlink_creation "$board_name" "3"
+		;;
+	esac
 }
 
 # this function is to parse the bootargs and update ath12k
@@ -82,5 +91,33 @@ update_ath12k_module_parameters()
 		else
 			echo "ap-sdxkova-qcn9224-V2" > /tmp/sysinfo/board_name
 		fi
+	fi
+}
+
+create_caldata() {
+	if [ -e /lib/read_caldata_to_fs.sh ]; then
+		. /lib/read_caldata_to_fs.sh
+		do_load_ipq4019_board_bin
+	fi
+}
+
+caldata_symlink_creation(){
+	var=0
+	while read -r line
+	do
+		board=$(echo $line | cut -f1 -d',')
+		if [[ "$board" == "$1" ]]; then
+			var=$((var+1))
+			if [[ $var == $2 ]]; then
+				local brdid=$(echo $line | cut -f2 -d',')
+				local art_slot=$(echo $line | cut -f3 -d',')
+				local pciid=$(echo $line | cut -f6 -d',')
+				break
+			fi
+		fi
+	done < /lib/firmware/ftm.conf
+
+	if [ -e /lib/firmware/qcn9224/caldata_$art_slot.b$brdid ]; then
+		ln -sf /lib/firmware/qcn9224/caldata_$art_slot.b$brdid /lib/firmware/ath12k/QCN92XX/hw1.0/cal-pci-000$pciid:01:00.0.bin
 	fi
 }
