@@ -472,6 +472,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int control_frame_prot
 	config_add_int max_cip_padding_delay
+	config_add_int dcs_random_chan_bitmap
 }
 
 hostapd_set_vlan_file() {
@@ -679,7 +680,8 @@ hostapd_set_bss_options() {
 		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
 		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
 		control_frame_prot max_cip_padding_delay \
-		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
+		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
+		dcs_random_chan_bitmap
 
 
 	json_get_values sae_groups sae_groups
@@ -712,6 +714,9 @@ hostapd_set_bss_options() {
 	/usr/sbin/hostapd -vfils || fils=0
 
 	append bss_conf "ctrl_interface=/var/run/hostapd"
+
+	[ -n "$dcs_random_chan_bitmap" ] && append bss_conf "dcs_random_chan_bitmap=$dcs_random_chan_bitmap" "$N"
+
 	if [ "$isolate" -gt 0 ]; then
 		append bss_conf "ap_isolate=$isolate" "$N"
 	fi
