@@ -314,6 +314,17 @@ function translate_proprietary_to_ath_ud() {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
 					print(`delete wireless.${secname}.hwmode\n`);
+					/* Check if any iface on this device has disablecoext */
+					let has_disablecoext = false;
+					for (let iface_name, iface in config) {
+						if (iface[".type"] == "wifi-iface" && iface.device == secname && iface.disablecoext == "1") {
+							has_disablecoext = true;
+							break;
+						}
+					}
+					if (has_disablecoext && radio_cfg.band == '2g') {
+						print(`set wireless.${secname}.noscan='1'\n`);
+					}
 				}
 
                 		/* remove device-level MAC address */
