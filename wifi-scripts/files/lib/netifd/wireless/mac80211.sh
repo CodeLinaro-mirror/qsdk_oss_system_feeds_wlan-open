@@ -2919,13 +2919,17 @@ drv_mac80211_setup() {
 	for_each_interface "ap mesh" mac80211_set_fq_limit
 	wireless_set_up
 
-	# Update repeater flag and start rptr-mgr only once: on highest enabled radio id
+	# rptr-mgr needs to be invoked only when independent repeater is
+	# configured or when dependent repeater is configured in socket
+	# mode. Start it only once on the highest enabled radio id.
 	if mac80211_is_last_enabled_radio && [ "$is_repeater" = "1" ]; then
-		if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
-			config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
-			config_get athnewind mac80211 athnewind 0
-			sh /lib/wifi/rptr_mgr.sh $is_skip_cac $rptr_mgr_mode $athnewind
-			rptr-mgr > /dev/console 2>&1 &
+		config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+		config_get athnewind mac80211 athnewind 0
+		if [ "$athnewind" -eq 1 ] || [ "$rptr_mgr_mode" -eq 2 ]; then
+			if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
+				sh /lib/wifi/rptr_mgr.sh $is_skip_cac $rptr_mgr_mode $athnewind
+				rptr-mgr > /dev/console 2>&1 &
+			fi
 		fi
 	fi
 }
