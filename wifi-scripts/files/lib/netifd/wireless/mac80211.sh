@@ -196,6 +196,7 @@ acsmax_dwell=
 acs_dwelltime=
 acs_dbgtrace=
 acs_txpwr_opt=
+acs_freq_list=
 
 #dcs enable command
 dcs_enable=
@@ -263,6 +264,7 @@ ubus_call() {
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_array scan_list
+	config_add_array acs_freq_list
 	config_add_boolean \
 		rxldpc \
 		short_gi_80 \
@@ -637,6 +639,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
+	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 
@@ -1286,10 +1289,36 @@ mac80211_hostapd_setup_base() {
 	# According to OCE Specification 2.0, when OCE is enabled, ACS should select channels 1, 6, or 11 in 2GHz band
 	if [ -n "$oce_ap" ] && [ "$band" = "2g" ]; then
 		channel_list="1,6,11"
+		# Override acs_freq_list for OCE compliance in 2GHz
+		if [ -n "$acs_freq_list" ]; then
+			acs_freq_list="2412,2437,2462"  # Frequencies for channels 1, 6, 11
+		fi
 	fi
+
+	if [ -n "$acs_freq_list" ]; then
+		# Validate frequency list format and values
+		local valid_freqs=""
+		local freq_valid=1
+		for freq in $(echo $acs_freq_list | tr ',' ' ' '-'); do
+			# Validate frequency ranges
+			if [ "$freq" -lt 2412 ] || ([ "$freq" -gt 2484 ] && [ "$freq" -lt 5170 ]) || ([ "$freq" -gt 5885 ] && [ "$freq" -lt 5955 ]) || [ "$freq" -gt 7115 ]; then
+				freq_valid=0
+				break
+			fi
+		done
+
+		if [ "$freq_valid" -eq 1 ]; then
+			append base_cfg "freqlist=$(echo $acs_freq_list)" "$N"
+		else
+			echo "Invalid acs_freq_list, falling back to chanlist" > /dev/console
+			append base_cfg "chanlist=$(echo $channel_list)" "$N"
+		fi
+	else
+		append base_cfg "chanlist=$(echo $channel_list)" "$N"
+	fi
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
-${channel_list:+chanlist=$channel_list}
 ${hostapd_noscan:+noscan=1}
 ${tx_burst:+tx_queue_data2_burst=$tx_burst}
 #num_global_macaddr=$num_global_macaddr
