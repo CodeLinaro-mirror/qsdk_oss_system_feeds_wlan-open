@@ -179,24 +179,10 @@ sub download
 			make_path($target);
 		}
 
-		if (! open TMPDLS, "find $mirror -not -path '*/[@.]*' -follow -name $filename 2>/dev/null |") {
-			print("Failed to search for $filename in $mirror\n");
-			return;
-		}
+		# Direct path to the file instead of using find command
+		my $link = "$mirror/$filename";
 
-		my $link;
-
-		while (defined(my $line = readline TMPDLS)) {
-			chomp ($link = $line);
-			if ($. > 1) {
-				print("$. or more instances of $filename in $mirror found . Only one instance allowed.\n");
-				return;
-			}
-		}
-
-		close TMPDLS;
-
-		if (! $link) {
+		if (! -f $link) {
 			print("No instances of $filename found in $mirror.\n");
 			return;
 		}
