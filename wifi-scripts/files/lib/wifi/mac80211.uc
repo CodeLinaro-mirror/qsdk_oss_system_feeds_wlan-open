@@ -537,6 +537,47 @@ set ${si}.encryption='none'
 	}
 }
 
+
+/* Add missing radio option for existing multi-radio devices (sysupgrade case) */
+function add_missing_radio_for_existing(phy, idx) {
+	if (!phy.multi_radio)
+		return;
+
+	let multi_radio = phy.multi_radio;
+	let hw_idx = 0;
+
+	for (let radio_name in multi_radio) {
+		let radio_idx = multi_radio[radio_name];
+		if (!radio_idx || radio_idx.idx == null)
+			continue;
+
+		/* Device name matches generate_config(): radio{idx}_band{hw_idx} */
+		let devname = "radio" + idx + "_band" + hw_idx;
+		let dev = config[devname];
+
+		if (!dev || dev[".type"] != "wifi-device") {
+			hw_idx++;
+			continue;
+		}
+
+		if (lc(dev.type ?? "") != "mac80211") {
+			hw_idx++;
+			continue;
+		}
+
+		/* Only add if radio option is missing */
+		if (dev.radio != null) {
+			hw_idx++;
+			continue;
+		}
+
+		print(`set wireless.${devname}.radio='${radio_idx.idx}'\n`);
+		dev.radio = radio_idx.idx;
+		commit = true;
+		hw_idx++;
+	}
+}
+
 if (has_qca_cfg80211()) {
 	/* Rename first so band extraction works in translation */
 	rename_devices_and_rebind_ifaces();
@@ -558,6 +599,7 @@ for (let phy_name, phy in board.wlan) {
 
 	let macaddr = trim(readfile(`/sys/class/ieee80211/${phy_name}/macaddress`));
 	if (radio_exists(phy.path, macaddr, phy_name)) {
+		add_missing_radio_for_existing(phy, idx);
 		idx++;
 		continue;
 	}
