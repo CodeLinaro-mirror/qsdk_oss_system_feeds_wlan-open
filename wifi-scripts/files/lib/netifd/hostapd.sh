@@ -182,7 +182,13 @@ hostapd_prepare_device_config() {
 	set_default legacy_rates 0
 	set_default airtime_mode 0
 	set_default cell_density 0
-	set_default country "US"
+
+	if [ -z "$country" ]; then
+		local iw_country="$(iw reg get 2>/dev/null | awk -F '[: ]+' '$1=="country" && ++n==2 { print $2; exit }')"
+		if [ -n "$iw_country" ]; then
+			set_default country "$iw_country"
+		fi
+	fi
 
 	[ -n "$country" ] && [ "$country" != "00" ] && {
 		append base_cfg "country_code=$country" "$N"
