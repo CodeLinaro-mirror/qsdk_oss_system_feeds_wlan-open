@@ -513,7 +513,7 @@ mac80211_prepare_atf_config() {
 			append cfg "atf-group-command=$cmd" "$N"
 			append cfg "atf-group-ssid=$ssid" "$N"
 			append cfg "atf-group-airtime=$airtime" "$N"
-		fi	
+		fi
 	}
 	config_foreach atf_group_configcfg80211 atf-config-group
 
@@ -2085,6 +2085,17 @@ mac80211_setup_scan_radio() {
 }
 
 
+mac80211_apply_tx_monitor_defaults() {
+	json_select config
+	json_get_var ifname _ifname
+	json_get_vars mode bss_index
+	json_select ..
+
+	[ "$mode" = "monitor" ] || return 0
+
+	iw dev "$ifname" set monitor skip_tx
+}
+
 mac80211_apply_monitor_mac() {
 	json_select config
 	json_get_var ifname _ifname
@@ -2855,6 +2866,8 @@ drv_mac80211_setup() {
 	for_each_interface "monitor" mac80211_apply_monitor_mac
 
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_set_vif_txpower
+
+	for_each_interface "monitor" mac80211_apply_tx_monitor_defaults
 
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 	if [ "$enable_smp_affinity" -eq 1 ]; then

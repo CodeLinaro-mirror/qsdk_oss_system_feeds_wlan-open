@@ -54,6 +54,7 @@ hostapd_append_wpa_key_mgmt() {
 		eap192)
 			append wpa_key_mgmt "WPA-EAP-SUITE-B-192"
 			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-EAP-SHA384"
+			group_cipher="GCMP-256"
 		;;
 		eap-eap2)
 			append wpa_key_mgmt "WPA-EAP"
@@ -1104,6 +1105,10 @@ hostapd_set_bss_options() {
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
+		if [ "$group_cipher" != "GCMP-256" ]; then
+			group_cipher="CCMP"
+		fi
+		append bss_conf "group_cipher=$group_cipher" "$N"
 	fi
 
 	if [ "$wpa" -ge "2" ]; then
@@ -1985,8 +1990,11 @@ wpa_supplicant_add_network() {
 
 	[ -n "$wpa_cipher" ] && {
 		append network_data "pairwise=$wpa_cipher" "$N$T"
-		append network_data "group=$wpa_cipher" "$N$T"
 	}
+	if [ "$group_cipher" != "GCMP-256" ]; then
+		group_cipher="CCMP"
+	fi
+	append network_data "group=$group_cipher" "$N$T"
 
 	[ "$mode" = mesh ] || {
 		case "$wpa" in
