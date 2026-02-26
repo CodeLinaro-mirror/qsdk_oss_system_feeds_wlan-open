@@ -2456,7 +2456,7 @@ mac80211_setup_supplicant() {
 	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -2614,6 +2614,8 @@ is_repeater=0
 
 # Global skip_cac flag: set to 1 if any enabled 5 GHz radio has skip_cac enabled
 is_skip_cac=0
+# Global uplink_csa flag:
+is_uplink_csa=0
 
 # Update global repeater flag once based on current wireless config
 mac80211_update_is_repeater_flag() {
@@ -2684,6 +2686,28 @@ mac80211_update_is_skip_cac_flag() {
 	config_foreach __skip_cac wifi-device
 }
 
+mac80211_update_is_uplink_csa_flag() {
+	[ "$is_uplink_csa" = "1" ] && return 0
+
+	config_load wireless
+
+	__uplink_csa() {
+		local section="$1"
+		local disabled band uplink_csa
+
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+
+		config_get band "$section" band
+		[ "$band" != "5g" ] && return 0
+
+		config_get uplink_csa "$section" uplink_csa 0
+		[ "$uplink_csa" -eq 1 ] && is_uplink_csa=1
+	}
+
+	config_foreach __uplink_csa wifi-device
+}
+
 drv_mac80211_setup() {
 	local device=$1
 
@@ -2705,6 +2729,7 @@ drv_mac80211_setup() {
 
 	mac80211_update_is_repeater_flag
 	mac80211_update_is_skip_cac_flag
+	mac80211_update_is_uplink_csa_flag
 
 	if [ ${#device} -eq 12 ]; then
 		is_wiphy_multi_radio=1
