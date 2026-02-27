@@ -405,6 +405,7 @@ endif
 ifeq ($(CONFIG_TARGET_sdx85),y)
 ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
 	C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
+	C_DEFINES+= -DCPTCFG_EXT_IPA_STATS
 endif
   LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
   EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
