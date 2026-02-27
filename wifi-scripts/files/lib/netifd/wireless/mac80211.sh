@@ -389,6 +389,7 @@ drv_mac80211_init_iface_config() {
 
 	#monitor
 	config_add_string monitor_flags
+	config_add_int tx_monitor
 }
 
 mac80211_add_capabilities() {
@@ -2131,6 +2132,24 @@ mac80211_apply_tx_monitor_defaults() {
 	iw dev "$ifname" set monitor skip_tx
 }
 
+mac80211_apply_monitor_flags() {
+	json_select config
+	json_get_var ifname _ifname
+	json_get_var tx_mon tx_monitor
+	json_select ..
+
+	if  [ -n "$tx_mon" ] && [ "$tx_mon" -eq 1 ]; then
+		## Setting tx_mon=1 means enabling tx_mon.
+		## In this case, setting skip_tx flag = 0 to enable tx_mon
+		if [[ "$monitor_flags" == *"skip_tx"* ]]; then
+			echo "WARNING: Ignoring tx_monitor_enable request; " \
+			"using default configuration (tx_monitor=DISABLED)." > /dev/ttyMSM0
+		fi
+		set -- $monitor_flags
+		iw dev "$ifname" set monitor "$@"
+	fi
+}
+
 mac80211_apply_monitor_mac() {
 	json_select config
 	json_get_var ifname _ifname
@@ -2928,6 +2947,8 @@ drv_mac80211_setup() {
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_set_vif_txpower
 
 	for_each_interface "monitor" mac80211_apply_tx_monitor_defaults
+
+	for_each_interface "monitor" mac80211_apply_monitor_flags
 
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 	if [ "$enable_smp_affinity" -eq 1 ]; then
