@@ -1973,9 +1973,9 @@ mac80211_setup_monitor() {
 
         if [ $is_wiphy_multi_radio -eq 1 ]; then
                 json_add_boolean is_multi_radio 1
-                [ -n "$center_freq" ] && json_add_string center_freq "$center_freq"
-                json_add_string bw "$bw"
-        fi
+	fi
+	[ -n "$center_freq" ] && json_add_string center_freq "$center_freq"
+	json_add_string bw "$bw"
 	json_close_object
 
 	json_set_namespace "$prev"
