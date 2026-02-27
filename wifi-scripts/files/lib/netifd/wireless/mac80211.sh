@@ -698,7 +698,9 @@ mac80211_hostapd_setup_base() {
 				# If user specified ht40 override, honor it regardless of auto_channel
 				case "${htmode}" in
 					HT40|EHT40)
-						ht_capab="[HT40+][HT40-]"
+						if [ "$auto_channel" -gt 0 ]; then
+							ht_capab="[HT40+][HT40-]"
+						fi
 						;;
 					HT40PLUS|EHT40PLUS)
 						ht_capab="[HT40+]"
