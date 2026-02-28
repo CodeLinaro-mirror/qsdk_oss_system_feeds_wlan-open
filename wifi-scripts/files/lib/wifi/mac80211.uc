@@ -593,6 +593,13 @@ if (has_qca_cfg80211()) {
 	/* Rename first so band extraction works in translation */
 	rename_devices_and_rebind_ifaces();
 	translate_proprietary_to_ath_ud();
+
+	/* Create marker file to trigger wifi startup after translation */
+	let ret = system("touch /tmp/.wifi_needs_restart");
+	if (ret) {
+		warn("Failed to create WiFi restart marker file\n");
+	}
+
 	/* Exit after translation to prevent generate_config from overwriting */
 	if (commit)
 		print("commit wireless\n");
