@@ -107,6 +107,16 @@ hostapd_append_wpa_key_mgmt() {
 		eppk)
 			append wpa_key_mgmt "EPPKE"
 		;;
+		eap2-personal)
+			append wpa_key_mgmt "WPA-EAP-SHA256 SAE"
+			json_get_vars key wpa_psk_file
+			append bss_conf "wpa_passphrase=$key" "$N"
+		;;
+		eap2-personal-akm24)
+			append wpa_key_mgmt "WPA-EAP-SHA256 SAE SAE-EXT-KEY"
+			json_get_vars key wpa_psk_file
+			append bss_conf "wpa_passphrase=$key" "$N"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -302,6 +312,7 @@ hostapd_common_add_bss_config() {
 	config_add_boolean rsn_preauth auth_cache
 	config_add_int ieee80211w
 	config_add_int eapol_version
+	config_add_int ieee8021x
 
 	config_add_array auth_server acct_server
 	config_add_string 'server:host'
@@ -377,6 +388,9 @@ hostapd_common_add_bss_config() {
 	config_add_boolean sae_require_mfp
 	config_add_int sae_pwe
 
+	config_add_string sae_password_id
+	config_add_int sae_password_id_change
+
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
 
@@ -435,6 +449,10 @@ hostapd_common_add_bss_config() {
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 	config_add_string vht_mcs_nss_set ht_mcs_nss_set
+
+	config_add_int sae_pw_id_num
+	config_add_string sae_pw_id_key
+	config_add_string sae_password
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
@@ -622,7 +640,7 @@ hostapd_set_bss_options() {
 		wps_pushbutton wps_label ext_registrar wps_pbc_in_m1 wps_ap_setup_locked \
 		wps_independent wps_device_type wps_device_name wps_manufacturer wps_pin \
 		macfilter ssid utf8_ssid wmm uapsd hidden short_preamble rsn_preauth \
-		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
+		iapp_interface eapol_version ieee8021x dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe \
 		multi_ap multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
@@ -632,7 +650,8 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate vht_mcs_nss_set ht_mcs_nss_set eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
+		beacon_rate vht_mcs_nss_set ht_mcs_nss_set eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy kek_in_pasn \
+		sae_pw_id_num sae_pw_id_key sae_password
 
 
 	json_get_values sae_groups sae_groups
@@ -822,7 +841,7 @@ hostapd_set_bss_options() {
 			vlan_possible=1
 			wps_possible=1
 		;;
-		eap|eap2|eap-eap2|eap192|eap-eap192)
+		eap|eap2|eap-eap2|eap192|eap-eap192|eap2-personal|eap2-personal-akm24)
 			json_get_vars \
 				auth_server auth_secret auth_port \
 				dae_client dae_secret dae_port \
@@ -912,7 +931,7 @@ hostapd_set_bss_options() {
 				json_for_each_item append_auth_server auth_server
 				[ -n "$ownip" ] && append bss_conf "own_ip_addr=$ownip" "$N"
 				[ -n "$radius_client_addr" ] && append bss_conf "radius_client_addr=$radius_client_addr" "$N"
-				append bss_conf "macaddr_acl=2" "$N"
+				[ -z "$ieee8021x" ] && append bss_conf "macaddr_acl=2" "$N"
 			}
 		;;
 	esac
@@ -1327,6 +1346,12 @@ hostapd_set_bss_options() {
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
+	[ -n "$sae_pw_id_num" ] && append bss_conf "sae_pw_id_num=$sae_pw_id_num" "$N"
+	[ -n "$sae_pw_id_key" ] && append bss_conf "sae_pw_id_key=$sae_pw_id_key" "$N"
+
+	[ -n "$sae_password" ] && append bss_conf "sae_password=$sae_password" "$N"
+	[ -n "$ieee8021x" ] && append bss_conf "ieee8021x=$ieee8021x" "$N"
+
 	append "$var" "$bss_conf" "$N"
 	return 0
 }
@@ -1505,7 +1530,9 @@ wpa_supplicant_add_network() {
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
-		scan_freq bgscan bgscan_freq
+		scan_freq bgscan bgscan_freq \
+		sae_password_id \
+		sae_password_id_change
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1855,6 +1882,11 @@ wpa_supplicant_add_network() {
 
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
+
+	[ -n "$sae_password_id" ] && append network_data "sae_password_id=\"$sae_password_id\"" "$N$T"
+
+	[ -n "$sae_password_id_change" ] && append network_data "sae_password_id_change=$sae_password_id_change" "$N$T"
+
 
 	local ppe_vp_type=
 	case "$ppe_vp" in
