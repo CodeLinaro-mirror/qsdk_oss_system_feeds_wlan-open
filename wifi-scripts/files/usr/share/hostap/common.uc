@@ -89,7 +89,7 @@ function wdev_get_radio_mask(name)
 
 	let error = nl80211.error();
 	if (error || !wdev) {
-		hostapd.printf(`error: Failed to get radio mask, iface ${name} error ${error} wdev ${wdev}`);
+		print(`error: Failed to get radio mask, iface ${name} error ${error} wdev ${wdev}\n`);
 		return null;
 	}
 
