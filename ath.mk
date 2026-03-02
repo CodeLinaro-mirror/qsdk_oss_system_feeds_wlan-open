@@ -190,6 +190,7 @@ define KernelPackage/ath12k/config
 
 	config PACKAGE_EXT_IPA_STATS
 		bool "Enable IPA stats"
+		default y
 		depends on PACKAGE_EXT_IPA_OFFLOAD
 		help
 		  Enable IPA stats for SDX.
