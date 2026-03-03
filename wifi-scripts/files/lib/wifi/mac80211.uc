@@ -18,7 +18,6 @@ if (!board.wlan)
 
 let idx = 0;
 let commit;
-let single_wiphy = false;
 
 let config = uci.cursor().get_all("wireless") ?? {};
 
@@ -84,6 +83,13 @@ function get_band(freq) {
 function get_channel_list(start_freq, end_freq) {
 	channels = freq_to_channel(start_freq) + "-" + freq_to_channel(end_freq);
 	return channels;
+}
+
+function is_scan_radio(phy_name) {
+	/* Scan Radios have a phy-scan-XX format */
+	if (match(phy_name, /^phy-scan-[0-9]+$/))
+		return true;
+	return false;
 }
 
 /* ADDED: helpers for proprietary→ath-ud translator */
@@ -436,7 +442,7 @@ function rename_devices_and_rebind_ifaces() {
 	}
 }
 
-function generate_config(info, name, single_wiphy, id, radio_idx) {
+function generate_config(info, name, single_wiphy, id, radio_idx, is_scan) {
 	let s = "wireless." + name;
 	let si = "wireless.default_" + name;
 
@@ -529,6 +535,12 @@ set ${si}.ssid='OpenWrt'
 set ${si}.encryption='none'
 
 `);
+
+	/* Add vap_submode for scan radios */
+        if (is_scan) {
+		print(`set ${si}.vap_submode='scan'\n`);
+	}
+
 	if (band_name == "6G") {
 		print(`set ${si}.encryption='sae'
 		set ${si}.sae_pwe='1'
@@ -591,21 +603,23 @@ if (has_qca_cfg80211()) {
 for (let phy_name, phy in board.wlan) {
 	let info = phy.info;
 	let name;
+	let single_wiphy = false;
+	let is_scan_phy = is_scan_radio(phy_name);
 	if (!info || !length(info.bands))
 		continue;
 
 	if (!phy.path)
-		return;
+		continue;
 
 	let macaddr = trim(readfile(`/sys/class/ieee80211/${phy_name}/macaddress`));
-	if (radio_exists(phy.path, macaddr, phy_name)) {
+	if (!is_scan_phy && radio_exists(phy.path, macaddr, phy_name)) {
 		add_missing_radio_for_existing(phy, idx);
 		idx++;
 		continue;
 	}
 
 	id = `phy='${phy_name}'`;
-	if (match(phy_name, /^phy[0-9]/))
+	if (match(phy_name, /^phy[0-9]/) || is_scan_phy)
 		id = `path='${phy.path}'`;
 
 	if (phy.multi_radio)
@@ -617,11 +631,11 @@ for (let phy_name, phy in board.wlan) {
 		for (let radio_name in multi_radio ) {
 			let radio_idx = multi_radio[radio_name];
 			name = "radio" + idx + "_band" + hw_idx++;
-			generate_config(info, name, single_wiphy, id, radio_idx);
+			generate_config(info, name, single_wiphy, id, radio_idx, false);
 		}
 	} else {
 		name = "radio" + idx;
-		generate_config(info, name, single_wiphy, id, NULL);
+		generate_config(info, name, single_wiphy, id, NULL, is_scan_phy);
 	}
 	idx++;
 	commit = true;
