@@ -33,4 +33,16 @@ load_dynamic_modules()
 			fi
 			;;
 	esac
+
+	sed -i '/^ath12k_wifi8$/d' "$ath12k_config_file"
+
+	for pci_dev in /sys/bus/pci/devices/*; do
+		[ -d "$pci_dev" ] || continue
+
+		ID=$(cat "$pci_dev/device" 2>/dev/null) || continue
+		if [ "xx${ID}" = "xx0x1113" ]; then
+			echo "ath12k_wifi8" >> "$ath12k_config_file"
+			break
+		fi
+	done
 }
