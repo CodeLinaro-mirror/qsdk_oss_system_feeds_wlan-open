@@ -8,6 +8,51 @@
 . /lib/netifd/hostapd.sh
 . /lib/functions/system.sh
 
+# ---------------------------------------------------------------------------
+# HMMC Default Deny List Configuration
+# ---------------------------------------------------------------------------
+
+# Configure default HMMC multicast deny-list entries for a VAP.
+# $1 = VAP interface name
+# $2 = "add" (wifi up) or "del" (wifi down)
+configure_mcast_denylist() {
+	local vap="$1"
+	local action="$2"
+
+	logger -t mcast-config "HMMC Multicast Deny List $action on $vap"
+
+	# --- IPv4 Deny List ---
+	# SSDP (239.255.255.250), mDNS (224.0.0.251), LLMNR (224.0.0.252)
+	wlanconfig "$vap" deny_list "$action" 239.255.255.250 255.255.255.255 > /dev/null
+	wlanconfig "$vap" deny_list "$action" 224.0.0.251 255.255.255.255 > /dev/null
+	wlanconfig "$vap" deny_list "$action" 224.0.0.252 255.255.255.255 > /dev/null
+
+	# --- IPv6 Deny List ---
+	# SSDP (ff05::c), mDNS (ff02::fb), LLMNR (ff02::1:3)
+	wlanconfig "$vap" deny_list_v6 "$action" ff05::c 128 > /dev/null
+	wlanconfig "$vap" deny_list_v6 "$action" ff02::fb 128 > /dev/null
+	wlanconfig "$vap" deny_list_v6 "$action" ff02::1:3 128 > /dev/null
+}
+
+# Iterate over all currently present wireless VAPs and apply or remove
+# the HMMC deny-list entries.
+# Detection is done via the phy80211 symlink that mac80211 creates under
+# /sys/class/net/<iface>/phy80211 for various VAPs like
+# (e.g. ath0, wlan0, phy00.0-0, ...).
+# $1 = "add" (wifi up) or "del" (wifi down)
+configure_hmmc_denylist_all() {
+	local action="$1"
+	local vap
+
+	for vap in $(ls /sys/class/net/ 2>/dev/null); do
+		# Skip non-wireless interfaces: only process VAPs that have the
+		# phy80211 symlink created by the mac80211 stack.
+		[ -e "/sys/class/net/$vap/phy80211" ] || continue
+
+		configure_mcast_denylist "$vap" "$action"
+	done
+}
+
 mac80211_update_mld_iface_config() {
 	vif_name=$1
 	mld_name=$2
@@ -2959,6 +3004,9 @@ drv_mac80211_setup() {
 			fi
 		fi
 	fi
+
+	# Apply HMMC default deny-list entries to all VAPs on wifi up
+	configure_hmmc_denylist_all add
 }
 
 _list_phy_interfaces() {
@@ -2980,6 +3028,9 @@ list_phy_interfaces() {
 }
 
 drv_mac80211_teardown() {
+	# Remove HMMC default deny-list entries from all VAPs on wifi down
+	configure_hmmc_denylist_all del
+
 	json_select data
 	json_get_vars phy radio
 	json_select ..
