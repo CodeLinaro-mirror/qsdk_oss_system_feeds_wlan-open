@@ -350,7 +350,7 @@ hostapd_common_add_bss_config() {
 	config_add_string multi_ap_backhaul_ssid multi_ap_backhaul_key
 
 	config_add_boolean wnm_sleep_mode wnm_sleep_mode_no_keys bss_transition mbo
-	config_add_int time_advertisement
+	config_add_int time_advertisement mbo_cell_data_conn_pref
 	config_add_string time_zone
 	config_add_string vendor_elements
 
@@ -1040,7 +1040,8 @@ hostapd_set_bss_options() {
 		append bss_conf "iapp_interface=$ifname" "$N"
 	}
 
-	json_get_vars time_advertisement time_zone wnm_sleep_mode wnm_sleep_mode_no_keys bss_transition mbo
+	json_get_vars time_advertisement time_zone wnm_sleep_mode wnm_sleep_mode_no_keys \
+			bss_transition mbo mbo_cell_data_conn_pref
 	set_default bss_transition 0
 	set_default wnm_sleep_mode 0
 	set_default wnm_sleep_mode_no_keys 0
@@ -1055,6 +1056,7 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq "1" ] && bss_transition=1
 	[ "$bss_transition" -eq "1" ] && append bss_conf "bss_transition=1" "$N"
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
+	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 
 	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr
 	set_default ieee80211k 0
