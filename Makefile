@@ -72,6 +72,7 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_IWLWIFI_DEBUGFS \
 	CONFIG_PACKAGE_RTLWIFI_DEBUG \
 	CONFIG_PACKAGE_QCN_EXTN \
+	CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT \
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -305,6 +306,10 @@ define KernelPackage/mac80211/config
 		bool "Enable QCN extensions support"
 		default y
 
+	config PACKAGE_QCN_EXTN_MESH_SUPPORT
+		bool "Enable QCN extension mesh feature support"
+		default y
+
   endif
 endef
 
@@ -385,6 +390,7 @@ config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_PS_DEBUG) += MAC80211_PS_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG) += MAC80211_ATHMEMDEBUG
 config-$(CONFIG_PACKAGE_QCN_EXTN) += QCN_EXTN
+config-$(CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT) += QCN_EXTN_MESH_SUPPORT
 
 config-$(call config_package,mac80211-hwsim) += MAC80211_HWSIM
 
