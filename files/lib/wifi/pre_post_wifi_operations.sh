@@ -873,6 +873,14 @@ configure_service_class() {
 		configure_service_param "$svc_class_json" "$enable_svc" "$phy"
 		svc_class_index=$((svc_class_index+1))
 	done
+
+	if [ "$enable_svc" -eq 1 ]; then
+                touch /tmp/svc_configured
+        else
+                if [ -f "/tmp/svc_configured" ]; then
+                        rm /tmp/svc_configured
+                fi
+        fi
 }
 
 configure_sla_param() {
@@ -1020,7 +1028,6 @@ pre_mac80211() {
 			fi
 			if [ -f "/tmp/svc_configured" ]; then
 				configure_service_class 0
-				rm /tmp/svc_configured
 			fi
 			if [ -f "/tmp/apsta_mode.pid" ]; then
 				pid=$(cat /tmp/apsta_mode.pid)
@@ -1048,7 +1055,6 @@ post_mac80211() {
 		enable)
 			if [ ! -f "/tmp/svc_configured" ]; then
 				configure_service_class 1
-				touch /tmp/svc_configured
 				configure_telemetry_sla_samples
 				configure_telemetry_sla_thersholds
 				configure_telemetry_sla_detect
