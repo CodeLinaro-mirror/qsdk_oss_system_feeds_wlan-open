@@ -18,6 +18,7 @@ if (!board.wlan)
 
 let idx = 0;
 let commit;
+let sysupgrade = false;
 
 let config = uci.cursor().get_all("wireless") ?? {};
 
@@ -597,6 +598,7 @@ function add_missing_radio_for_existing(phy, idx) {
 		print(`set wireless.${devname}.radio='${radio_idx.idx}'\n`);
 		dev.radio = radio_idx.idx;
 		commit = true;
+		sysupgrade = true;
 		hw_idx++;
 	}
 }
@@ -658,6 +660,15 @@ for (let phy_name, phy in board.wlan) {
 	idx++;
 	commit = true;
 }
+
+if (sysupgrade) {
+	/* Create marker file to trigger wifi startup after translation */
+	let ret = system("touch /tmp/.wifi_needs_restart");
+	if (ret) {
+		warn("Failed to create WiFi restart marker file\n");
+	}
+}
+
 
 if (commit)
 	print("commit wireless\n");
