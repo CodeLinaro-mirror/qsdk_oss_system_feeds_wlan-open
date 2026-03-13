@@ -45,6 +45,7 @@ config-$(call config_package,ath12k) += ATH12K
 config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
 config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
 config-$(CONFIG_PACKAGE_EXT_IPA_OFFLOAD) += EXT_IPA_OFFLOAD
+config-$(CONFIG_PACKAGE_EXT_IPA_STATS) += EXT_IPA_STATS
 config-$(CONFIG_PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO) += ATH12K_TEST_FW_FOR_11S_MLO
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH12K_MEM_PROFILE_512M
@@ -186,6 +187,13 @@ define KernelPackage/ath12k/config
 		default y
 		help
 		  Enable IPA offload for SDX.
+
+	config PACKAGE_EXT_IPA_STATS
+		bool "Enable IPA stats"
+		default y
+		depends on PACKAGE_EXT_IPA_OFFLOAD
+		help
+		  Enable IPA stats for SDX.
 endef
 
 define KernelPackage/ath11k-ahb

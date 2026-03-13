@@ -15,6 +15,8 @@ start()
         insmod ath_debug.ko
         insmod ath12k.ko
         insmod ath12k_wifi7.ko dyndbg=+p debug_mask=0xFFFFFFFF
+        # Mark KPI after all drivers are loaded
+        echo -n 'M - QCA wifi Ready' >> /sys/kernel/boot_kpi/kpi_values
 }
 
 stop()
