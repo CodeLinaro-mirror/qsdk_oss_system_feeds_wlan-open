@@ -48,6 +48,9 @@ config-$(CONFIG_PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO) += ATH12K_TEST_FW_FOR_11S_ML
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH12K_MEM_PROFILE_512M
 endif
+ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+config-y += ATH12K_MEM_PROFILE_256M
+endif
 
 config-$(call config_package,carl9170) += CARL9170
 config-$(call config_package,ar5523) += AR5523

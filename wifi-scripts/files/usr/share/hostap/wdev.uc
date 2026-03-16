@@ -38,8 +38,32 @@ function iface_start(wdev)
 	if (!wdev_config.macaddr && wdev.mode != "monitor")
 		wdev_config.macaddr = phydev.macaddr_next();
 	phydev.wdev_add(ifname, wdev_config);
+
+	// For Scan Radio VDEVs, set vap submode before bringing up interface
+	if (wdev.mode == "ap" && wdev.vap_submode == "scan") {
+		let vap_submode_value = 2;
+		system(`cfg80211tool ${ifname} vap_submode ${vap_submode_value}`);
+	}
 	wdev_set_up(ifname, true);
 	let htmode = wdev.htmode || "NOHT";
+
+	// Handle scan radio VAP creation using iw instead of hostapd
+	if (wdev.mode == "ap" && wdev.vap_submode == "scan" &&
+	    wdev.freq && wdev.ssid) {
+		let bw = wdev.bw || 20;
+		let beacon_int = wdev.beacon_interval || 100;
+		let dtim = wdev.dtim_period || 2;
+		let iw_cmd = `iw dev ${ifname} ap start ${wdev.ssid} ${wdev.freq} ${bw}`;
+
+		// Add center frequency for bandwidths >= 40MHz
+		if (wdev.center_freq) {
+			iw_cmd += ` ${wdev.center_freq}`;
+		}
+
+		iw_cmd += ` ${beacon_int} ${dtim}`;
+		system(iw_cmd);
+	}
+
 	if (wdev.is_multi_radio != null) {
 		if (wdev.mode == "monitor") {
 			if (wdev.center_freq) {

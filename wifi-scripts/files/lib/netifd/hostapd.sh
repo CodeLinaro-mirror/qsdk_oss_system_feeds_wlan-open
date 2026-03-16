@@ -54,6 +54,7 @@ hostapd_append_wpa_key_mgmt() {
 		eap192)
 			append wpa_key_mgmt "WPA-EAP-SUITE-B-192"
 			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-EAP-SHA384"
+			group_cipher="GCMP-256"
 		;;
 		eap-eap2)
 			append wpa_key_mgmt "WPA-EAP"
@@ -148,6 +149,8 @@ hostapd_common_add_device_config() {
 	config_add_int cell_density
 	config_add_int rts_threshold
 	config_add_int rssi_reject_assoc_rssi
+	config_add_int rssi_reject_assoc_timeout
+	config_add_int rssi_deauth_grace_samples
 	config_add_int rssi_ignore_probe_request
 	config_add_int maxassoc
 
@@ -168,7 +171,7 @@ hostapd_prepare_device_config() {
 
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
-		rts_threshold rssi_reject_assoc_rssi rssi_ignore_probe_request maxassoc \
+		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
 		mbssid:0
 
 	hostapd_set_log_options base_cfg
@@ -179,7 +182,13 @@ hostapd_prepare_device_config() {
 	set_default legacy_rates 0
 	set_default airtime_mode 0
 	set_default cell_density 0
-	set_default country "US"
+
+	if [ -z "$country" ]; then
+		local iw_country="$(iw reg get 2>/dev/null | awk -F '[: ]+' '$1=="country" && ++n==2 { print $2; exit }')"
+		if [ -n "$iw_country" ]; then
+			set_default country "$iw_country"
+		fi
+	fi
 
 	[ -n "$country" ] && [ "$country" != "00" ] && {
 		append base_cfg "country_code=$country" "$N"
@@ -263,6 +272,8 @@ hostapd_prepare_device_config() {
 	done
 
 	[ -n "$rssi_reject_assoc_rssi" ] && append base_cfg "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append base_cfg "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append base_cfg "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
 	[ -n "$rssi_ignore_probe_request" ] && append base_cfg "rssi_ignore_probe_request=$rssi_ignore_probe_request" "$N"
 	append base_cfg "beacon_int=$beacon_int" "$N"
 	[ -n "$rts_threshold" ] && append base_cfg "rts_threshold=$rts_threshold" "$N"
@@ -285,6 +296,7 @@ hostapd_common_add_bss_config() {
 	config_add_string 'bssid:macaddr' 'ssid:string'
 	config_add_boolean wds wmm uapsd hidden utf8_ssid ppsk
 
+	config_add_int rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 	config_add_int maxassoc max_inactivity
 	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll
 
@@ -339,6 +351,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int multi_ap
 
+	config_add_int multi_ap_vlanid
+
 	config_add_boolean wps_pushbutton wps_label ext_registrar wps_pbc_in_m1
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
@@ -376,6 +390,13 @@ hostapd_common_add_bss_config() {
 	config_add_int sae_pwe
 	config_add_int external_plugin_enable
 	config_add_int externally_triggered_m3
+	config_add_int external_plugin_auth_policy
+	config_add_int external_plugin_assoc_policy
+	config_add_int external_plugin_deauth_policy
+	config_add_int external_plugin_disassoc_policy
+
+	config_add_int control_frame_protection
+	config_add_int cip_padding_delay
 
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
@@ -459,6 +480,10 @@ hostapd_common_add_bss_config() {
 
 	config_add_int wps_cred_add_sae
 	config_add_string scan_freq bgscan bgscan_freq
+
+	config_add_int control_frame_prot
+	config_add_int max_cip_padding_delay
+	config_add_int dcs_random_chan_bitmap
 }
 
 hostapd_set_vlan_file() {
@@ -641,7 +666,8 @@ hostapd_set_bss_options() {
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable externally_triggered_m3 \
-		multi_ap multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
+		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -664,7 +690,10 @@ hostapd_set_bss_options() {
 		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
 		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
 		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
-		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
+		control_frame_prot max_cip_padding_delay \
+		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
+		dcs_random_chan_bitmap
 
 
 	json_get_values sae_groups sae_groups
@@ -693,10 +722,17 @@ hostapd_set_bss_options() {
 	set_default airtime_bss_limit 0
 	set_default eap_server 0
 	set_default apup 0
+	set_default external_plugin_auth_policy 0
+	set_default external_plugin_assoc_policy 0
+	set_default external_plugin_deauth_policy 0
+	set_default external_plugin_disassoc_policy 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
 	append bss_conf "ctrl_interface=/var/run/hostapd"
+
+	[ -n "$dcs_random_chan_bitmap" ] && append bss_conf "dcs_random_chan_bitmap=$dcs_random_chan_bitmap" "$N"
+
 	if [ "$isolate" -gt 0 ]; then
 		append bss_conf "ap_isolate=$isolate" "$N"
 	fi
@@ -711,6 +747,10 @@ hostapd_set_bss_options() {
 	[ "$airtime_bss_limit" -gt 0 ] && append bss_conf "airtime_bss_limit=$airtime_bss_limit" "$N"
 	json_for_each_item append_airtime_sta_weight airtime_sta_weight
 
+	[ -n "$rssi_reject_assoc_rssi" ] && append bss_conf "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append bss_conf "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append bss_conf "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
+
 	#[ -n "$bss_load_update_period" ] && append bss_conf "bss_load_update_period=$bss_load_update_period" "$N"
 	append bss_conf "chan_util_avg_period=$chan_util_avg_period" "$N"
 	append bss_conf "disassoc_low_ack=$disassoc_low_ack" "$N"
@@ -721,6 +761,7 @@ hostapd_set_bss_options() {
 	append bss_conf "uapsd_advertisement_enabled=$uapsd" "$N"
 	append bss_conf "utf8_ssid=$utf8_ssid" "$N"
 	append bss_conf "multi_ap=$multi_ap" "$N"
+	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 
 	[ -n "$oce" ] && {
@@ -820,6 +861,10 @@ hostapd_set_bss_options() {
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
 	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
+	[ -n "$external_plugin_auth_policy" ] && append bss_conf "external_plugin_auth_policy=$external_plugin_auth_policy" "$N"
+	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
+	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
+	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
@@ -1079,6 +1124,10 @@ hostapd_set_bss_options() {
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
+		if [ "$group_cipher" != "GCMP-256" ]; then
+			group_cipher="CCMP"
+		fi
+		append bss_conf "group_cipher=$group_cipher" "$N"
 	fi
 
 	if [ "$wpa" -ge "2" ]; then
@@ -1483,6 +1532,10 @@ hostapd_set_bss_options() {
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
+	[ -n "$control_frame_prot" ] && append bss_conf "control_frame_prot=$control_frame_prot" "$N"
+
+	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
+
 	append "$var" "$bss_conf" "$N"
 	return 0
 }
@@ -1647,14 +1700,15 @@ wpa_supplicant_add_network() {
 		local athnewind="$2"
 		local rptr_mgr_mode="$3"
 		local channel="$4"
+		local uplink_csa="$5"
 	else
 		local freq="$2"
 		local htmode="$3"
 		local noscan="$4"
+		local ru_punct_bitmap=$5
 	fi
 
 	local disable_40mhz_scan=0
-	local ru_punct_bitmap=$5
 	local disable_csa_dfs=$6
 	local ccfs=0
 
@@ -1669,7 +1723,9 @@ wpa_supplicant_add_network() {
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
-		scan_freq bgscan bgscan_freq
+		scan_freq bgscan bgscan_freq \
+		control_frame_protection \
+		cip_padding_delay
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1954,8 +2010,11 @@ wpa_supplicant_add_network() {
 
 	[ -n "$wpa_cipher" ] && {
 		append network_data "pairwise=$wpa_cipher" "$N$T"
-		append network_data "group=$wpa_cipher" "$N$T"
 	}
+	if [ "$group_cipher" != "GCMP-256" ]; then
+		group_cipher="CCMP"
+	fi
+	append network_data "group=$group_cipher" "$N$T"
 
 	[ "$mode" = mesh ] || {
 		case "$wpa" in
@@ -2023,6 +2082,10 @@ wpa_supplicant_add_network() {
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
 
+	[ -n "$control_frame_protection" ] && append network_data "control_frame_protection=$control_frame_protection" "$N$T"
+
+	[ -n "$cip_padding_delay" ] && append network_data "cip_padding_delay=$cip_padding_delay" "$N$T"
+
 	local ppe_vp_type=
 	case "$ppe_vp" in
 		"passive")
@@ -2071,6 +2134,7 @@ network={
 athnewind=$athnewind
 rptr_mgr_mode=$rptr_mgr_mode
 channel=$channel
+uplink_csa=$uplink_csa
 EOF
 	fi
 	return 0

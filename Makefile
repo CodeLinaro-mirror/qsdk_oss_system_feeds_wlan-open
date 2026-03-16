@@ -48,7 +48,7 @@ LOCAL_SRC:=$(TOPDIR)/$(SRCPREFIX)src/mac80211/wlan-open/backports-6.1-$(MAC80211
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
 else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
-	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/prpl-patches/package/network/services/hostapd/
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/feed-qca/qca/feeds/wlan-hostapd/hostapd/
 else
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/qca/feeds/wlan-hostapd/hostapd/
 endif
@@ -401,11 +401,18 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 endif
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized"
+ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
+  C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
+endif
+  LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
 
+  KBUILD_EXTRA_SYMBOLS_IPA="$(PKG_BUILD_DIR)/../dataipa-1.0/Module.symvers"
   MAKE_OPTS:= \
 	-C $(LINUX_DIR) M="$(PKG_BUILD_DIR)" \
+	KBUILD_EXTRA_SYMBOLS=$(KBUILD_EXTRA_SYMBOLS_IPA) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS)
+	KLIB_BUILD=$(LINUX_HDRS)
 
 define Build/PreCompile
 	echo "Pushing KLIB_BUILD before compilation"
@@ -519,7 +526,7 @@ endef
 define Build/Compile
 	$(SH_FUNC) var2file "$(call shvar,mac80211_config)" $(PKG_BUILD_DIR)/.config
 ifeq ($(CONFIG_TARGET_sdx85),y)
-	$(MAKE) -C $(PKG_BUILD_DIR) allnoconfig
+	$(MAKE) -C $(PKG_BUILD_DIR) KLIB_BUILD=$(LINUX_HDRS) allnoconfig
 else
 	$(MAKE) $(MAKE_OPTS) allnoconfig
 endif
@@ -549,6 +556,8 @@ define KernelPackage/ath/install
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/ipam.ko $(1)/lib/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/gsim.ko $(1)/lib/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko $(1)/lib/modules/$(UNAME_VERSION)
 
 	# Export ath.ko to bin/targets

@@ -314,6 +314,17 @@ function translate_proprietary_to_ath_ud() {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
 					print(`delete wireless.${secname}.hwmode\n`);
+					/* Check if any iface on this device has disablecoext */
+					let has_disablecoext = false;
+					for (let iface_name, iface in config) {
+						if (iface[".type"] == "wifi-iface" && iface.device == secname && iface.disablecoext == "1") {
+							has_disablecoext = true;
+							break;
+						}
+					}
+					if (has_disablecoext && radio_cfg.band == '2g') {
+						print(`set wireless.${secname}.noscan='1'\n`);
+					}
 				}
 
                 		/* remove device-level MAC address */
@@ -381,15 +392,24 @@ function translate_proprietary_to_ath_ud() {
 function rename_devices_and_rebind_ifaces() {
 	let map = {
 		wifi0: "radio0_band0",
-		wifi1: "radio0_band1",
-		wifi2: "radio0_band2",
+		wifi1: "radio0_band2",
+		wifi2: "radio0_band1",
 		wifi3: "radio0_band3"
 	};
 
 	let renamed = false;
 	let renames = [];
 
-	/* Collect all renames first to avoid modifying during iteration */
+	/* Collect all renames first to avoid modifying during iteration
+	 * Board override: ipq5332 → wifi1=5G (band1), wifi2=6G (band2)
+	 */
+	let bn = "";
+
+	bn = trim(readfile("/tmp/sysinfo/board_name")) ?? "";
+	if (match(lc(bn), /ipq5332/, "s")) {
+		map["wifi1"] = "radio0_band1";
+		map["wifi2"] = "radio0_band2";
+	}
 	for (let secname, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
@@ -528,13 +548,61 @@ set ${si}.encryption='none'
 	}
 }
 
+
+/* Add missing radio option for existing multi-radio devices (sysupgrade case) */
+function add_missing_radio_for_existing(phy, idx) {
+	if (!phy.multi_radio)
+		return;
+
+	let multi_radio = phy.multi_radio;
+	let hw_idx = 0;
+
+	for (let radio_name in multi_radio) {
+		let radio_idx = multi_radio[radio_name];
+		if (!radio_idx || radio_idx.idx == null)
+			continue;
+
+		/* Device name matches generate_config(): radio{idx}_band{hw_idx} */
+		let devname = "radio" + idx + "_band" + hw_idx;
+		let dev = config[devname];
+
+		if (!dev || dev[".type"] != "wifi-device") {
+			hw_idx++;
+			continue;
+		}
+
+		if (lc(dev.type ?? "") != "mac80211") {
+			hw_idx++;
+			continue;
+		}
+
+		/* Only add if radio option is missing */
+		if (dev.radio != null) {
+			hw_idx++;
+			continue;
+		}
+
+		print(`set wireless.${devname}.radio='${radio_idx.idx}'\n`);
+		dev.radio = radio_idx.idx;
+		commit = true;
+		hw_idx++;
+	}
+}
+
 if (has_qca_cfg80211()) {
 	/* Rename first so band extraction works in translation */
 	rename_devices_and_rebind_ifaces();
 	translate_proprietary_to_ath_ud();
+
+	/* Create marker file to trigger wifi startup after translation */
+	let ret = system("touch /tmp/.wifi_needs_restart");
+	if (ret) {
+		warn("Failed to create WiFi restart marker file\n");
+	}
+
 	/* Exit after translation to prevent generate_config from overwriting */
 	if (commit)
-		print("commit wireless\\n");
+		print("commit wireless\n");
 	exit(0);
 }
 
@@ -549,6 +617,7 @@ for (let phy_name, phy in board.wlan) {
 
 	let macaddr = trim(readfile(`/sys/class/ieee80211/${phy_name}/macaddress`));
 	if (radio_exists(phy.path, macaddr, phy_name)) {
+		add_missing_radio_for_existing(phy, idx);
 		idx++;
 		continue;
 	}

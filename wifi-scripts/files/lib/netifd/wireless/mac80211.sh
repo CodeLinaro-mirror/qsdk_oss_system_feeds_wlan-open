@@ -98,6 +98,8 @@ enable_color=
 
 #ACS DFS
 acs_exclude_dfs=
+# ACS retry scan count (device-level)
+acs_retry_interval=
 
 updated_chanlist=
 min_tx_power=
@@ -158,7 +160,9 @@ chan_util_avg_period=
 use_driver_vendor_addr=
 athnewind=
 skip_cac=
+uplink_csa=
 rptr_mgr_mode=
+vap_submode=
 
 #dpp
 dpp_ifaces=
@@ -192,6 +196,10 @@ acsmax_dwell=
 acs_dwelltime=
 acs_dbgtrace=
 acs_txpwr_opt=
+acs_freq_list=
+
+#dcs enable command
+dcs_enable=
 
 mac80211_freq_to_channel() {
         local freq=$1
@@ -238,20 +246,25 @@ ubus_call() {
 	flock /var/run/hostapd.lock ubus call "$@"
 }
 
-drv_mac80211_init_device_config() {
-	hostapd_common_add_device_config
+	drv_mac80211_init_device_config() {
+		hostapd_common_add_device_config
 
-	config_add_string path phy 'macaddr:macaddr'
-	config_add_string tx_burst
-	config_add_string distance band
-	config_add_int radio beacon_int chanbw frag rts
-	config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
-	config_add_int num_global_macaddr multiple_bssid
-	config_add_boolean use_driver_vendor_addr
-	config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
+		config_add_string path phy 'macaddr:macaddr'
+		config_add_string tx_burst
+		config_add_string distance band
+		# User override for HT40 capability in hostapd: HT40PLUS/HT40MINUS/HT40
+		config_add_string ht40
+		config_add_int radio beacon_int chanbw frag rts
+		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
+		config_add_int num_global_macaddr multiple_bssid
+		config_add_boolean use_driver_vendor_addr
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
+	# ACS behavior tuning
+	config_add_int acs_retry_interval acs_retry_count
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_array scan_list
+	config_add_array acs_freq_list
 	config_add_boolean \
 		rxldpc \
 		short_gi_80 \
@@ -306,7 +319,8 @@ drv_mac80211_init_device_config() {
 		acs_dbgtrace \
 		acs_txpwr_opt \
 		athnewind \
-		rptr_mgr_mode
+		rptr_mgr_mode \
+		dcs_enable
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -317,7 +331,8 @@ drv_mac80211_init_device_config() {
 		disable_eml_cap \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
-		skip_cac
+		skip_cac \
+		uplink_csa
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
 }
@@ -339,6 +354,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int fils_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
+	config_add_string vap_submode
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -499,7 +515,7 @@ mac80211_prepare_atf_config() {
 			append cfg "atf-group-command=$cmd" "$N"
 			append cfg "atf-group-ssid=$ssid" "$N"
 			append cfg "atf-group-airtime=$airtime" "$N"
-		fi	
+		fi
 	}
 	config_foreach atf_group_configcfg80211 atf-config-group
 
@@ -612,15 +628,23 @@ mac80211_hostapd_setup_base() {
 
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 
-	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs
+	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count
 	[ -n "$acs_exclude_dfs" ] && [ "$acs_exclude_dfs" -gt 0 ] &&
 		append base_cfg "acs_exclude_dfs=1" "$N"
 
-	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs
+	# Pass through ACS retry scan count when ACS is enabled
+	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
+	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
+
+	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac
+	json_get_values acs_freq_list acs_freq_list
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
+
+	# Optional user override for HT40 capability string
+	json_get_vars ht40
 
 	[ "$auto_channel" = 0 ] && [ -z "$channel_list" ] && \
 		channel_list="$channel"
@@ -648,7 +672,7 @@ mac80211_hostapd_setup_base() {
 		ht_capab=
 		case "$htmode" in
 			VHT20|HT20|HE20|EHT20|UHR20) ;;
-			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320|UHR40|UHR80|UHR160|UHR320)
+			HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|EHT40|EHT80|EHT160|EHT320|UHR40|UHR80|UHR160|UHR320|EHT40*)
 				case "$hwmode" in
 					a)
 						case "$(( (($channel / 4) + $chan_ofs) % 2 ))" in
@@ -670,7 +694,21 @@ mac80211_hostapd_setup_base() {
 						esac
 					;;
 				esac
-				[ "$auto_channel" -gt 0 ] && ht_capab="[HT40+]"
+				[ "$auto_channel" -gt 0 ] && ht_capab="[HT40+][HT40-]"
+				# If user specified ht40 override, honor it regardless of auto_channel
+				case "${htmode}" in
+					HT40|EHT40)
+						if [ "$auto_channel" -gt 0 ]; then
+							ht_capab="[HT40+][HT40-]"
+						fi
+						;;
+					HT40PLUS|EHT40PLUS)
+						ht_capab="[HT40+]"
+						;;
+					HT40MINUS|EHT40MINUS)
+						ht_capab="[HT40-]"
+						;;
+				esac
 			;;
 			*) ieee80211n= ;;
 		esac
@@ -1197,6 +1235,7 @@ mac80211_hostapd_setup_base() {
 	}
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
+	[ -n "$uplink_csa" ] && append base_cfg "uplink_csa=$uplink_csa" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
@@ -1241,6 +1280,10 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "acs_txpwr_opt=$acs_txpwr_opt" "$N"
 	fi
 
+	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
+		append base_cfg "dcs_enable=$dcs_enable" "$N"
+	fi
+
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
 
 	[ -n "$updated_chanlist" ] && channel_list=$(echo $updated_chanlist)
@@ -1248,10 +1291,36 @@ mac80211_hostapd_setup_base() {
 	# According to OCE Specification 2.0, when OCE is enabled, ACS should select channels 1, 6, or 11 in 2GHz band
 	if [ -n "$oce_ap" ] && [ "$band" = "2g" ]; then
 		channel_list="1,6,11"
+		# Override acs_freq_list for OCE compliance in 2GHz
+		if [ -n "$acs_freq_list" ]; then
+			acs_freq_list="2412,2437,2462"  # Frequencies for channels 1, 6, 11
+		fi
 	fi
+
+	if [ -n "$acs_freq_list" ]; then
+		# Validate frequency list format and values
+		local valid_freqs=""
+		local freq_valid=1
+		for freq in $(echo $acs_freq_list | tr ',' ' ' '-'); do
+			# Validate frequency ranges
+			if [ "$freq" -lt 2412 ] || ([ "$freq" -gt 2484 ] && [ "$freq" -lt 5170 ]) || ([ "$freq" -gt 5885 ] && [ "$freq" -lt 5955 ]) || [ "$freq" -gt 7115 ]; then
+				freq_valid=0
+				break
+			fi
+		done
+
+		if [ "$freq_valid" -eq 1 ]; then
+			append base_cfg "freqlist=$(echo $acs_freq_list)" "$N"
+		else
+			echo "Invalid acs_freq_list, falling back to chanlist" > /dev/console
+			append base_cfg "chanlist=$(echo $channel_list)" "$N"
+		fi
+	else
+		append base_cfg "chanlist=$(echo $channel_list)" "$N"
+	fi
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
-${channel_list:+chanlist=$channel_list}
 ${hostapd_noscan:+noscan=1}
 ${tx_burst:+tx_queue_data2_burst=$tx_burst}
 #num_global_macaddr=$num_global_macaddr
@@ -1605,7 +1674,7 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
@@ -1686,23 +1755,30 @@ mac80211_prepare_vif() {
 	# It is far easier to delete and create the desired interface
 	case "$mode" in
 		ap)
-			# Hostapd will handle recreating the interface and
-			# subsequent virtual APs belonging to the same PHY
-			if [ -n "$hostapd_ctrl" ]; then
-				type=bss
+			# Check for Scan Radio VAP
+			json_get_vars vap_submode
+			if [ -n "$vap_submode" ] && [ "$vap_submode" = "scan" ]; then
+				# Skip hostapd setup for scan radio
+				:
 			else
-				type=interface
+				# Hostapd will handle recreating the interface and
+				# subsequent virtual APs belonging to the same PHY
+				if [ -n "$hostapd_ctrl" ]; then
+					type=bss
+				else
+					type=interface
+				fi
+
+				mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
+
+				[ -n "$dpp" ] && append dpp_ifaces $ifname
+
+				[ -n "$hostapd_ctrl" ] || {
+					ap_ifname="${ifname}"
+					hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
+				}
 			fi
-
-			mac80211_hostapd_setup_bss "$phy" "$ifname" "$macaddr" "$type" || return
-
-			[ -n "$dpp" ] && append dpp_ifaces $ifname
-
-			[ -n "$hostapd_ctrl" ] || {
-				ap_ifname="${ifname}"
-				hostapd_ctrl="${hostapd_ctrl:-/var/run/hostapd/$ifname}"
-			}
-		;;
+			;;
 	esac
 
 	json_select ..
@@ -1930,6 +2006,15 @@ get_seg0_freq() {
 
 mac80211_setup_monitor() {
 	local prev idx
+
+	if [ "$auto_channel" -gt 0 ];then
+		freq_list=$(get_sta_freq_list "$phy" "$radio" "$band_name")
+		freq="${freq_list%% *}"
+		channel="$(mac80211_freq_to_channel $freq)"
+	elif [ -z "$freq" ] && [ -n "$channel"];then
+		freq="$(get_freq "$phy" "$channel" "$band")"
+	fi
+
 	json_set_namespace wdev_uc prev
 
 	json_add_object "$ifname"
@@ -1973,6 +2058,73 @@ mac80211_setup_monitor() {
 	json_close_object
 
 	json_set_namespace "$prev"
+}
+
+
+mac80211_setup_scan_radio() {
+	local prev idx
+
+	json_set_namespace wdev_uc prev
+
+	json_add_object "$ifname"
+	json_add_string mode ap
+	[ -n "$freq" ] && json_add_string freq "$freq"
+	json_add_string htmode "$htmode"
+	[ -n "$vap_submode" ] && json_add_string vap_submode "$vap_submode"
+	json_add_string ssid "$ssid"
+	json_add_int beacon_interval "$beacon_int"
+	json_add_int dtim_period "$dtim_period"
+
+	case "$htmode" in
+                VHT20|HT20|HE20|EHT20|UHR20)
+                        bw=20
+                        ;;
+                HT40*|VHT40|HE40|EHT40|UHR40)
+                        bw=40
+			center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 40)")
+                        ;;
+                VHT80|HE80|EHT80|UHR80)
+                        bw=80
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 80)")
+                        ;;
+                VHT160|HE160|EHT160|UHR160)
+                        bw=160
+                        center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
+                        ;;
+		EHT320)
+			if [ "$band" = "6g" ]; then
+				bw=320
+				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
+					idx="$ccfs"
+				elif [ -z "$ccfs" ] || [ "$ccfs" -eq "0" ]; then
+					idx="$(mac80211_get_seg0 "320")"
+				fi
+				center_freq=$(get_seg0_freq "$freq" "$channel" "$idx")
+			fi
+			;;
+        esac
+
+	json_add_string bw "$bw"
+	[ -n "$center_freq" ] && json_add_string center_freq "$center_freq"
+
+        if [ $is_wiphy_multi_radio -eq 1 ]; then
+		json_add_boolean is_multi_radio 1
+        fi
+	json_close_object
+
+	json_set_namespace "$prev"
+}
+
+
+mac80211_apply_tx_monitor_defaults() {
+	json_select config
+	json_get_var ifname _ifname
+	json_get_vars mode bss_index
+	json_select ..
+
+	[ "$mode" = "monitor" ] || return 0
+
+	iw dev "$ifname" set monitor skip_tx
 }
 
 mac80211_apply_monitor_mac() {
@@ -2225,14 +2377,75 @@ wpa_supplicant_start() {
 	local phy="$1"
 	local radio="$2"
 	local is_mld="false"
+	local dpp_enabled=0
+	local managed_ifaces=""
+	local iface_name=""
+	local config_ifname=""
+	local config_dpp=""
+	local config_mode=""
+	local phy_for_iw=""
 
 	[ -n "$wpa_supp_init" ] || return 0
 	[ -n "$mld" ] && is_mld="true"
 
 	ubus_call wpa_supplicant config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "num_global_macaddr": '"$num_global_macaddr"', "is_ml": '"$is_mld"' }' > /dev/null
-	if [ "${dpp}" -eq 1 ]; then
-		/usr/sbin/wpa_cli -i $ifname -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
-	fi
+
+	# Convert phy name format from "phy00"/"phy01" to "phy#0"/"phy#1"
+	# Remove "phy" prefix and leading zeros, then add "phy#" prefix
+	phy_for_iw=$(echo "$phy" | sed 's/^phy0*\([0-9]\+\)/phy#\1/')
+
+	managed_ifaces="$(iw dev | awk -v phy="$phy_for_iw" -v typ="managed" '
+		$1 ~ /^phy#/      { cur_phy=$1; next }
+		$1 == "Interface" { cur_if=$2; next }
+		$1 == "type" && cur_phy==phy && $2==typ { print cur_if }
+	')"
+
+	# Function to check each wifi-iface section for DPP configuration
+	check_iface_dpp() {
+		local section="$1"
+		local target_iface="$2"
+		local config_mld=""
+		local mld_ifname=""
+		local config_mode config_ifname config_dpp
+
+		config_get config_mode "$section" mode
+		config_get config_ifname "$section" ifname
+		config_get config_dpp "$section" dpp 0
+		config_get _device "$section" device
+
+		phy_num="${phy_for_iw//[!0-9]/}"
+		#extract radio & band from "radioX_bandY" and ensure both match incoming phy and radio;
+
+		set -- ${_device#radio}; _phy="${1%%_*}"; _radio="${1#*_band}"; [ "$_phy" = "$phy_num" ] && [ "$_radio" = "$radio" ] || return 1
+
+		# If ifname is not available in wifi-iface section, try to get it from wifi-mld section
+		if [ -z "$config_ifname" ]; then
+			config_get config_mld "$section" mld
+			if [ -n "$config_mld" ]; then
+				config_get mld_ifname "$config_mld" ifname
+				config_ifname="$mld_ifname"
+			fi
+		fi
+
+		# If ifname is still not available, use the target interface name
+		[ -z "$config_ifname" ] && config_ifname="$target_iface"
+
+		# Match by interface name and check if it's a STA mode with DPP enabled
+		if [ "$config_mode" = "sta" ] && [ "$config_ifname" = "$target_iface" ] && [ "$config_dpp" -eq 1 ]; then
+			dpp_enabled=1  # DPP is enabled
+		fi
+	}
+
+	config_load wireless
+	# Check if any managed interface has DPP enabled
+	for iface_name in $managed_ifaces; do
+		dpp_enabled=0
+		config_foreach check_iface_dpp wifi-iface "$iface_name" "$phy" "$radio"
+		if [ "$dpp_enabled" -eq 1 ]; then
+			/usr/sbin/wpa_cli -i "$iface_name" -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
+			dpp_enabled=0
+		fi
+	done
 }
 
 mac80211_setup_supplicant() {
@@ -2245,7 +2458,7 @@ mac80211_setup_supplicant() {
 	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -2263,7 +2476,7 @@ mac80211_setup_vif() {
 	json_get_var ifname _ifname
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
-	json_get_vars mode wds powersave mld
+	json_get_vars mode wds powersave mld ssid vap_submode
 
 	set_default powersave 0
 	set_default wds 0
@@ -2304,6 +2517,17 @@ mac80211_setup_vif() {
 		;;
 		monitor)
 			mac80211_setup_monitor
+		;;
+		ap)
+			# Check if this is a scan radio VAP
+			 json_get_vars ssid vap_submode
+
+			 if [ -n "$vap_submode" ] && [ "$vap_submode" = "scan" ]; then
+				 mac80211_setup_scan_radio
+			 else
+				 # Normal AP Handling
+				 :
+			 fi
 		;;
 	esac
 
@@ -2390,6 +2614,11 @@ mac80211_is_last_enabled_radio() {
 # Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
 is_repeater=0
 
+# Global skip_cac flag: set to 1 if any enabled 5 GHz radio has skip_cac enabled
+is_skip_cac=0
+# Global uplink_csa flag:
+is_uplink_csa=0
+
 # Update global repeater flag once based on current wireless config
 mac80211_update_is_repeater_flag() {
 	[ "$is_repeater" = "1" ] && return 0
@@ -2437,6 +2666,50 @@ mac80211_update_is_repeater_flag() {
 	config_foreach __scan_dev wifi-device
 }
 
+mac80211_update_is_skip_cac_flag() {
+	[ "$is_skip_cac" = "1" ] && return 0
+
+	config_load wireless
+
+	__skip_cac() {
+		local section="$1"
+		local disabled band skip
+
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+
+		config_get band "$section" band
+		[ "$band" != "5g" ] && return 0
+
+		config_get skip "$section" skip_cac 0
+		[ "$skip" -eq 1 ] && is_skip_cac=1
+	}
+
+	config_foreach __skip_cac wifi-device
+}
+
+mac80211_update_is_uplink_csa_flag() {
+	[ "$is_uplink_csa" = "1" ] && return 0
+
+	config_load wireless
+
+	__uplink_csa() {
+		local section="$1"
+		local disabled band uplink_csa
+
+		config_get disabled "$section" disabled 0
+		[ "$disabled" -eq 1 ] && return 0
+
+		config_get band "$section" band
+		[ "$band" != "5g" ] && return 0
+
+		config_get uplink_csa "$section" uplink_csa 0
+		[ "$uplink_csa" -eq 1 ] && is_uplink_csa=1
+	}
+
+	config_foreach __uplink_csa wifi-device
+}
+
 drv_mac80211_setup() {
 	local device=$1
 
@@ -2457,6 +2730,8 @@ drv_mac80211_setup() {
 	json_select ..
 
 	mac80211_update_is_repeater_flag
+	mac80211_update_is_skip_cac_flag
+	mac80211_update_is_uplink_csa_flag
 
 	if [ ${#device} -eq 12 ]; then
 		is_wiphy_multi_radio=1
@@ -2648,6 +2923,8 @@ drv_mac80211_setup() {
 
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_set_vif_txpower
 
+	for_each_interface "monitor" mac80211_apply_tx_monitor_defaults
+
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 	if [ "$enable_smp_affinity" -eq 1 ]; then
 		[ -f "/lib/smp_affinity_settings.sh" ] && {
@@ -2669,14 +2946,17 @@ drv_mac80211_setup() {
 	for_each_interface "ap mesh" mac80211_set_fq_limit
 	wireless_set_up
 
-	# Update repeater flag and start rptr-mgr only once: on highest enabled radio id
+	# rptr-mgr needs to be invoked only when independent repeater is
+	# configured or when dependent repeater is configured in socket
+	# mode. Start it only once on the highest enabled radio id.
 	if mac80211_is_last_enabled_radio && [ "$is_repeater" = "1" ]; then
-		if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
-			set_default skip_cac 0
-			config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
-			config_get athnewind mac80211 athnewind 0
-			sh /lib/wifi/rptr_mgr.sh $skip_cac $rptr_mgr_mode $athnewind
-			rptr-mgr > /dev/console 2>&1 &
+		config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+		config_get athnewind mac80211 athnewind 0
+		if [ "$athnewind" -eq 1 ] || [ "$rptr_mgr_mode" -eq 2 ]; then
+			if ! pgrep -x rptr-mgr >/dev/null 2>&1; then
+				sh /lib/wifi/rptr_mgr.sh $is_skip_cac $rptr_mgr_mode $athnewind
+				rptr-mgr > /dev/console 2>&1 &
+			fi
 		fi
 	fi
 }
