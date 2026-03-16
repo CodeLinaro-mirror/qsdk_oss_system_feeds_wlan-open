@@ -531,6 +531,11 @@ else
 	$(MAKE) $(MAKE_OPTS) allnoconfig
 endif
 	$(call Build/Compile/kmod)
+	-pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
+		$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt
+	-lzma e $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt \
+		$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt.lzma
+	rm -f $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt
 endef
 
 define Build/InstallDev
