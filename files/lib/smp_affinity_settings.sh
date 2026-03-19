@@ -1775,6 +1775,7 @@ enable_smp_affinity_wifi() {
 			rdp487-c2)
 					#for RDP487 (IPQ5424(2.4GHz) + QCN9274(5 GHz))
 					enable_affinity_mr03
+					;;
 			rdp502 | \
 			rdp503 | \
 			rdp504)
