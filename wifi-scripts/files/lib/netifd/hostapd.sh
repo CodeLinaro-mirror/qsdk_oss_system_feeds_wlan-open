@@ -1852,6 +1852,7 @@ wpa_supplicant_add_network() {
 				hostapd_append_wpa_key_mgmt
 			fi
 
+			[[ "$auth_type" == *sae* ]] && set_default saepwe "sae_pwe=2"
 			key_mgmt="$wpa_key_mgmt"
 
 			if [ "$_w_mode" = "mesh" ] || [ "$auth_type" = "sae" ]; then
