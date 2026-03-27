@@ -16,6 +16,17 @@ const iftypes = {
 	monitor: nl80211.const.NL80211_IFTYPE_MONITOR,
 };
 
+const monitor_flags_map = {
+	fcsfail: "fcsfail",
+	plcpfail: "plcpfail",
+	control: "control",
+	other_bss: "other_bss",
+	cook_frames: "cook_frames",
+	active: "active",
+	skip_tx: "skip_tx",
+	skip_rx: "skip_rx",
+};
+
 const mesh_params = {
 	mesh_retry_timeout: "retry_timeout",
 	mesh_confirm_timeout: "confirm_timeout",
@@ -45,6 +56,19 @@ const mesh_params = {
 	mesh_power_mode: "power_mode",
 	mesh_nolearn: "nolearn"
 };
+
+function parse_monitor_flags(flag_list) {
+	let mntr_flags = {};
+	for (let flag_str in flag_list) {
+		let nl_flag_val = monitor_flags_map[flag_str];
+		if (nl_flag_val) {
+			mntr_flags[nl_flag_val] = 1;
+		} else {
+			warn(`Unknown monitor flag: ${flag_str}\n`);
+		}
+	}
+	return mntr_flags;
+}
 
 function wdev_remove(name)
 {
@@ -125,6 +149,13 @@ function wdev_create(phy, name, data)
 		req.mac = data.macaddr;
 	if (data.radio != null && data.radio >= 0)
 		req.vif_radio_mask = 1 << data.radio;
+
+	if (data.mode == "monitor") {
+		if (data.monitor_flags){
+			let flags_list = split(data.monitor_flags, " ");
+			req.mntr_flags = parse_monitor_flags(flags_list);
+		}
+	}
 
 	nl80211.error();
 
