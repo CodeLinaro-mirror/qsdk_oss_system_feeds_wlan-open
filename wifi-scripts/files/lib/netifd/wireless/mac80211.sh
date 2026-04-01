@@ -207,6 +207,7 @@ use_driver_vendor_addr=
 athnewind=
 skip_cac=
 uplink_csa=
+sta_dfs_en=
 rptr_mgr_mode=
 vap_submode=
 
@@ -306,6 +307,7 @@ ubus_call() {
 		config_add_int radio beacon_int chanbw frag rts
 		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
 		config_add_int num_global_macaddr multiple_bssid
+		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
 		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar
 	# ACS behavior tuning
@@ -2807,7 +2809,7 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 htmode \
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
-		ccfs disable_csa_dfs ru_punct_bitmap
+		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -2985,6 +2987,8 @@ drv_mac80211_setup() {
 		[ -n "$frag" ] && iw phy "$phy" set frag "${frag%%.*}"
 		[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 	fi
+
+	[ -n "$sta_dfs_en" ] && iw phy "$phy" set sta_dfs_en "$sta_dfs_en" >/dev/null 2>&1
 
 	has_ap=
 	hostapd_ctrl=
