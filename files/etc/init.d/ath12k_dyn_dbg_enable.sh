@@ -90,6 +90,8 @@ update_ath12k_module_parameters()
 	} > "$ath12k_config_file"
 	rm -f /tmp/ath12k_rest
 
+	fsync "$ath12k_config_file"
+
 	# Set board name for sdx kobuk single-phy and split-phy
 	if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "SDXKOVA" /sys/firmware/devicetree/base/model) != 0 ]; then
 		if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "V2" /tmp/sysinfo/model) = 0 ]; then
