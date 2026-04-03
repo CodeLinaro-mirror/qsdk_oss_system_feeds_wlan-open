@@ -47,7 +47,23 @@ function freq_to_channel(freq) {
 	return 0;
 }
 
+function is_scan_radio(phy_name) {
+	/* Scan Radios have a phy-scan-XX format */
+	if (match(phy_name, /^phy-scan-[0-9]+$/))
+		return true;
+	return false;
+}
+
 function radio_exists(path, macaddr, phy) {
+	/* For scan radios: check if a wifi-iface with vap_submode=scan already exists */
+	if (is_scan_radio(phy)) {
+		for (let name, s in config) {
+			if (s[".type"] == "wifi-iface" && s.vap_submode == "scan")
+				return true;
+		}
+		return false;
+	}
+
 	for (let name, s in config) {
 		if (s[".type"] != "wifi-device")
 			continue;
@@ -84,13 +100,6 @@ function get_band(freq) {
 function get_channel_list(start_freq, end_freq) {
 	channels = freq_to_channel(start_freq) + "-" + freq_to_channel(end_freq);
 	return channels;
-}
-
-function is_scan_radio(phy_name) {
-	/* Scan Radios have a phy-scan-XX format */
-	if (match(phy_name, /^phy-scan-[0-9]+$/))
-		return true;
-	return false;
 }
 
 /* ADDED: helpers for proprietary→ath-ud translator */
@@ -632,7 +641,7 @@ for (let phy_name, phy in board.wlan) {
 		continue;
 
 	let macaddr = trim(readfile(`/sys/class/ieee80211/${phy_name}/macaddress`));
-	if (!is_scan_phy && radio_exists(phy.path, macaddr, phy_name)) {
+	if (radio_exists(phy.path, macaddr, phy_name)) {
 		add_missing_radio_for_existing(phy, idx);
 		idx++;
 		continue;
