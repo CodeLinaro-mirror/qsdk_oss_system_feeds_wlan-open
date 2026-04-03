@@ -428,6 +428,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean enable_aal
 	config_add_int ml_max_rec_links
 	config_add_int bss_index
+	config_add_boolean disable_11be
 
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
@@ -1145,11 +1146,15 @@ mac80211_hostapd_setup_base() {
 		if [ "$he_bss_color_enabled" -gt 0 ]; then
 			config_get enable_color mac80211 enable_color 1
 			if [ "$enable_color" -eq 1 ]; then
-				bss_color=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
-				[ -z "$bss_color" ] && bss_color=0
-				[ "$bss_color" != "0" ] && bss_color=${bss_color#0}
-				bss_color=$((bss_color % 63))
-				bss_color=$((bss_color + 1))
+				if [ "$he_bss_color" -ge 1 ] && [ "$he_bss_color" -le 63 ]; then
+					bss_color=$he_bss_color
+				else
+					bss_color=$(head -1 /dev/urandom | tr -dc '0-9' | head -c2)
+					[ -z "$bss_color" ] && bss_color=0
+					[ "$bss_color" != "0" ] && bss_color=${bss_color#0}
+					bss_color=$((bss_color % 63))
+					bss_color=$((bss_color + 1))
+				fi
 				append base_cfg "he_bss_color=$bss_color" "$N"
 			fi
 
@@ -1233,7 +1238,7 @@ mac80211_hostapd_setup_base() {
 		fi
 
 		if [[ "$htmode" == "HE"* ]] || [ "$band" = "6g" ]; then
-			if [ "$has_ap" -gt 1 ]; then
+			if [ "$has_ap" -gt 1 ] && [ ! -z "$multiple_bssid" ]; then
 				append base_cfg "mbssid=$multiple_bssid" "$N"
 			fi
 
@@ -1397,6 +1402,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
+	json_get_vars disable_11be
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
 	json_get_vars commitatf atfssidsched atfssidgroup
@@ -1477,8 +1483,13 @@ mac80211_hostapd_setup_bss() {
 
 	case "$htmode" in
 		EHT*|UHR*)
-		append hostapd_cfg "mld_ap=1" "$N"
-
+		if [ "$disable_11be" = "1" ]; then
+			# Non-MLD BSS on EHT radio: suppress EHT caps, operate as 11ax only
+			append hostapd_cfg "mld_ap=0" "$N"
+			append hostapd_cfg "disable_11be=1" "$N"
+		else
+			append hostapd_cfg "mld_ap=1" "$N"
+		fi
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
 			[ -n "$mld_macaddr" ] && append hostapd_cfg "mld_addr=$mld_macaddr" "$N"
@@ -1701,7 +1712,8 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode disable_11be
+
 
 	if [ "$mode" == "monitor" ] && [ "$auto_channel" -gt 0 ] && \
 	   [ "$has_ap" -gt 0 ]; then
