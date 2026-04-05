@@ -193,6 +193,24 @@ function wiphy_detect() {
 				break;
 			}
 
+			/* Collect first and last enabled channel for the channel-range option */
+			let first_chan = 0;
+			let last_chan = 0;
+			for (let freq in band.freqs) {
+				if (freq.disabled)
+					continue;
+				let chan = freq_to_channel(freq.freq);
+				if (!chan)
+					continue;
+				if (!first_chan)
+					first_chan = chan;
+				last_chan = chan;
+			}
+			if (first_chan && last_chan) {
+				band_info.first_channel = first_chan;
+				band_info.last_channel = last_chan;
+			}
+
 			if (band_name == "2G")
 				continue;
 			if (he_phy_cap & 4)

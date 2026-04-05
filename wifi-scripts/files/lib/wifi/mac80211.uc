@@ -512,6 +512,9 @@ function generate_config(info, name, single_wiphy, id, radio_idx, is_scan) {
 			else
 				channel = 49;
 		}
+		/* Populate channels from the enabled-frequency range stored by wifi-detect.uc */
+		if (band.first_channel && band.last_channel)
+			channels = band.first_channel + "-" + band.last_channel;
 	}
 
 	if (band_name == "2G")
