@@ -140,6 +140,7 @@ CPTCFG_ATH12K_PCI=m
 CPTCFG_ATH12K_DEBUG=y
 CPTCFG_ATH12K_DEBUGFS=y
 CPTCFG_ATH12K_TRACING=y
+CPTCFG_ATH12K_SAWF=y
 CPTCFG_WLAN_VENDOR_ATH=y
 CPTCFG_NL80211_TESTMODE=y
 CPTCFG_CFG80211_CERTIFICATION_ONUS=y
@@ -246,6 +247,11 @@ do_install:append() {
 
 	if [ -f ${S}/drivers/net/wireless/ath/ath12k/vendor.h ]; then
 		cp ${S}/drivers/net/wireless/ath/ath12k/vendor.h ${D}${includedir}/mac80211/ath/
+	fi
+
+	if [ -f ${S}/Module.symvers ]; then
+		install -d ${D}${includedir}/mac80211
+		cp ${S}/Module.symvers ${D}${includedir}/mac80211/
 	fi
 
 	if [ -f ${S}/include/ath/ath_sawf.h ]; then
