@@ -46,3 +46,5 @@ do_install() {
     install -d ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/qca-wifi-nss-plugins
     install -m 0644 qca-wifi-nss-plugins${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/qca-wifi-nss-plugins/
 }
+
+KERNEL_MODULE_AUTOLOAD += "qca-wifi-nss-plugins"
