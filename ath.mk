@@ -50,6 +50,8 @@ config-y += ATH12K_MEM_PROFILE_512M
 endif
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 config-y += ATH12K_MEM_PROFILE_256M
+else
+config-y += ATH12K_TX_MONITOR
 endif
 
 config-$(call config_package,carl9170) += CARL9170
