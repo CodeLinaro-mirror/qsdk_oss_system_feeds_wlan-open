@@ -405,6 +405,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_string vap_submode
+	config_add_boolean he_mcs_12_13_supp
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -1411,7 +1412,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp
 	json_get_vars commitatf atfssidsched atfssidgroup
 
 	#epcs params
@@ -1449,6 +1450,7 @@ mac80211_hostapd_setup_bss() {
 	[ -n "$vlan_tagged_interface" ] && append hostapd_cfg "vlan_tagged_interface=$vlan_tagged_interface" "$N"
 	[ -n "$vlan_bridge" ] && append hostapd_cfg "vlan_bridge=$vlan_bridge" "$N"
 	[ "$vlan_naming" = "1" ] && append hostapd_cfg "vlan_naming=1" "$N"
+	[ -n "$he_mcs_12_13_supp" ] && append hostapd_cfg "he_mcs_12_13_enabled=$he_mcs_12_13_supp" "$N"
 	[ -n "$accept_mac_file" ] && [ -f "$accept_mac_file" ] && append hostapd_cfg "accept_mac_file=$accept_mac_file" "$N"
 	[ -n "$wpa_psk_file" ] && [ -f "$wpa_psk_file" ] && append hostapd_cfg "wpa_psk_file=$wpa_psk_file" "$N"
 	[ -n "$sae_password_file" ] && [ -f "$sae_password_file" ] && append hostapd_cfg "sae_password_file=$sae_password_file" "$N"
