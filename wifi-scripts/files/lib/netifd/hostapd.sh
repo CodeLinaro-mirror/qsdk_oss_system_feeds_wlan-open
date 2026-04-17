@@ -1009,6 +1009,11 @@ hostapd_set_bss_options() {
 	local auth_algs="$(((auth_mode_shared << 1) | auth_mode_open))"
 	append bss_conf "auth_algs=${auth_algs:-1}" "$N"
 	append bss_conf "wpa=$wpa" "$N"
+	if [ "$control_frame_prot" = "1" ]; then
+		if ! echo "$wpa_pairwise" | grep -qw "GCMP-256"; then
+			wpa_pairwise="${wpa_pairwise:+$wpa_pairwise }GCMP-256"
+		fi
+	fi
 	[ -n "$wpa_pairwise" ] && append bss_conf "wpa_pairwise=$wpa_pairwise" "$N"
 
 	set_default wps_pushbutton 0
@@ -2011,9 +2016,12 @@ wpa_supplicant_add_network() {
 		;;
 	esac
 
-	[ -n "$wpa_cipher" ] && {
-		append network_data "pairwise=$wpa_cipher" "$N$T"
-	}
+	if [ "$control_frame_protection" = "1" ]; then
+		if ! echo "$wpa_cipher" | grep -qw "GCMP-256"; then
+			wpa_cipher="${wpa_cipher:+$wpa_cipher }GCMP-256"
+		fi
+	fi
+	[ -n "$wpa_cipher" ] && append network_data "pairwise=$wpa_cipher" "$N$T"
 	if [ "$group_cipher" != "GCMP-256" ]; then
 		group_cipher="CCMP"
 	fi
