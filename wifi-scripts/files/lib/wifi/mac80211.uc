@@ -48,8 +48,8 @@ function freq_to_channel(freq) {
 }
 
 function is_scan_radio(phy_name) {
-	/* Scan Radios have a phy-scan-XX format */
-	if (match(phy_name, /^phy-scan-[0-9]+$/))
+	/* Scan Radios have a phy-scan-XX or phy_scan_XX format */
+	if (match(phy_name, /^phy-scan-[0-9]+$/) || match(phy_name, /^phy_scan_[0-9]+$/))
 		return true;
 	return false;
 }
