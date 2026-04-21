@@ -48,4 +48,3 @@ do_install() {
 }
 
 KERNEL_MODULE_AUTOLOAD += "qca-wifi-nss-plugins"
-

@@ -95,9 +95,9 @@ KCFLAGS += " \
 "
 
 MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
-                        ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
-                        ${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
-                        ${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
 "
 
 do_unpack[postfuncs] += "do_cp_src_wlan_open_extns"
@@ -211,13 +211,16 @@ do_install:append() {
 	install -d ${D}/ini
 	install -d ${D}/ini/internal/
 
-	rm -f ${D}${includedir}/mac80211-backport/linux/module.h
-
+	install -d ${D}${includedir}/open-mac80211
 	install -d ${D}${includedir}/mac80211
 	install -d ${D}${includedir}/mac80211-backport
 	install -d ${D}${includedir}/mac80211/ath
 	install -d ${D}${includedir}/net/mac80211
-    install -d ${D}${sysconfdir}/modprobe.d
+	install -d ${D}${sysconfdir}/modprobe.d
+	install -d  ${STAGING_DIR}/usr/
+	install -d  ${STAGING_DIR}/usr/include
+	install -d  ${STAGING_DIR}/usr/include/mac80211
+	install -d  ${STAGING_DIR}/usr/include/mac80211/ath
 
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
@@ -227,6 +230,11 @@ do_install:append() {
 	cp -r ${S}/backport-include/* ${D}${includedir}/mac80211-backport/
 	cp ${S}/net/mac80211/rate.h ${D}${includedir}/net/mac80211/
 	cp ${S}/drivers/net/wireless/ath/*.h ${D}${includedir}/mac80211/ath/
+
+	cp -r ${S}/include/ath/*.h ${STAGING_DIR}/usr/include
+	cp -r ${S}/include/uapi/linux/*.h ${STAGING_DIR}/usr/include
+	cp ${S}/drivers/net/wireless/ath/ath12k/*.h ${STAGING_DIR}/usr/include/mac80211/ath/
+	cp ${S}/Module.symvers ${D}${includedir}/open-mac80211/
 
 	if [ -f ${S}/drivers/net/wireless/ath/ath12k/vendor.h ]; then
 		cp ${S}/drivers/net/wireless/ath/ath12k/vendor.h ${D}${includedir}/mac80211/ath/
@@ -243,7 +251,7 @@ do_install:append() {
 		cp ${S}/include/ath/ath_fse.h ${D}${includedir}/ath/
 		cp ${S}/include/ath/ath_dp_accel_cfg.h ${D}${includedir}/ath/
 		cp ${S}/include/ath/ppe_public.h ${D}${includedir}/ath/
-    fi
+	fi
 
 cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
 # Ensure firmware path is set before loading ath12k
@@ -261,19 +269,19 @@ ALLOW_EMPTY:${PN}-firmware-ath11k = "1"
 ALLOW_EMPTY:${PN}-firmware-ath12k = "1"
 
 FILES:${PN}-firmware-ath11k = " \
-    ${nonarch_base_libdir}/firmware/ath11k/* \
+	${nonarch_base_libdir}/firmware/ath11k/* \
 "
 
 FILES:${PN}-firmware-ath12k = " \
-    ${nonarch_base_libdir}/firmware/ath12k/* \
-    ${nonarch_base_libdir}/firmware/qcn9224 \
+	${nonarch_base_libdir}/firmware/ath12k/* \
+	${nonarch_base_libdir}/firmware/qcn9224 \
 "
 
 FILES:${PN}-dev = " \
-    ${includedir}/mac80211/* \
-    ${includedir}/mac80211-backport/* \
-    ${includedir}/net/mac80211/* \
-    ${includedir}/ath/* \
+	${includedir}/mac80211/* \
+	${includedir}/mac80211-backport/* \
+	${includedir}/net/mac80211/* \
+	${includedir}/ath/* \
 "
 
 # Runtime dependencies for auto-generated kernel-module-* packages
@@ -286,6 +294,7 @@ RDEPENDS:kernel-module-ath11k-pci = "kernel-module-ath11k"
 RDEPENDS:kernel-module-ath12k = "kernel-module-ath"
 RDEPENDS:kernel-module-ath-debug = "kernel-module-ath12k"
 RDEPENDS:kernel-module-ath12k-wifi7 = "kernel-module-ath12k"
+RDEPENDS:kernel-module-ath12k-wifi8 = "kernel-module-ath12k"
 RDEPENDS:${PN}-scripts = "bash"
 
 
@@ -293,25 +302,28 @@ ALLOW_EMPTY:${PN} = "1"
 ALLOW_EMPTY:${PN}-dev = "1"
 
 RDEPENDS:${PN} += " \
-    kernel-module-compat \
-    kernel-module-cfg80211 \
-    kernel-module-mac80211 \
-    kernel-module-ath \
-    kernel-module-ath11k \
-    kernel-module-ath11k-ahb \
-    kernel-module-ath11k-pci \
-    kernel-module-ath12k \
-    kernel-module-ath-debug \
-    kernel-module-ath12k-wifi7 \
-    ${PN}-firmware-ath11k \
-    ${PN}-firmware-ath12k \
+	kernel-module-compat \
+	kernel-module-cfg80211 \
+	kernel-module-mac80211 \
+	kernel-module-ath \
+	kernel-module-ath11k \
+	kernel-module-ath11k-ahb \
+	kernel-module-ath11k-pci \
+	kernel-module-ath12k \
+	kernel-module-ath-debug \
+	kernel-module-ath12k-wifi7 \
+	kernel-module-ath12k-wifi8 \
+	${PN}-firmware-ath11k \
+	${PN}-firmware-ath12k \
 "
 
 FILES:${PN} += "/ini/* /ini/internal/*"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 
-COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|sdx85)"
+FILES:${PN}-dev += "${includedir}/open-mac80211/*"
+
+COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85)"
 
 PARALLEL_MAKEINST = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
@@ -327,6 +339,7 @@ KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k"
 KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
 
 # Configure modprobe options using module_conf (same pattern as reference)
 module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
