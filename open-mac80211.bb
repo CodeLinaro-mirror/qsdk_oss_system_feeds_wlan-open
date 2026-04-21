@@ -56,12 +56,6 @@ RDEPENDS:${PN} = " \
 	hostapd \
 "
 
-EXTRA_OEMAKE += " \
-	KLIB_BUILD=${STAGING_KERNEL_BUILDDIR} \
-	KLIB=${D}/${nonarch_base_libdir}/modules/${KERNEL_VERSION}/ \
-	MODPROBE=true \
-"
-
 EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
 	-I${STAGING_DIR}/usr/include \
@@ -186,7 +180,7 @@ do_refactor_alloc_cocci() {
 	done
 }
 
-MAKE_OPTS:= " \
+MAKE_OPTS = " \
 	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
 	KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" \
 	MODPROBE=true \
@@ -194,6 +188,9 @@ MAKE_OPTS:= " \
 	KBUILD_LDFLAGS_MODULE_PREREQ= \
 	KBUILD_EXTRA_SYMBOLS='${STAGING_INCDIR}/qca-nss-ppe/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers ${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers' \
 "
+
+do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
+
 do_compile() {
 	${MAKE} ${MAKE_OPTS} modules
 }
