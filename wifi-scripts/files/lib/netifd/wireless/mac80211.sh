@@ -2087,7 +2087,7 @@ mac80211_setup_monitor() {
                         bw=160
                         center_freq=$(get_seg0_freq "$freq" "$channel" "$(mac80211_get_seg0 160)")
                         ;;
-		EHT320)
+		EHT320|UHR320)
 			if [ "$band" = "6g" ]; then
 				bw=320
 				if [ -n "$ccfs" ] && [ "$ccfs" -gt 0 ]; then
