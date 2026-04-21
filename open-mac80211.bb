@@ -94,8 +94,6 @@ KCFLAGS += " \
 	-Wno-error=unused-variable -Wno-unused-variable \
 "
 
-PARALLEL_MAKE = "-j ${@oe.utils.cpu_count()}"
-
 MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
                         ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
                         ${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
@@ -187,21 +185,6 @@ do_refactor_alloc_cocci() {
 			${SPATCH} --sp-file "${COCCI}" --in-place -dir "${WLAN_DIR}/${d}"
 		fi
 	done
-}
-
-do_compile:prepend() {
-    # Find all Module.symvers from dependencies
-    EXTRA_SYMBOLS=""
-    for dep in qca-nss-ppe qca-nss-ppe-vp qca-nss-ppe-ds qca-nss-wifi-plugin; do
-        symvers=$(find ${STAGING_DIR} -path "*/${dep}/Module.symvers" 2>/dev/null | head -1)
-        if [ -f "$symvers" ]; then
-            EXTRA_SYMBOLS="${EXTRA_SYMBOLS} $symvers"
-        fi
-    done
-
-    if [ -n "$EXTRA_SYMBOLS" ]; then
-        export KBUILD_EXTRA_SYMBOLS="$EXTRA_SYMBOLS"
-    fi
 }
 
 MAKE_OPTS:= " \
@@ -367,6 +350,5 @@ FILES:${PN} += "/ini/* /ini/internal/*"
 
 COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|sdx85)"
 
-EXTRA_OEMAKE += "V=1"
 PARALLEL_MAKEINST = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
