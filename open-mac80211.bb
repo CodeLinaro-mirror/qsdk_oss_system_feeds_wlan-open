@@ -125,6 +125,7 @@ CPTCFG_ATHDEBUG=y
 CPTCFG_DEBUG_FS=y
 CPTCFG_MAC80211_LEDS=y
 CPTCFG_ATH_COMMON=m
+CPTCFG_ATH_DEBUG=y
 CPTCFG_ATH11K=m
 CPTCFG_ATH11K_AHB=m
 CPTCFG_ATH11K_PCI=m
@@ -149,8 +150,6 @@ CPTCFG_QCN_EXTN=y
 CPTCFG_MAC80211_ATHDEBUG=y
 EOF
 
-	yes "" | oe_runmake -C ${S} oldconfig || true
-	oe_runmake -C ${S} KCONFIG_CONFIG=${S}/.config olddefconfig
 }
 
 #do_patch[postfuncs] += "do_refactor_alloc_cocci"
@@ -218,6 +217,7 @@ do_install:append() {
 	install -d ${D}${includedir}/mac80211-backport
 	install -d ${D}${includedir}/mac80211/ath
 	install -d ${D}${includedir}/net/mac80211
+    install -d ${D}${sysconfdir}/modprobe.d
 
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
@@ -243,112 +243,97 @@ do_install:append() {
 		cp ${S}/include/ath/ath_fse.h ${D}${includedir}/ath/
 		cp ${S}/include/ath/ath_dp_accel_cfg.h ${D}${includedir}/ath/
 		cp ${S}/include/ath/ppe_public.h ${D}${includedir}/ath/
-	fi
+    fi
+
+cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
+# Ensure firmware path is set before loading ath12k
+install ath12k /bin/sh -c 'echo /ini > /sys/module/firmware_class/parameters/path 2>/dev/null || true; /sbin/modprobe --ignore-install ath12k $CMDLINE_OPTS'
+EOF
+
 }
 
-# Prevent automatic kernel module dependency detection
-SKIP_FILEDEPS = "1"
 
-PACKAGES =+ " \
-	${PN}-cfg80211 \
-	${PN}-mac80211 \
-	${PN}-ath \
-	${PN}-ath11k \
-	${PN}-ath12k \
-	${PN}-scripts \
-"
-FILES:${PN} = ""
+# Firmware files need to be in separate packages since they're not .ko files
+PACKAGES =+ "${PN}-firmware-ath11k ${PN}-firmware-ath12k ${PN}-scripts"
 
-FILES:${PN}-cfg80211 = " \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/compat/compat.ko \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/net/wireless/cfg80211.ko \
+# Allow firmware packages to be empty if firmware is provided elsewhere
+ALLOW_EMPTY:${PN}-firmware-ath11k = "1"
+ALLOW_EMPTY:${PN}-firmware-ath12k = "1"
+
+FILES:${PN}-firmware-ath11k = " \
+    ${nonarch_base_libdir}/firmware/ath11k/* \
 "
 
-FILES:${PN}-mac80211 = " \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/net/mac80211/mac80211.ko \
-"
-
-FILES:${PN}-ath = " \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/drivers/net/wireless/ath/ath.ko \
-"
-
-FILES:${PN}-ath11k = " \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/drivers/net/wireless/ath/ath11k/*.ko \
-	${nonarch_base_libdir}/firmware/ath11k/* \
-"
-
-FILES:${PN}-ath12k = " \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/drivers/net/wireless/ath/ath12k/*.ko \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko \
-	${nonarch_base_libdir}/modules/${KERNEL_VERSION}/*/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
-	${nonarch_base_libdir}/firmware/ath12k/* \
-	${nonarch_base_libdir}/firmware/qcn9224 \
+FILES:${PN}-firmware-ath12k = " \
+    ${nonarch_base_libdir}/firmware/ath12k/* \
+    ${nonarch_base_libdir}/firmware/qcn9224 \
 "
 
 FILES:${PN}-dev = " \
-	${includedir}/mac80211/* \
-	${includedir}/mac80211-backport/* \
-	${includedir}/net/mac80211/* \
-	${includedir}/ath/* \
+    ${includedir}/mac80211/* \
+    ${includedir}/mac80211-backport/* \
+    ${includedir}/net/mac80211/* \
+    ${includedir}/ath/* \
 "
 
-# Runtime dependencies
-RDEPENDS:${PN}-cfg80211 = "wireless-regdb"
-RDEPENDS:${PN}-mac80211 = "${PN}-cfg80211"
-RDEPENDS:${PN}-ath = "${PN}-mac80211"
-RDEPENDS:${PN}-ath11k = "${PN}-ath"
-RDEPENDS:${PN}-ath12k = "${PN}-ath"
+# Runtime dependencies for auto-generated kernel-module-* packages
+RDEPENDS:kernel-module-cfg80211 = "wireless-regdb"
+RDEPENDS:kernel-module-mac80211 = "kernel-module-cfg80211 kernel-module-compat"
+RDEPENDS:kernel-module-ath = "kernel-module-mac80211"
+RDEPENDS:kernel-module-ath11k = "kernel-module-ath"
+RDEPENDS:kernel-module-ath11k-ahb = "kernel-module-ath11k"
+RDEPENDS:kernel-module-ath11k-pci = "kernel-module-ath11k"
+RDEPENDS:kernel-module-ath12k = "kernel-module-ath"
+RDEPENDS:kernel-module-ath-debug = "kernel-module-ath12k"
+RDEPENDS:kernel-module-ath12k-wifi7 = "kernel-module-ath12k"
 RDEPENDS:${PN}-scripts = "bash"
 
-# Provide, replace, and conflict with kernel-provided modules
-RPROVIDES:${PN}-cfg80211 += "kernel-module-cfg80211 kernel-module-cfg80211-${KERNEL_VERSION} kernel-module-compat kernel-module-compat-${KERNEL_VERSION}"
-RREPLACES:${PN}-cfg80211 += "kernel-module-cfg80211"
-RCONFLICTS:${PN}-cfg80211 += "kernel-module-cfg80211"
 
-RPROVIDES:${PN}-mac80211 += "kernel-module-mac80211 kernel-module-mac80211-${KERNEL_VERSION}"
-RREPLACES:${PN}-mac80211 += "kernel-module-mac80211"
-RCONFLICTS:${PN}-mac80211 += "kernel-module-mac80211"
-
-RPROVIDES:${PN}-ath += "kernel-module-ath kernel-module-ath-${KERNEL_VERSION}"
-RREPLACES:${PN}-ath += "kernel-module-ath"
-RCONFLICTS:${PN}-ath += "kernel-module-ath"
-
-RPROVIDES:${PN}-ath11k += "kernel-module-ath11k kernel-module-ath11k-${KERNEL_VERSION} kernel-module-ath11k-ahb kernel-module-ath11k-ahb-${KERNEL_VERSION} kernel-module-ath11k-pci kernel-module-ath11k-pci-${KERNEL_VERSION}"
-RREPLACES:${PN}-ath11k += "kernel-module-ath11k"
-RCONFLICTS:${PN}-ath11k += "kernel-module-ath11k"
-
-RPROVIDES:${PN}-ath12k += "kernel-module-ath12k kernel-module-ath12k-${KERNEL_VERSION} kernel-module-ath-debug kernel-module-ath-debug-${KERNEL_VERSION} kernel-module-ath12k-ahb kernel-module-ath12k-ahb-${KERNEL_VERSION} kernel-module-ath12k-pci kernel-module-ath12k-pci-${KERNEL_VERSION} kernel-module-ath12k-wifi7 kernel-module-ath12k-wifi7-${KERNEL_VERSION}"
-RREPLACES:${PN}-ath12k += "kernel-module-ath12k"
-RCONFLICTS:${PN}-ath12k += "kernel-module-ath12k"
-
-RCONFLICTS:${PN} = "linux-backports"
-
-# Autoload modules in dependency order
-KERNEL_MODULE_AUTOLOAD:${PN}-cfg80211 = "compat cfg80211"
-KERNEL_MODULE_AUTOLOAD:${PN}-mac80211 = "mac80211"
-KERNEL_MODULE_AUTOLOAD:${PN}-ath = "ath"
-KERNEL_MODULE_AUTOLOAD:${PN}-ath11k = "ath11k ath11k_ahb ath11k_pci"
-KERNEL_MODULE_AUTOLOAD:${PN}-ath12k = "ath12k ath_debug ath12k_wifi7"
-
-# Set regulatory domain
-KERNEL_MODULE_PROBECONF += "cfg80211"
-module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
-
-# Make the main package a meta-package that pulls in all sub-packages
 ALLOW_EMPTY:${PN} = "1"
 ALLOW_EMPTY:${PN}-dev = "1"
 
 RDEPENDS:${PN} += " \
-    ${PN}-cfg80211 \
-    ${PN}-mac80211 \
-    ${PN}-ath \
-    ${PN}-ath11k \
-    ${PN}-ath12k \
+    kernel-module-compat \
+    kernel-module-cfg80211 \
+    kernel-module-mac80211 \
+    kernel-module-ath \
+    kernel-module-ath11k \
+    kernel-module-ath11k-ahb \
+    kernel-module-ath11k-pci \
+    kernel-module-ath12k \
+    kernel-module-ath-debug \
+    kernel-module-ath12k-wifi7 \
+    ${PN}-firmware-ath11k \
+    ${PN}-firmware-ath12k \
 "
 
 FILES:${PN} += "/ini/* /ini/internal/*"
+
+FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 
 COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|sdx85)"
 
 PARALLEL_MAKEINST = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+# Use KERNEL_MODULE_AUTOLOAD:append for each module
+KERNEL_MODULE_AUTOLOAD:append = " compat"
+KERNEL_MODULE_AUTOLOAD:append = " cfg80211"
+KERNEL_MODULE_AUTOLOAD:append = " mac80211"
+KERNEL_MODULE_AUTOLOAD:append = " ath"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k_ahb"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k"
+KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
+
+# Configure modprobe options using module_conf (same pattern as reference)
+module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
+module_conf_ath12k = "options ath12k dyndbg=+p debug_mask=0xffffffff"
+
+# Register modules that have configuration
+KERNEL_MODULE_PROBECONF += "cfg80211 ath12k"
+
+# Conflict with linux-backports
+RCONFLICTS:${PN} = "linux-backports"
