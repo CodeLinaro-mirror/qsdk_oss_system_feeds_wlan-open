@@ -810,8 +810,6 @@ mac80211_hostapd_setup_base() {
 	vht_center_seg0=
 	eht_oper_chwidth=0
 	eht_center_seg0=
-	uhr_oper_chwidth=0
-	uhr_center_seg0=
 
 	idx="$channel"
 	case "$htmode" in
@@ -896,18 +894,6 @@ mac80211_hostapd_setup_base() {
 			;;
 	esac
 
-	if [ "$htmode" = "UHR320" ]; then
-		uhr_oper_chwidth=9
-		if [ "$freq" -ge 5500 ] && [ "$freq" -le 5730 ]; then
-			uhr_center_seg0=130
-		else
-			uhr_center_seg0=$vht_center_seg0
-		fi
-	else
-		uhr_oper_chwidth=$vht_oper_chwidth
-		uhr_center_seg0=$vht_center_seg0
-	fi
-
 	[ "$band" = "6g" ] && {
 		op_class=
 		case "$htmode" in
@@ -929,10 +915,6 @@ mac80211_hostapd_setup_base() {
 				eht_center_seg0=$idx
 				eht_oper_chwidth=9
 
-				if [ "$htmode" = "UHR320" ]; then
-					uhr_center_seg0=$idx
-					uhr_oper_chwidth=9
-				fi
 			;;
 			HE*|EHT*|UHR*) op_class=$((132 + $vht_oper_chwidth));;
 		esac
@@ -1236,10 +1218,6 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$enable_bn" != "0" ]; then
 			append base_cfg "ieee80211bn=1" "$N"
-			[ "$hwmode" = "a" ] && {
-				append base_cfg "uhr_oper_chwidth=$uhr_oper_chwidth" "$N"
-				append base_cfg "uhr_oper_centr_freq_seg0_idx=$uhr_center_seg0" "$N"
-			}
 		fi
 
 		if [ "$band" = "6g" ]; then
