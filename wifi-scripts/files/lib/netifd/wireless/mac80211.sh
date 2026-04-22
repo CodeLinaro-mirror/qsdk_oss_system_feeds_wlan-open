@@ -211,6 +211,7 @@ uplink_csa=
 sta_dfs_en=
 rptr_mgr_mode=
 vap_submode=
+CSwOpts=
 
 #dpp
 dpp_ifaces=
@@ -407,6 +408,7 @@ ubus_call() {
 		ignorecac \
 		skip_cac \
 		uplink_csa
+	config_add_string CSwOpts
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
 }
@@ -717,7 +719,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
 	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
-	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
+	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa CSwOpts
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
@@ -1308,6 +1310,7 @@ mac80211_hostapd_setup_base() {
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$uplink_csa" ] && append base_cfg "uplink_csa=$uplink_csa" "$N"
+	[ -n "$CSwOpts" ] && append base_cfg "CSwOpts=$CSwOpts" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
@@ -2608,14 +2611,22 @@ wpa_supplicant_start() {
 mac80211_setup_supplicant() {
 	local enable=$1
 	local add_sp=0
+	local fetched_CSwOpts
 
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
 	config_get athnewind mac80211 athnewind 0
 	config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+	config_get fetched_CSwOpts "$device" CSwOpts
+	if [ -n "$fetched_CSwOpts" ]; then
+		CSwOpts="$fetched_CSwOpts"
+		echo "$CSwOpts" > /tmp/CSwOpts_saved
+	elif [ -f /tmp/CSwOpts_saved ]; then
+		CSwOpts="$(cat /tmp/CSwOpts_saved)"
+	fi
 	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa" "$CSwOpts"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -3192,6 +3203,7 @@ drv_mac80211_teardown() {
 	mac80211_reset_config "$phy"
 	killall rptr-mgr
 	rm /var/run/rptr_mgr.conf
+	rm -f /tmp/CSwOpts_saved
 }
 
 _sta_radios=
