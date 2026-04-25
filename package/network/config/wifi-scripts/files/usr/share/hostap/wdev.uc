@@ -69,30 +69,54 @@ function iface_cb(new_if, old_if)
 	if (old_if && new_if && is_equal(old_if, new_if))
 		return;
 
-	if (old_if)
+	/* Interface removal */
+	if (old_if && !new_if) {
+		warn(`iface_cb removing ${old_if.ifname}`);
 		iface_stop(old_if);
-	if (new_if)
+		return;
+	}
+
+	/* Interface addition */
+	if (new_if && !old_if) {
+		warn(`iface_cb: adding ${new_if.ifname}`);
 		iface_start(new_if);
+		return;
+	}
+
+	if (old_if && new_if)
+		warn(`iface_cb change for ${old_if.ifname}, not deleting`);
 }
 
 function drop_inactive(config)
 {
 	for (let key in config) {
-		if (!readfile(`/sys/class/net/${key}/ifindex`))
-			delete config[key];
+		let entry = config[key];
+		/* Drop only unmanaged entries (phy helpers, temp objects, etc) */
+		if (!entry.managed) {
+			if (!readfile(`/sys/class/net/${key}/ifindex`)) {
+				warn(`drop_inactive: removing unmanaged entry ${key}`);
+				delete config[key];
+			}
+		}
 	}
 }
 
 function add_ifname(config)
 {
-	for (let key in config)
-		config[key].ifname = key;
+	for (let key in config) {
+		let entry = config[key];
+		if (entry.managed === true)
+			entry.ifname = key;
+	}
 }
 
 function delete_ifname(config)
 {
-	for (let key in config)
-		delete config[key].ifname;
+	for (let key in config) {
+		let entry = config[key];
+		if (entry.managed === true)
+			delete entry.ifname;
+	}
 }
 
 function add_existing(phydev, config)
@@ -101,8 +125,14 @@ function add_existing(phydev, config)
 		if (config[wdev])
 			return;
 
-		if (trim(readfile(`/sys/class/net/${wdev}/operstate`)) == "down")
-			config[wdev] = {};
+		/* Only add if this is a real netdev */
+		if (!readfile(`/sys/class/net/${wdev}/ifindex`))
+			return;
+
+		config[wdev] = {
+			managed: true,
+			existing: true
+		};
 	});
 }
 
@@ -146,6 +176,44 @@ const commands = {
 		add_ifname(config.data);
 		drop_inactive(config.data);
 
+               /*
+                * Build FULL desired interface state for vlist.update().
+                * new_config may be partial (e.g. STA removal).
+                * Managed AP VAPs must never disappear implicitly.
+                */
+               let merged = {};
+
+               /* 1. Start from previous desired state */
+               if (type(config.data) == "object") {
+                       for (let k in config.data)
+                               merged[k] = config.data[k];
+               }
+
+               /* 2. Overlay new changes */
+               if (type(new_config) == "object") {
+                       for (let k in new_config) {
+                               if (new_config[k] === null)
+                                       delete merged[k];
+                               else
+                                       merged[k] = new_config[k];
+                       }
+               }
+
+               /* 3. Preserve managed AP VAPs */
+               if (type(config.data) == "object") {
+                       for (let k in config.data) {
+                               let e = config.data[k];
+                               if (e.managed === true && e.type === "ap")
+                                       merged[k] = e;
+                       }
+               }
+
+               /* 4. Drop only unmanaged helper entries */
+               drop_inactive(merged);
+
+               /* 5. Assign ifname only to managed entries */
+               add_ifname(merged);
+
 		let ubus = libubus.connect();
 		let data = ubus.call("hostapd", "config_get_macaddr_list", { phy: phydev.name, radio: phydev.radio ?? -1 });
 		let macaddr_list = [];
@@ -153,9 +221,7 @@ const commands = {
 			macaddr_list = data.macaddr;
 		ubus.disconnect();
 		phydev.macaddr_init(macaddr_list);
-
-		add_ifname(new_config);
-		config.update(new_config);
+		config.update(merged);
 
 		drop_inactive(config.data);
 		delete_ifname(config.data);
