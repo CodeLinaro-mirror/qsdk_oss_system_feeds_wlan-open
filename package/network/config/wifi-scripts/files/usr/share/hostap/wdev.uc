@@ -69,17 +69,28 @@ function iface_cb(new_if, old_if)
 	if (old_if && new_if && is_equal(old_if, new_if))
 		return;
 
-	if (old_if)
+	if (old_if) {
+		warn(`iface_cb removing ${old_if.ifname}`);
 		iface_stop(old_if);
-	if (new_if)
+	}
+
+	if (new_if) {
+		warn(`iface_cb: adding ${new_if.ifname}`);
 		iface_start(new_if);
+	}
 }
 
 function drop_inactive(config)
 {
 	for (let key in config) {
-		if (!readfile(`/sys/class/net/${key}/ifindex`))
-			delete config[key];
+		let entry = config[key];
+		/* Drop only unmanaged entries (phy helpers, temp objects, etc) */
+		if (!entry.managed) {
+			if (!readfile(`/sys/class/net/${key}/ifindex`)) {
+				warn(`drop_inactive: removing unmanaged entry ${key}`);
+				delete config[key];
+			}
+		}
 	}
 }
 
