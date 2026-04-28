@@ -18,10 +18,19 @@ let phy, phydev;
 
 function iface_stop(wdev)
 {
-	if (keep_devices[wdev.ifname])
+	warn("iface_stop " + wdev.ifname + " keep=" + keep_devices[wdev.ifname] + "\n");
+	let ifname = wdev.ifname;
+
+	if (keep_devices[ifname])
 		return;
 
-	wdev_remove(wdev.ifname);
+	wdev_remove(ifname);
+
+	/* Fallback for helper interfaces that survive wdev_remove() */
+	if (readfile("/sys/class/net/" + ifname + "/ifindex")) {
+		wdev_set_up(ifname, false);
+		system("iw dev " + ifname + " del 2>/dev/null");
+	}
 }
 
 function iface_start(wdev)
@@ -100,35 +109,21 @@ function iface_cb(new_if, old_if)
 	if (old_if && new_if && is_equal(old_if, new_if))
 		return;
 
-	/* Interface removal */
-	if (old_if && !new_if) {
-		warn(`iface_cb removing ${old_if.ifname}`);
+	if (old_if) {
+		warn(`iface_cb removing ${old_if.ifname} \n`);
 		iface_stop(old_if);
-		return;
 	}
-
-	/* Interface addition */
-	if (new_if && !old_if) {
+	if (new_if) {
 		warn(`iface_cb: adding ${new_if.ifname}`);
 		iface_start(new_if);
-		return;
 	}
-
-	if (old_if && new_if)
-		warn(`iface_cb change for ${old_if.ifname}, not deleting`);
 }
 
 function drop_inactive(config)
 {
 	for (let key in config) {
-		let entry = config[key];
-		/* Drop only unmanaged entries (phy helpers, temp objects, etc) */
-		if (!entry.managed) {
-			if (!readfile(`/sys/class/net/${key}/ifindex`)) {
-				warn(`drop_inactive: removing unmanaged entry ${key}`);
-				delete config[key];
-			}
-		}
+		if (!readfile(`/sys/class/net/${key}/ifindex`))
+			delete config[key];
 	}
 }
 
@@ -161,6 +156,7 @@ function usage()
 
 Commands:
 	set_config <config> [<device]...] - set phy configuration
+	teardown 			  - explicitly remove configured and helper interfaces
 	get_macaddr <id>		  - get phy MAC address for vif index <id>
 `);
 	exit(1);
@@ -174,11 +170,12 @@ const commands = {
 		for (let dev in ARGV)
 			keep_devices[dev] = true;
 
-		if (!new_config)
+		if (new_config == null)
 			usage();
 
-		new_config = json(new_config);
-		if (!new_config) {
+		/* allow empty config for teardown (wifi down) */
+		new_config = new_config == "" ? {} : json(new_config);
+		if (type(new_config) != "object") {
 			warn("Invalid configuration\n");
 			exit(1);
 		}
@@ -193,58 +190,60 @@ const commands = {
 
 		add_existing(phydev, config.data);
 		add_ifname(config.data);
-		drop_inactive(config.data);
 
-               /*
-                * Build FULL desired interface state for vlist.update().
-                * new_config may be partial (e.g. STA removal).
-                * Managed AP VAPs must never disappear implicitly.
-                */
-               let merged = {};
+		let desired = {};
 
-               /* 1. Start from previous desired state */
-               if (type(config.data) == "object") {
-                       for (let k in config.data)
-                               merged[k] = config.data[k];
-               }
+		if (type(old_config) == "object") {
+			for (let k in old_config)
+				desired[k] = old_config[k];
+		}
 
-               /* 2. Overlay new changes */
-               if (type(new_config) == "object") {
-                       for (let k in new_config) {
-                               if (new_config[k] === null)
-                                       delete merged[k];
-                               else
-                                       merged[k] = new_config[k];
-                       }
-               }
+		for (let k in new_config) {
+			if (new_config[k] === null)
+				delete desired[k];
+			else
+				desired[k] = new_config[k];
+		}
 
-               /* 3. Preserve managed AP VAPs */
-               if (type(config.data) == "object") {
-                       for (let k in config.data) {
-                               let e = config.data[k];
-                               if (e.managed === true && e.type === "ap")
-                                       merged[k] = e;
-                       }
-               }
-
-               /* 4. Drop only unmanaged helper entries */
-               drop_inactive(merged);
-
-               /* 5. Assign ifname only to managed entries */
-               add_ifname(merged);
+		add_ifname(desired);
+		config.update(desired);
 
 		let ubus = libubus.connect();
 		let data = ubus.call("hostapd", "config_get_macaddr_list", { phy: phydev.name, radio: phydev.radio ?? -1 });
 		let macaddr_list = [];
 		if (type(data) == "object" && data.macaddr)
 			macaddr_list = data.macaddr;
+
 		ubus.disconnect();
 		phydev.macaddr_init(macaddr_list);
-		config.update(merged);
+
+		warn("desired keys before update: " + sprintf("%J", keys(desired)));
 
 		drop_inactive(config.data);
 		delete_ifname(config.data);
 		writefile(statefile, sprintf("%J", config.data));
+	},
+
+	teardown: function(args) {
+		let statefile = `/var/run/wdev-${phy_name}.json`;
+		let old_config = readfile(statefile);
+		let current = {};
+
+		if (old_config)
+			old_config = json(old_config);
+
+		if (type(old_config) == "object") {
+			for (let k in old_config)
+				current[k] = old_config[k];
+		}
+
+		add_existing(phydev, current);
+		add_ifname(current);
+
+		for (let k in current)
+			iface_stop(current[k]);
+
+		writefile(statefile, "{}");
 	},
 	get_macaddr: function(args) {
 		let data = {};

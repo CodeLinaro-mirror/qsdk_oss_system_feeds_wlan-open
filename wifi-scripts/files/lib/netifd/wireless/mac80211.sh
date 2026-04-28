@@ -2645,7 +2645,7 @@ drv_mac80211_cleanup() {
 
 mac80211_reset_config() {
 	hostapd_conf_file="/var/run/hostapd-$phy$vif_phy_suffix.conf"
-	wdev_tool "$phy$phy_suffix" set_config '{}'
+	wdev_tool "$phy$phy_suffix" teardown
 	ubus_call hostapd config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "config": "", "prev_config": "'"$hostapd_conf_file"'" }' > /dev/null
 	ubus_call wpa_supplicant config_set '{ "phy": "'"$phy"'", "radio": '"$radio"', "config": [] }' > /dev/null
 }
