@@ -171,6 +171,7 @@ endif
 	$(INSTALL_BIN) ./files/lib/mandatory_dp_stats.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/kpi_stats.sh $(1)/lib
 ifeq ($(CONFIG_KERNEL_ATHMEMDEBUG),y)
 	$(INSTALL_BIN) ./files/lib/memleak_check.sh $(1)/lib
 endif
