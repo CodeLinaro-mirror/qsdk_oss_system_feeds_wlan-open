@@ -168,6 +168,7 @@ mlo_add_link() {
 	local iface_data
 	local check_band result select_iface
 	local hw_idx band check_disabled start_freq end_freq check_config
+	local radio_id=
 
 	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
 		echo "command line inputs missing" > /dev/ttyMSM0
@@ -195,7 +196,17 @@ mlo_add_link() {
 	case "$2" in
 		2g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -206,7 +217,17 @@ mlo_add_link() {
 		;;
 		5g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -218,13 +239,18 @@ mlo_add_link() {
 		5gl)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -lt "65" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -lt "65" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -236,13 +262,18 @@ mlo_add_link() {
 		5gh)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -gt "65" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -gt "65" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -253,7 +284,17 @@ mlo_add_link() {
 		;;
 		6g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -265,13 +306,18 @@ mlo_add_link() {
 		6gl)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -lt "100" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -lt "100" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -283,13 +329,18 @@ mlo_add_link() {
 		6gh)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -gt "100" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -gt "100" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -575,6 +626,7 @@ mlo_remove_link() {
 	local hw_idx band check_disabled start_freq end_freq check_device
 	local link_id partner_link found default_link iter_links check_mld
 	local found=0
+	local radio_id=
 
 	if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]; then
 		echo "command line inputs missing" > /dev/ttyMSM0
@@ -606,7 +658,17 @@ mlo_remove_link() {
 	case "$2" in
 		2g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -617,7 +679,17 @@ mlo_remove_link() {
 		;;
 		5g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -629,13 +701,18 @@ mlo_remove_link() {
 		5gl)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -lt "65" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -lt "65" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -647,13 +724,18 @@ mlo_remove_link() {
 		5gh)
 		test_band=$(uci show wireless | grep "'5g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -gt "65" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -gt "65" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -664,7 +746,17 @@ mlo_remove_link() {
 		;;
 		6g)
 		test_band=$(uci show wireless | grep "'$2'" | cut -d "." -f 2)
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		for iter in $test_band; do
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+			if [ -n "$local_channel" ] && [ -n "$radio_id" ]; then
+				break;
+			fi
+		done
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -676,13 +768,18 @@ mlo_remove_link() {
 		6gl)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -lt "100" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -lt "100" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
@@ -694,13 +791,18 @@ mlo_remove_link() {
 		6gh)
 		test_band=$(uci show wireless | grep "'6g'" | cut -d "." -f 2)
 		for iter in $test_band; do
-			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1)
-			if [ "$local_channel" -gt "100" ]; then
-				test_band=$(echo $iter)
-				break;
+			local_channel=$(uci show wireless.$iter.channels | cut -d "'" -f 2 | cut -d "-" -f 1) 2> /dev/null
+			if [ -n "$local_channel" ] && [ "$local_channel" -gt "100" ]; then
+				radio_id=$(uci show wireless.$iter.radio | cut -d "'" -f 2) 2> /dev/null
+				if [ -n "$radio_id" ]; then
+					break;
+				fi
 			fi
 		done
-		radio_id=$(uci show wireless.$test_band.radio | cut -d "'" -f 2)
+		if [ -z "$radio_id" ]; then
+			echo "failed to find radio id" > /dev/ttyMSM0
+			return
+		fi
 		start_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $3}')
 		start_freq=$((start_freq+10))
 		end_freq=$(iw $1 info | grep -A 2 "Idx $radio_id:" | grep "Frequency Range:" | awk '{print $6}')
