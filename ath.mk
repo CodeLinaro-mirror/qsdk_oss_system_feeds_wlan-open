@@ -1,5 +1,9 @@
 PKG_DRIVERS += \
-	ath ath11k ath11k-ahb ath11k-pci ath12k carl9170 owl-loader ar5523 wil6210
+	ath ath12k carl9170 owl-loader ar5523 wil6210
+
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+PKG_DRIVERS += ath11k ath11k-ahb ath11k-pci
+endif
 
 PKG_CONFIG_DEPENDS += \
 	CONFIG_PACKAGE_ATH_DEBUG \
@@ -126,10 +130,12 @@ define KernelPackage/ath11k
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
   DEPENDS+= +kmod-ath +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT \
   +kmod-crypto-michael-mic +ATH11K_THERMAL:kmod-hwmon-core +ATH11K_THERMAL:kmod-thermal
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k.ko \
         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko \
         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_pci.ko
   AUTOLOAD:=$(call AutoProbe,ath11k ath11k_ahb ath11k_pci)
+endif
 endef
 
 define KernelPackage/ath11k/description
@@ -152,11 +158,15 @@ define KernelPackage/ath12k
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
   DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
-         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
-	 $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
+         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
+endif
 
 ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko
+endif
 endif
 
 ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
@@ -191,8 +201,10 @@ define KernelPackage/ath11k-ahb
   TITLE:=Qualcomm 802.11ax AHB wireless chipset support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
   DEPENDS+= @TARGET_qualcommax +kmod-ath11k +kmod-qrtr-smd
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko
   AUTOLOAD:=$(call AutoProbe,ath11k_ahb)
+endif
 endef
 
 define KernelPackage/ath11k-ahb/description
@@ -205,8 +217,10 @@ define KernelPackage/ath11k-pci
   TITLE:=Qualcomm 802.11ax PCI wireless chipset support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath11k
   DEPENDS+= @PCI_SUPPORT +kmod-qrtr-mhi +kmod-ath11k
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath11k/ath11k_pci.ko
   AUTOLOAD:=$(call AutoProbe,ath11k_pci)
+endif
 endef
 
 define KernelPackage/ath11k-pci/description
