@@ -193,6 +193,7 @@ he_bss_color_enabled=
 he_spr_non_srg_obss_pd_max_offset=
 disable_csa_dfs=
 discard_6g_awgn_event=
+ignorecac=
 atfstrictsched=
 wds=
 wds_bridge=
@@ -381,6 +382,7 @@ ubus_call() {
 		disable_eml_cap \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
+		ignorecac \
 		skip_cac \
 		uplink_csa
 	config_add_boolean atfstrictsched
@@ -696,7 +698,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 
 	# Optional user override for HT40 capability string
@@ -1280,6 +1282,7 @@ mac80211_hostapd_setup_base() {
 	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
 	config_get athnewind mac80211 athnewind 0
 	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
+	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
 	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 
 	if [ "$qacs_enable" -eq "1" ]; then
