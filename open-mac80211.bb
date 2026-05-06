@@ -53,7 +53,6 @@ REQUIRED_HOSTTOOLS += "spatch"
 RDEPENDS:${PN} = " \
 	wireless-regdb \
 	iw \
-	hostapd \
 "
 
 EXTRA_MAKE_CFLAGS=" \
