@@ -254,8 +254,10 @@ cbs_dwellsplit=
 cbs_totaldwell=
 cbs_csa_enable=
 
-#dcs enable command
+#dcs commands
 dcs_enable=
+dcs_bw_reduction_ctrl=
+
 #obss_snr command
 obss_snr_threshold=
 obss_rx_snr_threshold=
@@ -382,6 +384,7 @@ ubus_call() {
 		athnewind \
 		rptr_mgr_mode \
 		dcs_enable \
+		dcs_bw_reduction_ctrl \
 		obss_snr_threshold \
 		obss_rx_snr_threshold \
 		cbs_enable \
@@ -717,7 +720,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable
 
@@ -1350,6 +1353,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
 		append base_cfg "dcs_enable=$dcs_enable" "$N"
+	fi
+
+	if [ -n "$dcs_bw_reduction_ctrl" ] && [ "$dcs_bw_reduction_ctrl" -gt "0" ]; then
+		append base_cfg "dcs_bw_reduction_ctrl=$dcs_bw_reduction_ctrl" "$N"
 	fi
 
 	if [ -n "$obss_snr_threshold" ] && [ "$obss_snr_threshold" -gt "0" ]; then
