@@ -231,6 +231,8 @@ do_install:append() {
 
 	cp -r ${S}/include/ath/*.h ${STAGING_DIR}/usr/include
 	cp -r ${S}/include/uapi/linux/*.h ${STAGING_DIR}/usr/include
+	install -d ${D}${includedir}/open-mac80211/linux
+	install -m 0644 ${S}/include/uapi/linux/nl80211.h ${D}${includedir}/open-mac80211/linux/nl80211.h
 	cp ${S}/drivers/net/wireless/ath/ath12k/*.h ${STAGING_DIR}/usr/include/mac80211/ath/
 	cp ${S}/Module.symvers ${D}${includedir}/open-mac80211/
 
