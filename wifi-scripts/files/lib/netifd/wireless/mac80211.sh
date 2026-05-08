@@ -1162,6 +1162,12 @@ mac80211_hostapd_setup_base() {
 					[ "$bss_color" != "0" ] && bss_color=${bss_color#0}
 					bss_color=$((bss_color % 63))
 					bss_color=$((bss_color + 1))
+					# Persist generated color so it remains stable across reloads/reboots
+					# when he_bss_color is not configured.
+					if [ -n "$device" ]; then
+						uci -q set wireless."$device".he_bss_color="$bss_color"
+						uci -q commit wireless
+					fi
 				fi
 				append base_cfg "he_bss_color=$bss_color" "$N"
 			fi
