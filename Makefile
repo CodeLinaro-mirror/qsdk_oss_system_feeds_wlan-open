@@ -172,6 +172,11 @@ endif
 	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/kpi_stats.sh $(1)/lib
+ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+	$(INSTALL_DIR) $(1)/lib/wifi/mount
+	$(INSTALL_BIN) ./files/lib/wifi/mount/umount_fw_partition.sh $(1)/lib/wifi/mount/
+	$(INSTALL_BIN) ./files/lib/wifi/mount/mount_fw_partition.sh $(1)/lib/wifi/mount/
+endif
 ifeq ($(CONFIG_KERNEL_ATHMEMDEBUG),y)
 	$(INSTALL_BIN) ./files/lib/memleak_check.sh $(1)/lib
 endif
