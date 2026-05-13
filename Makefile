@@ -612,6 +612,8 @@ define KernelPackage/ath/install
 	$(CP) $(PKG_BUILD_DIR)/include/ath/ath_dp_accel_cfg.h $(STAGING_DIR)/usr/include/
 	$(CP) $(PKG_BUILD_DIR)/include/ath/ppe_public.h $(STAGING_DIR)/usr/include/
 ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
+	$(INSTALL_DIR) $(STAGING_DIR)/usr/include/ipa/wifi8/
+	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h $(STAGING_DIR)/usr/include/ipa/wifi8/
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko
 ifeq ($(CONFIG_TARGET_sdx85),y)
