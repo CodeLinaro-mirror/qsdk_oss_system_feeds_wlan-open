@@ -324,6 +324,9 @@ hostapd_common_add_bss_config() {
 	config_add_int bss_load_update_period chan_util_avg_period
 
 	config_add_int oce
+	config_add_int oce_tx_power oce_dl_availcap oce_ul_availcap oce_ess_edge oce_ess_rssi_threshold
+	config_add_boolean oce_ess_report
+	config_add_string oce_ip_subnet_id
 	config_add_string beacon_rate probe_resp_rate
 
 	config_add_string dae_client
@@ -678,6 +681,8 @@ hostapd_set_bss_options() {
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
 		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
+		oce_tx_power oce_dl_availcap oce_ul_availcap \
+		oce_ess_report oce_ess_edge oce_ess_rssi_threshold oce_ip_subnet_id \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -779,6 +784,14 @@ hostapd_set_bss_options() {
 			[ -z "$beacon_rate" ] && append bss_conf "beacon_rate=55" "$N"
 			[ -z "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=55" "$N"
 		fi
+
+		[ -n "$oce_tx_power" ] && append bss_conf "oce_tx_power=$oce_tx_power" "$N"
+		[ -n "$oce_dl_availcap" ] && append bss_conf "oce_dl_availcap=$oce_dl_availcap" "$N"
+		[ -n "$oce_ul_availcap" ] && append bss_conf "oce_ul_availcap=$oce_ul_availcap" "$N"
+		[ "$oce_ess_report" -gt 0 ] && append bss_conf "oce_ess_report=$oce_ess_report" "$N"
+		[ -n "$oce_ess_edge" ] && append bss_conf "oce_ess_edge=$oce_ess_edge" "$N"
+		[ -n "$oce_ess_rssi_threshold" ] && append bss_conf "oce_ess_rssi_threshold=$oce_ess_rssi_threshold" "$N"
+		[ -n "$oce_ip_subnet_id" ] && append bss_conf "oce_ip_subnet_id=$oce_ip_subnet_id" "$N"
 	}
 
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
