@@ -159,6 +159,7 @@ tx_stbc=
 max_amsdu=
 dsss_cck_40=
 background_radar=
+dfs_bw_reduce_en=
 rxldpc=
 short_gi_80=
 short_gi_160=
@@ -307,7 +308,7 @@ ubus_call() {
 		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
 		config_add_int num_global_macaddr multiple_bssid
 		config_add_boolean use_driver_vendor_addr
-		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en
 	# ACS behavior tuning
 	config_add_int acs_retry_interval acs_retry_count
 	config_add_array ht_capab
@@ -883,10 +884,11 @@ mac80211_hostapd_setup_base() {
 		;;
 	esac
 	[ "$band" = "5g" ] && {
-		json_get_vars background_radar:0 bgcac_en:0
+		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0
 
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 		[ "$bgcac_en" -eq 1 ] && append base_cfg "bgcac_en=1" "$N"
+		[ "$dfs_bw_reduce_en" -eq 1 ] && append base_cfg "dfs_bw_reduce_en=1" "$N"
 	}
 
 	case "$htmode" in
