@@ -364,7 +364,7 @@ hostapd_common_add_bss_config() {
 	config_add_string vendor_elements
 
 	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report
-	config_add_int rnr
+	config_add_int rnr rnr_ie_allowed
 
 	config_add_boolean ftm_responder stationary_ap
 	config_add_string lci civic
@@ -1094,9 +1094,10 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 
-	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr
+	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
 	set_default ieee80211k 0
 	set_default rnr 0
+	set_default rnr_ie_allowed 0
 	if [ "$ieee80211k" -eq "1" ]; then
 		set_default rrm_neighbor_report 1
 		set_default rrm_beacon_report 1
@@ -1108,6 +1109,7 @@ hostapd_set_bss_options() {
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
 	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
+	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
 	json_get_vars ftm_responder stationary_ap lci civic
 	set_default ftm_responder 0
