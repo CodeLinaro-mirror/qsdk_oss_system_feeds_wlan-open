@@ -1321,6 +1321,13 @@ mac80211_hostapd_setup_base() {
 	[ "$rpt_max_phy" = "1" ] && append base_cfg "rpt_max_phy=1" "$N"
 	config_get athnewind mac80211 athnewind 0
 	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
+
+	config_get same_ssid_disable mac80211 same_ssid_disable
+	# If same_ssid_disable is 1, override same_ssid_repeater to 0
+	[ "$same_ssid_disable" = "1" ] && same_ssid_repeater="0"
+	# Add same_ssid parameter if repeater has AP and STA with same SSID
+	[ "$same_ssid_repeater" = "1" ] && append base_cfg "same_ssid=1" "$N"
+
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
 	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
 	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
@@ -2799,6 +2806,9 @@ mac80211_is_last_enabled_radio() {
 # Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
 is_repeater=0
 
+# Global same_ssid flag: set to 1 if repeater has AP and STA with same SSID
+same_ssid_repeater=0
+
 # Global skip_cac flag: set to 1 if any enabled 5 GHz radio has skip_cac enabled
 is_skip_cac=0
 # Global uplink_csa flag:
@@ -2823,10 +2833,12 @@ mac80211_update_is_repeater_flag() {
 		dev="$section"
 		local ap=0
 		local sta=0
+		local ap_ssid=""
+		local sta_ssid=""
 
 		__scan_iface() {
 			local iface="$1"
-			local if_device mode if_disabled
+			local if_device mode if_disabled ssid
 
 			config_get if_device "$iface" device
 			[ "$if_device" != "$dev" ] && return 0
@@ -2835,9 +2847,17 @@ mac80211_update_is_repeater_flag() {
 			config_get if_disabled "$iface" disabled 0
 			[ "$if_disabled" -eq 1 ] && return 0
 
+			config_get ssid "$iface" ssid
+
 			case "$mode" in
-				ap) ap=1 ;;
-				sta) sta=1 ;;
+				ap)
+					ap=1
+					ap_ssid="$ssid"
+					;;
+				sta)
+					sta=1
+					sta_ssid="$ssid"
+					;;
 			esac
 		}
 
@@ -2845,6 +2865,11 @@ mac80211_update_is_repeater_flag() {
 
 		if [ "$ap" -eq 1 ] && [ "$sta" -eq 1 ]; then
 			is_repeater=1
+
+			# Check if SSIDs match
+			if [ -n "$ap_ssid" ] && [ -n "$sta_ssid" ] && [ "$ap_ssid" = "$sta_ssid" ]; then
+				same_ssid_repeater=1
+			fi
 		fi
 	}
 
