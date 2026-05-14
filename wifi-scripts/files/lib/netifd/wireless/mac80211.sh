@@ -425,7 +425,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int ieee80211w
 	config_add_int beacon_prot
 	config_add_int unsol_bcast_presp
-	config_add_int fils_discovery
+	config_add_int fils_discovery force_disable_in_band_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_string vap_submode
@@ -1485,7 +1485,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars bss_index
 	json_get_vars disable_11be
 	json_get_vars disable_11ax
-	json_get_vars unsol_bcast_presp fils_discovery
+	json_get_vars unsol_bcast_presp fils_discovery force_disable_in_band_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp
 	json_get_vars commitatf atfssidsched atfssidgroup
 
@@ -1537,6 +1537,12 @@ mac80211_hostapd_setup_bss() {
 			append fils_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
 		else
 			append fils_cfg "fils_discovery_max_interval=20" "$N"
+		fi
+
+		if [ -n "$force_disable_in_band_discovery" ] &&
+		   [ "$force_disable_in_band_discovery" -ge 0 ] &&
+		   [ "$force_disable_in_band_discovery" -le 1 ]; then
+			append fils_cfg "force_disable_in_band_discovery=$force_disable_in_band_discovery" "$N"
 		fi
 
 		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -ge 1 ] && [ "$type" == "interface" ]; then
