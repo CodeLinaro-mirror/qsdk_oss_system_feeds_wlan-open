@@ -31,6 +31,7 @@ SRC_URI = " \
 	file://lib/netifd-wlan/wireless/ \
 	file://ini/ \
 	file://ini/internal/ \
+	file://etc/modprobe.d/ \
 "
 
 SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
@@ -259,10 +260,9 @@ do_install:append() {
 	# Clean up empty updates/ dir
 	rm -rf ${D}/lib/modules/${KERNEL_VERSION}/updates
 
-cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
-# Ensure firmware path is set before loading ath12k
-install ath12k /bin/sh -c 'echo /ini > /sys/module/firmware_class/parameters/path 2>/dev/null || true; /sbin/modprobe --ignore-install ath12k $CMDLINE_OPTS'
-EOF
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
 
 }
 
@@ -326,6 +326,8 @@ RDEPENDS:${PN} += " \
 FILES:${PN} += "/ini/* /ini/internal/*"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
+FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
+FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
