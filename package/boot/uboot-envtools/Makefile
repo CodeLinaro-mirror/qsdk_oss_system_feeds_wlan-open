@@ -45,6 +45,7 @@ define Package/uboot-envtools/description
 endef
 
 define Build/Configure
+	sed -i 's/CONFIG_BOOTCOMMAND="run distro_bootcmd"/CONFIG_BOOTCOMMAND="bootipq"/' $(PKG_BUILD_DIR)/configs/tools-only_defconfig
 	$(call Build/Compile/Default,tools-only_defconfig)
 endef
 
