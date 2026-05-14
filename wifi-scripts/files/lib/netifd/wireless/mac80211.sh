@@ -245,6 +245,15 @@ acs_dbgtrace=
 acs_txpwr_opt=
 acs_freq_list=
 
+#cbs commands
+cbs_enable=
+cbs_resttime=
+cbs_dwellrest=
+cbs_waittime=
+cbs_dwellsplit=
+cbs_totaldwell=
+cbs_csa_enable=
+
 #dcs enable command
 dcs_enable=
 #obss_snr command
@@ -339,6 +348,7 @@ ubus_call() {
 		use_ru_puncture_dfs \
 		qacs_enable \
 		acs_rank_en \
+		cbs_csa_enable \
 		acs_6g_only_psc \
 		acs_wradar
 	config_add_int \
@@ -373,7 +383,13 @@ ubus_call() {
 		rptr_mgr_mode \
 		dcs_enable \
 		obss_snr_threshold \
-		obss_rx_snr_threshold
+		obss_rx_snr_threshold \
+		cbs_enable \
+		cbs_resttime \
+		cbs_dwellrest \
+		cbs_waittime \
+		cbs_dwellsplit \
+		cbs_totaldwell
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -703,6 +719,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
+	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -1341,6 +1358,34 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$obss_rx_snr_threshold" ] && [ "$obss_rx_snr_threshold" -gt "0" ]; then
 		append base_cfg "obss_rx_snr_threshold=$obss_rx_snr_threshold" "$N"
+	fi
+
+	if [ -n "$cbs_enable" ]; then
+		append base_cfg "cbs_enable=$cbs_enable" "$N"
+	fi
+
+	if [ -n "$cbs_resttime" ]; then
+		append base_cfg "cbs_resttime=$cbs_resttime" "$N"
+	fi
+
+	if [ -n "$cbs_dwellrest" ]; then
+		append base_cfg "cbs_dwellrest=$cbs_dwellrest" "$N"
+	fi
+
+	if [ -n "$cbs_waittime" ]; then
+		append base_cfg "cbs_waittime=$cbs_waittime" "$N"
+	fi
+
+	if [ -n "$cbs_dwellsplit" ]; then
+		append base_cfg "cbs_dwellsplit=$cbs_dwellsplit" "$N"
+	fi
+
+	if [ -n "$cbs_totaldwell" ]; then
+		append base_cfg "cbs_totaldwell=$cbs_totaldwell" "$N"
+	fi
+
+	if [ -n "$cbs_csa_enable" ]; then
+		append base_cfg "cbs_csa_enable=$cbs_csa_enable" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
