@@ -1,142 +1,351 @@
-SUMMARY = "cfg80211 interface configuration utility"
-LICENSE = "GPL-2.0 WITH Linux-syscall-note"
-SECTION = "console/network"
-LIC_FILES_CHKSUM = "file://${DL_DIR}/mac80211-kernel/COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
-PKG_NAME = "open-mac80211"
-SRC_URI = "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/snapshot/linux-firmware-8afadbe.tar.gz"
+SUMMARY = "Linux 802.11 Wireless Networking Stack (mac80211) and Atheros WiFi Drivers"
+DESCRIPTION = "Backported wireless drivers from newer kernels including mac80211, cfg80211, ath, ath11k, and ath12k drivers"
+LICENSE = "GPL-2.0-only"
+LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
 
-PKG_KERNEL_SRC_URL = "https://git.codelinaro.org/clo/qsdk/kvalo/ath.git"
-PKG_KERNEL_VERSION = "ef7197996efe"
-SRC_URI[md5sum] = "21113fbd338eed6070c7f9b4c8939b43"
-V_mac80211_config =" \
-	\nCPTCFG_CFG80211=m \
-	\nCPTCFG_MAC80211=m \
-	\nCPTCFG_ATH_CARDS=m \
-	\nCPTCFG_ATH_COMMON=m \
-	\nCPTCFG_ATH11K=m \
-	\nCPTCFG_ATH11K_PCI=m \
-	\nCPTCFG_ATH11K_AHB=m \
-	\nCPTCFG_ATH12K=m \
-	\nCPTCFG_WLAN=y \
-	\nCPTCFG_NL80211_TESTMODE=y \
-	\nCPTCFG_CFG80211_WEXT=y \
-	\nCPTCFG_CFG80211_INTERNAL_REGDB=y \
-	\nCPTCFG_CFG80211_CERTIFICATION_ONUS=y \
-	\nCPTCFG_MAC80211_RC_MINSTREL=y \
-	\nCPTCFG_MAC80211_RC_MINSTREL_HT=y \
-	\nCPTCFG_MAC80211_RC_DEFAULT_MINSTREL=y \
-	\nCPTCFG_MAC80211_MESH=y \
-	\nCPTCFG_CFG80211_DEBUGFS=y \
-	\nCPTCFG_MAC80211_DEBUGFS=y \
-	\nCPTCFG_ATH9K_DEBUGFS=y \
-	\nCPTCFG_ATH9K_HTC_DEBUGFS=y \
-	\nCPTCFG_ATH10K_DEBUGFS=y \
-	\nCPTCFG_ATH11K_DEBUGFS=y \
-	\nCPTCFG_ATH12K_DEBUGFS=y \
-	\nCPTCFG_ATH10K_PKTLOG=y \
-	\nCPTCFG_ATH11K_PKTLOG=y \
-	\nCPTCFG_ATH12K_PKTLOG=y \
-	\nCPTCFG_ATH_DEBUG=y \
-	\nCPTCFG_ATH10K_DEBUG=y \
-	\nCPTCFG_ATH11K_DEBUG=y \
-	\nCPTCFG_ATH12K_DEBUG=y \
-	\nCPTCFG_HWMON=y \
-	\nCPTCFG_ATH9K_PCI=y \
-	\nCPTCFG_ATH_USER_REGD=y \
-	\nCPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS=y \
-	\nCPTCFG_ATH_REG_DYNAMIC_USER_CERT_TESTING=y \
-	\nCPTCFG_ATH11K_SPECTRAL=y \
-	\nCPTCFG_ATH11K_CFR=y \
-	\nCPTCFG_MAC80211_LEDS=y \
-	\nCPTCFG_ATH12K_SPECTRAL=y \
-	\nCPTCFG_ATH12K_AHB=y \
-"
+PV = "6.6.15"
+PR = "r2"
+
+INHIBIT_PACKAGE_STRIP = "0"
+INHIBIT_PACKAGE_DEBUG_SPLIT = "0"
+
 inherit module
-DEPENDS +="linux-ipq libnl pkgconfig-native virtual/kernel"
-addtask download before do_unpack after do_fetch
-PKG_BACKPORTS_SOURCE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git"
-PKG_BACKPORTS_VERSION = "42a95ce7"
-PKG_VERSION = "20220802"
 
-SUBDIR = "backports-${PKG_VERSION}-${PKG_KERNEL_VERSION}"
+MAC80211_PKG_SUBDIR := "backports-${MAC80211_PKG_VERSION}-${LINUX_VERSION}-${MAC80211_PKG_KERNEL_VERSION}"
+MAC80211_S := "${KERNEL_BUILD_DIR}"
+PKG_BACKPORTS_VERSION := "965f73fc"
+PKG_BACKPORTS_BRANCH := "master"
+MAC80211_PKG_NAME := "=korg-kvalo/master"
+MAC80211_PKG_VERSION := "20250213"
+MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
-T_DIR = "${S}/../../${SUBDIR}"
-P_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/mac80211/patches"
-I_DIR = "${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/"
-CC_remove = "-fstack-protector-strong  -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security"
-KBUILD_CFLAGS += "-Wno-error=implicit-function-declaration"
-LC_ALL = "C"
-backports_mlo_support() {
-	sed -i 's/struct ieee80211_tx_info \*info;/ktime_t ack_hwtstamp;/' \
-			${DL_DIR}/mac80211-source/patches/0097-skb-list/mac80211-status.patch
-	sed -i 's/struct sk_buff \*skb;/u8 n_rates;/' \
-			${DL_DIR}/mac80211-source/patches/0097-skb-list/mac80211-status.patch
-	sed -i '13s/.*/ /' \
-			${DL_DIR}/mac80211-source/patches/0097-skb-list/mac80211-status.patch
-	sed -i '58,75d' ${DL_DIR}/mac80211-source/patches/0099-netlink-range/mac80211.patch
+SRCPREFIX := "../"
+FILESEXTRAPATHS:prepend := "${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
+
+SRC_URI = " \
+	git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git;protocol=https;branch=${PKG_BACKPORTS_BRANCH};name=backports \
+	git://git.codelinaro.org/clo/qsdk/kvalo/ath.git;protocol=https;branch=korg-kvalo/master;name=wlan_open; \
+	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
+	file://lib/ \
+	file://lib/wifi/ \
+	file://lib/netifd-wlan/wireless/ \
+	file://ini/ \
+	file://ini/internal/ \
+"
+
+SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
+SRCREV_wlan_open = "9a0dddfb30f120db3851627935851d262e4e7acb"
+
+S = "${WORKDIR}/backports-6.1-${MAC80211_PKG_KERNEL_VERSION}"
+
+DEPENDS = " \
+	virtual/kernel \
+	wireless-regdb \
+	iw \
+	qca-nss-ppe \
+	qca-nss-ppe-vp \
+	qca-nss-ppe-ds \
+	qca-nss-wifi-plugin \
+"
+
+REQUIRED_HOSTTOOLS += "spatch"
+
+RDEPENDS:${PN} = " \
+	wireless-regdb \
+	iw \
+"
+
+EXTRA_MAKE_CFLAGS=" \
+	-I${S}/include \
+	-I${STAGING_DIR}/usr/include \
+	-I${STAGING_INCDIR}/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
+	-I${TOPDIR}/${SRCPREFIX}src/ipq/qca-wifi/telemetry_agent/inc/ \
+	-Wno-error=unused-variable -Wno-unused-variable \
+"
+
+EXTRA_CFLAGS += " \
+	-I${S}/include \
+	-I${S}/include/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
+	-I${STAGING_DIR}/usr/include \
+	-I${STAGING_INCDIR}/qca-nss-drv \
+	-I${STAGING_INCDIR}/qca-nss-ppe \
+	-I${STAGING_INCDIR}/qca-nss-clients \
+	-Wall \
+	-Wno-unused-function \
+	-Wno-error=unused-variable -Wno-unused-variable \
+"
+
+KCFLAGS += " \
+	-I${S}/include \
+	-I${S}/include/qca-nss-ppe/drv/ppe_ds/exports/ \
+	-I${STAGING_DIR}/usr/include \
+	-I${STAGING_INCDIR}/qca-nss-drv \
+	-I${STAGING_INCDIR}/qca-nss-ppe \
+	-I${STAGING_INCDIR}/qca-nss-wifi-plugin \
+	-I${STAGING_INCDIR}/qca-nss-clients \
+	-Wall \
+	-Wno-error=unused-variable -Wno-unused-variable \
+"
+
+MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
+						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+"
+
+do_unpack[postfuncs] += "do_cp_src_wlan_open_extns"
+
+do_cp_src_wlan_open_extns() {
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/ath12k/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
 }
-do_download() {
-	if [ ! -f ${DL_DIR}/${SUBDIR}.tar.bz2 ];then
-	git clone ${PKG_KERNEL_SRC_URL} ${DL_DIR}/mac80211-kernel || (rm -rf ${DL_DIR}/mac80211-kernel &&  git clone ${PKG_KERNEL_SRC_URL} ${DL_DIR}/mac80211-kernel)
-	(cd ${DL_DIR}/mac80211-kernel;git remote add src ${PKG_KERNEL_SRC_URL}; git fetch src)
 
-	(cd  ${DL_DIR}/mac80211-kernel&& git checkout ${PKG_KERNEL_VERSION})
-
-	git clone ${PKG_BACKPORTS_SOURCE_URL} ${DL_DIR}/mac80211-source  ||
-        (rm -rf ${DL_DIR}/mac80211-source && git  clone ${PKG_BACKPORTS_SOURCE_URL} ${DL_DIR}/mac80211-source)
-	cp ${TOPDIR}/../poky/meta-ipq/recipes-openwifi/wlan-open/mac80211/files/copy-list.ath ${DL_DIR}/mac80211-source
-	(cd  ${DL_DIR}/mac80211-source && git checkout ${PKG_BACKPORTS_VERSION} && rm -f ${DL_DIR}/mac80211-source/patches/0073-netdevice-mtu-range.cocci && rm -f ${DL_DIR}/mac80211-source/patches/0075-ndo-stats-64.cocci && rm -f ${DL_DIR}/mac80211-source/patches/0105-remove-const-from-rchan_callbacks.patch && backports_mlo_support &&./gentree.py --clean --copy-list ./copy-list.ath ${DL_DIR}/mac80211-kernel ${DL_DIR}/${SUBDIR})
-	echo "before making tar"
-	(cd ${DL_DIR}; if [ -z " tar --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name ${TAR_TIMESTAMP:+--mtime="$TAR_TIMESTAMP"} -c ${SUBDIR} |  bzip2 -c > ${DL_DIR}/${SUBDIR}.tar.bz2" ]; then bzip2 -c > ${DL_DIR}/${SUBDIR}.tar.bz2; else : ; fi; tar --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name ${TAR_TIMESTAMP:+--mtime="$TAR_TIMESTAMP"} -c ${SUBDIR} | bzip2 -c > ${DL_DIR}/${SUBDIR}.tar.bz2)
-
-	else
-	echo "Skipping backports download"
-	fi;
-
-	if [ -d ${T_DIR} ]; then
-		rm -rf ${T_DIR}/
-	fi;
-	mkdir -p ${T_DIR}/
-	bzcat ${DL_DIR}/${SUBDIR}.tar.bz2 | tar -C ${T_DIR}/.. -xf -
+do_configure:prepend() {
+	cat > ${S}/.config << 'EOF'
+CPTCFG_CFG80211=m
+CPTCFG_CFG80211_DEBUGFS=y
+CPTCFG_MAC80211=m
+CPTCFG_MAC80211_RC_MINSTREL=y
+CPTCFG_MAC80211_RC_MINSTREL_HT=y
+CPTCFG_MAC80211_RC_MINSTREL_VHT=y
+CPTCFG_MAC80211_RC_DEFAULT_MINSTREL=y
+CPTCFG_MAC80211_MESH=y
+CPTCFG_MAC80211_DEBUGFS=y
+CONFIG_QCOM_RPROC_DISABLE_MPD_SUPPORT=y
+CPTCFG_ATHDEBUG=y
+CPTCFG_DEBUG_FS=y
+CPTCFG_MAC80211_LEDS=y
+CPTCFG_ATH_COMMON=m
+CPTCFG_ATH_DEBUG=y
+CPTCFG_ATH11K=m
+CPTCFG_ATH11K_AHB=m
+CPTCFG_ATH11K_PCI=m
+CPTCFG_ATH11K_DEBUG=y
+CPTCFG_ATH11K_DEBUGFS=y
+CPTCFG_ATH11K_TRACING=y
+CPTCFG_ATH11K_PKTLOG=y
+CPTCFG_ATH12K=m
+CPTCFG_ATH12K_AHB=y
+CPTCFG_ATH12K_PCI=m
+CPTCFG_ATH12K_DEBUG=y
+CPTCFG_ATH12K_DEBUGFS=y
+CPTCFG_ATH12K_TRACING=y
+CPTCFG_ATH12K_SAWF=y
+CPTCFG_WLAN_VENDOR_ATH=y
+CPTCFG_NL80211_TESTMODE=y
+CPTCFG_CFG80211_CERTIFICATION_ONUS=y
+CPTCFG_MAC80211_DS_SUPPORT=y
+CPTCFG_ATH12K_PPE_DS_SUPPORT=y
+CPTCFG_MAC80211_SFE_SUPPORT=y
+CPTCFG_QCN_EXTN=y
+CPTCFG_MAC80211_ATHDEBUG=y
+EOF
 
 }
 
-do_patch() {
-	ls ${I_DIR}/mac80211/patches | xargs -I % sh -c 'echo "applying patch "%;patch -d${T_DIR} -f -p1 < ${I_DIR}/mac80211/patches/%'
-	find ${T_DIR}/ '(' -name '*.orig' -o -name '.*.orig' ')' -exec rm -f {} \;
-	tar -C ${T_DIR} -xf ${DL_DIR}/linux-firmware-8afadbe.tar.gz
-	rm -rf ${T_DIR}/include/linux/ssb ${T_DIR}/include/linux/bcma ${T_DIR}/include/net/bluetooth
-	rm -rf ${T_DIR}/include/linux/cordic.h  ${T_DIR}/include/linux/crc8.h ${T_DIR}/include/linux/eeprom_93cx6.h ${T_DIR}/include/linux/wl12xx.h ${T_DIR}/include/linux/spi/libertas_spi.h ${T_DIR}/include/net/ieee80211.h
+#do_patch[postfuncs] += "do_refactor_alloc_cocci"
 
+do_refactor_alloc_cocci() {
+	set -e
+	SPATCH="spatch"
+	COCCI="${WORKDIR}/alloc.cocci"
+	WLAN_DIR="${S}/drivers/net/wireless/ath/ath12k"
+
+	if [ ! -f "${COCCI}" ]; then
+		bbfatal "Missing semantic patch: ${COCCI}"
+	fi
+	if [ ! -d "${WLAN_DIR}" ]; then
+		bbwarn "ath12k directory not found at ${WLAN_DIR}; skipping refactor"
+		return
+	fi
+
+	for f in \
+		ahb.c ce.c core.c coredump.c debugfs_htt_stats.c dp_htt.c dp_mon.c \
+		dp_peer.c dbring.c debugfs.c dp_rx.c mac.c peer.c qmi.c reg.c wmi.c wow.c
+	do
+		if [ -f "${WLAN_DIR}/${f}" ]; then
+			bbnote "spatch: ${f}"
+			${SPATCH} --sp-file "${COCCI}" --in-place "${WLAN_DIR}/${f}"
+		fi
+	done
+
+	for d in wifi7 wifi8; do
+		if [ -d "${WLAN_DIR}/${d}" ]; then
+			bbnote "spatch: dir ${d}"
+			${SPATCH} --sp-file "${COCCI}" --in-place -dir "${WLAN_DIR}/${d}"
+		fi
+	done
 }
-CC_remove  = "${@bb.utils.contains('TUNE_ARCH','arm',' -mfloat-abi=hard -mcpu=cortex-a7 ','',d)}"
-ARCH = "${@bb.utils.contains('TUNE_ARCH','arm','arm','arm64',d)}"
+
+MAKE_OPTS = " \
+	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
+	KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" \
+	MODPROBE=true \
+	KLIB=${D}/${nonarch_base_libdir}/modules/${KERNEL_VERSION}/ \
+	KBUILD_LDFLAGS_MODULE_PREREQ= \
+	KBUILD_EXTRA_SYMBOLS='${STAGING_INCDIR}/qca-nss-ppe/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers ${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers' \
+"
+
+do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
 
 do_compile() {
-	LINUX_IPQ_VERSION=`echo ${PREFERRED_VERSION_linux-yocto} | awk -F% '{print $1}'`
-	echo -e "${V_mac80211_config}" > ${T_DIR}/.config
-	sed -i 's/-e//g' ${T_DIR}/.config
-	cat ${T_DIR}/.config
-	make  -C ${T_DIR} CC="gcc" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include/ -Wno-incompatible-pointer-types -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-function-declaration" MODPROBE=true     KLIB=/lib/modules/${KERNEL_VERSION}  KLIB_BUILD=${S}/../../../../linux-ipq/${LINUX_IPQ_VERSION}-${PR}/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= olddefconfig
-	rm -rf ${T_DIR}/modules
-make -C ${T_DIR} CC="${CC}" LD="${LD}"  ARCH="${ARCH}" EXTRA_CFLAGS="-I${T_DIR}/include -Wall -Werror -Wno-incompatible-pointer-types -Wno-unused-variable -Wno-discarded-qualifiers -Wno-int-conversion -Wno-implicit-fallthrough" KLIB=/lib/modules/${KERNEL_VERSION}  KLIB_BUILD=${S}/../../../../linux-ipq/${LINUX_IPQ_VERSION}-${PR}/build KERNEL_SUBLEVEL=4 KBUILD_LDFLAGS_MODULE_PREREQ= modules
-	cp ${T_DIR}/compat/compat.ko ${T_DIR}/drivers/net/wireless/ath/ath12k/ath12k.ko  ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_ahb.ko ${T_DIR}/drivers/net/wireless/ath/ath11k/ath11k_pci.ko ${T_DIR}/drivers/net/wireless/ath/ath.ko ${T_DIR}/net/mac80211/mac80211.ko ${T_DIR}/net/wireless/cfg80211.ko ./
-
-
+	${MAKE} ${MAKE_OPTS} modules
 }
 
 do_install() {
-	install -m 0755 -d ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 compat${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 cfg80211${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 mac80211${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 ath${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 ath11k${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 ath11k_ahb${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 ath11k_pci${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -m 0644 ath12k${KERNEL_OBJECT_SUFFIX} ${D}${base_libdir}/modules/${KERNEL_VERSION}/kernel/drivers/mac80211
-	install -d ${D}${includedir}/open-mac80211
+	oe_runmake -C ${STAGING_KERNEL_DIR} \
+		M=${S} \
+		ARCH=${ARCH} \
+		CROSS_COMPILE=${TARGET_PREFIX} \
+		INSTALL_MOD_PATH=${D} \
+		modules_install
 }
 
-S = "${WORKDIR}/git/${PKG_NAME}"
-inherit pkgconfig
+do_install:append() {
+	install -d ${D}/ini
+	install -d ${D}/ini/internal/
+
+	install -d ${D}${includedir}/open-mac80211
+	install -d ${D}${includedir}/mac80211
+	install -d ${D}${includedir}/mac80211-backport
+	install -d ${D}${includedir}/mac80211/ath
+	install -d ${D}${includedir}/net/mac80211
+	install -d ${D}${sysconfdir}/modprobe.d
+	install -d  ${STAGING_DIR}/usr/
+	install -d  ${STAGING_DIR}/usr/include
+	install -d  ${STAGING_DIR}/usr/include/mac80211
+	install -d  ${STAGING_DIR}/usr/include/mac80211/ath
+
+	cp -r ${WORKDIR}/ini/* ${D}/ini/
+	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
+
+	cp -r ${S}/net/mac80211/*.h ${D}${includedir}/mac80211/
+	cp -r ${S}/include/* ${D}${includedir}/mac80211/
+	cp -r ${S}/backport-include/* ${D}${includedir}/mac80211-backport/
+	cp ${S}/net/mac80211/rate.h ${D}${includedir}/net/mac80211/
+	cp ${S}/drivers/net/wireless/ath/*.h ${D}${includedir}/mac80211/ath/
+
+	cp -r ${S}/include/ath/*.h ${STAGING_DIR}/usr/include
+	cp -r ${S}/include/uapi/linux/*.h ${STAGING_DIR}/usr/include
+	install -d ${D}${includedir}/open-mac80211/linux
+	install -m 0644 ${S}/include/uapi/linux/nl80211.h ${D}${includedir}/open-mac80211/linux/nl80211.h
+	cp ${S}/drivers/net/wireless/ath/ath12k/*.h ${STAGING_DIR}/usr/include/mac80211/ath/
+	cp ${S}/Module.symvers ${D}${includedir}/open-mac80211/
+
+	if [ -f ${S}/drivers/net/wireless/ath/ath12k/vendor.h ]; then
+		cp ${S}/drivers/net/wireless/ath/ath12k/vendor.h ${D}${includedir}/mac80211/ath/
+	fi
+
+	if [ -f ${S}/Module.symvers ]; then
+		install -d ${D}${includedir}/mac80211
+		cp ${S}/Module.symvers ${D}${includedir}/mac80211/
+	fi
+
+	if [ -f ${S}/include/ath/ath_sawf.h ]; then
+		install -d ${D}${includedir}/ath
+		cp ${S}/include/ath/ath_sawf.h ${D}${includedir}/ath/
+		cp ${S}/include/ath/ath_fse.h ${D}${includedir}/ath/
+		cp ${S}/include/ath/ath_dp_accel_cfg.h ${D}${includedir}/ath/
+		cp ${S}/include/ath/ppe_public.h ${D}${includedir}/ath/
+	fi
+
+cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
+# Ensure firmware path is set before loading ath12k
+install ath12k /bin/sh -c 'echo /ini > /sys/module/firmware_class/parameters/path 2>/dev/null || true; /sbin/modprobe --ignore-install ath12k $CMDLINE_OPTS'
+EOF
+
+}
+
+
+# Firmware files need to be in separate packages since they're not .ko files
+PACKAGES =+ "${PN}-firmware-ath11k ${PN}-firmware-ath12k ${PN}-scripts"
+
+# Allow firmware packages to be empty if firmware is provided elsewhere
+ALLOW_EMPTY:${PN}-firmware-ath11k = "1"
+ALLOW_EMPTY:${PN}-firmware-ath12k = "1"
+
+FILES:${PN}-firmware-ath11k = " \
+	${nonarch_base_libdir}/firmware/ath11k/* \
+"
+
+FILES:${PN}-firmware-ath12k = " \
+	${nonarch_base_libdir}/firmware/ath12k/* \
+	${nonarch_base_libdir}/firmware/qcn9224 \
+"
+
+FILES:${PN}-dev = " \
+	${includedir}/mac80211/* \
+	${includedir}/mac80211-backport/* \
+	${includedir}/net/mac80211/* \
+	${includedir}/ath/* \
+"
+
+# Runtime dependencies for auto-generated kernel-module-* packages
+RDEPENDS:kernel-module-cfg80211 = "wireless-regdb"
+RDEPENDS:kernel-module-mac80211 = "kernel-module-cfg80211 kernel-module-compat"
+RDEPENDS:kernel-module-ath = "kernel-module-mac80211"
+RDEPENDS:kernel-module-ath11k = "kernel-module-ath"
+RDEPENDS:kernel-module-ath11k-ahb = "kernel-module-ath11k"
+RDEPENDS:kernel-module-ath11k-pci = "kernel-module-ath11k"
+RDEPENDS:kernel-module-ath12k = "kernel-module-ath"
+RDEPENDS:kernel-module-ath-debug = "kernel-module-ath12k"
+RDEPENDS:kernel-module-ath12k-wifi7 = "kernel-module-ath12k"
+RDEPENDS:kernel-module-ath12k-wifi8 = "kernel-module-ath12k"
+RDEPENDS:${PN}-scripts = "bash"
+
+
+ALLOW_EMPTY:${PN} = "1"
+ALLOW_EMPTY:${PN}-dev = "1"
+
+RDEPENDS:${PN} += " \
+	kernel-module-compat \
+	kernel-module-cfg80211 \
+	kernel-module-mac80211 \
+	kernel-module-ath \
+	kernel-module-ath11k \
+	kernel-module-ath11k-ahb \
+	kernel-module-ath11k-pci \
+	kernel-module-ath12k \
+	kernel-module-ath-debug \
+	kernel-module-ath12k-wifi7 \
+	kernel-module-ath12k-wifi8 \
+	${PN}-firmware-ath11k \
+	${PN}-firmware-ath12k \
+"
+
+FILES:${PN} += "/ini/* /ini/internal/*"
+
+FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
+
+FILES:${PN}-dev += "${includedir}/open-mac80211/*"
+
+COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85)"
+
+PARALLEL_MAKEINST = ""
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+# Use KERNEL_MODULE_AUTOLOAD:append for each module
+KERNEL_MODULE_AUTOLOAD:append = " compat"
+KERNEL_MODULE_AUTOLOAD:append = " cfg80211"
+KERNEL_MODULE_AUTOLOAD:append = " mac80211"
+KERNEL_MODULE_AUTOLOAD:append = " ath"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k_ahb"
+KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k"
+KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
+KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
+
+# Configure modprobe options using module_conf (same pattern as reference)
+module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
+module_conf_ath12k = "options ath12k dyndbg=+p debug_mask=0xffffffff"
+
+# Register modules that have configuration
+KERNEL_MODULE_PROBECONF += "cfg80211 ath12k"
+
+# Conflict with linux-backports
+RCONFLICTS:${PN} = "linux-backports"

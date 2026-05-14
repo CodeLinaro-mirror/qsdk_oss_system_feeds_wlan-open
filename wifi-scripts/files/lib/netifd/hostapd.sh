@@ -54,6 +54,7 @@ hostapd_append_wpa_key_mgmt() {
 		eap192)
 			append wpa_key_mgmt "WPA-EAP-SUITE-B-192"
 			[ "${ieee80211r:-0}" -gt 0 ] && append wpa_key_mgmt "FT-EAP-SHA384"
+			group_cipher="GCMP-256"
 		;;
 		eap-eap2)
 			append wpa_key_mgmt "WPA-EAP"
@@ -138,7 +139,6 @@ hostapd_add_log_config() {
 hostapd_common_add_device_config() {
 	config_add_array basic_rate
 	config_add_array supported_rates
-	config_add_string beacon_rate
 
 	config_add_string country country3
 	config_add_boolean country_ie doth
@@ -149,6 +149,8 @@ hostapd_common_add_device_config() {
 	config_add_int cell_density
 	config_add_int rts_threshold
 	config_add_int rssi_reject_assoc_rssi
+	config_add_int rssi_reject_assoc_timeout
+	config_add_int rssi_deauth_grace_samples
 	config_add_int rssi_ignore_probe_request
 	config_add_int maxassoc
 
@@ -169,7 +171,7 @@ hostapd_prepare_device_config() {
 
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
-		rts_threshold beacon_rate rssi_reject_assoc_rssi rssi_ignore_probe_request maxassoc \
+		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
 		mbssid:0
 
 	hostapd_set_log_options base_cfg
@@ -180,7 +182,13 @@ hostapd_prepare_device_config() {
 	set_default legacy_rates 0
 	set_default airtime_mode 0
 	set_default cell_density 0
-	set_default country "US"
+
+	if [ -z "$country" ]; then
+		local iw_country="$(iw reg get 2>/dev/null | awk -F '[: ]+' '$1=="country" && ++n==2 { print $2; exit }')"
+		if [ -n "$iw_country" ]; then
+			set_default country "$iw_country"
+		fi
+	fi
 
 	[ -n "$country" ] && [ "$country" != "00" ] && {
 		append base_cfg "country_code=$country" "$N"
@@ -264,8 +272,9 @@ hostapd_prepare_device_config() {
 	done
 
 	[ -n "$rssi_reject_assoc_rssi" ] && append base_cfg "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append base_cfg "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append base_cfg "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
 	[ -n "$rssi_ignore_probe_request" ] && append base_cfg "rssi_ignore_probe_request=$rssi_ignore_probe_request" "$N"
-	[ -n "$beacon_rate" ] && append base_cfg "beacon_rate=$beacon_rate" "$N"
 	append base_cfg "beacon_int=$beacon_int" "$N"
 	[ -n "$rts_threshold" ] && append base_cfg "rts_threshold=$rts_threshold" "$N"
 	[ "$airtime_mode" -gt 0 ] && append base_cfg "airtime_mode=$airtime_mode" "$N"
@@ -287,6 +296,7 @@ hostapd_common_add_bss_config() {
 	config_add_string 'bssid:macaddr' 'ssid:string'
 	config_add_boolean wds wmm uapsd hidden utf8_ssid ppsk
 
+	config_add_int rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 	config_add_int maxassoc max_inactivity
 	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll
 
@@ -313,6 +323,9 @@ hostapd_common_add_bss_config() {
 
 	config_add_int bss_load_update_period chan_util_avg_period
 
+	config_add_int oce
+	config_add_string beacon_rate probe_resp_rate
+
 	config_add_string dae_client
 	config_add_string dae_secret
 	config_add_int dae_port
@@ -338,13 +351,15 @@ hostapd_common_add_bss_config() {
 
 	config_add_int multi_ap
 
+	config_add_int multi_ap_vlanid
+
 	config_add_boolean wps_pushbutton wps_label ext_registrar wps_pbc_in_m1
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
 	config_add_string multi_ap_backhaul_ssid multi_ap_backhaul_key
 
 	config_add_boolean wnm_sleep_mode wnm_sleep_mode_no_keys bss_transition mbo
-	config_add_int time_advertisement
+	config_add_int time_advertisement mbo_cell_data_conn_pref
 	config_add_string time_zone
 	config_add_string vendor_elements
 
@@ -369,16 +384,27 @@ hostapd_common_add_bss_config() {
 	config_add_int mcast_rate
 	config_add_array basic_rate
 	config_add_array supported_rates
+	config_add_array basic_rates
 
 	config_add_boolean sae_require_mfp
 	config_add_int sae_pwe
+	config_add_int external_plugin_enable
+	config_add_int plugin_eap_offload
+	config_add_int externally_triggered_m3
+	config_add_int external_plugin_auth_policy
+	config_add_int external_plugin_assoc_policy
+	config_add_int external_plugin_deauth_policy
+	config_add_int external_plugin_disassoc_policy
+
+	config_add_int control_frame_protection
+	config_add_int cip_padding_delay
 
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
 
 	config_add_boolean iw_enabled iw_internet iw_asra iw_esr iw_uesa
 	config_add_int iw_access_network_type iw_venue_group iw_venue_type
-	config_add_int iw_ipaddr_type_availability iw_gas_address3
+	config_add_int iw_ipaddr_type_availability iw_gas_address3 iw_bss_priority iw_bss_priority_status
 	config_add_string iw_hessid iw_network_auth_type iw_qos_map_set
 	config_add_array iw_roaming_consortium iw_domain_name iw_anqp_3gpp_cell_net iw_nai_realm
 	config_add_array iw_anqp_elem iw_venue_name iw_venue_url
@@ -430,8 +456,36 @@ hostapd_common_add_bss_config() {
 
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
+	config_add_string vht_mcs_nss_set ht_mcs_nss_set
+# WMM AC params
+	config_add_int \
+		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
+		wmm_ac_be_txop_limit wmm_ac_be_acm \
+		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
+		wmm_ac_bk_txop_limit wmm_ac_bk_acm \
+		wmm_ac_vi_aifs wmm_ac_vi_cwmin wmm_ac_vi_cwmax \
+		wmm_ac_vi_txop_limit wmm_ac_vi_acm \
+		wmm_ac_vo_aifs wmm_ac_vo_cwmin wmm_ac_vo_cwmax \
+		wmm_ac_vo_txop_limit wmm_ac_vo_acm
+
+	# tx_queue_dataX params + noack for all ACs (0..3)
+	config_add_int \
+		tx_queue_data0_aifs tx_queue_data0_cwmin tx_queue_data0_cwmax \
+		tx_queue_data0_burst tx_queue_data0_acm tx_queue_data0_noack \
+		tx_queue_data1_aifs tx_queue_data1_cwmin tx_queue_data1_cwmax \
+		tx_queue_data1_burst tx_queue_data1_acm tx_queue_data1_noack \
+		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
+		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
+		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack
 
 	config_add_int wps_cred_add_sae
+	config_add_string scan_freq bgscan bgscan_freq
+
+	config_add_int control_frame_prot
+	config_add_int max_cip_padding_delay
+	config_add_int dcs_random_chan_bitmap
+	config_add_int dcs_bw_reduction_ctrl
 }
 
 hostapd_set_vlan_file() {
@@ -613,14 +667,35 @@ hostapd_set_bss_options() {
 		macfilter ssid utf8_ssid wmm uapsd hidden short_preamble rsn_preauth \
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
-		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe \
-		multi_ap multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable plugin_eap_offload externally_triggered_m3 \
+		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
+		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
-		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2
+		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
+		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set \
+		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
+		wmm_ac_be_txop_limit wmm_ac_be_acm \
+		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
+		wmm_ac_bk_txop_limit wmm_ac_bk_acm \
+		wmm_ac_vi_aifs wmm_ac_vi_cwmin wmm_ac_vi_cwmax \
+		wmm_ac_vi_txop_limit wmm_ac_vi_acm \
+		wmm_ac_vo_aifs wmm_ac_vo_cwmin wmm_ac_vo_cwmax \
+		wmm_ac_vo_txop_limit wmm_ac_vo_acm \
+		tx_queue_data0_aifs tx_queue_data0_cwmin tx_queue_data0_cwmax \
+		tx_queue_data0_burst tx_queue_data0_acm tx_queue_data0_noack \
+		tx_queue_data1_aifs tx_queue_data1_cwmin tx_queue_data1_cwmax \
+		tx_queue_data1_burst tx_queue_data1_acm tx_queue_data1_noack \
+		tx_queue_data2_aifs tx_queue_data2_cwmin tx_queue_data2_cwmax \
+		tx_queue_data2_burst tx_queue_data2_acm tx_queue_data2_noack \
+		tx_queue_data3_aifs tx_queue_data3_cwmin tx_queue_data3_cwmax \
+		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
+		control_frame_prot max_cip_padding_delay \
+		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
+		dcs_random_chan_bitmap dcs_bw_reduction_ctrl
 
 
 	json_get_values sae_groups sae_groups
@@ -649,10 +724,18 @@ hostapd_set_bss_options() {
 	set_default airtime_bss_limit 0
 	set_default eap_server 0
 	set_default apup 0
+	set_default external_plugin_auth_policy 0
+	set_default external_plugin_assoc_policy 0
+	set_default external_plugin_deauth_policy 0
+	set_default external_plugin_disassoc_policy 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
 	append bss_conf "ctrl_interface=/var/run/hostapd"
+
+	[ -n "$dcs_random_chan_bitmap" ] && append bss_conf "dcs_random_chan_bitmap=$dcs_random_chan_bitmap" "$N"
+	[ -n "$dcs_bw_reduction_ctrl" ] && append bss_conf "dcs_bw_reduction_ctrl=$dcs_bw_reduction_ctrl" "$N"
+
 	if [ "$isolate" -gt 0 ]; then
 		append bss_conf "ap_isolate=$isolate" "$N"
 	fi
@@ -667,6 +750,10 @@ hostapd_set_bss_options() {
 	[ "$airtime_bss_limit" -gt 0 ] && append bss_conf "airtime_bss_limit=$airtime_bss_limit" "$N"
 	json_for_each_item append_airtime_sta_weight airtime_sta_weight
 
+	[ -n "$rssi_reject_assoc_rssi" ] && append bss_conf "rssi_reject_assoc_rssi=$rssi_reject_assoc_rssi" "$N"
+	[ -n "$rssi_reject_assoc_timeout" ] && append bss_conf "rssi_reject_assoc_timeout=$rssi_reject_assoc_timeout" "$N"
+	[ -n "$rssi_deauth_grace_samples" ] && append bss_conf "rssi_deauth_grace_samples=$rssi_deauth_grace_samples" "$N"
+
 	#[ -n "$bss_load_update_period" ] && append bss_conf "bss_load_update_period=$bss_load_update_period" "$N"
 	append bss_conf "chan_util_avg_period=$chan_util_avg_period" "$N"
 	append bss_conf "disassoc_low_ack=$disassoc_low_ack" "$N"
@@ -677,7 +764,39 @@ hostapd_set_bss_options() {
 	append bss_conf "uapsd_advertisement_enabled=$uapsd" "$N"
 	append bss_conf "utf8_ssid=$utf8_ssid" "$N"
 	append bss_conf "multi_ap=$multi_ap" "$N"
+	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
+
+	[ -n "$oce" ] && {
+		# Set oce=4 to enable OCE_AP
+		append bss_conf "oce=4" "$N"
+
+		# Set default Beacon and Probe Resp Rate for 2.4 GHz band as per OCE spec 2.0
+		if [ "$band" = "2g" ]; then
+			[ -z "$beacon_rate" ] && append bss_conf "beacon_rate=55" "$N"
+			[ -z "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=55" "$N"
+		fi
+	}
+
+	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
+
+	[ -n "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=$probe_resp_rate" "$N"
+
+	[ -n "$vht_mcs_nss_set" ] && append bss_conf "vht_mcs_nss_set=$vht_mcs_nss_set" "$N"
+	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
+
+	# Per-VAP supported/basic rates (string or array)
+	# Supported rates (array or string)
+	local supported_rates_list
+	json_get_values supported_rates_list supported_rates
+	[ -z "$supported_rates_list" ] && json_get_var supported_rates_list supported_rates
+	[ -n "$supported_rates_list" ] && append bss_conf "supported_rates=$supported_rates_list" "$N"
+	
+	# Basic rates (array or string)
+	local basic_rates_list
+	json_get_values basic_rates_list basic_rates
+	[ -z "$basic_rates_list" ] && json_get_var basic_rates_list basic_rates
+	[ -n "$basic_rates_list" ] && append bss_conf "basic_rates=$basic_rates_list" "$N"
 
 	[ "$tdls_prohibit" -gt 0 ] && append bss_conf "tdls_prohibit=$tdls_prohibit" "$N"
 
@@ -743,6 +862,13 @@ hostapd_set_bss_options() {
 
 	[ -n "$sae_require_mfp" ] && append bss_conf "sae_require_mfp=$sae_require_mfp" "$N"
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
+	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
+	[ -n "$plugin_eap_offload" ] && append bss_conf "plugin_eap_offload=$plugin_eap_offload" "$N"
+	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
+	[ -n "$external_plugin_auth_policy" ] && append bss_conf "external_plugin_auth_policy=$external_plugin_auth_policy" "$N"
+	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
+	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
+	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
@@ -887,6 +1013,11 @@ hostapd_set_bss_options() {
 	local auth_algs="$(((auth_mode_shared << 1) | auth_mode_open))"
 	append bss_conf "auth_algs=${auth_algs:-1}" "$N"
 	append bss_conf "wpa=$wpa" "$N"
+	if [ "$control_frame_prot" = "1" ]; then
+		if ! echo "$wpa_pairwise" | grep -qw "GCMP-256"; then
+			wpa_pairwise="${wpa_pairwise:+$wpa_pairwise }GCMP-256"
+		fi
+	fi
 	[ -n "$wpa_pairwise" ] && append bss_conf "wpa_pairwise=$wpa_pairwise" "$N"
 
 	set_default wps_pushbutton 0
@@ -946,7 +1077,8 @@ hostapd_set_bss_options() {
 		append bss_conf "iapp_interface=$ifname" "$N"
 	}
 
-	json_get_vars time_advertisement time_zone wnm_sleep_mode wnm_sleep_mode_no_keys bss_transition mbo
+	json_get_vars time_advertisement time_zone wnm_sleep_mode wnm_sleep_mode_no_keys \
+			bss_transition mbo mbo_cell_data_conn_pref
 	set_default bss_transition 0
 	set_default wnm_sleep_mode 0
 	set_default wnm_sleep_mode_no_keys 0
@@ -958,8 +1090,10 @@ hostapd_set_bss_options() {
 		append bss_conf "wnm_sleep_mode=1" "$N"
 		[ "$wnm_sleep_mode_no_keys" -eq "1" ] && append bss_conf "wnm_sleep_mode_no_keys=1" "$N"
 	fi
+	[ "$mbo" -eq "1" ] && bss_transition=1
 	[ "$bss_transition" -eq "1" ] && append bss_conf "bss_transition=1" "$N"
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
+	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 
 	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr
 	set_default ieee80211k 0
@@ -1001,6 +1135,10 @@ hostapd_set_bss_options() {
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
+		if [ "$group_cipher" != "GCMP-256" ]; then
+			group_cipher="CCMP"
+		fi
+		append bss_conf "group_cipher=$group_cipher" "$N"
 	fi
 
 	if [ "$wpa" -ge "2" ]; then
@@ -1153,7 +1291,7 @@ hostapd_set_bss_options() {
 	json_get_vars iw_hessid iw_venue_group iw_venue_type iw_network_auth_type
 	json_get_vars iw_roaming_consortium iw_domain_name iw_anqp_3gpp_cell_net iw_nai_realm
 	json_get_vars iw_anqp_elem iw_qos_map_set iw_ipaddr_type_availability iw_gas_address3
-	json_get_vars iw_venue_name iw_venue_url
+	json_get_vars iw_venue_name iw_venue_url iw_bss_priority iw_bss_priority_status
 
 	set_default iw_enabled 0
 	if [ "$iw_enabled" = "1" ]; then
@@ -1201,6 +1339,119 @@ hostapd_set_bss_options() {
 		*) iw_qos_map_set="";;
 	esac
 	[ -n "$iw_qos_map_set" ] && append bss_conf "qos_map_set=$iw_qos_map_set" "$N"
+
+	set_default iw_bss_priority 0
+	set_default iw_bss_priority_status 0
+
+# WMM AC defaults
+	set_default wmm_ac_be_aifs       3
+	set_default wmm_ac_be_cwmin      4
+	set_default wmm_ac_be_cwmax      10
+	set_default wmm_ac_be_txop_limit 0
+	set_default wmm_ac_be_acm        0
+
+	set_default wmm_ac_bk_aifs       7
+	set_default wmm_ac_bk_cwmin      4
+	set_default wmm_ac_bk_cwmax      10
+	set_default wmm_ac_bk_txop_limit 0
+	set_default wmm_ac_bk_acm        0
+
+	set_default wmm_ac_vi_aifs       2
+	set_default wmm_ac_vi_cwmin      3
+	set_default wmm_ac_vi_cwmax      4
+	set_default wmm_ac_vi_txop_limit 94
+	set_default wmm_ac_vi_acm        0
+
+	set_default wmm_ac_vo_aifs       2
+	set_default wmm_ac_vo_cwmin      2
+	set_default wmm_ac_vo_cwmax      3
+	set_default wmm_ac_vo_txop_limit 47
+	set_default wmm_ac_vo_acm        0
+
+# TX queue defaults (including acm / noack)
+	set_default tx_queue_data0_aifs   1
+	set_default tx_queue_data0_cwmin  3
+	set_default tx_queue_data0_cwmax  7
+	set_default tx_queue_data0_burst  1.5
+	set_default tx_queue_data0_acm    0
+	set_default tx_queue_data0_noack  0
+
+	set_default tx_queue_data1_aifs   1
+	set_default tx_queue_data1_cwmin  7
+	set_default tx_queue_data1_cwmax  15
+	set_default tx_queue_data1_burst  3.0
+	set_default tx_queue_data1_acm    0
+	set_default tx_queue_data1_noack  0
+
+	set_default tx_queue_data2_aifs   3
+	set_default tx_queue_data2_cwmin  15
+	set_default tx_queue_data2_cwmax  63
+	set_default tx_queue_data2_burst  0
+	set_default tx_queue_data2_acm    0
+	set_default tx_queue_data2_noack  0
+
+	set_default tx_queue_data3_aifs   7
+	set_default tx_queue_data3_cwmin  15
+	set_default tx_queue_data3_cwmax  1023
+	set_default tx_queue_data3_burst  0
+	set_default tx_queue_data3_acm    0
+	set_default tx_queue_data3_noack  0
+
+	[ -n "$iw_bss_priority" ] && append bss_conf "bss_priority=$iw_bss_priority" "$N"
+	[ -n "$iw_bss_priority_status" ] && append bss_conf "bss_priority_status=$iw_bss_priority_status" "$N"
+	# WMM per-AC parameters
+	[ -n "$wmm_ac_be_aifs" ]       && append bss_conf "wmm_ac_be_aifs=$wmm_ac_be_aifs" "$N"
+	[ -n "$wmm_ac_be_cwmin" ]      && append bss_conf "wmm_ac_be_cwmin=$wmm_ac_be_cwmin" "$N"
+	[ -n "$wmm_ac_be_cwmax" ]      && append bss_conf "wmm_ac_be_cwmax=$wmm_ac_be_cwmax" "$N"
+	[ -n "$wmm_ac_be_txop_limit" ] && append bss_conf "wmm_ac_be_txop_limit=$wmm_ac_be_txop_limit" "$N"
+	[ -n "$wmm_ac_be_acm" ]        && append bss_conf "wmm_ac_be_acm=$wmm_ac_be_acm" "$N"
+
+	[ -n "$wmm_ac_bk_aifs" ]       && append bss_conf "wmm_ac_bk_aifs=$wmm_ac_bk_aifs" "$N"
+	[ -n "$wmm_ac_bk_cwmin" ]      && append bss_conf "wmm_ac_bk_cwmin=$wmm_ac_bk_cwmin" "$N"
+	[ -n "$wmm_ac_bk_cwmax" ]      && append bss_conf "wmm_ac_bk_cwmax=$wmm_ac_bk_cwmax" "$N"
+	[ -n "$wmm_ac_bk_txop_limit" ] && append bss_conf "wmm_ac_bk_txop_limit=$wmm_ac_bk_txop_limit" "$N"
+	[ -n "$wmm_ac_bk_acm" ]        && append bss_conf "wmm_ac_bk_acm=$wmm_ac_bk_acm" "$N"
+
+	[ -n "$wmm_ac_vi_aifs" ]       && append bss_conf "wmm_ac_vi_aifs=$wmm_ac_vi_aifs" "$N"
+	[ -n "$wmm_ac_vi_cwmin" ]      && append bss_conf "wmm_ac_vi_cwmin=$wmm_ac_vi_cwmin" "$N"
+	[ -n "$wmm_ac_vi_cwmax" ]      && append bss_conf "wmm_ac_vi_cwmax=$wmm_ac_vi_cwmax" "$N"
+	[ -n "$wmm_ac_vi_txop_limit" ] && append bss_conf "wmm_ac_vi_txop_limit=$wmm_ac_vi_txop_limit" "$N"
+	[ -n "$wmm_ac_vi_acm" ]        && append bss_conf "wmm_ac_vi_acm=$wmm_ac_vi_acm" "$N"
+
+	[ -n "$wmm_ac_vo_aifs" ]       && append bss_conf "wmm_ac_vo_aifs=$wmm_ac_vo_aifs" "$N"
+	[ -n "$wmm_ac_vo_cwmin" ]      && append bss_conf "wmm_ac_vo_cwmin=$wmm_ac_vo_cwmin" "$N"
+	[ -n "$wmm_ac_vo_cwmax" ]      && append bss_conf "wmm_ac_vo_cwmax=$wmm_ac_vo_cwmax" "$N"
+	[ -n "$wmm_ac_vo_txop_limit" ] && append bss_conf "wmm_ac_vo_txop_limit=$wmm_ac_vo_txop_limit" "$N"
+	[ -n "$wmm_ac_vo_acm" ]        && append bss_conf "wmm_ac_vo_acm=$wmm_ac_vo_acm" "$N"
+
+	# TX queue parameters for data0..data3 (0..3)
+	[ -n "$tx_queue_data0_aifs" ]       && append bss_conf "tx_queue_data0_aifs=$tx_queue_data0_aifs" "$N"
+	[ -n "$tx_queue_data0_cwmin" ]      && append bss_conf "tx_queue_data0_cwmin=$tx_queue_data0_cwmin" "$N"
+	[ -n "$tx_queue_data0_cwmax" ]      && append bss_conf "tx_queue_data0_cwmax=$tx_queue_data0_cwmax" "$N"
+	[ -n "$tx_queue_data0_burst" ] 	    && append bss_conf "tx_queue_data0_burst=$tx_queue_data0_burst" "$N"
+	[ -n "$tx_queue_data0_acm" ]        && append bss_conf "tx_queue_data0_acm=$tx_queue_data0_acm" "$N"
+	[ -n "$tx_queue_data0_noack" ]      && append bss_conf "tx_queue_data0_noack=$tx_queue_data0_noack" "$N"
+
+	[ -n "$tx_queue_data1_aifs" ]       && append bss_conf "tx_queue_data1_aifs=$tx_queue_data1_aifs" "$N"
+	[ -n "$tx_queue_data1_cwmin" ]      && append bss_conf "tx_queue_data1_cwmin=$tx_queue_data1_cwmin" "$N"
+	[ -n "$tx_queue_data1_cwmax" ]      && append bss_conf "tx_queue_data1_cwmax=$tx_queue_data1_cwmax" "$N"
+	[ -n "$tx_queue_data1_burst" ]	    && append bss_conf "tx_queue_data1_burst=$tx_queue_data1_burst" "$N"
+	[ -n "$tx_queue_data1_acm" ]        && append bss_conf "tx_queue_data1_acm=$tx_queue_data1_acm" "$N"
+	[ -n "$tx_queue_data1_noack" ]      && append bss_conf "tx_queue_data1_noack=$tx_queue_data1_noack" "$N"
+
+	[ -n "$tx_queue_data2_aifs" ]       && append bss_conf "tx_queue_data2_aifs=$tx_queue_data2_aifs" "$N"
+	[ -n "$tx_queue_data2_cwmin" ]      && append bss_conf "tx_queue_data2_cwmin=$tx_queue_data2_cwmin" "$N"
+	[ -n "$tx_queue_data2_cwmax" ]      && append bss_conf "tx_queue_data2_cwmax=$tx_queue_data2_cwmax" "$N"
+	[ -n "$tx_queue_data2_burst" ]      && append bss_conf "tx_queue_data2_burst=$tx_queue_data2_burst" "$N"
+	[ -n "$tx_queue_data2_acm" ]        && append bss_conf "tx_queue_data2_acm=$tx_queue_data2_acm" "$N"
+	[ -n "$tx_queue_data2_noack" ]      && append bss_conf "tx_queue_data2_noack=$tx_queue_data2_noack" "$N"
+
+	[ -n "$tx_queue_data3_aifs" ]       && append bss_conf "tx_queue_data3_aifs=$tx_queue_data3_aifs" "$N"
+	[ -n "$tx_queue_data3_cwmin" ]      && append bss_conf "tx_queue_data3_cwmin=$tx_queue_data3_cwmin" "$N"
+	[ -n "$tx_queue_data3_cwmax" ]      && append bss_conf "tx_queue_data3_cwmax=$tx_queue_data3_cwmax" "$N"
+	[ -n "$tx_queue_data3_burst" ]      && append bss_conf "tx_queue_data3_burst=$tx_queue_data3_burst" "$N"
+	[ -n "$tx_queue_data3_acm" ]        && append bss_conf "tx_queue_data3_acm=$tx_queue_data3_acm" "$N"
+	[ -n "$tx_queue_data3_noack" ]      && append bss_conf "tx_queue_data3_noack=$tx_queue_data3_noack" "$N"
 
 	local hs20 disable_dgaf osen anqp_domain_id hs20_deauth_req_timeout \
 		osu_ssid hs20_wan_metrics hs20_operating_class hs20_t_c_filename hs20_t_c_timestamp \
@@ -1291,6 +1542,10 @@ hostapd_set_bss_options() {
 		[ -n "$dpp_configurator_connectivity" ] && append bss_conf "dpp_configurator_connectivity=$dpp_configurator_connectivity" "$N"
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
+
+	[ -n "$control_frame_prot" ] && append bss_conf "control_frame_prot=$control_frame_prot" "$N"
+
+	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
 
 	append "$var" "$bss_conf" "$N"
 	return 0
@@ -1409,11 +1664,15 @@ wpa_supplicant_prepare_interface() {
 	else
 		[ -e "$multiap_flag_file" ] && rm "$multiap_flag_file"
 	fi
+	local ctrl_intf_str=
+	[ "$mode" = sta ] && ctrl_intf_str="ctrl_interface=${_rpath}"
+
 	wpa_supplicant_teardown_interface "$ifname"
 	cat > "$_config" <<EOF
 ${scan_list:+freq_list=$scan_list}
 $ap_scan
 $country_str
+$ctrl_intf_str
 EOF
 	return 0
 }
@@ -1447,11 +1706,20 @@ wpa_supplicant_set_fixed_freq() {
 
 wpa_supplicant_add_network() {
 	local ifname="$1"
-	local freq="$2"
-	local htmode="$3"
-	local noscan="$4"
+
+	if [ "$_w_mode" = "sta" ]; then
+		local athnewind="$2"
+		local rptr_mgr_mode="$3"
+		local channel="$4"
+		local uplink_csa="$5"
+	else
+		local freq="$2"
+		local htmode="$3"
+		local noscan="$4"
+		local ru_punct_bitmap=$5
+	fi
+
 	local disable_40mhz_scan=0
-	local ru_punct_bitmap=$5
 	local disable_csa_dfs=$6
 	local ccfs=0
 
@@ -1465,7 +1733,10 @@ wpa_supplicant_add_network() {
 		multi_ap \
 		default_disabled dpp \
 		ppe_vp \
-		ssid_protection
+		ssid_protection \
+		scan_freq bgscan bgscan_freq \
+		control_frame_protection \
+		cip_padding_delay
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1502,6 +1773,33 @@ wpa_supplicant_add_network() {
 		[ -n "$freq_list" ] && {
 			freq_list="freq_list=$freq_list"
 		}
+		# Append per-network scan/bgscan parameters when provided via UCI
+		json_get_vars scan_freq bgscan_freq bgscan
+		[ -n "$scan_freq" ] && {
+			if echo "$scan_freq" | grep -qE '^[0-9]+([ ][0-9]+)*$'; then
+				append network_data "scan_freq=$scan_freq" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_SCAN_FREQ
+				return 1
+			fi
+		}
+		[ -n "$bgscan" ] && {
+			if echo "$bgscan" | grep -qE '^[a-z]+:[0-9:-]+$'; then
+				append network_data "bgscan=\"${bgscan}\"" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_BGSCAN
+				return 1
+			fi
+		}
+		[ -n "$bgscan_freq" ] && {
+			if echo "$bgscan_freq" | grep -qE '^[0-9]+([ ][0-9]+)*$'; then
+				append network_data "bgscan_freq=$bgscan_freq" "$N$T"
+			else
+				wireless_setup_vif_failed INVALID_BGSCAN_FREQ
+				return 1
+			fi
+		}
+		([ -n "$scan_freq" ] || [ -n "$bgscan" ] || [ -n "$bgscan_freq" ]) && append update_config "update_config=1" "$N$T"
 	}
 
 	[ "$_w_mode" = "mesh" ] && {
@@ -1533,7 +1831,10 @@ wpa_supplicant_add_network() {
 	}
 
 	[ "$_w_mode" = "sta" ] && {
-		[ "$multi_ap" = 1 ] && append network_data "multi_ap_backhaul_sta=1" "$N$T"
+		[ "$multi_ap" = 1 ] && {
+			append network_data "multi_ap_backhaul_sta=1" "$N$T"
+			append network_data "enable_4addr_mode=1" "$N$T"
+		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 	}
 
@@ -1560,6 +1861,7 @@ wpa_supplicant_add_network() {
 				hostapd_append_wpa_key_mgmt
 			fi
 
+			[[ "$auth_type" == *sae* ]] && set_default saepwe "sae_pwe=2"
 			key_mgmt="$wpa_key_mgmt"
 
 			if [ "$_w_mode" = "mesh" ] || [ "$auth_type" = "sae" ]; then
@@ -1718,10 +2020,16 @@ wpa_supplicant_add_network() {
 		;;
 	esac
 
-	[ -n "$wpa_cipher" ] && {
-		append network_data "pairwise=$wpa_cipher" "$N$T"
-		append network_data "group=$wpa_cipher" "$N$T"
-	}
+	if [ "$control_frame_protection" = "1" ]; then
+		if ! echo "$wpa_cipher" | grep -qw "GCMP-256"; then
+			wpa_cipher="${wpa_cipher:+$wpa_cipher }GCMP-256"
+		fi
+	fi
+	[ -n "$wpa_cipher" ] && append network_data "pairwise=$wpa_cipher" "$N$T"
+	if [ "$group_cipher" != "GCMP-256" ]; then
+		group_cipher="CCMP"
+	fi
+	append network_data "group=$group_cipher" "$N$T"
 
 	[ "$mode" = mesh ] || {
 		case "$wpa" in
@@ -1789,6 +2097,10 @@ wpa_supplicant_add_network() {
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
 
+	[ -n "$control_frame_protection" ] && append network_data "control_frame_protection=$control_frame_protection" "$N$T"
+
+	[ -n "$cip_padding_delay" ] && append network_data "cip_padding_delay=$cip_padding_delay" "$N$T"
+
 	local ppe_vp_type=
 	case "$ppe_vp" in
 		"passive")
@@ -1834,6 +2146,10 @@ network={
 	$reconfig
 	$freq_list
 }
+athnewind=$athnewind
+rptr_mgr_mode=$rptr_mgr_mode
+channel=$channel
+uplink_csa=$uplink_csa
 EOF
 	fi
 	return 0

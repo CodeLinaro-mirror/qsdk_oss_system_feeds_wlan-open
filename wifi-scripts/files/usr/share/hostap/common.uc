@@ -16,6 +16,17 @@ const iftypes = {
 	monitor: nl80211.const.NL80211_IFTYPE_MONITOR,
 };
 
+const monitor_flags_map = {
+	fcsfail: "fcsfail",
+	plcpfail: "plcpfail",
+	control: "control",
+	other_bss: "other_bss",
+	cook_frames: "cook_frames",
+	active: "active",
+	skip_tx: "skip_tx",
+	skip_rx: "skip_rx",
+};
+
 const mesh_params = {
 	mesh_retry_timeout: "retry_timeout",
 	mesh_confirm_timeout: "confirm_timeout",
@@ -45,6 +56,19 @@ const mesh_params = {
 	mesh_power_mode: "power_mode",
 	mesh_nolearn: "nolearn"
 };
+
+function parse_monitor_flags(flag_list) {
+	let mntr_flags = {};
+	for (let flag_str in flag_list) {
+		let nl_flag_val = monitor_flags_map[flag_str];
+		if (nl_flag_val) {
+			mntr_flags[nl_flag_val] = 1;
+		} else {
+			warn(`Unknown monitor flag: ${flag_str}\n`);
+		}
+	}
+	return mntr_flags;
+}
 
 function wdev_remove(name)
 {
@@ -89,7 +113,7 @@ function wdev_get_radio_mask(name)
 
 	let error = nl80211.error();
 	if (error || !wdev) {
-		hostapd.printf(`error: Failed to get radio mask, iface ${name} error ${error} wdev ${wdev}`);
+		print(`error: Failed to get radio mask, iface ${name} error ${error} wdev ${wdev}\n`);
 		return null;
 	}
 
@@ -125,6 +149,13 @@ function wdev_create(phy, name, data)
 		req.mac = data.macaddr;
 	if (data.radio != null && data.radio >= 0)
 		req.vif_radio_mask = 1 << data.radio;
+
+	if (data.mode == "monitor") {
+		if (data.monitor_flags){
+			let flags_list = split(data.monitor_flags, " ");
+			req.mntr_flags = parse_monitor_flags(flags_list);
+		}
+	}
 
 	nl80211.error();
 
@@ -191,7 +222,8 @@ function macaddr_split(str)
 
 function macaddr_join(addr)
 {
-	return join(":", map(addr, (val) => sprintf("%02x", val)));
+	/* Clamp each octet to 8 bits before formatting */
+	return join(":", map(addr, (val) => sprintf("%02x", val & 0xff)));
 }
 
 function wdev_macaddr(wdev)
@@ -291,6 +323,7 @@ const phy_proto = {
 				idx--;
 			addr[0] |= 2;
 			addr[0] ^= idx << 2;
+			addr[0] %= 256;
 			break;
 		case "b5":
 			if (mbssid) {
@@ -299,8 +332,11 @@ const phy_proto = {
 				let B = addr[5] % size;
 				let loct = addr[5];
 				addr[5] = loct - B + ((B+idx) % size);
+				addr[5] %= 256;
 			} else {
+				/* Ensure last octet remains within 0..255 */
 				addr[5] ^= idx;
+				addr[5] %= 256;
 			}
 			break;
 		default:
