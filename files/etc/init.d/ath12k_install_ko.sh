@@ -13,8 +13,7 @@ start()
         insmod mac80211.ko
         insmod ath.ko
         insmod ath_debug.ko
-	# ath12k debug_mask belongs to ath12k.ko (not ath12k_wifi7.ko)
-        insmod ath12k.ko dyndbg=+p
+        insmod ath12k.ko dyndbg=+p probe_order=0x312
         insmod ath12k_wifi7.ko
         # Mark KPI after all drivers are loaded
         echo -n 'M - QCA wifi Ready' >> /sys/kernel/boot_kpi/kpi_values
