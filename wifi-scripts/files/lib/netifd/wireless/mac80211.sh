@@ -210,6 +210,7 @@ skip_cac=
 uplink_csa=
 sta_dfs_en=
 rptr_mgr_mode=
+rptr_allow_chan_sw=
 vap_submode=
 CSwOpts=
 rpt_max_phy=
@@ -408,6 +409,7 @@ ubus_call() {
 		discard_6g_awgn_event \
 		ignorecac \
 		skip_cac \
+		rptr_allow_chan_sw \
 		uplink_csa
 	config_add_string CSwOpts
 	config_add_boolean atfstrictsched
@@ -722,7 +724,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
 	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
-	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa CSwOpts
+	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa CSwOpts rptr_allow_chan_sw
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
@@ -1324,6 +1326,9 @@ mac80211_hostapd_setup_base() {
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
 	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
 	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
+	if [ "$is_repeater" = "1" ]; then
+		[ -n "$rptr_allow_chan_sw" ] && append base_cfg "rptr_allow_chan_sw=$rptr_allow_chan_sw" "$N"
+	fi
 
 	if [ "$qacs_enable" -eq "1" ]; then
 		append base_cfg "qacs_enable=$qacs_enable" "$N"
