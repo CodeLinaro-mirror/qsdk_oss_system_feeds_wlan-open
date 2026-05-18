@@ -37,7 +37,7 @@ PKG_BUILD_PARALLEL:=1
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
 PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
 
-ifeq ($(CONFIG_TARGET_sdx85),y)
+ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	SRCPREFIX:=
 else
 	SRCPREFIX:="qca/"
@@ -47,6 +47,8 @@ LOCAL_SRC:=$(TOPDIR)/$(SRCPREFIX)src/mac80211/wlan-open/backports-6.1-$(MAC80211
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
+else ifeq ($(CONFIG_TARGET_echo),y)
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/wlan-hostapd/hostapd/
 else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/feed-qca/qca/feeds/wlan-hostapd/hostapd/
 else
@@ -199,7 +201,7 @@ endif
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_module_add.sh $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
 	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
-ifeq ($(CONFIG_TARGET_sdx85),y)
+ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/compat/compat.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
@@ -233,7 +235,7 @@ define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
   # +kmod-crypto-cmac is a runtime only dependency of net/mac80211/aes_cmac.c
-ifeq ($(CONFIG_TARGET_sdx85),y)
+ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
 else
   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common \
@@ -343,7 +345,7 @@ define KernelPackage/mac80211-hwsim
   AUTOLOAD:=$(call AutoProbe,mac80211_hwsim)
 endef
 
-ifeq ($(CONFIG_TARGET_sdx85),y)
+ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 define KernelPackage/mac80211/install
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -357,23 +359,26 @@ define KernelPackage/ath12k/install
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
+	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_DIR) $(1)/lib/firmware
-	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
+ifeq ($(CONFIG_TARGET_sdx85),y)
+	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN92XX
 	ln -sf /firmware/image/qcn9224 $(1)/lib/firmware
-	ln -sf /firmware/image/qcn9224/amss.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
-	ln -sf /firmware/image/qcn9224/amss_dualmac.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
-	ln -sf /firmware/image/qcn9224/board-2.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
-	ln -sf /firmware/image/qcn9224/m3.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
-	ln -sf /firmware/image/qcn9224/qdss_trace_config.bin $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
-
+	ln -sf /firmware/image/qcn9224 $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
+else ifeq ($(CONFIG_TARGET_echo),y)
+	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN9625
+	ln -sf /firmware/image/qcn9625 $(1)/lib/firmware
+	ln -sf /firmware/image/qcn9625 $(1)/lib/firmware/ath12k/QCN9625/hw1.0
+endif
 	# Export ath12k modules to bin/targets
 	$(INSTALL_DIR) $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endef
 endif
@@ -430,7 +435,7 @@ ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
   C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
 endif
   LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX85 -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
 
   KBUILD_EXTRA_SYMBOLS_IPA="$(PKG_BUILD_DIR)/../dataipa-1.0/Module.symvers"
   MAKE_OPTS:= \
@@ -446,6 +451,18 @@ define Build/PreCompile
 endef
 
 else
+  ifeq ($(CONFIG_TARGET_echo),y)
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(SRCPREFIX)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall"
+   MAKE_OPTS:= \
+	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
+	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
+	KLIB_BUILD="$(LINUX_DIR)" \
+	MODPROBE=true \
+	KLIB=$(TARGET_MODULES_DIR) \
+	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
+	KBUILD_LDFLAGS_MODULE_PREREQ=
+	CFLAGS="-DPLATFORM_SDX"
+  else
   EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(SRCPREFIX)/src/qca-wifi/telemetry_agent/inc/ -Wall"
 
   MAKE_OPTS:= \
@@ -456,6 +473,7 @@ else
 	KLIB=$(TARGET_MODULES_DIR) \
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
 	KBUILD_LDFLAGS_MODULE_PREREQ=
+  endif
 endif
 
 define ConfigVars
@@ -590,11 +608,16 @@ define KernelPackage/ath/install
 	$(CP) $(PKG_BUILD_DIR)/include/ath/ath_fse.h $(STAGING_DIR)/usr/include/
 	$(CP) $(PKG_BUILD_DIR)/include/ath/ath_dp_accel_cfg.h $(STAGING_DIR)/usr/include/
 	$(CP) $(PKG_BUILD_DIR)/include/ath/ppe_public.h $(STAGING_DIR)/usr/include/
-ifeq ($(CONFIG_TARGET_sdx85),y)
+ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko
+ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/ipam.ko $(1)/lib/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/gsim.ko $(1)/lib/modules/
+else ifeq ($(CONFIG_TARGET_echo),y)
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/ipa/ipam.ko $(1)/lib/modules/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/gsi/gsim.ko $(1)/lib/modules/
+endif
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko $(1)/lib/modules/$(UNAME_VERSION)
 
 	# Export ath.ko to bin/targets
