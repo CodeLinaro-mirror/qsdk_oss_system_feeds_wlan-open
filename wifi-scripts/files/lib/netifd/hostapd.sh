@@ -349,7 +349,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_string wpa_psk_file
 
-	config_add_int multi_ap
+	config_add_int multi_ap he_6ghz_min_rate
 
 	config_add_int multi_ap_vlanid
 
@@ -677,7 +677,7 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set \
+		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -729,6 +729,7 @@ hostapd_set_bss_options() {
 	set_default external_plugin_assoc_policy 0
 	set_default external_plugin_deauth_policy 0
 	set_default external_plugin_disassoc_policy 0
+	set_default he_6ghz_min_rate 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
@@ -767,6 +768,7 @@ hostapd_set_bss_options() {
 	append bss_conf "multi_ap=$multi_ap" "$N"
 	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
+	[ "$band" = "6g" ] && [ "$he_6ghz_min_rate" -gt 0 ] && append bss_conf "he_6ghz_min_rate=$he_6ghz_min_rate" "$N"
 
 	[ -n "$oce" ] && {
 		# Set oce=4 to enable OCE_AP
