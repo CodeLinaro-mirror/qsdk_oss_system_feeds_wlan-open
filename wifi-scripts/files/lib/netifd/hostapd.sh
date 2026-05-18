@@ -364,6 +364,7 @@ hostapd_common_add_bss_config() {
 	config_add_string vendor_elements
 
 	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report
+	config_add_int rnr
 
 	config_add_boolean ftm_responder stationary_ap
 	config_add_string lci civic
@@ -1108,7 +1109,7 @@ hostapd_set_bss_options() {
 
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
-	[ "$rnr" -eq "1" ] && append bss_conf "rnr=1" "$N"
+	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
 
 	json_get_vars ftm_responder stationary_ap lci civic
 	set_default ftm_responder 0
