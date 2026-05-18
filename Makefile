@@ -74,6 +74,7 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_QCN_EXTN \
 	CONFIG_PACKAGE_QCA_LAB_TEST_FEATURES \
 	CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT \
+	CONFIG_PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE \
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -316,6 +317,10 @@ define KernelPackage/mac80211/config
 	config PACKAGE_QCN_EXTN_MESH_SUPPORT
 		bool "Enable QCN extension mesh feature support"
 		default y
+
+	config PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE
+		bool "Enable unicast AST override"
+		default n
 
   endif
 endef
