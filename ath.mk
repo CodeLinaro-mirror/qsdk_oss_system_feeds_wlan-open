@@ -172,7 +172,8 @@ endif
 
 ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko \
+         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/sa_test/sa_test.ko
 endif
 endif
 
