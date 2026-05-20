@@ -29,13 +29,13 @@ boot()
 	update_ath12k_module_parameters
 	board_name=$(cat /tmp/sysinfo/board_name)
 	case "$board_name" in
-		ap-sdxkova-qcn9224-V1)
+		*sdxkova-qcn9224-V1)
 			create_caldata
 			caldata_symlink_creation "$board_name" "1"
 			caldata_symlink_creation "$board_name" "2"
 			caldata_symlink_creation "$board_name" "3"
 		;;
-		ap-sdxkova-qcn9224-V2)
+		*sdxkova-qcn9224-V2)
 			create_caldata
 			caldata_symlink_creation "$board_name" "1"
 			caldata_symlink_creation "$board_name" "2"
@@ -51,9 +51,9 @@ update_ath12k_module_parameters()
 	# Set board name for sdx kobuk single-phy and split-phy
 	if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "SDXKOVA" /sys/firmware/devicetree/base/model) != 0 ]; then
 		if [ ! -f /tmp/sysinfo/model ] || [ $(grep -c "V2" /tmp/sysinfo/model) = 0 ]; then
-			echo "ap-sdxkova-qcn9224-V1" > /tmp/sysinfo/board_name
+			echo "qcom,ap-sdxkova-qcn9224-V1" > /tmp/sysinfo/board_name
 		else
-			echo "ap-sdxkova-qcn9224-V2" > /tmp/sysinfo/board_name
+			echo "qcom,ap-sdxkova-qcn9224-V2" > /tmp/sysinfo/board_name
 		fi
 	fi
 
@@ -111,7 +111,7 @@ caldata_symlink_creation(){
 	while read -r line
 	do
 		board=$(echo $line | cut -f1 -d',')
-		if [[ "$board" == "$1" ]]; then
+		if [[ "$1" == *"$board" ]]; then
 			var=$((var+1))
 			if [[ $var == $2 ]]; then
 				local brdid=$(echo $line | cut -f2 -d',')
