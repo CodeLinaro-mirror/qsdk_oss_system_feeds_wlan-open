@@ -252,6 +252,13 @@ do_install:append() {
 		cp ${S}/include/ath/ppe_public.h ${D}${includedir}/ath/
 	fi
 
+	# Move all .ko files from updates/ subdirs to KERNEL_VERSION/
+	find "${D}/lib/modules/${KERNEL_VERSION}/updates/" -name '*.ko' \
+		-exec mv -t "${D}/lib/modules/${KERNEL_VERSION}/" {} +
+
+	# Clean up empty updates/ dir
+	rm -rf ${D}/lib/modules/${KERNEL_VERSION}/updates
+
 cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
 # Ensure firmware path is set before loading ath12k
 install ath12k /bin/sh -c 'echo /ini > /sys/module/firmware_class/parameters/path 2>/dev/null || true; /sbin/modprobe --ignore-install ath12k $CMDLINE_OPTS'
