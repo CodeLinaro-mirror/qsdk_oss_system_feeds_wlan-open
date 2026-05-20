@@ -1717,15 +1717,16 @@ wpa_supplicant_add_network() {
 		local rptr_mgr_mode="$3"
 		local channel="$4"
 		local uplink_csa="$5"
+		local CSwOpts="$6"
 	else
 		local freq="$2"
 		local htmode="$3"
 		local noscan="$4"
 		local ru_punct_bitmap=$5
+		local disable_csa_dfs=$6
 	fi
 
 	local disable_40mhz_scan=0
-	local disable_csa_dfs=$6
 	local ccfs=0
 
 	_wpa_supplicant_common "$1"
@@ -1841,6 +1842,10 @@ wpa_supplicant_add_network() {
 			append network_data "enable_4addr_mode=1" "$N$T"
 		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
+
+		[ -n "$CSwOpts" ] && {
+		         CSwOpts="$CSwOpts"
+		}
 	}
 
 	[ -n "$ocv" ] && append network_data "ocv=$ocv" "$N$T"
@@ -2133,6 +2138,7 @@ wpa_supplicant_add_network() {
 $mesh_ctrl_interface
 $user_mpm
 $disable_csa_dfs
+CSwOpts=$CSwOpts
 $saepwe
 $rsn_override
 $wps_cred_add_sae
