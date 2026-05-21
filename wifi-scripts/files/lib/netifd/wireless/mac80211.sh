@@ -3241,6 +3241,11 @@ mac80211_derive_ml_info() {
 	do
 	        for _staifname in $_staifaces
 	        do
+			config_get disabled "$_staifname" disabled
+			if [ "$disabled" -eq 1 ]; then
+				continue;
+			fi
+
 	                config_get mld_name "$_staifname" mld
 	                config_get mldevice "$_staifname" device
 	                if [ ${#mldevice} -ne 12 ]; then
