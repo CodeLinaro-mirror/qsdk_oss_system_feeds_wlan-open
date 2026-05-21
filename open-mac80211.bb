@@ -293,6 +293,7 @@ do_install:append() {
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
+	install -m 0755 ${WORKDIR}/lib/boost_performance.sh ${D}${nonarch_base_libdir}/boost_performance.sh
 
 }
 
@@ -358,6 +359,7 @@ FILES:${PN} += "/ini/* /ini/internal/*"
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
 FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
+FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
