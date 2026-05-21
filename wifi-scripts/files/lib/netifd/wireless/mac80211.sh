@@ -1817,13 +1817,6 @@ mac80211_prepare_vif() {
 	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode
 
 
-	if [ "$mode" == "monitor" ] && [ "$auto_channel" -gt 0 ] && \
-	   [ "$has_ap" -gt 0 ]; then
-		echo "Radio $radio in ACS mode with AP VAPs, " \
-		     "skip monitor VAP create" >> /dev/console
-		return;
-	fi
-
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
                         if [[ "$htmode" == EHT* || "$htmode" == UHR* ]] && [ -n "$mld" ]; then
