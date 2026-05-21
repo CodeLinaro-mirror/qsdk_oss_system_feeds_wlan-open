@@ -212,6 +212,7 @@ sta_dfs_en=
 rptr_mgr_mode=
 vap_submode=
 CSwOpts=
+rpt_max_phy=
 
 #dpp
 dpp_ifaces=
@@ -322,7 +323,7 @@ ubus_call() {
 		config_add_int num_global_macaddr multiple_bssid
 		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
-		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy
 	# ACS behavior tuning
 	config_add_int acs_retry_interval acs_retry_count
 	config_add_array ht_capab
@@ -723,7 +724,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
 	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable
 
@@ -1315,6 +1316,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
 	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
+	[ "$rpt_max_phy" = "1" ] && append base_cfg "rpt_max_phy=1" "$N"
 	config_get athnewind mac80211 athnewind 0
 	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
