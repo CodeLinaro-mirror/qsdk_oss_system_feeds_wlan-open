@@ -1318,6 +1318,7 @@ mac80211_hostapd_setup_base() {
 	config_get athnewind mac80211 athnewind 0
 	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
+	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
 	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 
 	if [ "$qacs_enable" -eq "1" ]; then
@@ -1870,7 +1871,7 @@ mac80211_prepare_vif() {
 
 	if [ -z "$macaddr" ]; then
 		macaddr="$(mac80211_generate_mac $phy $mode)"
-		macidx="$(($macidx + 1))"
+		[ "$mode" != "monitor" ] && macidx="$(($macidx + 1))"
 		#default_macaddr=1
 	elif [ "$macaddr" = 'random' ]; then
 		macaddr="$(macaddr_random)"
@@ -3085,6 +3086,7 @@ drv_mac80211_setup() {
 	hostapd_noscan=
 	wpa_supp_init=
 	oce_ap=
+	mon_ifname=
 	for_each_interface "ap" mac80211_check_ap
 
 	[ -f "$hostapd_conf_file" ] && mv "$hostapd_conf_file" "$hostapd_conf_file.prev"
@@ -3092,6 +3094,7 @@ drv_mac80211_setup() {
 
 	for_each_interface "ap" mac80211_check_oce_ap
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
+	for_each_interface "monitor" mac80211_prepare_vif
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy"
 
         if [ "$mlo_add_flag" = 1 ]; then
@@ -3108,12 +3111,11 @@ drv_mac80211_setup() {
 
 	mac80211_prepare_iw_htmode
 	active_ifnames=
-	mon_ifname=
 	reserved_bss_list=
 	unreserved_apsta_count=0
 
 	for_each_interface "ap" mac80211_prepare_vif
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
+	for_each_interface "sta adhoc mesh" mac80211_prepare_vif
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
 	echo 3 > /sys/kernel/debug/ecm/ecm_classifier_default/accel_delay_pkts
