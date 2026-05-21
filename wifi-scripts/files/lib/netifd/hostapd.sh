@@ -511,6 +511,7 @@ hostapd_common_add_bss_config() {
 	config_add_int max_cip_padding_delay
 	config_add_int dcs_random_chan_bitmap
 	config_add_int dcs_bw_reduction_ctrl
+	config_add_array security_profiles
 }
 
 hostapd_set_vlan_file() {
@@ -731,6 +732,7 @@ hostapd_set_bss_options() {
 
 	json_get_values sae_groups sae_groups
 	json_get_values owe_groups owe_groups
+	json_get_values security_profiles security_profiles
 
 	set_default fils 0
 	set_default isolate 0
@@ -1592,6 +1594,8 @@ hostapd_set_bss_options() {
 	[ -n "$control_frame_prot" ] && append bss_conf "control_frame_prot=$control_frame_prot" "$N"
 
 	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
+
+	[ -n "$security_profiles" ] && append bss_conf "security_profiles=$security_profiles" "$N"
 
 	append "$var" "$bss_conf" "$N"
 	return 0
