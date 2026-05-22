@@ -312,6 +312,63 @@ enable_affinity_mpc1() {
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 }
 
+# Generic function to set WiFi DP monitor affinity across available CPUs in round-robin
+# Uses (num_cpus - 1) cores, e.g., for 4 CPUs uses cores 0/1/2
+# Parameters:
+#   $1 - interrupt pattern to match 
+#        e.g., "wlan_dp_10" for monitor destination ring
+#              "wlan_dp_12" for monitor low watermark threshold
+set_wifi_dp_mon_affinity() {
+	local pattern="$1"
+	local cpu_index=0
+	
+	# Detect number of available CPUs
+	local num_cpus=$(grep -c "^processor" /proc/cpuinfo)
+	local max_cpu_index=$((num_cpus - 1))
+	
+	# Build CPU masks dynamically: 1, 2, 4, 8, 16, 32, etc.
+	local cpu_masks=""
+	local i=0
+	while [ $i -lt $max_cpu_index ]; do
+		local mask=$((1 << i))
+		cpu_masks="$cpu_masks $mask"
+		i=$((i + 1))
+	done
+	
+	# Find all interrupts matching the pattern and extract IRQ numbers
+	# Use grep with line-based matching to get complete lines
+	grep -E "${pattern}" /proc/interrupts 2>/dev/null | while read -r line; do
+		# Extract IRQ number (first field before ':')
+		local irq_num=$(echo "$line" | cut -d ':' -f 1 | tr -d ' ')
+		
+		# Skip if not a valid IRQ number
+		[ -z "$irq_num" ] && continue
+		echo "$irq_num" | grep -q '^[0-9]\+$' || continue
+		
+		# Get current CPU mask from round-robin list
+		local mask_count=0
+		local current_mask=""
+		for m in $cpu_masks; do
+			if [ $mask_count -eq $cpu_index ]; then
+				current_mask=$m
+				break
+			fi
+			mask_count=$((mask_count + 1))
+		done
+		
+		# Assign affinity
+		if [ -n "$current_mask" ] && [ -f "/proc/irq/$irq_num/smp_affinity" ]; then
+			echo $current_mask > /proc/irq/$irq_num/smp_affinity
+		fi
+		
+		# Move to next CPU (round-robin)
+		cpu_index=$((cpu_index + 1))
+		if [ $cpu_index -ge $max_cpu_index ]; then
+			cpu_index=0
+		fi
+	done
+}
+
 enable_affinity_al02_c4() {
 
 	#pci 3
@@ -406,22 +463,10 @@ enable_affinity_al02_c4() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
 	#RDP492 specific:
-	#Split pci1/pci2/pci3_wlan_dp_10 interrupts across cores 0/1/2
+	#Split wlan_dp_10 and wlan_dp_12 interrupts across cores 0/1/2
 	#to prevent CPU0 exhaustion
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
-	#Split pci1/pci2/pci3_wlan_dp_12 interrupts across cores 0/1/2
-	#to prevent CPU0 exhaustion
-	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_12' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_12' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_12' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
-	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	set_wifi_dp_mon_affinity "wlan_dp_10"
+	set_wifi_dp_mon_affinity "wlan_dp_12"
 
 
 
@@ -1780,6 +1825,36 @@ enable_smp_affinity_wifi() {
 			rdp501)
 					#for RDP501 (QCN6432 2.4GHz + 5GHz)
 					enable_affinity_hr01
+					;;
+			rdp497 | \
+			rdp498 | \
+			rdp499 | \
+			rdp500 | \
+			rdp501 | \
+			rdp502 | \
+			rdp503 | \
+			rdp504 | \
+			rdp505 | \
+			rdp511 | \
+			rdp512)
+					#for Hermoza based RDPs
+					#Split monitor destination ring (wlan_dp_10) and 
+					#monitor low watermark threshold (wlan_dp_12) interrupts 
+					#across available CPUs
+					set_wifi_dp_mon_affinity "wlan_dp_10"
+					set_wifi_dp_mon_affinity "wlan_dp_12"
+					;;
+			rdp488 | \
+			rdp489 | \
+			rdp490 | \
+			rdp491 | \
+			rdp506)
+					#for Juhu based RDPs
+					#Split monitor destination ring (wlan_dp_10) and 
+					#monitor low watermark threshold (wlan_dp_12) interrupts 
+					#across available CPUs
+					set_wifi_dp_mon_affinity "wlan_dp_10"
+					set_wifi_dp_mon_affinity "wlan_dp_12"
 					;;
 			*)
 					#no affinity settings
