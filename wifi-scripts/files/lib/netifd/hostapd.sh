@@ -5,6 +5,24 @@
 . /lib/functions/network.sh
 . /lib/functions.sh
 
+hostapd_if_action_policy_uci_vars="\
+				   external_plugin_action_policy_radio \
+				   external_plugin_action_policy_radio_neighbour_req \
+				   external_plugin_action_policy_wnm \
+				   external_plugin_action_policy_wnm_btm_query \
+				   external_plugin_action_policy_wnm_btm_resp \
+				   external_plugin_action_policy_wnm_btm_req \
+				   external_plugin_action_policy_wmm_addts_req \
+				   external_plugin_action_policy_wmm_delts \
+				   external_plugin_action_policy_wnm_dms_req \
+				   external_plugin_action_policy_wnm_dms_resp \
+				   external_plugin_action_policy_ft \
+				   external_plugin_action_policy_ft_req \
+				   external_plugin_action_policy_ft_resp \
+				   external_plugin_action_policy_vendor \
+				   external_plugin_action_policy_vendor_specific_action_intel \
+				   external_plugin_action_policy_vendor_specific_action_apple"
+
 wpa_supplicant_add_rate() {
 	local var="$1"
 	local val="$(($2 / 1000))"
@@ -401,6 +419,7 @@ hostapd_common_add_bss_config() {
 	config_add_int external_plugin_assoc_policy
 	config_add_int external_plugin_deauth_policy
 	config_add_int external_plugin_disassoc_policy
+	config_add_int $hostapd_if_action_policy_uci_vars
 
 	config_add_int control_frame_protection
 	config_add_int cip_padding_delay
@@ -662,6 +681,7 @@ hostapd_set_bss_options() {
 	wireless_vif_parse_encryption
 
 	local bss_conf bss_md5sum ft_key
+	local action_policy_var action_policy_val
 	local wep_rekey wpa_group_rekey wpa_pair_rekey wpa_master_rekey wpa_key_mgmt
 
 	json_get_vars \
@@ -676,6 +696,7 @@ hostapd_set_bss_options() {
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable plugin_eap_offload externally_triggered_m3 \
 		plugin_eapol_key_offload external_pmk_cache \
 		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
+		$hostapd_if_action_policy_uci_vars \
 		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
@@ -890,6 +911,10 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
 	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
+	for action_policy_var in $hostapd_if_action_policy_uci_vars; do
+		eval "action_policy_val=\"\${$action_policy_var}\""
+		[ -n "$action_policy_val" ] && append bss_conf "${action_policy_var}=$action_policy_val" "$N"
+	done
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
