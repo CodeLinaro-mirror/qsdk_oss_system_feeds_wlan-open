@@ -395,6 +395,7 @@ hostapd_common_add_bss_config() {
 	config_add_int external_plugin_enable
 	config_add_int plugin_eap_offload
 	config_add_int externally_triggered_m3
+	config_add_int plugin_eapol_key_offload
 	config_add_int external_plugin_auth_policy
 	config_add_int external_plugin_assoc_policy
 	config_add_int external_plugin_deauth_policy
@@ -672,6 +673,7 @@ hostapd_set_bss_options() {
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable plugin_eap_offload externally_triggered_m3 \
+		plugin_eapol_key_offload \
 		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
 		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
@@ -881,6 +883,7 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
 	[ -n "$plugin_eap_offload" ] && append bss_conf "plugin_eap_offload=$plugin_eap_offload" "$N"
 	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
+	[ -n "$plugin_eapol_key_offload" ] && append bss_conf "plugin_eapol_key_offload=$plugin_eapol_key_offload" "$N"
 	[ -n "$external_plugin_auth_policy" ] && append bss_conf "external_plugin_auth_policy=$external_plugin_auth_policy" "$N"
 	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
