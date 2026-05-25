@@ -40,7 +40,7 @@ load_dynamic_modules()
 		[ -d "$pci_dev" ] || continue
 
 		ID=$(cat "$pci_dev/device" 2>/dev/null) || continue
-		if [ "xx${ID}" = "xx0x1113" ]; then
+		if [ "xx${ID}" = "xx0x1113" ] || [ "xx${ID}" = "xx0x1114" ]; then
 			echo "ath12k_wifi8" >> "$ath12k_config_file"
 			break
 		fi
