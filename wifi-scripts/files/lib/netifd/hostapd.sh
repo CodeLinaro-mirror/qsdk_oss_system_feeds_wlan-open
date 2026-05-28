@@ -12,6 +12,7 @@ hostapd_if_action_policy_uci_vars="\
 				   external_plugin_action_policy_wnm_btm_query \
 				   external_plugin_action_policy_wnm_btm_resp \
 				   external_plugin_action_policy_wnm_btm_req \
+				   external_plugin_action_policy_wmm \
 				   external_plugin_action_policy_wmm_addts_req \
 				   external_plugin_action_policy_wmm_delts \
 				   external_plugin_action_policy_wnm_dms_req \
@@ -19,9 +20,7 @@ hostapd_if_action_policy_uci_vars="\
 				   external_plugin_action_policy_ft \
 				   external_plugin_action_policy_ft_req \
 				   external_plugin_action_policy_ft_resp \
-				   external_plugin_action_policy_vendor \
-				   external_plugin_action_policy_vendor_specific_action_intel \
-				   external_plugin_action_policy_vendor_specific_action_apple"
+				   external_plugin_action_policy_vendor"
 
 wpa_supplicant_add_rate() {
 	local var="$1"
