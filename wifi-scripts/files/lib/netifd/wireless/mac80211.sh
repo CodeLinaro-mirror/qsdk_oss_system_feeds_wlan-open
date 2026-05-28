@@ -1332,9 +1332,9 @@ mac80211_hostapd_setup_base() {
 
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
 	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
-	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 	if [ "$is_repeater" = "1" ]; then
 		[ -n "$rptr_allow_chan_sw" ] && append base_cfg "rptr_allow_chan_sw=$rptr_allow_chan_sw" "$N"
+		[ "$is_skip_cac" = "1" ] && append base_cfg "skip_cac=1" "$N"
 	fi
 
 	if [ "$qacs_enable" -eq "1" ]; then
@@ -2896,8 +2896,13 @@ mac80211_update_is_skip_cac_flag() {
 		config_get band "$section" band
 		[ "$band" != "5g" ] && return 0
 
-		config_get skip "$section" skip_cac 0
-		[ "$skip" -eq 1 ] && is_skip_cac=1
+		config_get skip "$section" skip_cac
+		# For repeater mode: enable skip_cac by default unless explicitly set to 0
+		if [ "$is_repeater" = "1" ]; then
+			if [ -z "$skip" ] || [ "$skip" = "1" ]; then
+				is_skip_cac=1
+			fi
+		fi
 	}
 
 	config_foreach __skip_cac wifi-device
