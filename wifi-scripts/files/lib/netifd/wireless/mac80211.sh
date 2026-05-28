@@ -145,6 +145,8 @@ enable_color=
 acs_exclude_dfs=
 # ACS retry scan count (device-level)
 acs_retry_interval=
+acs_periodic_interval=
+acs_pcac_only=
 
 updated_chanlist=
 min_tx_power=
@@ -202,6 +204,7 @@ start_disabled=
 dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
+punc_eirp_thres_6ghz=
 bss_load_update_period=
 chan_util_avg_period=
 use_driver_vendor_addr=
@@ -324,9 +327,9 @@ ubus_call() {
 		config_add_int num_global_macaddr multiple_bssid
 		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
-		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy acs_2g_scan_all
 	# ACS behavior tuning
-	config_add_int acs_retry_interval acs_retry_count
+	config_add_int acs_retry_interval acs_retry_count acs_periodic_interval acs_pcac_only
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_array scan_list
@@ -378,6 +381,7 @@ ubus_call() {
 		multiple_bssid \
 		mbssid_group_size \
 		he_6ghz_reg_pwr_type \
+		punc_eirp_thres_6ghz \
 		bss_load_update_period \
 		chan_util_avg_period \
 		acsmin_dwell \
@@ -716,9 +720,15 @@ mac80211_hostapd_setup_base() {
 
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 
-	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count
+	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count acs_2g_scan_all qacs_enable
 	[ -n "$acs_exclude_dfs" ] && [ "$acs_exclude_dfs" -gt 0 ] &&
 		append base_cfg "acs_exclude_dfs=1" "$N"
+
+	# If enabled, allow QACS to scan all 2.4GHz channels (not just 1/6/11).
+	# Applicable only to 2g radios and only when QACS is enabled.
+	if [ -n "$acs_2g_scan_all" ] && [ "$acs_2g_scan_all" -gt 0 ] && [ "$band" = "2g" ] && [ "$qacs_enable" -eq 1 ]; then
+		append base_cfg "acs_2g_scan_all=1" "$N"
+	fi
 
 	# Pass through ACS retry scan count when ACS is enabled
 	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
@@ -729,8 +739,8 @@ mac80211_hostapd_setup_base() {
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
-	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
-	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable
+	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
+	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -1123,8 +1133,9 @@ mac80211_hostapd_setup_base() {
 			mbssid_group_size \
 			he_6ghz_reg_pwr_type:0
 
-		if [ "$band" = "6g" ]; then
+	if [ "$band" = "6g" ]; then
 			append base_cfg "he_6ghz_reg_pwr_type=$he_6ghz_reg_pwr_type" "$N"
+			[ -n "$punc_eirp_thres_6ghz" ] && append base_cfg "punc_eirp_thres_6ghz=$punc_eirp_thres_6ghz" "$N"
 		fi
 
 		he_phy_cap=$(eval $sedString | awk -F "[()]" '/HE PHY Capabilities/ { print $2 }' | head -1)
@@ -1371,6 +1382,14 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$acs_txpwr_opt" ]; then
 		append base_cfg "acs_txpwr_opt=$acs_txpwr_opt" "$N"
+	fi
+
+	if [ -n "$acs_periodic_interval" ]; then
+		append base_cfg "acs_periodic_interval=$acs_periodic_interval" "$N"
+	fi
+
+	if [ -n "$acs_pcac_only" ]; then
+		append base_cfg "acs_pcac_only=$acs_pcac_only" "$N"
 	fi
 
 	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
@@ -3082,8 +3101,11 @@ drv_mac80211_setup() {
 		start_chan=$(mac80211_freq_to_channel $start_freq)
 		end_chan=$(mac80211_freq_to_channel $end_freq)
 		if [ "$start_chan" != "0" ] && [ "$end_chan" != "0" ]; then
-			uci set wireless.$device_name.channels=$start_chan-$end_chan
-			uci commit wireless
+			rchanlist=$(uci get wireless.$device.channels)
+			if [ -z "$rchanlist" ]; then
+				uci set wireless.$device_name.channels=$start_chan-$end_chan
+				uci commit wireless
+			fi
 		fi
 	}
 
