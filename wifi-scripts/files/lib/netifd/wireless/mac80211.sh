@@ -1765,6 +1765,10 @@ get_board_phy_name() (
 rename_board_phy_by_path() {
 	local path="$1"
 
+	# Skip iw set name command if phy is "phy-scan-00"
+	[ "$phy" = "phy-scan-00" ] && return
+
+
 	local new_phy="$(get_board_phy_name "$path")"
 	[ -z "$new_phy" -o "$new_phy" = "$phy" ] && return
 
