@@ -143,6 +143,7 @@ enable_color=
 
 #ACS DFS
 acs_exclude_dfs=
+acs_enable_bw_downgrade=
 # ACS retry scan count (device-level)
 acs_retry_interval=
 acs_periodic_interval=
@@ -356,6 +357,7 @@ ubus_call() {
 		he_twt_required \
 		use_ru_puncture_dfs \
 		qacs_enable \
+		acs_enable_bw_downgrade \
 		acs_rank_en \
 		cbs_csa_enable \
 		acs_6g_only_psc \
@@ -740,7 +742,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
-	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz
+	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -1348,7 +1350,7 @@ mac80211_hostapd_setup_base() {
 		[ "$is_skip_cac" = "1" ] && append base_cfg "skip_cac=1" "$N"
 	fi
 
-	if [ "$qacs_enable" -eq "1" ]; then
+	if [ -n "$qacs_enable" ]; then
 		append base_cfg "qacs_enable=$qacs_enable" "$N"
 	fi
 
@@ -1434,6 +1436,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$cbs_csa_enable" ]; then
 		append base_cfg "cbs_csa_enable=$cbs_csa_enable" "$N"
+	fi
+
+	if [ -n "$acs_enable_bw_downgrade" ]; then
+		append base_cfg "acs_enable_bw_downgrade=$acs_enable_bw_downgrade" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
