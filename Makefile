@@ -484,6 +484,8 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.c
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
 endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
