@@ -501,7 +501,7 @@ hostapd_common_add_bss_config() {
 	config_add_boolean multicast_to_unicast multicast_to_unicast_all proxy_arp per_sta_vif
 
 	config_add_array hostapd_bss_options
-	config_add_boolean default_disabled
+	config_add_boolean default_disabled notify_mgmt_frames
 
 	config_add_boolean request_cui
 	config_add_array radius_auth_req_attr
@@ -873,7 +873,7 @@ hostapd_set_bss_options() {
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
-		vendor_elements fils ocv apup dpp pasn pasn_noauth ssid_protection \
+		vendor_elements fils ocv apup dpp pasn pasn_noauth ssid_protection notify_mgmt_frames \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
 		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
@@ -936,6 +936,7 @@ hostapd_set_bss_options() {
 	set_default eap_server 0
 	set_default apup 0
 	set_default he_6ghz_min_rate 0
+	set_default notify_mgmt_frames 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
@@ -973,6 +974,7 @@ hostapd_set_bss_options() {
 	append bss_conf "uapsd_advertisement_enabled=$uapsd" "$N"
 	append bss_conf "utf8_ssid=$utf8_ssid" "$N"
 	append bss_conf "multi_ap=$multi_ap" "$N"
+	append bss_conf "notify_mgmt_frames=$notify_mgmt_frames" "$N"
 	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 	[ "$band" = "6g" ] && [ "$he_6ghz_min_rate" -gt 0 ] && append bss_conf "he_6ghz_min_rate=$he_6ghz_min_rate" "$N"
