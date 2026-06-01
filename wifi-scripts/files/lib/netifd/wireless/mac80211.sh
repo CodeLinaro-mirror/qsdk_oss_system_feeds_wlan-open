@@ -728,7 +728,7 @@ mac80211_hostapd_setup_base() {
 
 	# If enabled, allow QACS to scan all 2.4GHz channels (not just 1/6/11).
 	# Applicable only to 2g radios and only when QACS is enabled.
-	if [ -n "$acs_2g_scan_all" ] && [ "$acs_2g_scan_all" -gt 0 ] && [ "$band" = "2g" ] && [ "$qacs_enable" -eq 1 ]; then
+	if [ -n "$acs_2g_scan_all" ] && [ "$acs_2g_scan_all" -gt 0 ] && [ "$band" = "2g" ]; then
 		append base_cfg "acs_2g_scan_all=1" "$N"
 	fi
 
