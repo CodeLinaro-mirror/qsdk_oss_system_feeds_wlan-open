@@ -1391,7 +1391,7 @@ mac80211_hostapd_setup_base() {
 	fi
 
 	if [ -n "$acs_pcac_only" ]; then
-		append base_cfg "acs_pcac_only=$acs_pcac_only" "$N"
+		append base_cfg "acs_pcaconly=$acs_pcac_only" "$N"
 	fi
 
 	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
