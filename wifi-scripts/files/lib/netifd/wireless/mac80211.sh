@@ -442,6 +442,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean disable_reconfig
 	config_add_string vap_submode
 	config_add_boolean he_mcs_12_13_supp
+	config_add_boolean wds_ie
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -1532,7 +1533,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars disable_11ax
 	json_get_vars disable_11bn
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
 
 	#epcs params
@@ -1554,16 +1555,21 @@ mac80211_hostapd_setup_bss() {
 		;;
 	esac
 
-	[ "$wds" -gt 0 ] && {
+	if [ "$wds" -gt 0 ] || [ "$wds_ie" -gt 0 ]; then
 		wds_support=$(mac80211_wds_support_check "$phy")
-                if [ "$wds_support" -ne 1 ]; then
-                        echo WDS is supported only in native wifi mode for ath11k driver. Kindly update the config > /dev/ttyMSM0
-                        return
-                fi
+		if [ "$wds_support" -ne 1 ]; then
+			echo WDS is supported only in native wifi mode for ath11k driver. Kindly update the config > /dev/ttyMSM0
+			return
+		fi
 
-		append hostapd_cfg "wds_sta=1" "$N"
+		if [ "$wds_ie" -gt 0 ]; then
+			append hostapd_cfg "wds_ie=1" "$N"
+		else
+			append hostapd_cfg "wds_sta=1" "$N"
+		fi
 		[ -n "$wds_bridge" ] && append hostapd_cfg "wds_bridge=$wds_bridge" "$N"
-	}
+	fi
+
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
 	[ "$dynamic_vlan" = "1" ] && append hostapd_cfg "dynamic_vlan=1" "$N"
@@ -1872,7 +1878,7 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode wds_ie
 
 
 	[ -n "$ifname" ] || {
@@ -2530,6 +2536,7 @@ wpa_supplicant_add_interface() {
 	[ -n "$default_macaddr" ] || json_add_string macaddr "$macaddr"
 	[ -n "$network_bridge" ] && json_add_string bridge "$network_bridge"
 	[ -n "$wds" ] && json_add_boolean 4addr "$wds"
+	[ -n "$wds_ie" ] && json_add_boolean 4addr "$wds_ie"
 	json_add_boolean powersave "$powersave"
 	[ "$mode" = "mesh" ] && mac80211_add_mesh_params
 	json_close_object

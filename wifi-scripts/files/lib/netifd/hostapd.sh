@@ -1681,7 +1681,7 @@ wpa_supplicant_prepare_interface() {
 				fail=1
 			;;
 			sta)
-				([ "$wds" = 1 ] || [ "$multi_ap" = 1 ]) || fail=1
+				([ "$wds_ie" ] || [ "$wds" = 1 ] || [ "$multi_ap" = 1 ]) || fail=1
 			;;
 		esac
 
@@ -1783,7 +1783,8 @@ wpa_supplicant_add_network() {
 		ssid_protection \
 		scan_freq bgscan bgscan_freq \
 		control_frame_protection \
-		cip_padding_delay
+		cip_padding_delay \
+		wds_ie
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1883,6 +1884,7 @@ wpa_supplicant_add_network() {
 			append network_data "enable_4addr_mode=1" "$N$T"
 		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
+		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
 
 		[ -n "$CSwOpts" ] && {
 		         CSwOpts="$CSwOpts"
