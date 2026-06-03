@@ -67,10 +67,12 @@ EXTRA_MAKE_CFLAGS=" \
 EXTRA_CFLAGS += " \
 	-I${S}/include \
 	-I${S}/include/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
+	-I${STAGING_DIR}/ \
 	-I${STAGING_DIR}/usr/include \
 	-I${STAGING_INCDIR}/qca-nss-drv \
 	-I${STAGING_INCDIR}/qca-nss-ppe \
 	-I${STAGING_INCDIR}/qca-nss-clients \
+	-I${STAGING_INCDIR}/qca-nss-ppe-ds/ \
 	-Wall \
 	-Wno-unused-function \
 	-Wno-error=unused-variable -Wno-unused-variable \
@@ -94,7 +96,7 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
 "
 
-do_unpack[postfuncs] += "do_cp_src_wlan_open_extns"
+do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
 
 do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
@@ -102,6 +104,11 @@ do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+}
+
+do_cp_headers() {
+	install -d ${STAGING_DIR}/include/linux/
+	install -m 0644 ${TOPDIR}/${SRCPREFIX}files-6.6/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
 }
 
 # The following compilation flags are enabled for 1G profile
