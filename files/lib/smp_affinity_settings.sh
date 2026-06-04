@@ -152,6 +152,37 @@ enable_affinity_ds() {
 	fi
 }
 
+enable_ath12k_rxmon_affinity() {
+	# Configure rx_mon workqueue cpumask for all ath12k radios
+	# Workqueue naming pattern: rxmon_pci-<PCI_BUS_ID> or rxmon_ahb-ahb<N>
+	# Example: rxmon_pci-0001:01:00.00, rxmon_ahb-ahb0
+	#
+	local cpumask="${1:-7}"  # Default cpumask is 7 (CPUs 0,1,2)
+	local wq_base_path="/sys/devices/virtual/workqueue"
+
+	# Check if workqueue sysfs path exists
+	if [ ! -d "$wq_base_path" ]; then
+		return
+	fi
+
+	# Find and configure all ath12k rx_mon workqueues
+	for wq_path in "$wq_base_path"/rxmon_*; do
+		# Check if the path exists and is a directory
+		if [ -d "$wq_path" ]; then
+			local wq_name=$(basename "$wq_path")
+			local cpumask_file="$wq_path/cpumask"
+
+			# Verify cpumask file exists and is writable
+			if [ -f "$cpumask_file" ] && [ -w "$cpumask_file" ]; then
+				echo "$cpumask" > "$cpumask_file" 2>/dev/null
+				if [ $? -eq 0 ]; then
+					echo "Configured $wq_name cpumask to $cpumask"
+				fi
+			fi
+		fi
+	done
+}
+
 enable_affinity_al02_c1() {
 
 	#assign 4 rx interrupts to each cores
@@ -1714,6 +1745,12 @@ enable_smp_affinity_wifi() {
 	fi
 
 	ce_interrupt_affinity
+
+	# Configure ath12k rx_mon workqueue affinity for all radios
+	# Default cpumask is 7 (CPUs 0,1,2) - can be customized per board if needed
+	if [ -d "/sys/kernel/debug/ath12k" ]; then
+		enable_ath12k_rxmon_affinity 7
+	fi
 
 		case "$board" in
 			ap-cp01-c1 | \
