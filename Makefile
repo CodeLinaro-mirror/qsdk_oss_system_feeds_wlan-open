@@ -571,6 +571,15 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/*.h $(1)/usr/include/mac80211/ath/
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/vendor.h $(1)/usr/include/mac80211/ath/
 	rm -f $(1)/usr/include/mac80211-backport/linux/module.h
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+	if [ -f "$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole" ]; then \
+		$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
+			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
+		lzma e $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt \
+			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
+		rm -f $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
+	fi
+endif
 endef
 
 define KernelPackage/ath/install
