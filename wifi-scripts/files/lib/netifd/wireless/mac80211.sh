@@ -1344,6 +1344,7 @@ mac80211_hostapd_setup_base() {
 	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
 	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
 	if [ "$is_repeater" = "1" ]; then
+		append base_cfg "repeater=1" "$N"
 		[ -n "$rptr_allow_chan_sw" ] && append base_cfg "rptr_allow_chan_sw=$rptr_allow_chan_sw" "$N"
 		[ "$is_skip_cac" = "1" ] && append base_cfg "skip_cac=1" "$N"
 	fi
