@@ -2334,14 +2334,18 @@ mac80211_apply_monitor_flags() {
 	json_select ..
 
 	if  [ -n "$tx_mon" ] && [ "$tx_mon" -eq 1 ]; then
-		## Setting tx_mon=1 means enabling tx_mon.
-		## In this case, setting skip_tx flag = 0 to enable tx_mon
-		if [[ "$monitor_flags" == *"skip_tx"* ]]; then
-			echo "WARNING: Ignoring tx_monitor_enable request; " \
-			"using default configuration (tx_monitor=DISABLED)." > /dev/ttyMSM0
+		if [ -n "$monitor_flags" ]; then
+			## Setting tx_mon=1 => enabling tx_mon.
+			## 'skip_tx' flag contradicts with tx_mon=1, - Do not enable Tx Monitor in such cases
+			if [[ "$monitor_flags" == *"skip_tx"* ]]; then
+				echo "WARNING: Ignoring tx_monitor_enable request; " \
+				"using default configuration (tx_monitor=DISABLED)." > /dev/ttyMSM0
+			fi
+			set -- $monitor_flags
+			iw dev "$ifname" set monitor "$@"
+		else
+			iw dev "$ifname" set monitor none
 		fi
-		set -- $monitor_flags
-		iw dev "$ifname" set monitor "$@"
 	fi
 }
 
