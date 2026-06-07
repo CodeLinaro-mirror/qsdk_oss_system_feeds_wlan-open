@@ -159,11 +159,21 @@ function map_hwmode_to_htmode(hwmode, curr_htmode) {
 }
 
 /* ADDED: convert proprietary encryption formats to mac80211 format */
-function map_encryption(enc) {
+function map_encryption(enc, sae) {
 	if (!enc)
 		return null;
 
 	let enc_lower = lc(enc);
+
+	/* Single SAE gate: psk* with sae=1 should become sae-mixed */
+	if (sae == "1") {
+		if (match(enc_lower, /^sae-mixed/, "s"))
+			return "sae-mixed";
+		if (match(enc_lower, /^ccmp/, "s"))
+			return "sae";
+		if (match(enc_lower, /^psk/, "s"))
+			return "sae-mixed";
+	}
 
 	/* WPA3 SAE variants */
 	if (match(enc_lower, /^sae-mixed/, "s"))
@@ -346,6 +356,16 @@ function translate_proprietary_to_ath_ud() {
 					print(`set wireless.${secname}.disabled='${s.disabled}'\n`);
 				}
 
+				/* Convert chainmasks -> antenna masks during sysupgrade migration */
+				if (s.txchainmask != null && s.txchainmask != '') {
+					print(`set wireless.${secname}.txantenna='${int(s.txchainmask, 0)}'\n`);
+					print(`delete wireless.${secname}.txchainmask\n`);
+				}
+				if (s.rxchainmask != null && s.rxchainmask != '') {
+					print(`set wireless.${secname}.rxantenna='${int(s.rxchainmask, 0)}'\n`);
+					print(`delete wireless.${secname}.rxchainmask\n`);
+				}
+
 				if (s.hwmode) {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
@@ -383,17 +403,18 @@ function translate_proprietary_to_ath_ud() {
 
 			/* Handle encryption conversion */
 			if (s.encryption) {
-				let new_enc = map_encryption(s.encryption);
+				let new_enc = map_encryption(s.encryption, s.sae);
 				if (new_enc && new_enc != s.encryption) {
 					print(`set wireless.${secname}.encryption='${new_enc}'\n`);
+					changed = true;
+				}
+				if (new_enc && match(lc(new_enc), /^sae/, "s") && s.sae_pwe != "1") {
+					print(`set wireless.${secname}.sae_pwe='1'\n`);
 					changed = true;
 				}
 			}
 
 			if (s.sae && s.sae == '1') {
-				print(`set wireless.${secname}.sae='1'\n`);
-				print(`set wireless.${secname}.sae_pwe='1'\n`);
-				print(`set wireless.${secname}.encryption='sae'\n`);
 				if (key) print(`set wireless.${secname}.key='${key}'\n`);
 
 				if (s.sae_groups && length(s.sae_groups)) {
