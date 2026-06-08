@@ -107,8 +107,12 @@ function parse_ht_width(val) {
 	if (!val)
 		return null;
 
-	let m = match(val, /([0-9]+)/, "s");
-	return m ? m[1] : null;
+	let m = match(val, /([0-9]+)([+-]?)/, "s");
+	if (!m) return null;
+	let width = m[1];
+	if (m[2] == "+") width += "PLUS";
+	else if (m[2] == "-") width += "MINUS";
+	return width;
 }
 
 function map_hwmode_to_htmode(hwmode, curr_htmode) {
@@ -394,8 +398,12 @@ function translate_proprietary_to_ath_ud() {
 
 		if (s[".type"] == "wifi-iface") {
 			let key = s.key;
-			if (!key && s.sae_password && s.sae_password[0])
-				key = s.sae_password[0];
+			if (!key && s.sae_password) {
+				if (type(s.sae_password) == "array")
+					key = s.sae_password[0];
+				else
+					key = s.sae_password;
+			}
 
 			/* Normalize station (STA) interface defaults */
 			if (is_sta_iface(s))
