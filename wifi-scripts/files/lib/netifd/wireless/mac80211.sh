@@ -1526,7 +1526,7 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
+	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp multi_ap
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
@@ -1545,7 +1545,16 @@ mac80211_hostapd_setup_bss() {
 
 	json_get_vars twt_responder
 
-	set_default wds 0
+	if [ -n "$multi_ap" ] && [ "$multi_ap" -gt 0 ]; then
+		set_default wds 0
+	else
+		wds_support=$(mac80211_wds_support_check "$phy")
+                if [ "$wds_support" -ne 1 ]; then
+			set_default wds 0
+		else
+			set_default wds 1
+		fi
+	fi
 	set_default start_disabled 0
 
 	case "$auth_type" in
