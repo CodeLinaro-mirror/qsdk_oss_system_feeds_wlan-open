@@ -16,6 +16,21 @@ S = "${WORKDIR}/qca-wifi-nss-plugins"
 
 PACKAGES += "kernel-module-qca-wifi-nss-plugins"
 
+PACKAGECONFIG ??= ""
+
+PACKAGECONFIG[ath] = ""
+
+WIFI_NSS_MAKE_OPTS += " \
+    ${@bb.utils.contains('PACKAGECONFIG', 'ath', 'QCA_WIFI_NSS_PLUGINS_OPEN_PROFILE_ENABLE=y', '', d)} \
+    QCA_WIFI_NSS_PLUGINS_ECM_EMESH=y \
+    QCA_WIFI_NSS_PLUGINS_ECM_FSE=y \
+    QCA_WIFI_NSS_PLUGINS_ECM_NL=y \
+    QCA_WIFI_NSS_PLUGINS_ECM_WIFI_CLASSIFIER=y \
+    QCA_WIFI_NSS_PLUGINS_MSCS=y \
+    QCA_WIFI_NSS_PLUGINS_PPE=y \
+    QCA_WIFI_NSS_PLUGINS_PPEDS=y \
+    "
+
 EXTRA_CFLAGS += " \
     -I${STAGING_INCDIR}/qca-nss-ecm \
     -I${STAGING_INCDIR}/qca-nss-ppe \
@@ -33,7 +48,7 @@ MODULE_EXTRA_SYMBOLS = " \
 
 do_compile() {
     unset LDFLAGS
-    make -C "${STAGING_KERNEL_BUILDDIR}" \
+    make -C "${STAGING_KERNEL_BUILDDIR}" ${WIFI_NSS_MAKE_OPTS} \
         CROSS_COMPILE="${TARGET_PREFIX}" \
         ARCH="${KARCH}" \
         M="${S}" \
