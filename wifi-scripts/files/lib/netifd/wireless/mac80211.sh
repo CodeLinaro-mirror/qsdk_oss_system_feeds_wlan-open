@@ -443,6 +443,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string vap_submode
 	config_add_boolean he_mcs_12_13_supp
 	config_add_boolean wds_ie
+	config_add_boolean allow_3addr_mc
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
