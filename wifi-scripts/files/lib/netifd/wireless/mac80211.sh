@@ -765,7 +765,7 @@ mac80211_hostapd_setup_base() {
 	fi
 
 	set_default noscan 0
-	set_default disable_iface_during_cac 1
+	set_default disable_iface_during_cac 0
 
 	[ "$noscan" -gt 0 ] && hostapd_noscan=1
 	[ "$tx_burst" = 0 ] && tx_burst=
