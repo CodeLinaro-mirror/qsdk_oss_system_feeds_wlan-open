@@ -107,8 +107,12 @@ function parse_ht_width(val) {
 	if (!val)
 		return null;
 
-	let m = match(val, /([0-9]+)/, "s");
-	return m ? m[1] : null;
+	let m = match(val, /([0-9]+)([+-]?)/, "s");
+	if (!m) return null;
+	let width = m[1];
+	if (m[2] == "+") width += "PLUS";
+	else if (m[2] == "-") width += "MINUS";
+	return width;
 }
 
 function map_hwmode_to_htmode(hwmode, curr_htmode) {
@@ -159,11 +163,21 @@ function map_hwmode_to_htmode(hwmode, curr_htmode) {
 }
 
 /* ADDED: convert proprietary encryption formats to mac80211 format */
-function map_encryption(enc) {
+function map_encryption(enc, sae) {
 	if (!enc)
 		return null;
 
 	let enc_lower = lc(enc);
+
+	/* Single SAE gate: psk* with sae=1 should become sae-mixed */
+	if (sae == "1") {
+		if (match(enc_lower, /^sae-mixed/, "s"))
+			return "sae-mixed";
+		if (match(enc_lower, /^ccmp/, "s"))
+			return "sae";
+		if (match(enc_lower, /^psk/, "s"))
+			return "sae-mixed";
+	}
 
 	/* WPA3 SAE variants */
 	if (match(enc_lower, /^sae-mixed/, "s"))
@@ -224,6 +238,26 @@ function map_encryption(enc) {
 
 	/* Return original if no mapping needed */
 	return enc;
+}
+
+/* Helper: determine if iface is station mode */
+function is_sta_iface(s) {
+	return (s && s.mode && lc(s.mode) == 'sta');
+}
+
+/* Helper: normalize station interface options */
+function normalize_sta_iface(secname, s) {
+	let changed = false;
+	/* Switch LAN->WAN only when extap is enabled and WDS is NOT enabled */
+	let extap_enabled = (s.extap && s.extap == '1');
+	let wds_enabled = (s.wds && s.wds == '1');
+	if (extap_enabled && !wds_enabled) {
+		if (!s.network || lc(s.network) == 'lan') {
+			print(`set wireless.${secname}.network='wan'\n`);
+			changed = true;
+		}
+	}
+	return changed;
 }
 
 /* ADDED: run translator only if proprietary QCA type present */
@@ -326,6 +360,16 @@ function translate_proprietary_to_ath_ud() {
 					print(`set wireless.${secname}.disabled='${s.disabled}'\n`);
 				}
 
+				/* Convert chainmasks -> antenna masks during sysupgrade migration */
+				if (s.txchainmask != null && s.txchainmask != '') {
+					print(`set wireless.${secname}.txantenna='${int(s.txchainmask, 0)}'\n`);
+					print(`delete wireless.${secname}.txchainmask\n`);
+				}
+				if (s.rxchainmask != null && s.rxchainmask != '') {
+					print(`set wireless.${secname}.rxantenna='${int(s.rxchainmask, 0)}'\n`);
+					print(`delete wireless.${secname}.rxchainmask\n`);
+				}
+
 				if (s.hwmode) {
 					let ht = map_hwmode_to_htmode(s.hwmode, s.htmode);
 					if (ht) print(`set wireless.${secname}.htmode='${ht}'\n`);
@@ -354,22 +398,31 @@ function translate_proprietary_to_ath_ud() {
 
 		if (s[".type"] == "wifi-iface") {
 			let key = s.key;
-			if (!key && s.sae_password && s.sae_password[0])
-				key = s.sae_password[0];
+			if (!key && s.sae_password) {
+				if (type(s.sae_password) == "array")
+					key = s.sae_password[0];
+				else
+					key = s.sae_password;
+			}
+
+			/* Normalize station (STA) interface defaults */
+			if (is_sta_iface(s))
+				changed = normalize_sta_iface(secname, s) || changed;
 
 			/* Handle encryption conversion */
 			if (s.encryption) {
-				let new_enc = map_encryption(s.encryption);
+				let new_enc = map_encryption(s.encryption, s.sae);
 				if (new_enc && new_enc != s.encryption) {
 					print(`set wireless.${secname}.encryption='${new_enc}'\n`);
+					changed = true;
+				}
+				if (new_enc && match(lc(new_enc), /^sae/, "s") && s.sae_pwe != "1") {
+					print(`set wireless.${secname}.sae_pwe='1'\n`);
 					changed = true;
 				}
 			}
 
 			if (s.sae && s.sae == '1') {
-				print(`set wireless.${secname}.sae='1'\n`);
-				print(`set wireless.${secname}.sae_pwe='1'\n`);
-				print(`set wireless.${secname}.encryption='sae'\n`);
 				if (key) print(`set wireless.${secname}.key='${key}'\n`);
 
 				if (s.sae_groups && length(s.sae_groups)) {

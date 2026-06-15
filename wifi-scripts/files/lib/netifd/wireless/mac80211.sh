@@ -143,8 +143,11 @@ enable_color=
 
 #ACS DFS
 acs_exclude_dfs=
+acs_enable_bw_downgrade=
 # ACS retry scan count (device-level)
 acs_retry_interval=
+acs_periodic_interval=
+acs_pcac_only=
 
 updated_chanlist=
 min_tx_power=
@@ -159,6 +162,7 @@ tx_stbc=
 max_amsdu=
 dsss_cck_40=
 background_radar=
+dfs_bw_reduce_en=
 rxldpc=
 short_gi_80=
 short_gi_160=
@@ -201,14 +205,19 @@ start_disabled=
 dtim_period=
 max_listen_int=
 he_6ghz_reg_pwr_type=
+punc_eirp_thres_6ghz=
 bss_load_update_period=
 chan_util_avg_period=
 use_driver_vendor_addr=
 athnewind=
 skip_cac=
 uplink_csa=
+sta_dfs_en=
 rptr_mgr_mode=
+rptr_allow_chan_sw=
 vap_submode=
+CSwOpts=
+rpt_max_phy=
 
 #dpp
 dpp_ifaces=
@@ -244,8 +253,19 @@ acs_dbgtrace=
 acs_txpwr_opt=
 acs_freq_list=
 
-#dcs enable command
+#cbs commands
+cbs_enable=
+cbs_resttime=
+cbs_dwellrest=
+cbs_waittime=
+cbs_dwellsplit=
+cbs_totaldwell=
+cbs_csa_enable=
+
+#dcs commands
 dcs_enable=
+dcs_bw_reduction_ctrl=
+
 #obss_snr command
 obss_snr_threshold=
 obss_rx_snr_threshold=
@@ -306,10 +326,11 @@ ubus_call() {
 		config_add_int radio beacon_int chanbw frag rts
 		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
 		config_add_int num_global_macaddr multiple_bssid
+		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
-		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy acs_2g_scan_all
 	# ACS behavior tuning
-	config_add_int acs_retry_interval acs_retry_count
+	config_add_int acs_retry_interval acs_retry_count acs_periodic_interval acs_pcac_only
 	config_add_array ht_capab
 	config_add_array channels
 	config_add_array scan_list
@@ -336,7 +357,9 @@ ubus_call() {
 		he_twt_required \
 		use_ru_puncture_dfs \
 		qacs_enable \
+		acs_enable_bw_downgrade \
 		acs_rank_en \
+		cbs_csa_enable \
 		acs_6g_only_psc \
 		acs_wradar
 	config_add_int \
@@ -360,6 +383,7 @@ ubus_call() {
 		multiple_bssid \
 		mbssid_group_size \
 		he_6ghz_reg_pwr_type \
+		punc_eirp_thres_6ghz \
 		bss_load_update_period \
 		chan_util_avg_period \
 		acsmin_dwell \
@@ -370,8 +394,15 @@ ubus_call() {
 		athnewind \
 		rptr_mgr_mode \
 		dcs_enable \
+		dcs_bw_reduction_ctrl \
 		obss_snr_threshold \
-		obss_rx_snr_threshold
+		obss_rx_snr_threshold \
+		cbs_enable \
+		cbs_resttime \
+		cbs_dwellrest \
+		cbs_waittime \
+		cbs_dwellsplit \
+		cbs_totaldwell
 	config_add_boolean \
 		ldpc \
 		greenfield \
@@ -384,9 +415,13 @@ ubus_call() {
 		discard_6g_awgn_event \
 		ignorecac \
 		skip_cac \
+		rptr_allow_chan_sw \
 		uplink_csa
+	config_add_string CSwOpts
+	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
+	config_add_boolean enable_link_id
 }
 
 drv_mac80211_init_iface_config() {
@@ -403,11 +438,13 @@ drv_mac80211_init_iface_config() {
 	config_add_int ieee80211w
 	config_add_int beacon_prot
 	config_add_int unsol_bcast_presp
-	config_add_int fils_discovery
+	config_add_int fils_discovery force_disable_in_band_discovery
 	config_add_string ppe_vp
 	config_add_boolean disable_reconfig
 	config_add_string vap_submode
 	config_add_boolean he_mcs_12_13_supp
+	config_add_boolean wds_ie
+	config_add_boolean allow_3addr_mc
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -437,6 +474,8 @@ drv_mac80211_init_iface_config() {
 	config_add_int ml_max_rec_links
 	config_add_int bss_index
 	config_add_boolean disable_11be
+	config_add_boolean disable_11ax
+	config_add_boolean disable_11bn
 
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
@@ -686,20 +725,28 @@ mac80211_hostapd_setup_base() {
 
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 
-	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count
+	[ "$auto_channel" -gt 0 ] && json_get_vars acs_exclude_dfs acs_retry_interval acs_retry_count acs_2g_scan_all qacs_enable
 	[ -n "$acs_exclude_dfs" ] && [ "$acs_exclude_dfs" -gt 0 ] &&
 		append base_cfg "acs_exclude_dfs=1" "$N"
+
+	# If enabled, allow QACS to scan all 2.4GHz channels (not just 1/6/11).
+	# Applicable only to 2g radios and only when QACS is enabled.
+	if [ -n "$acs_2g_scan_all" ] && [ "$acs_2g_scan_all" -gt 0 ] && [ "$band" = "2g" ]; then
+		append base_cfg "acs_2g_scan_all=1" "$N"
+	fi
 
 	# Pass through ACS retry scan count when ACS is enabled
 	[ -n "$acs_retry_interval" ] && append base_cfg "acs_scan_retry_interval=$acs_retry_interval" "$N"
 	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
-	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa
+	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa CSwOpts rptr_allow_chan_sw
+	json_get_vars disable_iface_during_cac
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac
-	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt
+	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
+	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
+	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -718,6 +765,7 @@ mac80211_hostapd_setup_base() {
 	fi
 
 	set_default noscan 0
+	set_default disable_iface_during_cac 1
 
 	[ "$noscan" -gt 0 ] && hostapd_noscan=1
 	[ "$tx_burst" = 0 ] && tx_burst=
@@ -883,10 +931,11 @@ mac80211_hostapd_setup_base() {
 		;;
 	esac
 	[ "$band" = "5g" ] && {
-		json_get_vars background_radar:0 bgcac_en:0
+		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0
 
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 		[ "$bgcac_en" -eq 1 ] && append base_cfg "bgcac_en=1" "$N"
+		[ "$dfs_bw_reduce_en" -eq 1 ] && append base_cfg "dfs_bw_reduce_en=1" "$N"
 	}
 
 	case "$htmode" in
@@ -1091,8 +1140,9 @@ mac80211_hostapd_setup_base() {
 			mbssid_group_size \
 			he_6ghz_reg_pwr_type:0
 
-		if [ "$band" = "6g" ]; then
+	if [ "$band" = "6g" ]; then
 			append base_cfg "he_6ghz_reg_pwr_type=$he_6ghz_reg_pwr_type" "$N"
+			[ -n "$punc_eirp_thres_6ghz" ] && append base_cfg "punc_eirp_thres_6ghz=$punc_eirp_thres_6ghz" "$N"
 		fi
 
 		he_phy_cap=$(eval $sedString | awk -F "[()]" '/HE PHY Capabilities/ { print $2 }' | head -1)
@@ -1283,16 +1333,31 @@ mac80211_hostapd_setup_base() {
 
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$uplink_csa" ] && append base_cfg "uplink_csa=$uplink_csa" "$N"
+	[ -n "$CSwOpts" ] && append base_cfg "CSwOpts=$CSwOpts" "$N"
+	[ -n "$disable_iface_during_cac" ] && append base_cfg "disable_iface_during_cac=$disable_iface_during_cac" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
 	[ "$use_driver_vendor_addr" = "1" ] && append base_cfg "use_driver_vendor_addr=1" "$N"
+	[ "$rpt_max_phy" = "1" ] && append base_cfg "rpt_max_phy=1" "$N"
 	config_get athnewind mac80211 athnewind 0
 	[ -n "$athnewind" ] && append base_cfg "athnewind=$athnewind" "$N"
-	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
-	[ -n "$skip_cac" ] && append base_cfg "skip_cac=$skip_cac" "$N"
 
-	if [ "$qacs_enable" -eq "1" ]; then
+	config_get same_ssid_disable mac80211 same_ssid_disable
+	# If same_ssid_disable is 1, override same_ssid_repeater to 0
+	[ "$same_ssid_disable" = "1" ] && same_ssid_repeater="0"
+	# Add same_ssid parameter if repeater has AP and STA with same SSID
+	[ "$same_ssid_repeater" = "1" ] && append base_cfg "same_ssid=1" "$N"
+
+	[ -n "$ignorecac" ] && append base_cfg "ignorecac=$ignorecac" "$N"
+	[ -n "$mon_ifname" ] && append base_cfg "monitor_iface=$mon_ifname" "$N"
+	if [ "$is_repeater" = "1" ]; then
+		append base_cfg "repeater=1" "$N"
+		[ -n "$rptr_allow_chan_sw" ] && append base_cfg "rptr_allow_chan_sw=$rptr_allow_chan_sw" "$N"
+		[ "$is_skip_cac" = "1" ] && append base_cfg "skip_cac=1" "$N"
+	fi
+
+	if [ -n "$qacs_enable" ]; then
 		append base_cfg "qacs_enable=$qacs_enable" "$N"
 	fi
 
@@ -1328,8 +1393,20 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "acs_txpwr_opt=$acs_txpwr_opt" "$N"
 	fi
 
+	if [ -n "$acs_periodic_interval" ]; then
+		append base_cfg "acs_periodic_interval=$acs_periodic_interval" "$N"
+	fi
+
+	if [ -n "$acs_pcac_only" ]; then
+		append base_cfg "acs_pcaconly=$acs_pcac_only" "$N"
+	fi
+
 	if [ -n "$dcs_enable" ] && [ "$dcs_enable" -gt "0" ]; then
 		append base_cfg "dcs_enable=$dcs_enable" "$N"
+	fi
+
+	if [ -n "$dcs_bw_reduction_ctrl" ] && [ "$dcs_bw_reduction_ctrl" -gt "0" ]; then
+		append base_cfg "dcs_bw_reduction_ctrl=$dcs_bw_reduction_ctrl" "$N"
 	fi
 
 	if [ -n "$obss_snr_threshold" ] && [ "$obss_snr_threshold" -gt "0" ]; then
@@ -1338,6 +1415,38 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$obss_rx_snr_threshold" ] && [ "$obss_rx_snr_threshold" -gt "0" ]; then
 		append base_cfg "obss_rx_snr_threshold=$obss_rx_snr_threshold" "$N"
+	fi
+
+	if [ -n "$cbs_enable" ]; then
+		append base_cfg "cbs_enable=$cbs_enable" "$N"
+	fi
+
+	if [ -n "$cbs_resttime" ]; then
+		append base_cfg "cbs_resttime=$cbs_resttime" "$N"
+	fi
+
+	if [ -n "$cbs_dwellrest" ]; then
+		append base_cfg "cbs_dwellrest=$cbs_dwellrest" "$N"
+	fi
+
+	if [ -n "$cbs_waittime" ]; then
+		append base_cfg "cbs_waittime=$cbs_waittime" "$N"
+	fi
+
+	if [ -n "$cbs_dwellsplit" ]; then
+		append base_cfg "cbs_dwellsplit=$cbs_dwellsplit" "$N"
+	fi
+
+	if [ -n "$cbs_totaldwell" ]; then
+		append base_cfg "cbs_totaldwell=$cbs_totaldwell" "$N"
+	fi
+
+	if [ -n "$cbs_csa_enable" ]; then
+		append base_cfg "cbs_csa_enable=$cbs_csa_enable" "$N"
+	fi
+
+	if [ -n "$acs_enable_bw_downgrade" ]; then
+		append base_cfg "acs_enable_bw_downgrade=$acs_enable_bw_downgrade" "$N"
 	fi
 
 	hostapd_prepare_device_config "$hostapd_conf_file" nl80211
@@ -1422,13 +1531,15 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
+	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp multi_ap
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
 	json_get_vars disable_11be
+	json_get_vars disable_11ax
+	json_get_vars disable_11bn
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
 
 	#epcs params
@@ -1439,7 +1550,16 @@ mac80211_hostapd_setup_bss() {
 
 	json_get_vars twt_responder
 
-	set_default wds 0
+	if [ -n "$multi_ap" ] && [ "$multi_ap" -gt 0 ]; then
+		set_default wds 0
+	else
+		wds_support=$(mac80211_wds_support_check "$phy")
+                if [ "$wds_support" -ne 1 ]; then
+			set_default wds 0
+		else
+			set_default wds 1
+		fi
+	fi
 	set_default start_disabled 0
 
 	case "$auth_type" in
@@ -1450,16 +1570,21 @@ mac80211_hostapd_setup_bss() {
 		;;
 	esac
 
-	[ "$wds" -gt 0 ] && {
+	if [ "$wds" -gt 0 ] || [ "$wds_ie" -gt 0 ]; then
 		wds_support=$(mac80211_wds_support_check "$phy")
-                if [ "$wds_support" -ne 1 ]; then
-                        echo WDS is supported only in native wifi mode for ath11k driver. Kindly update the config > /dev/ttyMSM0
-                        return
-                fi
+		if [ "$wds_support" -ne 1 ]; then
+			echo WDS is supported only in native wifi mode for ath11k driver. Kindly update the config > /dev/ttyMSM0
+			return
+		fi
 
-		append hostapd_cfg "wds_sta=1" "$N"
+		if [ "$wds_ie" -gt 0 ]; then
+			append hostapd_cfg "wds_ie=1" "$N"
+		else
+			append hostapd_cfg "wds_sta=1" "$N"
+		fi
 		[ -n "$wds_bridge" ] && append hostapd_cfg "wds_bridge=$wds_bridge" "$N"
-	}
+	fi
+
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
 
 	[ "$dynamic_vlan" = "1" ] && append hostapd_cfg "dynamic_vlan=1" "$N"
@@ -1479,6 +1604,12 @@ mac80211_hostapd_setup_bss() {
 			append fils_cfg "fils_discovery_max_interval=$fils_discovery" "$N"
 		else
 			append fils_cfg "fils_discovery_max_interval=20" "$N"
+		fi
+
+		if [ -n "$force_disable_in_band_discovery" ] &&
+		   [ "$force_disable_in_band_discovery" -ge 0 ] &&
+		   [ "$force_disable_in_band_discovery" -le 1 ]; then
+			append fils_cfg "force_disable_in_band_discovery=$force_disable_in_band_discovery" "$N"
 		fi
 
 		if [ -n "$multiple_bssid" ] && [ "$multiple_bssid" -ge 1 ] && [ "$type" == "interface" ]; then
@@ -1508,13 +1639,21 @@ mac80211_hostapd_setup_bss() {
 
 	case "$htmode" in
 		EHT*|UHR*)
-		if [ "$disable_11be" = "1" ]; then
-			# Non-MLD BSS on EHT radio: suppress EHT caps, operate as 11ax only
+		# On UHR radios, allow downgrading UHR (11bn) to EHT (11be) without
+		# disabling MLD by setting disable_11bn=1.
+		case "$htmode" in
+			UHR*)
+			[ "$disable_11bn" = "1" ] && append hostapd_cfg "disable_11bn=1" "$N"
+		;;
+		esac
+
+		if [ "$disable_11be" = "1" ] || [ "$disable_11ax" = "1" ]; then
 			append hostapd_cfg "mld_ap=0" "$N"
 			append hostapd_cfg "disable_11be=1" "$N"
 		else
 			append hostapd_cfg "mld_ap=1" "$N"
 		fi
+
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
 			[ -n "$mld_macaddr" ] && append hostapd_cfg "mld_addr=$mld_macaddr" "$N"
@@ -1546,6 +1685,19 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "ml_max_rec_links=$ml_max_rec_links" "$N"
 		fi
 	esac
+
+	case "$htmode" in
+		HE*|EHT*|UHR*)
+		if [ "$disable_11ax" = "1" ]; then
+			# Non-MLD BSS on HE/EHT/UHR radio: suppress HE caps, operate as 11ac only
+			append hostapd_cfg "disable_11ax=1" "$N"
+		fi
+		;;
+	esac
+
+	if [ -n "$enable_link_id" ]; then
+		append hostapd_cfg "mld_link_id=$([ "$radio" = "-1" ] && echo 0 || echo "$radio")" "$N"
+	fi
 
 	if [ -n "$twt_responder" ]; then
 		append hostapd_cfg "twt_responder_caps=$twt_responder" "$N"
@@ -1639,6 +1791,10 @@ get_board_phy_name() (
 
 rename_board_phy_by_path() {
 	local path="$1"
+
+	# Skip iw set name command if phy is "phy-scan-00"
+	[ "$phy" = "phy-scan-00" ] && return
+
 
 	local new_phy="$(get_board_phy_name "$path")"
 	[ -z "$new_phy" -o "$new_phy" = "$phy" ] && return
@@ -1737,15 +1893,8 @@ mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
-	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode disable_11be
+	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode wds_ie
 
-
-	if [ "$mode" == "monitor" ] && [ "$auto_channel" -gt 0 ] && \
-	   [ "$has_ap" -gt 0 ]; then
-		echo "Radio $radio in ACS mode with AP VAPs, " \
-		     "skip monitor VAP create" >> /dev/console
-		return;
-	fi
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
@@ -1794,7 +1943,7 @@ mac80211_prepare_vif() {
 
 	if [ -z "$macaddr" ]; then
 		macaddr="$(mac80211_generate_mac $phy $mode)"
-		macidx="$(($macidx + 1))"
+		[ "$mode" != "monitor" ] && macidx="$(($macidx + 1))"
 		#default_macaddr=1
 	elif [ "$macaddr" = 'random' ]; then
 		macaddr="$(macaddr_random)"
@@ -2206,14 +2355,18 @@ mac80211_apply_monitor_flags() {
 	json_select ..
 
 	if  [ -n "$tx_mon" ] && [ "$tx_mon" -eq 1 ]; then
-		## Setting tx_mon=1 means enabling tx_mon.
-		## In this case, setting skip_tx flag = 0 to enable tx_mon
-		if [[ "$monitor_flags" == *"skip_tx"* ]]; then
-			echo "WARNING: Ignoring tx_monitor_enable request; " \
-			"using default configuration (tx_monitor=DISABLED)." > /dev/ttyMSM0
+		if [ -n "$monitor_flags" ]; then
+			## Setting tx_mon=1 => enabling tx_mon.
+			## 'skip_tx' flag contradicts with tx_mon=1, - Do not enable Tx Monitor in such cases
+			if [[ "$monitor_flags" == *"skip_tx"* ]]; then
+				echo "WARNING: Ignoring tx_monitor_enable request; " \
+				"using default configuration (tx_monitor=DISABLED)." > /dev/ttyMSM0
+			fi
+			set -- $monitor_flags
+			iw dev "$ifname" set monitor "$@"
+		else
+			iw dev "$ifname" set monitor none
 		fi
-		set -- $monitor_flags
-		iw dev "$ifname" set monitor "$@"
 	fi
 }
 
@@ -2402,6 +2555,7 @@ wpa_supplicant_add_interface() {
 	[ -n "$default_macaddr" ] || json_add_string macaddr "$macaddr"
 	[ -n "$network_bridge" ] && json_add_string bridge "$network_bridge"
 	[ -n "$wds" ] && json_add_boolean 4addr "$wds"
+	[ -n "$wds_ie" ] && json_add_boolean 4addr "$wds_ie"
 	json_add_boolean powersave "$powersave"
 	[ "$mode" = "mesh" ] && mac80211_add_mesh_params
 	json_close_object
@@ -2541,14 +2695,22 @@ wpa_supplicant_start() {
 mac80211_setup_supplicant() {
 	local enable=$1
 	local add_sp=0
+	local fetched_CSwOpts
 
 	wpa_supplicant_prepare_interface "$ifname" nl80211 || return 1
 	config_get athnewind mac80211 athnewind 0
 	config_get rptr_mgr_mode mac80211 rptr_mgr_mode 1
+	config_get fetched_CSwOpts "$device" CSwOpts
+	if [ -n "$fetched_CSwOpts" ]; then
+		CSwOpts="$fetched_CSwOpts"
+		echo "$CSwOpts" > /tmp/CSwOpts_saved
+	elif [ -f /tmp/CSwOpts_saved ]; then
+		CSwOpts="$(cat /tmp/CSwOpts_saved)"
+	fi
 	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa" "$CSwOpts"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -2704,6 +2866,9 @@ mac80211_is_last_enabled_radio() {
 # Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
 is_repeater=0
 
+# Global same_ssid flag: set to 1 if repeater has AP and STA with same SSID
+same_ssid_repeater=0
+
 # Global skip_cac flag: set to 1 if any enabled 5 GHz radio has skip_cac enabled
 is_skip_cac=0
 # Global uplink_csa flag:
@@ -2728,10 +2893,12 @@ mac80211_update_is_repeater_flag() {
 		dev="$section"
 		local ap=0
 		local sta=0
+		local ap_ssid=""
+		local sta_ssid=""
 
 		__scan_iface() {
 			local iface="$1"
-			local if_device mode if_disabled
+			local if_device mode if_disabled ssid
 
 			config_get if_device "$iface" device
 			[ "$if_device" != "$dev" ] && return 0
@@ -2740,9 +2907,17 @@ mac80211_update_is_repeater_flag() {
 			config_get if_disabled "$iface" disabled 0
 			[ "$if_disabled" -eq 1 ] && return 0
 
+			config_get ssid "$iface" ssid
+
 			case "$mode" in
-				ap) ap=1 ;;
-				sta) sta=1 ;;
+				ap)
+					ap=1
+					ap_ssid="$ssid"
+					;;
+				sta)
+					sta=1
+					sta_ssid="$ssid"
+					;;
 			esac
 		}
 
@@ -2750,6 +2925,11 @@ mac80211_update_is_repeater_flag() {
 
 		if [ "$ap" -eq 1 ] && [ "$sta" -eq 1 ]; then
 			is_repeater=1
+
+			# Check if SSIDs match
+			if [ -n "$ap_ssid" ] && [ -n "$sta_ssid" ] && [ "$ap_ssid" = "$sta_ssid" ]; then
+				same_ssid_repeater=1
+			fi
 		fi
 	}
 
@@ -2771,8 +2951,13 @@ mac80211_update_is_skip_cac_flag() {
 		config_get band "$section" band
 		[ "$band" != "5g" ] && return 0
 
-		config_get skip "$section" skip_cac 0
-		[ "$skip" -eq 1 ] && is_skip_cac=1
+		config_get skip "$section" skip_cac
+		# For repeater mode: enable skip_cac by default unless explicitly set to 0
+		if [ "$is_repeater" = "1" ]; then
+			if [ -z "$skip" ] || [ "$skip" = "1" ]; then
+				is_skip_cac=1
+			fi
+		fi
 	}
 
 	config_foreach __skip_cac wifi-device
@@ -2814,7 +2999,7 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 htmode \
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
-		ccfs disable_csa_dfs ru_punct_bitmap
+		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -2952,8 +3137,11 @@ drv_mac80211_setup() {
 		start_chan=$(mac80211_freq_to_channel $start_freq)
 		end_chan=$(mac80211_freq_to_channel $end_freq)
 		if [ "$start_chan" != "0" ] && [ "$end_chan" != "0" ]; then
-			uci set wireless.$device_name.channels=$start_chan-$end_chan
-			uci commit wireless
+			rchanlist=$(uci get wireless.$device.channels)
+			if [ -z "$rchanlist" ]; then
+				uci set wireless.$device_name.channels=$start_chan-$end_chan
+				uci commit wireless
+			fi
 		fi
 	}
 
@@ -2993,12 +3181,15 @@ drv_mac80211_setup() {
 		[ -n "$rts" ] && iw phy "$phy" set rts "${rts%%.*}"
 	fi
 
+	[ -n "$sta_dfs_en" ] && iw phy "$phy" set sta_dfs_en "$sta_dfs_en" >/dev/null 2>&1
+
 	has_ap=
 	hostapd_ctrl=
 	ap_ifname=
 	hostapd_noscan=
 	wpa_supp_init=
 	oce_ap=
+	mon_ifname=
 	for_each_interface "ap" mac80211_check_ap
 
 	[ -f "$hostapd_conf_file" ] && mv "$hostapd_conf_file" "$hostapd_conf_file.prev"
@@ -3006,6 +3197,7 @@ drv_mac80211_setup() {
 
 	for_each_interface "ap" mac80211_check_oce_ap
 	for_each_interface "sta adhoc mesh" mac80211_set_noscan
+	for_each_interface "monitor" mac80211_prepare_vif
 	[ -n "$has_ap" ] && mac80211_hostapd_setup_base "$phy"
 
         if [ "$mlo_add_flag" = 1 ]; then
@@ -3022,12 +3214,11 @@ drv_mac80211_setup() {
 
 	mac80211_prepare_iw_htmode
 	active_ifnames=
-	mon_ifname=
 	reserved_bss_list=
 	unreserved_apsta_count=0
 
 	for_each_interface "ap" mac80211_prepare_vif
-	for_each_interface "sta adhoc mesh monitor" mac80211_prepare_vif
+	for_each_interface "sta adhoc mesh" mac80211_prepare_vif
 	for_each_interface "ap sta adhoc mesh monitor" mac80211_setup_vif
 
 	echo 3 > /sys/kernel/debug/ecm/ecm_classifier_default/accel_delay_pkts
@@ -3123,6 +3314,7 @@ drv_mac80211_teardown() {
 	mac80211_reset_config "$phy"
 	killall rptr-mgr
 	rm /var/run/rptr_mgr.conf
+	rm -f /tmp/CSwOpts_saved
 }
 
 _sta_radios=
@@ -3157,6 +3349,11 @@ mac80211_derive_ml_info() {
 	do
 	        for _staifname in $_staifaces
 	        do
+			config_get disabled "$_staifname" disabled
+			if [ "$disabled" -eq 1 ]; then
+				continue;
+			fi
+
 	                config_get mld_name "$_staifname" mld
 	                config_get mldevice "$_staifname" device
 	                if [ ${#mldevice} -ne 12 ]; then

@@ -65,6 +65,8 @@ else
 config-y += ATH12K_TX_MONITOR
 endif
 
+config-$(CONFIG_PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE) += ATH12K_UCAST_ENABLE_AST_OVERRIDE
+
 config-$(call config_package,carl9170) += CARL9170
 config-$(call config_package,ar5523) += AR5523
 config-$(call config_package,wil6210) += WIL6210
@@ -172,7 +174,8 @@ endif
 
 ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko \
+         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/sa_test/sa_test.ko
 endif
 endif
 

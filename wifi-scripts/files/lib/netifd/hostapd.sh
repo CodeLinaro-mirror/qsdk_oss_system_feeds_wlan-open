@@ -5,6 +5,23 @@
 . /lib/functions/network.sh
 . /lib/functions.sh
 
+hostapd_if_action_policy_uci_vars="\
+				   external_plugin_action_policy_radio \
+				   external_plugin_action_policy_radio_neighbour_req \
+				   external_plugin_action_policy_wnm \
+				   external_plugin_action_policy_wnm_btm_query \
+				   external_plugin_action_policy_wnm_btm_resp \
+				   external_plugin_action_policy_wnm_btm_req \
+				   external_plugin_action_policy_wmm \
+				   external_plugin_action_policy_wmm_addts_req \
+				   external_plugin_action_policy_wmm_delts \
+				   external_plugin_action_policy_wnm_dms_req \
+				   external_plugin_action_policy_wnm_dms_resp \
+				   external_plugin_action_policy_ft \
+				   external_plugin_action_policy_ft_req \
+				   external_plugin_action_policy_ft_resp \
+				   external_plugin_action_policy_vendor"
+
 wpa_supplicant_add_rate() {
 	local var="$1"
 	local val="$(($2 / 1000))"
@@ -324,6 +341,9 @@ hostapd_common_add_bss_config() {
 	config_add_int bss_load_update_period chan_util_avg_period
 
 	config_add_int oce
+	config_add_int oce_tx_power oce_dl_availcap oce_ul_availcap oce_ess_edge oce_ess_rssi_threshold
+	config_add_boolean oce_ess_report
+	config_add_string oce_ip_subnet_id
 	config_add_string beacon_rate probe_resp_rate
 
 	config_add_string dae_client
@@ -349,7 +369,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_string wpa_psk_file
 
-	config_add_int multi_ap
+	config_add_int multi_ap he_6ghz_min_rate
 
 	config_add_int multi_ap_vlanid
 
@@ -364,6 +384,7 @@ hostapd_common_add_bss_config() {
 	config_add_string vendor_elements
 
 	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report
+	config_add_int rnr rnr_ie_allowed
 
 	config_add_boolean ftm_responder stationary_ap
 	config_add_string lci civic
@@ -391,10 +412,14 @@ hostapd_common_add_bss_config() {
 	config_add_int external_plugin_enable
 	config_add_int plugin_eap_offload
 	config_add_int externally_triggered_m3
+	config_add_int plugin_eapol_key_offload
+	config_add_int external_pmk_cache
 	config_add_int external_plugin_auth_policy
+	config_add_int external_plugin_remote_auth_policy
 	config_add_int external_plugin_assoc_policy
 	config_add_int external_plugin_deauth_policy
 	config_add_int external_plugin_disassoc_policy
+	config_add_int $hostapd_if_action_policy_uci_vars
 
 	config_add_int control_frame_protection
 	config_add_int cip_padding_delay
@@ -486,6 +511,7 @@ hostapd_common_add_bss_config() {
 	config_add_int max_cip_padding_delay
 	config_add_int dcs_random_chan_bitmap
 	config_add_int dcs_bw_reduction_ctrl
+	config_add_array security_profiles
 }
 
 hostapd_set_vlan_file() {
@@ -656,6 +682,7 @@ hostapd_set_bss_options() {
 	wireless_vif_parse_encryption
 
 	local bss_conf bss_md5sum ft_key
+	local action_policy_var action_policy_val
 	local wep_rekey wpa_group_rekey wpa_pair_rekey wpa_master_rekey wpa_key_mgmt
 
 	json_get_vars \
@@ -668,7 +695,10 @@ hostapd_set_bss_options() {
 		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable plugin_eap_offload externally_triggered_m3 \
-		external_plugin_auth_policy external_plugin_deauth_policy external_plugin_assoc_policy external_plugin_disassoc_policy \
+		plugin_eapol_key_offload external_pmk_cache \
+		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
+		external_plugin_assoc_policy external_plugin_disassoc_policy \
+		$hostapd_if_action_policy_uci_vars \
 		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
@@ -676,7 +706,9 @@ hostapd_set_bss_options() {
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
-		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set \
+		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
+		oce_tx_power oce_dl_availcap oce_ul_availcap \
+		oce_ess_report oce_ess_edge oce_ess_rssi_threshold oce_ip_subnet_id \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -700,6 +732,7 @@ hostapd_set_bss_options() {
 
 	json_get_values sae_groups sae_groups
 	json_get_values owe_groups owe_groups
+	json_get_values security_profiles security_profiles
 
 	set_default fils 0
 	set_default isolate 0
@@ -724,10 +757,7 @@ hostapd_set_bss_options() {
 	set_default airtime_bss_limit 0
 	set_default eap_server 0
 	set_default apup 0
-	set_default external_plugin_auth_policy 0
-	set_default external_plugin_assoc_policy 0
-	set_default external_plugin_deauth_policy 0
-	set_default external_plugin_disassoc_policy 0
+	set_default he_6ghz_min_rate 0
 
 	/usr/sbin/hostapd -vfils || fils=0
 
@@ -766,6 +796,7 @@ hostapd_set_bss_options() {
 	append bss_conf "multi_ap=$multi_ap" "$N"
 	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
+	[ "$band" = "6g" ] && [ "$he_6ghz_min_rate" -gt 0 ] && append bss_conf "he_6ghz_min_rate=$he_6ghz_min_rate" "$N"
 
 	[ -n "$oce" ] && {
 		# Set oce=4 to enable OCE_AP
@@ -776,6 +807,14 @@ hostapd_set_bss_options() {
 			[ -z "$beacon_rate" ] && append bss_conf "beacon_rate=55" "$N"
 			[ -z "$probe_resp_rate" ] && append bss_conf "probe_resp_rate=55" "$N"
 		fi
+
+		[ -n "$oce_tx_power" ] && append bss_conf "oce_tx_power=$oce_tx_power" "$N"
+		[ -n "$oce_dl_availcap" ] && append bss_conf "oce_dl_availcap=$oce_dl_availcap" "$N"
+		[ -n "$oce_ul_availcap" ] && append bss_conf "oce_ul_availcap=$oce_ul_availcap" "$N"
+		[ "$oce_ess_report" -gt 0 ] && append bss_conf "oce_ess_report=$oce_ess_report" "$N"
+		[ -n "$oce_ess_edge" ] && append bss_conf "oce_ess_edge=$oce_ess_edge" "$N"
+		[ -n "$oce_ess_rssi_threshold" ] && append bss_conf "oce_ess_rssi_threshold=$oce_ess_rssi_threshold" "$N"
+		[ -n "$oce_ip_subnet_id" ] && append bss_conf "oce_ip_subnet_id=$oce_ip_subnet_id" "$N"
 	}
 
 	[ -n "$beacon_rate" ] && append bss_conf "beacon_rate=$beacon_rate" "$N"
@@ -865,10 +904,17 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
 	[ -n "$plugin_eap_offload" ] && append bss_conf "plugin_eap_offload=$plugin_eap_offload" "$N"
 	[ -n "$externally_triggered_m3" ] && append bss_conf "externally_triggered_m3=$externally_triggered_m3" "$N"
+	[ -n "$plugin_eapol_key_offload" ] && append bss_conf "plugin_eapol_key_offload=$plugin_eapol_key_offload" "$N"
+	[ -n "$external_pmk_cache" ] && append bss_conf "external_pmk_cache=$external_pmk_cache" "$N"
 	[ -n "$external_plugin_auth_policy" ] && append bss_conf "external_plugin_auth_policy=$external_plugin_auth_policy" "$N"
+	[ -n "$external_plugin_remote_auth_policy" ] && append bss_conf "external_plugin_remote_auth_policy=$external_plugin_remote_auth_policy" "$N"
 	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
 	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
+	for action_policy_var in $hostapd_if_action_policy_uci_vars; do
+		eval "action_policy_val=\"\${$action_policy_var}\""
+		[ -n "$action_policy_val" ] && append bss_conf "${action_policy_var}=$action_policy_val" "$N"
+	done
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
@@ -1095,9 +1141,10 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 
-	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr
+	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
 	set_default ieee80211k 0
 	set_default rnr 0
+	set_default rnr_ie_allowed 0
 	if [ "$ieee80211k" -eq "1" ]; then
 		set_default rrm_neighbor_report 1
 		set_default rrm_beacon_report 1
@@ -1108,7 +1155,8 @@ hostapd_set_bss_options() {
 
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
-	[ "$rnr" -eq "1" ] && append bss_conf "rnr=1" "$N"
+	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
+	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
 	json_get_vars ftm_responder stationary_ap lci civic
 	set_default ftm_responder 0
@@ -1202,7 +1250,7 @@ hostapd_set_bss_options() {
 			append bss_conf "rsn_preauth_interfaces=$network_bridge" "$N"
 		else
 			case "$auth_type" in
-			*sae*|owe|dpp)
+			*sae*|owe|dpp|eap2)
 				set_default auth_cache 1
 			;;
 			*)
@@ -1547,6 +1595,8 @@ hostapd_set_bss_options() {
 
 	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
 
+	[ -n "$security_profiles" ] && append bss_conf "security_profiles=$security_profiles" "$N"
+
 	append "$var" "$bss_conf" "$N"
 	return 0
 }
@@ -1635,7 +1685,7 @@ wpa_supplicant_prepare_interface() {
 				fail=1
 			;;
 			sta)
-				([ "$wds" = 1 ] || [ "$multi_ap" = 1 ]) || fail=1
+				([ "$wds_ie" ] || [ "$wds" = 1 ] || [ "$multi_ap" = 1 ]) || fail=1
 			;;
 		esac
 
@@ -1712,15 +1762,16 @@ wpa_supplicant_add_network() {
 		local rptr_mgr_mode="$3"
 		local channel="$4"
 		local uplink_csa="$5"
+		local CSwOpts="$6"
 	else
 		local freq="$2"
 		local htmode="$3"
 		local noscan="$4"
 		local ru_punct_bitmap=$5
+		local disable_csa_dfs=$6
 	fi
 
 	local disable_40mhz_scan=0
-	local disable_csa_dfs=$6
 	local ccfs=0
 
 	_wpa_supplicant_common "$1"
@@ -1736,7 +1787,9 @@ wpa_supplicant_add_network() {
 		ssid_protection \
 		scan_freq bgscan bgscan_freq \
 		control_frame_protection \
-		cip_padding_delay
+		cip_padding_delay \
+		wds_ie \
+		allow_3addr_mc
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -1836,6 +1889,12 @@ wpa_supplicant_add_network() {
 			append network_data "enable_4addr_mode=1" "$N$T"
 		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
+		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
+		[ "$allow_3addr_mc" = "1" ] && append network_data "allow_3addr_mc=1" "$N$T"
+
+		[ -n "$CSwOpts" ] && {
+		         CSwOpts="$CSwOpts"
+		}
 	}
 
 	[ -n "$ocv" ] && append network_data "ocv=$ocv" "$N$T"
@@ -2128,6 +2187,7 @@ wpa_supplicant_add_network() {
 $mesh_ctrl_interface
 $user_mpm
 $disable_csa_dfs
+CSwOpts=$CSwOpts
 $saepwe
 $rsn_override
 $wps_cred_add_sae

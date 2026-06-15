@@ -74,6 +74,7 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_QCN_EXTN \
 	CONFIG_PACKAGE_QCA_LAB_TEST_FEATURES \
 	CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT \
+	CONFIG_PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE \
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -172,6 +173,7 @@ endif
 	$(INSTALL_BIN) ./files/lib/ds_enable.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/apsta_mode.sh $(1)/lib
 	$(INSTALL_BIN) ./files/lib/kpi_stats.sh $(1)/lib
+	$(INSTALL_BIN) ./files/lib/vow_stats.sh $(1)/lib
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 	$(INSTALL_DIR) $(1)/lib/wifi/mount
 	$(INSTALL_BIN) ./files/lib/wifi/mount/umount_fw_partition.sh $(1)/lib/wifi/mount/
@@ -321,6 +323,10 @@ define KernelPackage/mac80211/config
 	config PACKAGE_QCN_EXTN_MESH_SUPPORT
 		bool "Enable QCN extension mesh feature support"
 		default y
+
+	config PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE
+		bool "Enable unicast AST override"
+		default n
 
   endif
 endef
@@ -478,6 +484,8 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.c
+	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
 endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
@@ -565,6 +573,15 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/*.h $(1)/usr/include/mac80211/ath/
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/vendor.h $(1)/usr/include/mac80211/ath/
 	rm -f $(1)/usr/include/mac80211-backport/linux/module.h
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+	if [ -f "$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole" ]; then \
+		$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
+			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
+		lzma e $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt \
+			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
+		rm -f $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
+	fi
+endif
 endef
 
 define KernelPackage/ath/install

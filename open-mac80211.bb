@@ -31,6 +31,7 @@ SRC_URI = " \
 	file://lib/netifd-wlan/wireless/ \
 	file://ini/ \
 	file://ini/internal/ \
+	file://etc/modprobe.d/ \
 "
 
 SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
@@ -66,10 +67,12 @@ EXTRA_MAKE_CFLAGS=" \
 EXTRA_CFLAGS += " \
 	-I${S}/include \
 	-I${S}/include/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
+	-I${STAGING_DIR}/ \
 	-I${STAGING_DIR}/usr/include \
 	-I${STAGING_INCDIR}/qca-nss-drv \
 	-I${STAGING_INCDIR}/qca-nss-ppe \
 	-I${STAGING_INCDIR}/qca-nss-clients \
+	-I${STAGING_INCDIR}/qca-nss-ppe-ds/ \
 	-Wall \
 	-Wno-unused-function \
 	-Wno-error=unused-variable -Wno-unused-variable \
@@ -93,7 +96,7 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
 "
 
-do_unpack[postfuncs] += "do_cp_src_wlan_open_extns"
+do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
 
 do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
@@ -101,7 +104,17 @@ do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
+	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
 }
+
+do_cp_headers() {
+	install -d ${STAGING_DIR}/include/linux/
+	install -m 0644 ${TOPDIR}/${SRCPREFIX}files-6.6/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
+}
+
+# The following compilation flags are enabled for 1G profile
+# When RDK platform introduces new profiles, configure accordingly in do_configure()
 
 do_configure:prepend() {
 	cat > ${S}/.config << 'EOF'
@@ -125,14 +138,11 @@ CPTCFG_ATH11K_AHB=m
 CPTCFG_ATH11K_PCI=m
 CPTCFG_ATH11K_DEBUG=y
 CPTCFG_ATH11K_DEBUGFS=y
-CPTCFG_ATH11K_TRACING=y
 CPTCFG_ATH11K_PKTLOG=y
 CPTCFG_ATH12K=m
-CPTCFG_ATH12K_AHB=y
 CPTCFG_ATH12K_PCI=m
 CPTCFG_ATH12K_DEBUG=y
 CPTCFG_ATH12K_DEBUGFS=y
-CPTCFG_ATH12K_TRACING=y
 CPTCFG_ATH12K_SAWF=y
 CPTCFG_WLAN_VENDOR_ATH=y
 CPTCFG_NL80211_TESTMODE=y
@@ -142,8 +152,38 @@ CPTCFG_ATH12K_PPE_DS_SUPPORT=y
 CPTCFG_MAC80211_SFE_SUPPORT=y
 CPTCFG_QCN_EXTN=y
 CPTCFG_MAC80211_ATHDEBUG=y
+CPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS=y
+CPTCFG_ATH_USER_REGD=y
+CPTCFG_ATH11K_CFR=y
+CPTCFG_ATH11K_SMART_ANT_ALG=y
+CPTCFG_ATH11K_SPECTRAL=y
+CPTCFG_ATH12K_CFR=y
+CPTCFG_ATH12K_PKTLOG=y
+CPTCFG_ATH12K_POWER_BOOST=y
+CPTCFG_ATH12K_SPECTRAL=y
+CPTCFG_ATH12K_TX_MONITOR=y
+CPTCFG_MAC80211_DEBUG_MENU=y
+CPTCFG_MAC80211_HWSIM=m
+CPTCFG_MAC80211_MLME_DEBUG=y
+CPTCFG_MAC80211_PPE_SUPPORT=y
+CPTCFG_MAC80211_PS_DEBUG=y
+CPTCFG_MAC80211_STA_DEBUG=y
+CPTCFG_MAC80211_VERBOSE_DEBUG=y
+CPTCFG_QCN_EXTN_MESH_SUPPORT=y
+CPTCFG_WILINK_PLATFORM_DATA=y
+CPTCFG_WLAN=y
+CPTCFG_WLAN_VENDOR_ADMTEK=y
+CPTCFG_WLAN_VENDOR_RSI=y
+CPTCFG_WL_TI=y
 EOF
 
+	if [[ "${MACHINE}" == ipq53xx* ]]; then
+		echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
+	fi
+
+	if [[ "${MACHINE}" == ipq53xx* || "${MACHINE}" == ipq54xx* ]]; then
+		echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
+	fi
 }
 
 #do_patch[postfuncs] += "do_refactor_alloc_cocci"
@@ -252,10 +292,16 @@ do_install:append() {
 		cp ${S}/include/ath/ppe_public.h ${D}${includedir}/ath/
 	fi
 
-cat > ${D}${sysconfdir}/modprobe.d/ath12k.conf << 'EOF'
-# Ensure firmware path is set before loading ath12k
-install ath12k /bin/sh -c 'echo /ini > /sys/module/firmware_class/parameters/path 2>/dev/null || true; /sbin/modprobe --ignore-install ath12k $CMDLINE_OPTS'
-EOF
+	# Move all .ko files from updates/ subdirs to KERNEL_VERSION/
+	find "${D}/lib/modules/${KERNEL_VERSION}/updates/" -name '*.ko' \
+		-exec mv -t "${D}/lib/modules/${KERNEL_VERSION}/" {} +
+
+	# Clean up empty updates/ dir
+	rm -rf ${D}/lib/modules/${KERNEL_VERSION}/updates
+
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
+	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
 
 }
 
@@ -319,6 +365,8 @@ RDEPENDS:${PN} += " \
 FILES:${PN} += "/ini/* /ini/internal/*"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
+FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
+FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
