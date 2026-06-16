@@ -210,6 +210,9 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/compat/compat.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endif
+	if [ -f "./files/lib/wifi/ath12k_struct_layout.txt.lzma" ]; then \
+		$(INSTALL_BIN) ./files/lib/wifi/ath12k_struct_layout.txt.lzma $(1)/lib/wifi/; \
+	fi
 endef
 
 define KernelPackage/cfg80211/description
@@ -576,10 +579,10 @@ define Build/InstallDev
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 	if [ -f "$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole" ]; then \
 		$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
-			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
-		lzma e $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt \
-			$(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
-		rm -f $(TOPDIR)/package/feeds/wlan_open/wifi-scripts/files/lib/wifi/ath12k_struct_layout.txt; \
+			$(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
+		lzma e $(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt \
+			$(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
+		rm -f $(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
 	fi
 endif
 endef
