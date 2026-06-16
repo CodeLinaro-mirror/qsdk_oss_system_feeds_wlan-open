@@ -17,6 +17,13 @@
 '
 SERVER=$(fw_printenv serverip | cut -c10-24)
 TIMESTAMP=$(date +%y%m%d%H%M%S)$(printf "%04d" $((RANDOM % 10000)))
+DUMP_LOCATION=/tmp
+COMPRESS_ENABLE_sysfs=/sys/kernel/debug/ath12k/compress_fw_dump
+ini_path=/ini/global.ini
+
+get_uptime() {
+        awk '{print $1}' /proc/uptime
+}
 
 if [ -z "$SERVER" ]; then
     echo "Wrong configuration: SERVER is empty" > /dev/console
@@ -30,7 +37,7 @@ if [ -n "$LATEST_FILE" ] && [ -e "$COREDUMP_PATH/$LATEST_FILE/data" ]; then
     TARGET_PATH="$COREDUMP_PATH/$LATEST_FILE/failing_device"
 
     if [ -e "$TARGET_PATH/subsystem_device" ]; then
-	# Extract the hexadecimal value (without '0x') from the file 'subsystem_device'
+        # Extract the hexadecimal value (without '0x') from the file 'subsystem_device'
         target=$(sed -n 's/.*0x\([0-9a-fA-F]*\).*/\1/p' "$TARGET_PATH/subsystem_device")
         TARGET_PATH_N=$(readlink -n "$TARGET_PATH")
         pci_path=$(basename "$TARGET_PATH_N")
@@ -55,14 +62,59 @@ if [ -n "$LATEST_FILE" ] && [ -e "$COREDUMP_PATH/$LATEST_FILE/data" ]; then
 fi
 
 if [ -n "$FILENAME" ]; then
-    echo "Collecting $FILENAME to $SERVER" > /dev/console
-    (
-        if tftp -l "$DUMPPATH" -r "$FILENAME" -p "$SERVER" 2>&1; then
-            echo "$FILENAME collected to $SERVER" > /dev/console
-        else
-            echo "$FILENAME collection failed to $SERVER" > /dev/console
-        fi
-        echo 1 > $DUMPPATH
-    ) &
-fi
 
+    sysfs_param=0
+    ini_param=0
+    if [ -f "$COMPRESS_ENABLE_sysfs" ]; then
+        sysfs_param=$(cat "$COMPRESS_ENABLE_sysfs")
+    fi
+    if [ -f "$ini_path" ]; then
+        ini_param=$(awk -F'=' '/^compress_fw_dump/{print $2}' "$ini_path")
+    fi
+    if [ "$sysfs_param" = "1" ] || [ "$ini_param" = "1" ]; then
+        compress_dump_enable=1
+        COMPR_DUMP_NAME=$FILENAME.gz
+        #Setting Max size of Compressed Wkk Q6 Memory
+        DUMP_MAX_SIZE=30
+    else
+        compress_dump_enable=0
+    fi
+
+    MEM_AVAILABLE=$(df -Ph $DUMP_LOCATION | awk 'NR==2 {print $4}')
+    MEM_AVAILABLE=${MEM_AVAILABLE%.*}
+
+    if [ "$compress_dump_enable" = "1" ] && [ ! $MEM_AVAILABLE -gt $DUMP_MAX_SIZE ]; then
+        echo "[ $(get_uptime)] Compression skipped: insufficient memory (available=${MEM_AVAILABLE}M, required=${DUMP_MAX_SIZE}M)" > /dev/console
+        compress_dump_enable=0
+    fi
+
+    if [ "$compress_dump_enable" = "1" ]; then
+        $(dd if=$DUMPPATH | gzip -c -1 > $DUMP_LOCATION/$COMPR_DUMP_NAME)
+        echo "[ $(get_uptime)] Collecting compressed version" > /dev/console
+        COMPR_SIZE=$(du -sk $DUMP_LOCATION/$COMPR_DUMP_NAME | cut -f1)
+        if [ "$COMPR_SIZE" -gt "$((DUMP_MAX_SIZE * 1024))" ]; then
+            echo "[ $(get_uptime)] Compressed dump size: $COMPR_SIZE greater than expected" > /dev/console
+        fi
+        echo "[ $(get_uptime)] Collecting $COMPR_DUMP_NAME to $SERVER" > /dev/console
+        echo 1 > $DUMPPATH
+        (
+          if tftp -l "$DUMP_LOCATION/$COMPR_DUMP_NAME" -r "$COMPR_DUMP_NAME" -p "$SERVER" 2>&1; then
+                echo "[ $(get_uptime)] $COMPR_DUMP_NAME collected to $SERVER" > /dev/console
+          else
+                echo "[ $(get_uptime)] $COMPR_DUMP_NAME collection failed to $SERVER" > /dev/console
+          fi
+          rm $DUMP_LOCATION/$COMPR_DUMP_NAME
+        ) &
+    else
+        echo "[ $(get_uptime)] Collecting dump directly on backbone" > /dev/console
+        echo "[ $(get_uptime)] Collecting $FILENAME to $SERVER" > /dev/console
+        (
+          if tftp -l "$DUMPPATH" -r "$FILENAME" -p "$SERVER" 2>&1; then
+                echo "[ $(get_uptime)] $FILENAME collected to $SERVER" > /dev/console
+          else
+                echo "[ $(get_uptime)] $FILENAME collection failed to $SERVER" > /dev/console
+          fi
+          echo 1 > $DUMPPATH
+        ) &
+    fi
+fi
