@@ -437,6 +437,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int start_disabled
 	config_add_int ieee80211w
 	config_add_int beacon_prot
+	config_add_boolean disable_sa_query
 	config_add_int unsol_bcast_presp
 	config_add_int fils_discovery force_disable_in_band_discovery
 	config_add_string ppe_vp
@@ -1531,7 +1532,7 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp multi_ap
+	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot disable_sa_query ppe_vp multi_ap 
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
@@ -1586,6 +1587,7 @@ mac80211_hostapd_setup_bss() {
 	fi
 
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
+	[ -n "$disable_sa_query" ] && append hostapd_cfg "disable_sa_query=$disable_sa_query" "$N"
 
 	[ "$dynamic_vlan" = "1" ] && append hostapd_cfg "dynamic_vlan=1" "$N"
 	[ -n "$vlan_tagged_interface" ] && append hostapd_cfg "vlan_tagged_interface=$vlan_tagged_interface" "$N"
