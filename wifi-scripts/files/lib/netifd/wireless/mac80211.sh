@@ -187,6 +187,9 @@ eht_ulmumimo_320mhz=
 ru_punct_bitmap=
 ru_punct_acs_threshold=
 use_ru_puncture_dfs=
+npca_primary_channel=
+npca_punct_bitmap=
+npca_enable=
 he_su_beamformer=
 he_su_beamformee=
 he_mu_beamformer=
@@ -379,6 +382,9 @@ ubus_call() {
 		eht_ulmumimo_320mhz \
 		ru_punct_bitmap \
 		ru_punct_acs_threshold \
+		npca_primary_channel \
+		npca_punct_bitmap \
+		npca_enable \
 		ccfs \
 		multiple_bssid \
 		mbssid_group_size \
@@ -746,6 +752,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
+	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
 	# Optional user override for HT40 capability string
@@ -1288,6 +1295,9 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$enable_bn" != "0" ]; then
 			append base_cfg "ieee80211bn=1" "$N"
+			[ -n "$npca_primary_channel" ] && append base_cfg "npca_primary_channel=$npca_primary_channel" "$N"
+			[ -n "$npca_punct_bitmap" ] && append base_cfg "npca_punct_bitmap=$npca_punct_bitmap" "$N"
+			[ -n "$npca_enable" ] && append base_cfg "npca_enable=$npca_enable" "$N"
 		fi
 
 		if [ "$band" = "6g" ]; then
