@@ -49,12 +49,16 @@ DEPENDS = " \
 	qca-nss-wifi-plugin \
 "
 
+DEPENDS:remove:echo = "qca-nss-ppe qca-nss-ppe-vp qca-nss-ppe-ds qca-nss-wifi-plugin"
+
 REQUIRED_HOSTTOOLS += "spatch"
 
 RDEPENDS:${PN} = " \
 	wireless-regdb \
 	iw \
 "
+
+TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
 
 EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
@@ -133,12 +137,6 @@ CPTCFG_DEBUG_FS=y
 CPTCFG_MAC80211_LEDS=y
 CPTCFG_ATH_COMMON=m
 CPTCFG_ATH_DEBUG=y
-CPTCFG_ATH11K=m
-CPTCFG_ATH11K_AHB=m
-CPTCFG_ATH11K_PCI=m
-CPTCFG_ATH11K_DEBUG=y
-CPTCFG_ATH11K_DEBUGFS=y
-CPTCFG_ATH11K_PKTLOG=y
 CPTCFG_ATH12K=m
 CPTCFG_ATH12K_PCI=m
 CPTCFG_ATH12K_DEBUG=y
@@ -165,7 +163,6 @@ CPTCFG_ATH12K_TX_MONITOR=y
 CPTCFG_MAC80211_DEBUG_MENU=y
 CPTCFG_MAC80211_HWSIM=m
 CPTCFG_MAC80211_MLME_DEBUG=y
-CPTCFG_MAC80211_PPE_SUPPORT=y
 CPTCFG_MAC80211_PS_DEBUG=y
 CPTCFG_MAC80211_STA_DEBUG=y
 CPTCFG_MAC80211_VERBOSE_DEBUG=y
@@ -183,6 +180,19 @@ EOF
 
 	if [[ "${MACHINE}" == ipq53xx* || "${MACHINE}" == ipq54xx* ]]; then
 		echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
+	fi
+
+	if [ "${MACHINE}" != "echo" ]; then
+		cat >> ${S}/.config << 'EOF'
+CPTCFG_ATH11K=m
+CPTCFG_ATH11K_AHB=m
+CPTCFG_ATH11K_PCI=m
+CPTCFG_ATH11K_DEBUG=y
+CPTCFG_ATH11K_DEBUGFS=y
+CPTCFG_ATH11K_TRACING=y
+CPTCFG_ATH11K_PKTLOG=y
+CPTCFG_MAC80211_PPE_SUPPORT=y
+EOF
 	fi
 }
 
@@ -220,14 +230,24 @@ do_refactor_alloc_cocci() {
 	done
 }
 
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+"
+
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo =""
+
 MAKE_OPTS = " \
 	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
 	KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" \
 	MODPROBE=true \
 	KLIB=${D}/${nonarch_base_libdir}/modules/${KERNEL_VERSION}/ \
 	KBUILD_LDFLAGS_MODULE_PREREQ= \
-	KBUILD_EXTRA_SYMBOLS='${STAGING_INCDIR}/qca-nss-ppe/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers ${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers' \
+	KBUILD_EXTRA_SYMBOLS='${OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS}' \
 "
+
+MODULE_EXTRA_SYMBOLS:echo = ""
 
 do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
 
@@ -363,6 +383,13 @@ RDEPENDS:${PN} += " \
 	${PN}-firmware-ath12k \
 "
 
+RDEPENDS:${PN}:remove:echo = " \
+	kernel-module-ath11k \
+	kernel-module-ath11k-ahb \
+	kernel-module-ath11k-pci \
+	${PN}-firmware-ath11k \
+"
+
 FILES:${PN} += "/ini/* /ini/internal/*"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
@@ -372,7 +399,7 @@ FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
-COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85)"
+COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85|echo)"
 
 PARALLEL_MAKEINST = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
