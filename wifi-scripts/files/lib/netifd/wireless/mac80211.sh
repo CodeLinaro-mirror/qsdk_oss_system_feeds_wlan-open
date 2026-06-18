@@ -489,6 +489,9 @@ drv_mac80211_init_iface_config() {
 	#monitor
 	config_add_string monitor_flags
 	config_add_int tx_monitor
+	config_add_boolean smd_ap smd_ptk_mode smd_dl_data_fwd
+	config_add_string 'smd_identifier:macaddr' 'smd_partner:macaddr'
+	config_add_int smd_timeout smd_max_peer_apmlds smd_dl_drain_time
 }
 
 mac80211_add_capabilities() {
@@ -1551,6 +1554,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
+	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -1630,6 +1634,35 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "$fils_cfg" "$N"
 		fi
         fi
+
+	if [ -n "$smd_ap" ]; then
+		append hostapd_cfg "smd_ap=$smd_ap" "$N"
+	fi
+
+	if [ -n "$smd_partner" ]; then
+		append hostapd_cfg "smd_partner=$smd_partner" "$N"
+	fi
+
+	if [ -n "$smd_identifier" ]; then
+		append hostapd_cfg "smd_identifier=$smd_identifier" "$N"
+	fi
+
+	if [ -n "$smd_dl_drain_time" ]; then
+		append hostapd_cfg "uhr_dl_drain_duration_tu=$smd_dl_drain_time" "$N"
+	fi
+
+	if [ -n "$smd_timeout" ]; then
+		append hostapd_cfg "smd_timeout=$smd_timeout" "$N"
+	fi
+
+	if [ -n "$smd_max_peer_apmlds" ]; then
+		append hostapd_cfg "smd_max_peer_apmlds=$smd_max_peer_apmlds" "$N"
+	fi
+
+	if [ -n "$smd_type" ]; then
+		append hostapd_cfg "smd_type=$smd_type" "$N"
+	fi
+
 
 	if [ -n "$enable_scs" ]; then
 		append hostapd_cfg "enable_scs=$enable_scs" "$N"
@@ -2743,6 +2776,11 @@ mac80211_setup_vif() {
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
 	json_get_vars mode wds powersave mld ssid vap_submode monitor_flags
+
+	# Setup SMD parameters
+	json_get_vars smd_enabled smd_enabled
+	json_get_vars smd_id smd_id
+	json_get_vars smd_ptk_mode smd_ptk_mode
 
 	set_default powersave 0
 	set_default wds 0

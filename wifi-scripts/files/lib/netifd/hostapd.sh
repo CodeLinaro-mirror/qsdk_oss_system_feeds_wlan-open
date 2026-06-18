@@ -511,6 +511,8 @@ hostapd_common_add_bss_config() {
 	config_add_int max_cip_padding_delay
 	config_add_int dcs_random_chan_bitmap
 	config_add_int dcs_bw_reduction_ctrl
+	config_add_string smd_id
+	config_add_boolean smd_ptk_mode smd_enabled
 	config_add_array security_profiles
 }
 
@@ -1788,6 +1790,7 @@ wpa_supplicant_add_network() {
 		scan_freq bgscan bgscan_freq \
 		control_frame_protection \
 		cip_padding_delay \
+		smd_ptk_mode smd_enabled smd_id \
 		wds_ie \
 		allow_3addr_mc
 
@@ -1826,6 +1829,20 @@ wpa_supplicant_add_network() {
 		[ -n "$freq_list" ] && {
 			freq_list="freq_list=$freq_list"
 		}
+
+		[ -n "$smd_enabled" ] &&  {
+			smd_enabled="smd_enabled=$smd_enabled"
+		}
+
+		[ -n "$smd_id" ] &&  {
+			smd_id="smd_id=$smd_id"
+		}
+
+
+		[ -n "$smd_ptk_mode" ] &&  {
+			smd_ptk_mode="smd_ptk_mode=$smd_ptk_mode"
+		}
+
 		# Append per-network scan/bgscan parameters when provided via UCI
 		json_get_vars scan_freq bgscan_freq bgscan
 		[ -n "$scan_freq" ] && {
@@ -2205,6 +2222,9 @@ network={
 	ccfs=$ccfs
 	$reconfig
 	$freq_list
+	$smd_enabled
+	$smd_id
+	$smd_ptk_mode
 }
 athnewind=$athnewind
 rptr_mgr_mode=$rptr_mgr_mode
