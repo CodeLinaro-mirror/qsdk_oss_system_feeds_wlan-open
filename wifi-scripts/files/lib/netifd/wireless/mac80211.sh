@@ -2696,6 +2696,10 @@ wpa_supplicant_start() {
 		dpp_enabled=0
 		config_foreach check_iface_dpp wifi-iface "$iface_name" "$phy" "$radio"
 		if [ "$dpp_enabled" -eq 1 ]; then
+			existing_pid=$(pgrep -f "wpa_cli -i $iface_name .*dpp-supplicant-event-update")
+			if [ -n "$existing_pid" ]; then
+				kill $existing_pid 2>/dev/null
+			fi
 			/usr/sbin/wpa_cli -i "$iface_name" -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
 			dpp_enabled=0
 		fi
