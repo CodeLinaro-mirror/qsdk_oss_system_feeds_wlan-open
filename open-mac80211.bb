@@ -13,9 +13,6 @@ inherit module
 
 MAC80211_PKG_SUBDIR := "backports-${MAC80211_PKG_VERSION}-${LINUX_VERSION}-${MAC80211_PKG_KERNEL_VERSION}"
 MAC80211_S := "${KERNEL_BUILD_DIR}"
-PKG_BACKPORTS_VERSION := "965f73fc"
-PKG_BACKPORTS_BRANCH := "master"
-MAC80211_PKG_NAME := "=korg-kvalo/master"
 MAC80211_PKG_VERSION := "20250213"
 MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
@@ -23,8 +20,6 @@ SRCPREFIX := "../"
 FILESEXTRAPATHS:prepend := "${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
 
 SRC_URI = " \
-	git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git;protocol=https;branch=${PKG_BACKPORTS_BRANCH};name=backports \
-	git://git.codelinaro.org/clo/qsdk/kvalo/ath.git;protocol=https;branch=korg-kvalo/master;name=wlan_open; \
 	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
 	file://lib/ \
 	file://lib/wifi/ \
@@ -33,9 +28,6 @@ SRC_URI = " \
 	file://ini/internal/ \
 	file://etc/modprobe.d/ \
 "
-
-SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
-SRCREV_wlan_open = "9a0dddfb30f120db3851627935851d262e4e7acb"
 
 S = "${WORKDIR}/backports-6.1-${MAC80211_PKG_KERNEL_VERSION}"
 
@@ -52,7 +44,7 @@ DEPENDS = " \
 REQUIRED_HOSTTOOLS += "spatch"
 
 RDEPENDS:${PN} = " \
-	wireless-regdb \
+	wireless-regdb-static \
 	iw \
 "
 
@@ -330,7 +322,7 @@ FILES:${PN}-dev = " \
 "
 
 # Runtime dependencies for auto-generated kernel-module-* packages
-RDEPENDS:kernel-module-cfg80211 = "wireless-regdb"
+RDEPENDS:kernel-module-cfg80211 = "wireless-regdb-static"
 RDEPENDS:kernel-module-mac80211 = "kernel-module-cfg80211 kernel-module-compat"
 RDEPENDS:kernel-module-ath = "kernel-module-mac80211"
 RDEPENDS:kernel-module-ath11k = "kernel-module-ath"
