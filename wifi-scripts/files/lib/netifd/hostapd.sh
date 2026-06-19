@@ -122,6 +122,16 @@ hostapd_append_wpa_key_mgmt() {
 		dpp)
 			append wpa_key_mgmt "DPP"
 		;;
+		eap2-personal)
+			append wpa_key_mgmt "WPA-EAP-SHA256 SAE"
+			json_get_vars key wpa_psk_file
+			append bss_conf "wpa_passphrase=$key" "$N"
+		;;
+		eap2-personal-akm24)
+			append wpa_key_mgmt "WPA-EAP-SHA256 SAE SAE-EXT-KEY"
+			json_get_vars key wpa_psk_file
+			append bss_conf "wpa_passphrase=$key" "$N"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -328,6 +338,7 @@ hostapd_common_add_bss_config() {
 	config_add_boolean rsn_preauth auth_cache
 	config_add_int ieee80211w
 	config_add_int eapol_version
+	config_add_int ieee8021x
 
 	config_add_array auth_server acct_server
 	config_add_string 'server:host'
@@ -409,6 +420,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_boolean sae_require_mfp
 	config_add_int sae_pwe
+	config_add_string sae_password_id
+	config_add_int sae_password_id_change
 	config_add_int external_plugin_enable
 	config_add_int plugin_eap_offload
 	config_add_int externally_triggered_m3
@@ -483,6 +496,9 @@ hostapd_common_add_bss_config() {
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 	config_add_string vht_mcs_nss_set ht_mcs_nss_set
+	config_add_int sae_pw_id_num
+	config_add_string sae_pw_id_key
+	config_add_string sae_password
 	config_add_string eht_tx_mcs_nss_set eht_rx_mcs_nss_set
 # WMM AC params
 	config_add_int \
@@ -515,6 +531,7 @@ hostapd_common_add_bss_config() {
 	config_add_int dcs_bw_reduction_ctrl
 	config_add_string smd_id
 	config_add_boolean smd_ptk_mode smd_enabled
+	config_add_string rsnxe_capab_mask
 	config_add_array security_profiles
 }
 
@@ -696,7 +713,7 @@ hostapd_set_bss_options() {
 		wps_pushbutton wps_label ext_registrar wps_pbc_in_m1 wps_ap_setup_locked \
 		wps_independent wps_device_type wps_device_name wps_manufacturer wps_pin \
 		macfilter ssid utf8_ssid wmm uapsd hidden short_preamble rsn_preauth \
-		iapp_interface eapol_version dynamic_vlan ieee80211w nasid \
+		iapp_interface eapol_version ieee8021x dynamic_vlan ieee80211w nasid \
 		acct_secret acct_port acct_interval \
 		bss_load_update_period chan_util_avg_period sae_require_mfp sae_pwe external_plugin_enable plugin_eap_offload externally_triggered_m3 \
 		plugin_eapol_key_offload external_pmk_cache \
@@ -732,7 +749,9 @@ hostapd_set_bss_options() {
 		tx_queue_data3_burst tx_queue_data3_acm tx_queue_data3_noack \
 		control_frame_prot max_cip_padding_delay \
 		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
-		dcs_random_chan_bitmap dcs_bw_reduction_ctrl
+		dcs_random_chan_bitmap dcs_bw_reduction_ctrl \
+		rsnxe_capab_mask \
+		sae_pw_id_num sae_pw_id_key sae_password
 
 
 	json_get_values sae_groups sae_groups
@@ -948,7 +967,7 @@ hostapd_set_bss_options() {
 				json_get_vars auth_secret auth_port
 				set_default auth_port 1812
 				json_for_each_item append_auth_server auth_server
-				append bss_conf "macaddr_acl=2" "$N"
+				[ -z "$ieee8021x" ] && append bss_conf "macaddr_acl=2" "$N"
 				append bss_conf "wpa_psk_radius=2" "$N"
 			elif [ ${#key} -eq 64 ]; then
 				append bss_conf "wpa_psk=$key" "$N"
@@ -968,7 +987,7 @@ hostapd_set_bss_options() {
 			vlan_possible=1
 			wps_possible=1
 		;;
-		eap|eap2|eap-eap2|eap192|eap-eap192)
+		eap|eap2|eap-eap2|eap192|eap-eap192|eap2-personal|eap2-personal-akm24)
 			json_get_vars \
 				auth_server auth_secret auth_port \
 				dae_client dae_secret dae_port \
@@ -1598,11 +1617,19 @@ hostapd_set_bss_options() {
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
+	[ -n "$sae_pw_id_num" ] && append bss_conf "sae_pw_id_num=$sae_pw_id_num" "$N"
+	[ -n "$sae_pw_id_key" ] && append bss_conf "sae_pw_id_key=$sae_pw_id_key" "$N"
+
+	[ -n "$sae_password" ] && append bss_conf "sae_password=$sae_password" "$N"
+	[ -n "$ieee8021x" ] && append bss_conf "ieee8021x=$ieee8021x" "$N"
+
 	[ -n "$control_frame_prot" ] && append bss_conf "control_frame_prot=$control_frame_prot" "$N"
 
 	[ -n "$max_cip_padding_delay" ] && append bss_conf "max_cip_padding_delay=$max_cip_padding_delay" "$N"
 
 	[ -n "$security_profiles" ] && append bss_conf "security_profiles=$security_profiles" "$N"
+
+	[ -n "$rsnxe_capab_mask" ] && append bss_conf "rsnxe_capab_mask=$rsnxe_capab_mask" "$N"
 
 	append "$var" "$bss_conf" "$N"
 	return 0
@@ -1793,6 +1820,8 @@ wpa_supplicant_add_network() {
 		ppe_vp \
 		ssid_protection \
 		scan_freq bgscan bgscan_freq \
+		sae_password_id \
+		sae_password_id_change \
 		control_frame_protection \
 		cip_padding_delay \
 		smd_ptk_mode smd_enabled smd_id \
@@ -2183,6 +2212,10 @@ wpa_supplicant_add_network() {
 
 	fi
 	[ -n "$ssid_protection" ] && append network_data "ssid_protection=$ssid_protection" "$N$T"
+
+	[ -n "$sae_password_id" ] && append network_data "sae_password_id=\"$sae_password_id\"" "$N$T"
+
+	[ -n "$sae_password_id_change" ] && append network_data "sae_password_id_change=$sae_password_id_change" "$N$T"
 
 	[ -n "$control_frame_protection" ] && append network_data "control_frame_protection=$control_frame_protection" "$N$T"
 
