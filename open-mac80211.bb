@@ -47,6 +47,7 @@ DEPENDS = " \
 	qca-nss-ppe-vp \
 	qca-nss-ppe-ds \
 	qca-nss-wifi-plugin \
+	qca-debug-uio \
 "
 
 DEPENDS:remove:echo = "qca-nss-ppe qca-nss-ppe-vp qca-nss-ppe-ds qca-nss-wifi-plugin"
@@ -77,6 +78,7 @@ EXTRA_CFLAGS += " \
 	-I${STAGING_INCDIR}/qca-nss-ppe \
 	-I${STAGING_INCDIR}/qca-nss-clients \
 	-I${STAGING_INCDIR}/qca-nss-ppe-ds/ \
+	-I${STAGING_INCDIR}/ \
 	-Wall \
 	-Wno-unused-function \
 	-Wno-error=unused-variable -Wno-unused-variable \
@@ -98,6 +100,7 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+						${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
 do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
@@ -234,6 +237,7 @@ OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symve
 	${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
 	${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 	${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+	${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
 OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo =""
@@ -274,10 +278,10 @@ do_install:append() {
 	install -d ${D}${includedir}/mac80211/ath
 	install -d ${D}${includedir}/net/mac80211
 	install -d ${D}${sysconfdir}/modprobe.d
-	install -d  ${STAGING_DIR}/usr/
-	install -d  ${STAGING_DIR}/usr/include
-	install -d  ${STAGING_DIR}/usr/include/mac80211
-	install -d  ${STAGING_DIR}/usr/include/mac80211/ath
+	install -d ${STAGING_DIR}/usr/
+	install -d ${STAGING_DIR}/usr/include
+	install -d ${STAGING_DIR}/usr/include/mac80211
+	install -d ${STAGING_DIR}/usr/include/mac80211/ath
 
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
