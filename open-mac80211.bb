@@ -20,7 +20,7 @@ MAC80211_PKG_VERSION := "20250213"
 MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
 SRCPREFIX := "../"
-FILESEXTRAPATHS:prepend := "${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
 
 SRC_URI = " \
 	git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git;protocol=https;branch=${PKG_BACKPORTS_BRANCH};name=backports \
@@ -32,6 +32,7 @@ SRC_URI = " \
 	file://ini/ \
 	file://ini/internal/ \
 	file://etc/modprobe.d/ \
+	file://rdk_init_helper.sh \
 "
 
 SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
@@ -324,6 +325,8 @@ do_install:append() {
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
 	install -m 0755 ${WORKDIR}/lib/boost_performance.sh ${D}${nonarch_base_libdir}/boost_performance.sh
 
+    install -d ${D}/lib/functions
+    install -m 0755 ${WORKDIR}/rdk_init_helper.sh ${D}/lib/functions/rdk_init_helper.sh
 }
 
 
@@ -391,6 +394,7 @@ RDEPENDS:${PN}:remove:echo = " \
 "
 
 FILES:${PN} += "/ini/* /ini/internal/*"
+FILES:${PN} += "/lib/functions/rdk_init_helper.sh"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
