@@ -482,6 +482,7 @@ hostapd_common_add_bss_config() {
 	config_add_int rsn_override_mfp_2
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 	config_add_string vht_mcs_nss_set ht_mcs_nss_set
+	config_add_string eht_tx_mcs_nss_set eht_rx_mcs_nss_set
 # WMM AC params
 	config_add_int \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
@@ -711,6 +712,7 @@ hostapd_set_bss_options() {
 		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
 		oce_tx_power oce_dl_availcap oce_ul_availcap \
 		oce_ess_report oce_ess_edge oce_ess_rssi_threshold oce_ip_subnet_id \
+		eht_tx_mcs_nss_set eht_rx_mcs_nss_set \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -825,6 +827,8 @@ hostapd_set_bss_options() {
 
 	[ -n "$vht_mcs_nss_set" ] && append bss_conf "vht_mcs_nss_set=$vht_mcs_nss_set" "$N"
 	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
+	[ -n "$eht_tx_mcs_nss_set" ] && append bss_conf "eht_tx_mcs_nss_set=$eht_tx_mcs_nss_set" "$N"
+	[ -n "$eht_rx_mcs_nss_set" ] && append bss_conf "eht_rx_mcs_nss_set=$eht_rx_mcs_nss_set" "$N"
 
 	# Per-VAP supported/basic rates (string or array)
 	# Supported rates (array or string)
