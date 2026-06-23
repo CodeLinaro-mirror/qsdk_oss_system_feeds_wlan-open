@@ -74,6 +74,10 @@ boost_performance() {
 	#Reduce Max skb recycler buffer count per CPU pool for 256M or 512M profile to 2048.
 	[ -e /proc/device-tree/MP_256 ] || [ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
 
+	#Reduce max skb of core-3 to 256 and max_spare_skb to 64.
+	echo "256" > /proc/net/skb_recycler/cpu3/max_skb
+	echo "64" > /proc/net/skb_recycler/cpu3/max_spare_skb
+
 	#Disable Generic receive offload(GRO) and Generic Segmentation offload(GSO) on interfaces
 	eth_interfaces="eth0 eth1 eth4 eth5"
 	for eth_iface in $eth_interfaces; do
