@@ -170,13 +170,17 @@ CPTCFG_WLAN_VENDOR_RSI=y
 CPTCFG_WL_TI=y
 EOF
 
-	if [[ "${MACHINE}" == ipq53xx* ]]; then
-		echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
-	fi
+	case "${MACHINE}" in
+		ipq53xx*)
+			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
+			;;
+	esac
 
-	if [[ "${MACHINE}" == ipq53xx* || "${MACHINE}" == ipq54xx* ]]; then
-		echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
-	fi
+	case "${MACHINE}" in
+		ipq53xx*|ipq54xx*)
+			echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
+			;;
+	esac
 
 	if [ "${MACHINE}" != "echo" ]; then
 		cat >> ${S}/.config << 'EOF'
