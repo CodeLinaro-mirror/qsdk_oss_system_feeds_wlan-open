@@ -487,6 +487,9 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
 
+	#uhr_config
+	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+
 	#monitor
 	config_add_string monitor_flags
 	config_add_int tx_monitor
@@ -1556,6 +1559,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
+	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
 
 	#epcs params
@@ -1689,6 +1693,10 @@ mac80211_hostapd_setup_bss() {
 		case "$htmode" in
 			UHR*)
 			[ "$disable_11bn" = "1" ] && append hostapd_cfg "disable_11bn=1" "$N"
+			[ -n "$uhr_adv_notification_interval" ] && \
+				append hostapd_cfg "uhr_adv_notification_interval=$uhr_adv_notification_interval" "$N"
+			[ -n "$uhr_update_in_tim_interval" ] && \
+				append hostapd_cfg "uhr_update_in_tim_interval=$uhr_update_in_tim_interval" "$N"
 		;;
 		esac
 
