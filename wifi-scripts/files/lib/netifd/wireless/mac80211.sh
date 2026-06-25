@@ -411,6 +411,7 @@ ubus_call() {
 		cbs_dwellsplit \
 		cbs_totaldwell
 	config_add_boolean \
+		best_power_mode \
 		ldpc \
 		greenfield \
 		short_gi_20 \
@@ -1153,10 +1154,12 @@ mac80211_hostapd_setup_base() {
 			eht_ulmumimo_320mhz \
 			multiple_bssid \
 			mbssid_group_size \
-			he_6ghz_reg_pwr_type:0
+			he_6ghz_reg_pwr_type:0 \
+			best_power_mode
 
 	if [ "$band" = "6g" ]; then
 			append base_cfg "he_6ghz_reg_pwr_type=$he_6ghz_reg_pwr_type" "$N"
+			[ -n "$best_power_mode" ] && append base_cfg "enable_best_power_mode=$best_power_mode" "$N"
 			[ -n "$punc_eirp_thres_6ghz" ] && append base_cfg "punc_eirp_thres_6ghz=$punc_eirp_thres_6ghz" "$N"
 		fi
 
