@@ -50,6 +50,10 @@ EXTRA_CFLAGS+= \
 			  -I$(STAGING_DIR)/usr/include/qca-nss-ppe \
 			  -I$(STAGING_DIR)/usr/include/mac80211/uapi/linux
 
+ifeq ($(CONFIG_TARGET_echo_cpe),y)
+EXTRA_CFLAGS+= -I$(STAGING_DIR)/usr/include/
+endif
+
 ifneq ($(CONFIG_PACKAGE_kmod-ath),)
 MAKE_OPTS+=QCA_WIFI_NSS_PLUGINS_OPEN_PROFILE_ENABLE=y
 endif
