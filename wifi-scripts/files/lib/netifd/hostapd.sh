@@ -423,6 +423,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int control_frame_protection
 	config_add_int cip_padding_delay
+	config_add_int security_profiles
 
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
@@ -1796,7 +1797,8 @@ wpa_supplicant_add_network() {
 		cip_padding_delay \
 		smd_ptk_mode smd_enabled smd_id \
 		wds_ie \
-		allow_3addr_mc
+		allow_3addr_mc \
+		security_profiles
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -2101,6 +2103,11 @@ wpa_supplicant_add_network() {
 	esac
 
 	if [ "$control_frame_protection" = "1" ]; then
+		if ! echo "$wpa_cipher" | grep -qw "GCMP-256"; then
+			wpa_cipher="${wpa_cipher:+$wpa_cipher }GCMP-256"
+		fi
+	fi
+	if [ -n "$security_profiles" ]; then
 		if ! echo "$wpa_cipher" | grep -qw "GCMP-256"; then
 			wpa_cipher="${wpa_cipher:+$wpa_cipher }GCMP-256"
 		fi
