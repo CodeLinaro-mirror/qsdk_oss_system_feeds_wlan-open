@@ -152,12 +152,15 @@ enable_affinity_ds() {
 	fi
 }
 
-enable_ath12k_rxmon_affinity() {
-	# Configure rx_mon workqueue cpumask for all ath12k radios
-	# Workqueue naming pattern: rxmon_pci-<PCI_BUS_ID> or rxmon_ahb-ahb<N>
-	# Example: rxmon_pci-0001:01:00.00, rxmon_ahb-ahb0
-	#
-	local cpumask="${1:-7}"  # Default cpumask is 7 (CPUs 0,1,2)
+
+configure_ath12k_mon_wq_affinity() {
+	# Configure rx_mon/tx_mon workqueue cpumask for all ath12k radios
+	# RX workqueue naming pattern: rxmon_pci-<PCI_BUS_ID> or rxmon_ahb-ahb<N>
+	# TX workqueue naming pattern: txmon_pci-<PCI_BUS_ID> or txmon_ahb-ahb<N>
+	# Example: rxmon_pci-0001:01:00.00, rxmon_ahb-ahb0, txmon_pci-0001:01:00.00, txmon_ahb-ahb0
+
+    local prefix="$1"
+	local cpumask="${2:-7}"  # Default cpumask is 7 (CPUs 0,1,2)
 	local wq_base_path="/sys/devices/virtual/workqueue"
 
 	# Check if workqueue sysfs path exists
@@ -165,8 +168,8 @@ enable_ath12k_rxmon_affinity() {
 		return
 	fi
 
-	# Find and configure all ath12k rx_mon workqueues
-	for wq_path in "$wq_base_path"/rxmon_*; do
+	# Find and configure all ath12k rx_mon/tx_mon workqueues
+	for wq_path in "$wq_base_path"/${prefix}_*; do
 		# Check if the path exists and is a directory
 		if [ -d "$wq_path" ]; then
 			local wq_name=$(basename "$wq_path")
@@ -182,6 +185,7 @@ enable_ath12k_rxmon_affinity() {
 		fi
 	done
 }
+
 
 enable_affinity_al02_c1() {
 
@@ -513,14 +517,6 @@ enable_affinity_al02_c4() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0003:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -633,15 +629,6 @@ enable_affinity_al02_c20() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0000:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0003:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 8 > $wq_path/cpumask
 	enable_affinity_ds
 }
 
@@ -740,14 +727,6 @@ enable_affinity_al02_c6() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0003:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -820,16 +799,6 @@ enable_affinity_al02_c9() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
-
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0000:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0000:01:00.01 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.01 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 8 > $wq_path/cpumask
 
 	enable_affinity_ds
 }
@@ -941,14 +910,6 @@ enable_affinity_mi01_2() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0000:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1024,14 +985,6 @@ enable_affinity_mi01_6() {
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
-
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.01 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
 
 	enable_affinity_ds
 }
@@ -1140,14 +1093,6 @@ enable_affinity_mi01_3() {
 	irq_affinity_num=`grep -E -m1 'pcic2_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi1@c -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi2@c -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1222,12 +1167,6 @@ enable_affinity_mi01_3_c2() {
 		irq_affinity_num=`grep -E -m1 'pcic1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 		[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
-		#For tx monitor workqueue affinity
-		wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-		[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-		wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi1@c -type d -name "*" 2>/dev/null | head -n1)
-		[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-
 		enable_affinity_ds
 
 }
@@ -1300,12 +1239,6 @@ enable_affinity_mi01_3_c3() {
 		irq_affinity_num=`grep -E -m1 'pcic1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 		[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
-		#For tx monitor workqueue affinity
-		wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-		[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-		wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi1@c -type d -name "*" 2>/dev/null | head -n1)
-		[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1375,12 +1308,6 @@ enable_affinity_mi01_9() {
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
-
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0000:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
 
 	enable_affinity_ds
 
@@ -1493,14 +1420,6 @@ enable_affinity_mi01_14() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi1@c -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1608,14 +1527,6 @@ enable_affinity_mi01_12() {
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 	irq_affinity_num=`grep -E -m1 'pcic1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
-
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-soc@0:wifi1@c -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
 
 	enable_affinity_ds
 }
@@ -1760,16 +1671,6 @@ enable_affinity_mr01() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0001:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0003:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 8 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1880,14 +1781,6 @@ enable_affinity_mr02() {
 	irq_affinity_num=`grep -E -m1 'pci3_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0003:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 4 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -1967,12 +1860,6 @@ enable_affinity_mr03() {
 	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
-	#For tx monitor workqueue affinity
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_ahb-c000000.wifi0 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 1 > $wq_path/cpumask
-	wq_path=$(find /sys/devices/virtual/workqueue/txmon_pci-0002:01:00.00 -type d -name "*" 2>/dev/null | head -n1)
-	[ -n "$wq_path" ] && echo 2 > $wq_path/cpumask
-
 	enable_affinity_ds
 }
 
@@ -2051,7 +1938,10 @@ enable_smp_affinity_wifi() {
 	# Configure ath12k rx_mon workqueue affinity for all radios
 	# Default cpumask is 7 (CPUs 0,1,2) - can be customized per board if needed
 	if [ -d "/sys/kernel/debug/ath12k" ]; then
-		enable_ath12k_rxmon_affinity 7
+		# rx monitor wq affnity
+		configure_ath12k_mon_wq_affinity "rxmon" 7
+		# tx monitor wq affnity
+		configure_ath12k_mon_wq_affinity "txmon" 7
 	fi
 
 		case "$board" in
