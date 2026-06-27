@@ -425,6 +425,7 @@ ubus_call() {
 		rptr_allow_chan_sw \
 		uplink_csa
 	config_add_string CSwOpts
+	config_add_int cac_timeout bgcac_timeout
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
@@ -3053,7 +3054,8 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 htmode \
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
-		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en
+		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
+		cac_timeout bgcac_timeout
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -3279,6 +3281,21 @@ drv_mac80211_setup() {
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio" "$mon_ifname"
 	[ -x /usr/sbin/hostapd ] && hostapd_set_config "$phy" "$radio"
+
+	if command -v cfg80211tool >/dev/null 2>&1; then
+		radio_idx="$radio"
+		[ "$radio_idx" = "-1" ] && radio_idx=0
+
+		[ -n "$cac_timeout" ] && {
+			cfg80211tool "${phy}:${radio_idx}" set_cactimeout "$cac_timeout" >/dev/null 2>&1 || \
+				echo "set_cactimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$bgcac_timeout" ] && {
+			cfg80211tool "${phy}:${radio_idx}" pCACTimeout "$bgcac_timeout" >/dev/null 2>&1 || \
+				echo "pCACTimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+	fi
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_start "$phy" "$radio"
 
