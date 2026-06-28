@@ -26,12 +26,6 @@ boot()
 		echo "Failed to set path for ini framework" > /dev/console
 	fi
 
-	ath12k_struct_layout="/lib/wifi/ath12k_struct_layout.txt.lzma"
-	[ -e "$ath12k_struct_layout" ] && {
-		echo "INFO:layout present at $ath12k_struct_layout" > /dev/console
-		lzma -d $ath12k_struct_layout
-	}
-
 	update_ath12k_module_parameters
 	board_name=$(cat /tmp/sysinfo/board_name)
 	case "$board_name" in

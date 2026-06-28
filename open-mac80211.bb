@@ -13,18 +13,13 @@ inherit module
 
 MAC80211_PKG_SUBDIR := "backports-${MAC80211_PKG_VERSION}-${LINUX_VERSION}-${MAC80211_PKG_KERNEL_VERSION}"
 MAC80211_S := "${KERNEL_BUILD_DIR}"
-PKG_BACKPORTS_VERSION := "965f73fc"
-PKG_BACKPORTS_BRANCH := "master"
-MAC80211_PKG_NAME := "=korg-kvalo/master"
 MAC80211_PKG_VERSION := "20250213"
 MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
 SRCPREFIX := "../"
-FILESEXTRAPATHS:prepend := "${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
 
 SRC_URI = " \
-	git://git.kernel.org/pub/scm/linux/kernel/git/backports/backports.git;protocol=https;branch=${PKG_BACKPORTS_BRANCH};name=backports \
-	git://git.codelinaro.org/clo/qsdk/kvalo/ath.git;protocol=https;branch=korg-kvalo/master;name=wlan_open; \
 	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
 	file://lib/ \
 	file://lib/wifi/ \
@@ -32,10 +27,8 @@ SRC_URI = " \
 	file://ini/ \
 	file://ini/internal/ \
 	file://etc/modprobe.d/ \
+	file://rdk_init_helper.sh \
 "
-
-SRCREV_backports = "965f73fc894d42f7cfa9880bbd6bcc671d295f12"
-SRCREV_wlan_open = "9a0dddfb30f120db3851627935851d262e4e7acb"
 
 S = "${WORKDIR}/backports-6.1-${MAC80211_PKG_KERNEL_VERSION}"
 
@@ -47,14 +40,19 @@ DEPENDS = " \
 	qca-nss-ppe-vp \
 	qca-nss-ppe-ds \
 	qca-nss-wifi-plugin \
+	qca-debug-uio \
 "
+
+DEPENDS:remove:echo = "qca-nss-ppe qca-nss-ppe-vp qca-nss-ppe-ds qca-nss-wifi-plugin"
 
 REQUIRED_HOSTTOOLS += "spatch"
 
 RDEPENDS:${PN} = " \
-	wireless-regdb \
+	wireless-regdb-static \
 	iw \
 "
+
+TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
 
 EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
@@ -73,6 +71,7 @@ EXTRA_CFLAGS += " \
 	-I${STAGING_INCDIR}/qca-nss-ppe \
 	-I${STAGING_INCDIR}/qca-nss-clients \
 	-I${STAGING_INCDIR}/qca-nss-ppe-ds/ \
+	-I${STAGING_INCDIR}/ \
 	-Wall \
 	-Wno-unused-function \
 	-Wno-error=unused-variable -Wno-unused-variable \
@@ -94,6 +93,7 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
 						${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+						${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
 do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
@@ -133,12 +133,6 @@ CPTCFG_DEBUG_FS=y
 CPTCFG_MAC80211_LEDS=y
 CPTCFG_ATH_COMMON=m
 CPTCFG_ATH_DEBUG=y
-CPTCFG_ATH11K=m
-CPTCFG_ATH11K_AHB=m
-CPTCFG_ATH11K_PCI=m
-CPTCFG_ATH11K_DEBUG=y
-CPTCFG_ATH11K_DEBUGFS=y
-CPTCFG_ATH11K_PKTLOG=y
 CPTCFG_ATH12K=m
 CPTCFG_ATH12K_PCI=m
 CPTCFG_ATH12K_DEBUG=y
@@ -165,7 +159,6 @@ CPTCFG_ATH12K_TX_MONITOR=y
 CPTCFG_MAC80211_DEBUG_MENU=y
 CPTCFG_MAC80211_HWSIM=m
 CPTCFG_MAC80211_MLME_DEBUG=y
-CPTCFG_MAC80211_PPE_SUPPORT=y
 CPTCFG_MAC80211_PS_DEBUG=y
 CPTCFG_MAC80211_STA_DEBUG=y
 CPTCFG_MAC80211_VERBOSE_DEBUG=y
@@ -177,12 +170,29 @@ CPTCFG_WLAN_VENDOR_RSI=y
 CPTCFG_WL_TI=y
 EOF
 
-	if [[ "${MACHINE}" == ipq53xx* ]]; then
-		echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
-	fi
+	case "${MACHINE}" in
+		ipq53xx*)
+			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
+			;;
+	esac
 
-	if [[ "${MACHINE}" == ipq53xx* || "${MACHINE}" == ipq54xx* ]]; then
-		echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
+	case "${MACHINE}" in
+		ipq53xx*|ipq54xx*)
+			echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
+			;;
+	esac
+
+	if [ "${MACHINE}" != "echo" ]; then
+		cat >> ${S}/.config << 'EOF'
+CPTCFG_ATH11K=m
+CPTCFG_ATH11K_AHB=m
+CPTCFG_ATH11K_PCI=m
+CPTCFG_ATH11K_DEBUG=y
+CPTCFG_ATH11K_DEBUGFS=y
+CPTCFG_ATH11K_TRACING=y
+CPTCFG_ATH11K_PKTLOG=y
+CPTCFG_MAC80211_PPE_SUPPORT=y
+EOF
 	fi
 }
 
@@ -220,14 +230,25 @@ do_refactor_alloc_cocci() {
 	done
 }
 
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
+	${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers \
+	${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
+"
+
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo =""
+
 MAKE_OPTS = " \
 	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
 	KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" \
 	MODPROBE=true \
 	KLIB=${D}/${nonarch_base_libdir}/modules/${KERNEL_VERSION}/ \
 	KBUILD_LDFLAGS_MODULE_PREREQ= \
-	KBUILD_EXTRA_SYMBOLS='${STAGING_INCDIR}/qca-nss-ppe/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-ds/Module.symvers ${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers ${STAGING_INCDIR}/qca-nss-wifi-plugin/Module.symvers' \
+	KBUILD_EXTRA_SYMBOLS='${OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS}' \
 "
+
+MODULE_EXTRA_SYMBOLS:echo = ""
 
 do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
 
@@ -254,10 +275,10 @@ do_install:append() {
 	install -d ${D}${includedir}/mac80211/ath
 	install -d ${D}${includedir}/net/mac80211
 	install -d ${D}${sysconfdir}/modprobe.d
-	install -d  ${STAGING_DIR}/usr/
-	install -d  ${STAGING_DIR}/usr/include
-	install -d  ${STAGING_DIR}/usr/include/mac80211
-	install -d  ${STAGING_DIR}/usr/include/mac80211/ath
+	install -d ${STAGING_DIR}/usr/
+	install -d ${STAGING_DIR}/usr/include
+	install -d ${STAGING_DIR}/usr/include/mac80211
+	install -d ${STAGING_DIR}/usr/include/mac80211/ath
 
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
@@ -302,7 +323,10 @@ do_install:append() {
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
+	install -m 0755 ${WORKDIR}/lib/boost_performance.sh ${D}${nonarch_base_libdir}/boost_performance.sh
 
+    install -d ${D}/lib/functions
+    install -m 0755 ${WORKDIR}/rdk_init_helper.sh ${D}/lib/functions/rdk_init_helper.sh
 }
 
 
@@ -330,7 +354,7 @@ FILES:${PN}-dev = " \
 "
 
 # Runtime dependencies for auto-generated kernel-module-* packages
-RDEPENDS:kernel-module-cfg80211 = "wireless-regdb"
+RDEPENDS:kernel-module-cfg80211 = "wireless-regdb-static"
 RDEPENDS:kernel-module-mac80211 = "kernel-module-cfg80211 kernel-module-compat"
 RDEPENDS:kernel-module-ath = "kernel-module-mac80211"
 RDEPENDS:kernel-module-ath11k = "kernel-module-ath"
@@ -362,15 +386,24 @@ RDEPENDS:${PN} += " \
 	${PN}-firmware-ath12k \
 "
 
+RDEPENDS:${PN}:remove:echo = " \
+	kernel-module-ath11k \
+	kernel-module-ath11k-ahb \
+	kernel-module-ath11k-pci \
+	${PN}-firmware-ath11k \
+"
+
 FILES:${PN} += "/ini/* /ini/internal/*"
+FILES:${PN} += "/lib/functions/rdk_init_helper.sh"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
 FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
+FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
-COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85)"
+COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85|echo)"
 
 PARALLEL_MAKEINST = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"

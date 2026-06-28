@@ -187,6 +187,9 @@ eht_ulmumimo_320mhz=
 ru_punct_bitmap=
 ru_punct_acs_threshold=
 use_ru_puncture_dfs=
+npca_primary_channel=
+npca_punct_bitmap=
+npca_enable=
 he_su_beamformer=
 he_su_beamformee=
 he_mu_beamformer=
@@ -329,6 +332,7 @@ ubus_call() {
 		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
 		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy acs_2g_scan_all
+		config_add_int rcac_freq
 	# ACS behavior tuning
 	config_add_int acs_retry_interval acs_retry_count acs_periodic_interval acs_pcac_only
 	config_add_array ht_capab
@@ -379,6 +383,9 @@ ubus_call() {
 		eht_ulmumimo_320mhz \
 		ru_punct_bitmap \
 		ru_punct_acs_threshold \
+		npca_primary_channel \
+		npca_punct_bitmap \
+		npca_enable \
 		ccfs \
 		multiple_bssid \
 		mbssid_group_size \
@@ -404,6 +411,7 @@ ubus_call() {
 		cbs_dwellsplit \
 		cbs_totaldwell
 	config_add_boolean \
+		best_power_mode \
 		ldpc \
 		greenfield \
 		short_gi_20 \
@@ -480,9 +488,15 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
 
+	#uhr_config
+	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+
 	#monitor
 	config_add_string monitor_flags
 	config_add_int tx_monitor
+	config_add_boolean smd_ap smd_ptk_mode smd_dl_data_fwd
+	config_add_string 'smd_identifier:macaddr' 'smd_partner:macaddr'
+	config_add_int smd_timeout smd_max_peer_apmlds smd_dl_drain_time
 }
 
 mac80211_add_capabilities() {
@@ -746,6 +760,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
+	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
 	# Optional user override for HT40 capability string
@@ -765,7 +780,7 @@ mac80211_hostapd_setup_base() {
 	fi
 
 	set_default noscan 0
-	set_default disable_iface_during_cac 1
+	set_default disable_iface_during_cac 0
 
 	[ "$noscan" -gt 0 ] && hostapd_noscan=1
 	[ "$tx_burst" = 0 ] && tx_burst=
@@ -931,11 +946,12 @@ mac80211_hostapd_setup_base() {
 		;;
 	esac
 	[ "$band" = "5g" ] && {
-		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0
+		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0 rcac_freq:0
 
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 		[ "$bgcac_en" -eq 1 ] && append base_cfg "bgcac_en=1" "$N"
 		[ "$dfs_bw_reduce_en" -eq 1 ] && append base_cfg "dfs_bw_reduce_en=1" "$N"
+		[ "$rcac_freq" -gt 0 ] && append base_cfg "rcac_freq=$rcac_freq" "$N"
 	}
 
 	case "$htmode" in
@@ -1138,10 +1154,12 @@ mac80211_hostapd_setup_base() {
 			eht_ulmumimo_320mhz \
 			multiple_bssid \
 			mbssid_group_size \
-			he_6ghz_reg_pwr_type:0
+			he_6ghz_reg_pwr_type:0 \
+			best_power_mode
 
 	if [ "$band" = "6g" ]; then
 			append base_cfg "he_6ghz_reg_pwr_type=$he_6ghz_reg_pwr_type" "$N"
+			[ -n "$best_power_mode" ] && append base_cfg "enable_best_power_mode=$best_power_mode" "$N"
 			[ -n "$punc_eirp_thres_6ghz" ] && append base_cfg "punc_eirp_thres_6ghz=$punc_eirp_thres_6ghz" "$N"
 		fi
 
@@ -1288,6 +1306,9 @@ mac80211_hostapd_setup_base() {
 
 		if [ "$enable_bn" != "0" ]; then
 			append base_cfg "ieee80211bn=1" "$N"
+			[ -n "$npca_primary_channel" ] && append base_cfg "npca_primary_channel=$npca_primary_channel" "$N"
+			[ -n "$npca_punct_bitmap" ] && append base_cfg "npca_punct_bitmap=$npca_punct_bitmap" "$N"
+			[ -n "$npca_enable" ] && append base_cfg "npca_enable=$npca_enable" "$N"
 		fi
 
 		if [ "$band" = "6g" ]; then
@@ -1541,6 +1562,8 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
+	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
+	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -1621,6 +1644,35 @@ mac80211_hostapd_setup_bss() {
 		fi
         fi
 
+	if [ -n "$smd_ap" ]; then
+		append hostapd_cfg "smd_ap=$smd_ap" "$N"
+	fi
+
+	if [ -n "$smd_partner" ]; then
+		append hostapd_cfg "smd_partner=$smd_partner" "$N"
+	fi
+
+	if [ -n "$smd_identifier" ]; then
+		append hostapd_cfg "smd_identifier=$smd_identifier" "$N"
+	fi
+
+	if [ -n "$smd_dl_drain_time" ]; then
+		append hostapd_cfg "uhr_dl_drain_duration_tu=$smd_dl_drain_time" "$N"
+	fi
+
+	if [ -n "$smd_timeout" ]; then
+		append hostapd_cfg "smd_timeout=$smd_timeout" "$N"
+	fi
+
+	if [ -n "$smd_max_peer_apmlds" ]; then
+		append hostapd_cfg "smd_max_peer_apmlds=$smd_max_peer_apmlds" "$N"
+	fi
+
+	if [ -n "$smd_type" ]; then
+		append hostapd_cfg "smd_type=$smd_type" "$N"
+	fi
+
+
 	if [ -n "$enable_scs" ]; then
 		append hostapd_cfg "enable_scs=$enable_scs" "$N"
 	else
@@ -1644,6 +1696,10 @@ mac80211_hostapd_setup_bss() {
 		case "$htmode" in
 			UHR*)
 			[ "$disable_11bn" = "1" ] && append hostapd_cfg "disable_11bn=1" "$N"
+			[ -n "$uhr_adv_notification_interval" ] && \
+				append hostapd_cfg "uhr_adv_notification_interval=$uhr_adv_notification_interval" "$N"
+			[ -n "$uhr_update_in_tim_interval" ] && \
+				append hostapd_cfg "uhr_update_in_tim_interval=$uhr_update_in_tim_interval" "$N"
 		;;
 		esac
 
@@ -2686,6 +2742,10 @@ wpa_supplicant_start() {
 		dpp_enabled=0
 		config_foreach check_iface_dpp wifi-iface "$iface_name" "$phy" "$radio"
 		if [ "$dpp_enabled" -eq 1 ]; then
+			existing_pid=$(pgrep -f "wpa_cli -i $iface_name .*dpp-supplicant-event-update")
+			if [ -n "$existing_pid" ]; then
+				kill $existing_pid 2>/dev/null
+			fi
 			/usr/sbin/wpa_cli -i "$iface_name" -p /var/run/wpa_supplicant -a /lib/netifd/dpp-supplicant-event-update -B
 			dpp_enabled=0
 		fi
@@ -2729,6 +2789,11 @@ mac80211_setup_vif() {
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
 	json_get_vars mode wds powersave mld ssid vap_submode monitor_flags
+
+	# Setup SMD parameters
+	json_get_vars smd_enabled smd_enabled
+	json_get_vars smd_id smd_id
+	json_get_vars smd_ptk_mode smd_ptk_mode
 
 	set_default powersave 0
 	set_default wds 0
