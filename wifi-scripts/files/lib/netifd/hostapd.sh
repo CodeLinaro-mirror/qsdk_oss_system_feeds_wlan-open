@@ -384,6 +384,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int multi_ap_vlanid
 
+	config_add_int multi_ap_profile
+
 	config_add_boolean wps_pushbutton wps_label ext_registrar wps_pbc_in_m1
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
@@ -720,7 +722,7 @@ hostapd_set_bss_options() {
 		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
 		external_plugin_assoc_policy external_plugin_disassoc_policy \
 		$hostapd_if_action_policy_uci_vars \
-		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -821,6 +823,7 @@ hostapd_set_bss_options() {
 	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 	[ "$band" = "6g" ] && [ "$he_6ghz_min_rate" -gt 0 ] && append bss_conf "he_6ghz_min_rate=$he_6ghz_min_rate" "$N"
+        [ "$multi_ap" -gt 0 ] && [ -n "$multi_ap_profile" ] && [ "$multi_ap_profile" -ge 1 ] && [ "$multi_ap_profile" -le 3 ] && append bss_conf "multi_ap_profile=$multi_ap_profile" "$N"
 
 	[ -n "$oce" ] && {
 		# Set oce=4 to enable OCE_AP
@@ -1816,6 +1819,7 @@ wpa_supplicant_add_network() {
 		basic_rate mcast_rate \
 		ieee80211w ieee80211r fils ocv \
 		multi_ap \
+		multi_ap_profile \
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
@@ -1939,6 +1943,9 @@ wpa_supplicant_add_network() {
 		[ "$multi_ap" = 1 ] && {
 			append network_data "multi_ap_backhaul_sta=1" "$N$T"
 			append network_data "enable_4addr_mode=1" "$N$T"
+                        [ -n "$multi_ap_profile" ] && [ "$multi_ap_profile" -ge 1 ] && [ "$multi_ap_profile" -le 3 ] && {
+			        append network_data "multi_ap_profile=$multi_ap_profile" "$N$T"
+		        }
 		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
@@ -1947,6 +1954,7 @@ wpa_supplicant_add_network() {
 		[ -n "$CSwOpts" ] && {
 		         CSwOpts="$CSwOpts"
 		}
+
 	}
 
 	[ -n "$ocv" ] && append network_data "ocv=$ocv" "$N$T"
