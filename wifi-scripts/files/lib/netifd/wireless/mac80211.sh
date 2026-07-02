@@ -2295,6 +2295,7 @@ mac80211_setup_monitor() {
 
 	json_add_object "$ifname"
 	json_add_string mode monitor
+	[ -n "$ru_punct_bitmap" ] && json_add_string punct "$ru_punct_bitmap"
 	[ -n "$monitor_flags" ] && json_add_string monitor_flags "$monitor_flags"
 	[ -n "$freq" ] && json_add_string freq "$freq"
 	json_add_string htmode "$htmode"
