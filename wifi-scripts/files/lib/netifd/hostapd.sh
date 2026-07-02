@@ -1166,6 +1166,7 @@ hostapd_set_bss_options() {
 	[ "$bss_transition" -eq "1" ] && append bss_conf "bss_transition=1" "$N"
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
+	[ "$mbo" -eq 1 ] && set_default ieee80211w 1
 
 	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
 	set_default ieee80211k 0
