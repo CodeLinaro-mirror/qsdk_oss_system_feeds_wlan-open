@@ -132,6 +132,9 @@ hostapd_append_wpa_key_mgmt() {
 			json_get_vars key wpa_psk_file
 			append bss_conf "wpa_passphrase=$key" "$N"
 		;;
+		eppk)
+			append wpa_key_mgmt "EPPKE"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -535,6 +538,10 @@ hostapd_common_add_bss_config() {
 	config_add_boolean smd_ptk_mode smd_enabled
 	config_add_string rsnxe_capab_mask
 	config_add_array security_profiles
+	config_add_int eppk
+	config_add_int assoc_frame_encryption
+	config_add_int eap_using_authentication_frames
+	config_add_int pmksa_caching_privacy
 }
 
 hostapd_set_vlan_file() {
@@ -753,7 +760,8 @@ hostapd_set_bss_options() {
 		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
 		dcs_random_chan_bitmap dcs_bw_reduction_ctrl \
 		rsnxe_capab_mask \
-		sae_pw_id_num sae_pw_id_key sae_password
+		sae_pw_id_num sae_pw_id_key sae_password \
+		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
 
 
 	json_get_values sae_groups sae_groups
@@ -928,6 +936,9 @@ hostapd_set_bss_options() {
 		append bss_conf "rsn_override_mfp_2=$rsn_override_mfp_2" "$N"
 	}
 
+	[ -n "$assoc_frame_encryption" ] && append bss_conf "assoc_frame_encryption=$assoc_frame_encryption" "$N"
+	[ -n "$pmksa_caching_privacy" ] && append bss_conf "pmksa_caching_privacy=$pmksa_caching_privacy" "$N"
+	[ -n "$eap_using_authentication_frames" ] && append bss_conf "eap_using_authentication_frames=$eap_using_authentication_frames" "$N"
 	[ -n "$sae_require_mfp" ] && append bss_conf "sae_require_mfp=$sae_require_mfp" "$N"
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
@@ -1211,6 +1222,7 @@ hostapd_set_bss_options() {
 
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
+		[ "$eppk" -eq "1" ] && append wpa_key_mgmt "EPPKE"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
 		if [ "$group_cipher" != "GCMP-256" ]; then
 			group_cipher="CCMP"
