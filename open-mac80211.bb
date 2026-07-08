@@ -44,6 +44,7 @@ DEPENDS = " \
 "
 
 DEPENDS:remove:echo = "qca-nss-ppe qca-nss-ppe-vp qca-nss-ppe-ds qca-nss-wifi-plugin"
+DEPENDS:append:echo = " dataipa"
 
 REQUIRED_HOSTTOOLS += "spatch"
 
@@ -87,6 +88,12 @@ KCFLAGS += " \
 	-I${STAGING_INCDIR}/qca-nss-clients \
 	-Wall \
 	-Wno-error=unused-variable -Wno-unused-variable \
+"
+
+KCFLAGS:append:echo = " \
+	-I${STAGING_INCDIR}/ \
+	-I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/ \
+	-I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/uapi \
 "
 
 MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
@@ -174,6 +181,9 @@ EOF
 		ipq53xx*)
 			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
 			;;
+		echo)
+			echo "CPTCFG_EXT_IPA_OFFLOAD=y" >> ${S}/.config
+			;;
 	esac
 
 	case "${MACHINE}" in
@@ -237,10 +247,13 @@ OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symve
 	${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
-OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo =""
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo ="\
+	${STAGING_INCDIR}/dataipa/Module.symvers \
+"
 
 MAKE_OPTS = " \
 	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
+	KCFLAGS="${KCFLAGS}" \
 	KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" \
 	MODPROBE=true \
 	KLIB=${D}/${nonarch_base_libdir}/modules/${KERNEL_VERSION}/ \
@@ -263,6 +276,13 @@ do_install() {
 		CROSS_COMPILE=${TARGET_PREFIX} \
 		INSTALL_MOD_PATH=${D} \
 		modules_install
+}
+
+do_install:append:echo() {
+	install -d ${D}${includedir}/ipa/wifi8/
+	if [ -f ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ]; then
+		cp ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ${D}${includedir}/ipa/wifi8/
+	fi
 }
 
 do_install:append() {
@@ -352,6 +372,8 @@ FILES:${PN}-dev = " \
 	${includedir}/net/mac80211/* \
 	${includedir}/ath/* \
 "
+
+FILES:${PN}-dev:append:echo = " ${includedir}/ipa/*"
 
 # Runtime dependencies for auto-generated kernel-module-* packages
 RDEPENDS:kernel-module-cfg80211 = "wireless-regdb-static"
