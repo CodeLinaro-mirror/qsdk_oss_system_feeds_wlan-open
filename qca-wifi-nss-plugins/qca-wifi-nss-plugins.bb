@@ -6,11 +6,17 @@ inherit module
 
 CLEANBROKEN = "1"
 
+SRCPREFIX:echo = "../"
+
+KARCH:echo = "${ARCH}"
+
 FILESPATH =+ "${TOPDIR}/../src/ipq/wlan-open-extns/ath/plugin:"
 
 SRC_URI = "file://qca-wifi-nss-plugins/"
 
 DEPENDS = "virtual/kernel qca-nss-ecm qca-nss-ppe qca-nss-ppe-ds open-mac80211"
+
+DEPENDS:echo = "virtual/kernel dataipa open-mac80211"
 
 S = "${WORKDIR}/qca-wifi-nss-plugins"
 
@@ -30,6 +36,9 @@ WIFI_NSS_MAKE_OPTS += " \
     QCA_WIFI_NSS_PLUGINS_PPE=y \
     QCA_WIFI_NSS_PLUGINS_PPEDS=y \
     "
+WIFI_NSS_MAKE_OPTS:echo = " \
+    QCA_WIFI_NSS_PLUGINS_IPA_FSE=y \
+    "
 
 EXTRA_CFLAGS += " \
     -I${STAGING_INCDIR}/qca-nss-ecm \
@@ -37,6 +46,11 @@ EXTRA_CFLAGS += " \
     -I${STAGING_INCDIR}/qca-nss-ppe-ds \
     -I${STAGING_INCDIR}/open-mac80211 \
     -I${STAGING_DIR}/usr/include/ \
+    "
+KCFLAGS:append:echo = " \
+    -I${STAGING_INCDIR} \
+    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/ \
+    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/uapi \
     "
 
 MODULE_EXTRA_SYMBOLS = " \
@@ -46,12 +60,18 @@ MODULE_EXTRA_SYMBOLS = " \
     ${STAGING_INCDIR}/open-mac80211/Module.symvers \
     "
 
+MODULE_EXTRA_SYMBOLS:echo = " \
+    ${STAGING_INCDIR}/dataipa/Module.symvers \
+    ${STAGING_INCDIR}/open-mac80211/Module.symvers \
+    "
+
 do_compile() {
     unset LDFLAGS
     make -C "${STAGING_KERNEL_BUILDDIR}" ${WIFI_NSS_MAKE_OPTS} \
         CROSS_COMPILE="${TARGET_PREFIX}" \
         ARCH="${KARCH}" \
         M="${S}" \
+        KCFLAGS="${KCFLAGS}" \
         EXTRA_CFLAGS="${EXTRA_CFLAGS}" \
         KBUILD_EXTRA_SYMBOLS="${MODULE_EXTRA_SYMBOLS}" \
         modules
