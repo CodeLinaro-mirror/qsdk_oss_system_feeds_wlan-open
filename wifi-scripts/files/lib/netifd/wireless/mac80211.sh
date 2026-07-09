@@ -1507,6 +1507,9 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "chanlist=$(echo $channel_list)" "$N"
 	fi
 
+	[ "$is_wiphy_multi_radio" -eq 1 ] && [ -n "$radio" ] && [ "$radio" != "-1" ] && \
+		append base_cfg "radio_idx=$radio" "$N"
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${hostapd_noscan:+noscan=1}
