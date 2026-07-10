@@ -67,6 +67,7 @@ config-y += ATH12K_TX_MONITOR
 endif
 
 config-$(CONFIG_PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE) += ATH12K_UCAST_ENABLE_AST_OVERRIDE
+config-$(CONFIG_PACKAGE_kmod-qca-debug-uio) += ATHDEBUG_UIO_LOGGING
 
 config-$(call config_package,carl9170) += CARL9170
 config-$(call config_package,ar5523) += AR5523
@@ -167,9 +168,12 @@ define KernelPackage/ath12k
   TITLE:=QTI 802.11be wireless cards support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
 ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
-  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-qca-debug-uio +kmod-dataipa
+  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-dataipa
 else
-  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-qca-debug-uio
+  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT
+endif
+ifeq ($(CONFIG_PACKAGE_kmod-qca-debug-uio),y)
+  DEPENDS+= +kmod-qca-debug-uio
 endif
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
