@@ -39,6 +39,7 @@ ifdef CONFIG_PACKAGE_MAC80211_TRACING
 	WIL6210_TRACING
 endif
 
+config-$(CONFIG_PACKAGE_EXT_IPA_OFFLOAD) += EXT_IPA_OFFLOAD
 config-$(call config_package,ath,regular smallbuffers) += ATH_CARDS ATH_COMMON
 config-$(CONFIG_PACKAGE_ATH_DEBUG) += ATH_DEBUG ATH11K_DEBUG ATH12K_DEBUG
 config-$(CONFIG_PACKAGE_ATH_SPECTRAL) += ATH11K_SPECTRAL
@@ -165,7 +166,11 @@ define KernelPackage/ath12k
   $(call KernelPackage/mac80211/Default)
   TITLE:=QTI 802.11be wireless cards support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
+ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
+  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-qca-debug-uio +kmod-dataipa
+else
   DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-qca-debug-uio
+endif
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
@@ -204,6 +209,13 @@ define KernelPackage/ath12k/config
 		help
 			This option enables support for 11S MLO Host Test Framework
 			in ATH12K.
+
+	config PACKAGE_EXT_IPA_OFFLOAD
+		bool "Enable IPA Offload"
+		default n
+		depends on PACKAGE_kmod-ath12k
+		help
+			Enable IPA offload for SDX.
 endef
 
 define KernelPackage/ath11k-ahb

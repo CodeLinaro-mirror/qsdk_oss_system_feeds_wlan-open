@@ -150,7 +150,7 @@ mac80211_update_mld_configs() {
 		config_get mld_name "$name" mld
 		config_get ml_device "$name" device
 		config_get ht_mode "$ml_device" htmode
-		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* ]]  && [ -n "$mld_name" ]); then
+		if ([ -n "$ht_mode" ] && [[ "$ht_mode" == "EHT"* || "$ht_mode" == "UHR"* ]]  && [ -n "$mld_name" ]); then
 			append mld_names "$mld_name"
 			mac80211_update_mld_iface_config "$name" "$mld_name"
 		fi

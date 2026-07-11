@@ -426,6 +426,7 @@ ubus_call() {
 		rptr_allow_chan_sw \
 		uplink_csa
 	config_add_string CSwOpts
+	config_add_int cac_timeout bgcac_timeout
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
@@ -445,6 +446,7 @@ drv_mac80211_init_iface_config() {
 	config_add_int start_disabled
 	config_add_int ieee80211w
 	config_add_int beacon_prot
+	config_add_boolean disable_sa_query
 	config_add_int unsol_bcast_presp
 	config_add_int fils_discovery force_disable_in_band_discovery
 	config_add_string ppe_vp
@@ -1505,6 +1507,9 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "chanlist=$(echo $channel_list)" "$N"
 	fi
 
+	[ "$is_wiphy_multi_radio" -eq 1 ] && [ -n "$radio" ] && [ "$radio" != "-1" ] && \
+		append base_cfg "radio_idx=$radio" "$N"
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${hostapd_noscan:+noscan=1}
@@ -1552,7 +1557,7 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp multi_ap
+	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot disable_sa_query ppe_vp multi_ap 
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
@@ -1609,6 +1614,7 @@ mac80211_hostapd_setup_bss() {
 	fi
 
 	[ "$staidx" -gt 0 -o "$start_disabled" -eq 1 ] && append hostapd_cfg "start_disabled=1" "$N"
+	[ -n "$disable_sa_query" ] && append hostapd_cfg "disable_sa_query=$disable_sa_query" "$N"
 
 	[ "$dynamic_vlan" = "1" ] && append hostapd_cfg "dynamic_vlan=1" "$N"
 	[ -n "$vlan_tagged_interface" ] && append hostapd_cfg "vlan_tagged_interface=$vlan_tagged_interface" "$N"
@@ -2295,6 +2301,7 @@ mac80211_setup_monitor() {
 
 	json_add_object "$ifname"
 	json_add_string mode monitor
+	[ -n "$ru_punct_bitmap" ] && json_add_string punct "$ru_punct_bitmap"
 	[ -n "$monitor_flags" ] && json_add_string monitor_flags "$monitor_flags"
 	[ -n "$freq" ] && json_add_string freq "$freq"
 	json_add_string htmode "$htmode"
@@ -3064,7 +3071,8 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 htmode \
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
-		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en
+		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
+		cac_timeout bgcac_timeout
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -3290,6 +3298,21 @@ drv_mac80211_setup() {
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_set_config "$phy" "$radio" "$mon_ifname"
 	[ -x /usr/sbin/hostapd ] && hostapd_set_config "$phy" "$radio"
+
+	if command -v cfg80211tool >/dev/null 2>&1; then
+		radio_idx="$radio"
+		[ "$radio_idx" = "-1" ] && radio_idx=0
+
+		[ -n "$cac_timeout" ] && {
+			cfg80211tool "${phy}:${radio_idx}" set_cactimeout "$cac_timeout" >/dev/null 2>&1 || \
+				echo "set_cactimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$bgcac_timeout" ] && {
+			cfg80211tool "${phy}:${radio_idx}" pCACTimeout "$bgcac_timeout" >/dev/null 2>&1 || \
+				echo "pCACTimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+	fi
 
 	[ -x /usr/sbin/wpa_supplicant ] && wpa_supplicant_start "$phy" "$radio"
 

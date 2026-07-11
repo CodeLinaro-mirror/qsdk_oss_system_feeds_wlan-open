@@ -132,6 +132,9 @@ hostapd_append_wpa_key_mgmt() {
 			json_get_vars key wpa_psk_file
 			append bss_conf "wpa_passphrase=$key" "$N"
 		;;
+		eppk)
+			append wpa_key_mgmt "EPPKE"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -384,6 +387,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int multi_ap_vlanid
 
+	config_add_int multi_ap_profile
+
 	config_add_boolean wps_pushbutton wps_label ext_registrar wps_pbc_in_m1
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
@@ -533,6 +538,10 @@ hostapd_common_add_bss_config() {
 	config_add_boolean smd_ptk_mode smd_enabled
 	config_add_string rsnxe_capab_mask
 	config_add_array security_profiles
+	config_add_int eppk
+	config_add_int assoc_frame_encryption
+	config_add_int eap_using_authentication_frames
+	config_add_int pmksa_caching_privacy
 }
 
 hostapd_set_vlan_file() {
@@ -720,7 +729,7 @@ hostapd_set_bss_options() {
 		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
 		external_plugin_assoc_policy external_plugin_disassoc_policy \
 		$hostapd_if_action_policy_uci_vars \
-		multi_ap multi_ap_vlanid multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -751,7 +760,8 @@ hostapd_set_bss_options() {
 		rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples \
 		dcs_random_chan_bitmap dcs_bw_reduction_ctrl \
 		rsnxe_capab_mask \
-		sae_pw_id_num sae_pw_id_key sae_password
+		sae_pw_id_num sae_pw_id_key sae_password \
+		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
 
 
 	json_get_values sae_groups sae_groups
@@ -821,6 +831,7 @@ hostapd_set_bss_options() {
 	[ "$multi_ap_vlanid" -gt 0 -a "$multi_ap_vlanid" -le 4094 ] && append bss_conf "multi_ap_vlanid=$multi_ap_vlanid" "$N"
 	[ -n "$vendor_elements" ] && append bss_conf "vendor_elements=$vendor_elements" "$N"
 	[ "$band" = "6g" ] && [ "$he_6ghz_min_rate" -gt 0 ] && append bss_conf "he_6ghz_min_rate=$he_6ghz_min_rate" "$N"
+        [ "$multi_ap" -gt 0 ] && [ -n "$multi_ap_profile" ] && [ "$multi_ap_profile" -ge 1 ] && [ "$multi_ap_profile" -le 3 ] && append bss_conf "multi_ap_profile=$multi_ap_profile" "$N"
 
 	[ -n "$oce" ] && {
 		# Set oce=4 to enable OCE_AP
@@ -925,6 +936,9 @@ hostapd_set_bss_options() {
 		append bss_conf "rsn_override_mfp_2=$rsn_override_mfp_2" "$N"
 	}
 
+	[ -n "$assoc_frame_encryption" ] && append bss_conf "assoc_frame_encryption=$assoc_frame_encryption" "$N"
+	[ -n "$pmksa_caching_privacy" ] && append bss_conf "pmksa_caching_privacy=$pmksa_caching_privacy" "$N"
+	[ -n "$eap_using_authentication_frames" ] && append bss_conf "eap_using_authentication_frames=$eap_using_authentication_frames" "$N"
 	[ -n "$sae_require_mfp" ] && append bss_conf "sae_require_mfp=$sae_require_mfp" "$N"
 	[ -n "$sae_pwe" ] && append bss_conf "sae_pwe=$sae_pwe" "$N"
 	[ -n "$external_plugin_enable" ] && append bss_conf "external_plugin_enable=$external_plugin_enable" "$N"
@@ -1166,6 +1180,7 @@ hostapd_set_bss_options() {
 	[ "$bss_transition" -eq "1" ] && append bss_conf "bss_transition=1" "$N"
 	[ "$mbo" -eq 1 ] && append bss_conf "mbo=1" "$N"
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
+	[ "$mbo" -eq 1 ] && set_default ieee80211w 1
 
 	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
 	set_default ieee80211k 0
@@ -1208,6 +1223,7 @@ hostapd_set_bss_options() {
 
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
+		[ "$eppk" -eq "1" ] && append wpa_key_mgmt "EPPKE"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
 		if [ "$group_cipher" != "GCMP-256" ]; then
 			group_cipher="CCMP"
@@ -1816,6 +1832,7 @@ wpa_supplicant_add_network() {
 		basic_rate mcast_rate \
 		ieee80211w ieee80211r fils ocv \
 		multi_ap \
+		multi_ap_profile \
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
@@ -1939,6 +1956,9 @@ wpa_supplicant_add_network() {
 		[ "$multi_ap" = 1 ] && {
 			append network_data "multi_ap_backhaul_sta=1" "$N$T"
 			append network_data "enable_4addr_mode=1" "$N$T"
+                        [ -n "$multi_ap_profile" ] && [ "$multi_ap_profile" -ge 1 ] && [ "$multi_ap_profile" -le 3 ] && {
+			        append network_data "multi_ap_profile=$multi_ap_profile" "$N$T"
+		        }
 		}
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
@@ -1947,6 +1967,7 @@ wpa_supplicant_add_network() {
 		[ -n "$CSwOpts" ] && {
 		         CSwOpts="$CSwOpts"
 		}
+
 	}
 
 	[ -n "$ocv" ] && append network_data "ocv=$ocv" "$N$T"
