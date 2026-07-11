@@ -87,7 +87,6 @@ KCFLAGS += " \
 	-I${STAGING_INCDIR}/qca-nss-clients \
 	-Wall \
 	-Wno-error=unused-variable -Wno-unused-variable \
-	-I${STAGING_INCDIR} \
 "
 
 MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
@@ -111,7 +110,7 @@ do_cp_src_wlan_open_extns() {
 
 do_cp_headers() {
 	install -d ${STAGING_DIR}/include/linux/
-	install -m 0644 ${STAGING_KERNEL_DIR}/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
+	install -m 0644 ${TOPDIR}/${SRCPREFIX}files-6.6/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
 }
 
 # The following compilation flags are enabled for 1G profile
@@ -238,7 +237,7 @@ OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symve
 	${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
-OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo ="${STAGING_INCDIR}/qca-debug-uio/Module.symvers"
+OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo =""
 
 MAKE_OPTS = " \
 	EXTRA_CFLAGS='${EXTRA_CFLAGS}' \
@@ -249,22 +248,9 @@ MAKE_OPTS = " \
 	KBUILD_EXTRA_SYMBOLS='${OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS}' \
 "
 
-MODULE_EXTRA_SYMBOLS:echo = "${STAGING_INCDIR}/qca-debug-uio/Module.symvers"
+MODULE_EXTRA_SYMBOLS:echo = ""
 
 do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
-
-do_compile:prepend() {
-       # backports module compile uses -I${S}/include reliably; mirror qca-debug-uio
-       # public header there so athdbg_uio.c can include <qca-debug-uio/debug_uio_public.h>.
-       install -d ${S}/include/qca-debug-uio
-       if [ -f ${STAGING_INCDIR}/qca-debug-uio/debug_uio_public.h ]; then
-               install -m 0644 ${STAGING_INCDIR}/qca-debug-uio/debug_uio_public.h \
-                       ${S}/include/qca-debug-uio/
-       else
-               bbfatal "Missing ${STAGING_INCDIR}/qca-debug-uio/debug_uio_public.h (qca-debug-uio not staged)"
-       fi
-}
-
 
 do_compile() {
 	${MAKE} ${MAKE_OPTS} modules
@@ -277,11 +263,6 @@ do_install() {
 		CROSS_COMPILE=${TARGET_PREFIX} \
 		INSTALL_MOD_PATH=${D} \
 		modules_install
-}
-
-do_install:append:echo() {
-	install -d ${D}/lib/firmware/ath12k/QCN9625/
-	ln -sf /firmware/image/qcn9625 ${D}/lib/firmware/ath12k/QCN9625/hw1.0
 }
 
 do_install:append() {
