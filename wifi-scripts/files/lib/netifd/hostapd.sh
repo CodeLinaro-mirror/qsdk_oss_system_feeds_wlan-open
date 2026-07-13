@@ -336,7 +336,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 	config_add_int maxassoc max_inactivity
-	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll
+	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll skip_disconnect
 
 	config_add_int \
 		wep_rekey eap_reauth_period \
@@ -738,7 +738,7 @@ hostapd_set_bss_options() {
 		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
 		external_plugin_assoc_policy external_plugin_disassoc_policy \
 		$hostapd_if_action_policy_uci_vars \
-		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll skip_disconnect \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -785,6 +785,7 @@ hostapd_set_bss_options() {
 	set_default short_preamble 1
 	set_default disassoc_low_ack 1
 	set_default skip_inactivity_poll 0
+	set_default skip_disconnect 0
 	set_default hidden 0
 	set_default wmm 1
 	set_default uapsd 1
@@ -832,6 +833,7 @@ hostapd_set_bss_options() {
 	append bss_conf "chan_util_avg_period=$chan_util_avg_period" "$N"
 	append bss_conf "disassoc_low_ack=$disassoc_low_ack" "$N"
 	append bss_conf "skip_inactivity_poll=$skip_inactivity_poll" "$N"
+	append bss_conf "skip_disconnect=$skip_disconnect" "$N"
 	append bss_conf "preamble=$short_preamble" "$N"
 	append bss_conf "wmm_enabled=$wmm" "$N"
 	append bss_conf "ignore_broadcast_ssid=$hidden" "$N"
