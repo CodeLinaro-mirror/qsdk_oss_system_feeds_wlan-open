@@ -40,6 +40,7 @@ SRC_URI = " \
 "
 
 SRC_URI:append:echo = " file://etc/udev/rules.d/60-ath12k-no-autoload.rules"
+SRC_URI:append:echo = " file://lib/systemd/system/ath12k-wifi8-load.service"
 
 S = "${WORKDIR}/backports-6.1-${MAC80211_PKG_KERNEL_VERSION}"
 
@@ -328,6 +329,13 @@ do_install:append:echo() {
 	install -d ${D}${sysconfdir}/udev/rules.d
 	install -m 0644 ${WORKDIR}/etc/udev/rules.d/60-ath12k-no-autoload.rules \
 		${D}${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules
+
+	install -d ${D}${systemd_unitdir}/system
+	install -m 0644 ${WORKDIR}/lib/systemd/system/ath12k-wifi8-load.service \
+		${D}${systemd_unitdir}/system/ath12k-wifi8-load.service
+	install -d ${D}${systemd_unitdir}/system/multi-user.target.wants
+	ln -sf ../ath12k-wifi8-load.service \
+		${D}${systemd_unitdir}/system/multi-user.target.wants/ath12k-wifi8-load.service
 }
 
 do_deploy() {
@@ -421,8 +429,10 @@ do_install:append() {
 	fi
 
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
-	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
+	if [ "${BASEMACHINE}" != "echo" ]; then
+		install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
+	fi
 	install -m 0755 ${WORKDIR}/lib/boost_performance.sh ${D}${nonarch_base_libdir}/boost_performance.sh
 
     install -d ${D}/lib/functions
@@ -503,6 +513,8 @@ FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
 FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 FILES:${PN}:append:echo = " ${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules"
+FILES:${PN}:append:echo = " ${systemd_unitdir}/system/ath12k-wifi8-load.service"
+FILES:${PN}:append:echo = " ${systemd_unitdir}/system/multi-user.target.wants/ath12k-wifi8-load.service"
 FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 FILES:${PN}:append:echo = " \
       ${nonarch_base_libdir}/firmware \
@@ -531,6 +543,7 @@ KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
 KERNEL_MODULE_AUTOLOAD:remove:echo = "ath12k_wifi7"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
+KERNEL_MODULE_AUTOLOAD:remove:echo = "ath12k_wifi8"
 
 # Configure modprobe options using module_conf (same pattern as reference)
 module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
