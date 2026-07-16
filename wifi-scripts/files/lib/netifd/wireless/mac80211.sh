@@ -260,6 +260,7 @@ acs_block_chan_list=
 #cbs commands
 cbs_enable=
 cbs_resttime=
+cbs_retrigger_time=
 cbs_dwellrest=
 cbs_waittime=
 cbs_dwellsplit=
@@ -407,6 +408,7 @@ ubus_call() {
 		obss_rx_snr_threshold \
 		cbs_enable \
 		cbs_resttime \
+		cbs_retrigger_time \
 		cbs_dwellrest \
 		cbs_waittime \
 		cbs_dwellsplit \
@@ -764,7 +766,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
-	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
+	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -1447,6 +1449,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$cbs_resttime" ]; then
 		append base_cfg "cbs_resttime=$cbs_resttime" "$N"
+	fi
+
+	if [ -n "$cbs_retrigger_time" ]; then
+		append base_cfg "cbs_retrigger_time=$cbs_retrigger_time" "$N"
 	fi
 
 	if [ -n "$cbs_dwellrest" ]; then
