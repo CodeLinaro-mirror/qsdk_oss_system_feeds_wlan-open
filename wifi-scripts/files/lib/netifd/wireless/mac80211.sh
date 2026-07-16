@@ -1507,6 +1507,9 @@ mac80211_hostapd_setup_base() {
 		append base_cfg "chanlist=$(echo $channel_list)" "$N"
 	fi
 
+	[ "$is_wiphy_multi_radio" -eq 1 ] && [ -n "$radio" ] && [ "$radio" != "-1" ] && \
+		append base_cfg "radio_idx=$radio" "$N"
+
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
 ${hostapd_noscan:+noscan=1}
@@ -2298,6 +2301,7 @@ mac80211_setup_monitor() {
 
 	json_add_object "$ifname"
 	json_add_string mode monitor
+	[ -n "$ru_punct_bitmap" ] && json_add_string punct "$ru_punct_bitmap"
 	[ -n "$monitor_flags" ] && json_add_string monitor_flags "$monitor_flags"
 	[ -n "$freq" ] && json_add_string freq "$freq"
 	json_add_string htmode "$htmode"
