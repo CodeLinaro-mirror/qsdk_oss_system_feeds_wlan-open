@@ -433,6 +433,15 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 	C_DEFINES+= -DCONFIG_ATH10K_SMALLBUFFERS
 endif
 
+CMA_TARGETS := $(CONFIG_TARGET_ipq96xx) \
+	       $(CONFIG_TARGET_ipq52xx)
+
+ifeq ($(filter y,$(CMA_TARGETS)),y)
+ifeq ($(CONFIG_DMA_CMA),y)
+	C_DEFINES+= -DATH12K_CMA_SUPPORT
+endif
+endif
+
 ifeq ($(CONFIG_TARGET_sdx85),y)
 ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
   C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD

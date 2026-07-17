@@ -27,9 +27,9 @@ load_dynamic_modules()
 	fi
 
 	case "$board_name" in
-		*ap-al02-c13*)
+		*ap-al02-c13*|*ap-mi01.2-qcn9160*|*ap-mi01.7*|*ap-mi01.13*)
 			if ! grep -q "ath12k_wifi6" "$ath12k_config_file" 2>/dev/null; then
-				echo "ath12k_wifi6" | tee -a "$ath12k_config_file"
+				echo "ath12k_wifi6" >> "$ath12k_config_file"
 			fi
 			;;
 	esac

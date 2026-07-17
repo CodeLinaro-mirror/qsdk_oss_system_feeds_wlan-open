@@ -30,6 +30,8 @@ SRC_URI = " \
 	file://rdk_init_helper.sh \
 "
 
+SRC_URI:append:echo = " file://etc/udev/rules.d/60-ath12k-no-autoload.rules"
+
 S = "${WORKDIR}/backports-6.1-${MAC80211_PKG_KERNEL_VERSION}"
 
 DEPENDS = " \
@@ -115,13 +117,22 @@ do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
 }
 
+LINUX_SRC_DIR = "${TOPDIR}/${SRCPREFIX}files-6.6"
+LINUX_SRC_DIR:echo = "${TOPDIR}/${SRCPREFIX}src/kernel-6.18/kernel_platform/kernel"
+
 do_cp_headers() {
 	install -d ${STAGING_DIR}/include/linux/
-	install -m 0644 ${TOPDIR}/${SRCPREFIX}files-6.6/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
+	install -m 0644 ${LINUX_SRC_DIR}/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
 }
 
 # The following compilation flags are enabled for 1G profile
 # When RDK platform introduces new profiles, configure accordingly in do_configure()
+
+do_configure:prepend:echo() {
+	install -d ${S}/include/qca-debug-uio
+	install -m 0644 ${STAGING_INCDIR}/qca-debug-uio/debug_uio_public.h \
+		${S}/include/qca-debug-uio/debug_uio_public.h
+}
 
 do_configure:prepend() {
 	cat > ${S}/.config << 'EOF'
@@ -249,6 +260,7 @@ OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS = "${STAGING_INCDIR}/qca-nss-ppe/Module.symve
 
 OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS:echo ="\
 	${STAGING_INCDIR}/dataipa/Module.symvers \
+	${STAGING_INCDIR}/qca-debug-uio/Module.symvers \
 "
 
 MAKE_OPTS = " \
@@ -261,7 +273,7 @@ MAKE_OPTS = " \
 	KBUILD_EXTRA_SYMBOLS='${OPEN_MAC80211_KBUILD_EXTRA_SYMBOLS}' \
 "
 
-MODULE_EXTRA_SYMBOLS:echo = ""
+MODULE_EXTRA_SYMBOLS:echo = "${STAGING_INCDIR}/qca-debug-uio/Module.symvers"
 
 do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
 
@@ -283,6 +295,11 @@ do_install:append:echo() {
 	if [ -f ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ]; then
 		cp ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ${D}${includedir}/ipa/wifi8/
 	fi
+	install -d ${D}/lib/firmware/ath12k/QCN9625/
+	ln -sf /firmware/image/qcn9625 ${D}/lib/firmware/ath12k/QCN9625/hw1.0
+	install -d ${D}${sysconfdir}/udev/rules.d
+	install -m 0644 ${WORKDIR}/etc/udev/rules.d/60-ath12k-no-autoload.rules \
+		${D}${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules
 }
 
 do_install:append() {
@@ -421,6 +438,7 @@ FILES:${PN} += "/lib/functions/rdk_init_helper.sh"
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
 FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
+FILES:${PN}:append:echo = " ${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules"
 FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"

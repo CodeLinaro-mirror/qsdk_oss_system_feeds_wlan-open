@@ -255,6 +255,7 @@ acs_dwelltime=
 acs_dbgtrace=
 acs_txpwr_opt=
 acs_freq_list=
+acs_block_chan_list=
 
 #cbs commands
 cbs_enable=
@@ -425,7 +426,7 @@ ubus_call() {
 		skip_cac \
 		rptr_allow_chan_sw \
 		uplink_csa
-	config_add_string CSwOpts
+	config_add_string CSwOpts acs_block_chan_list
 	config_add_int cac_timeout bgcac_timeout
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
@@ -761,7 +762,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
-	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only
+	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
@@ -1509,6 +1510,9 @@ mac80211_hostapd_setup_base() {
 
 	[ "$is_wiphy_multi_radio" -eq 1 ] && [ -n "$radio" ] && [ "$radio" != "-1" ] && \
 		append base_cfg "radio_idx=$radio" "$N"
+	if [ -n "$acs_block_chan_list" ]; then
+		append base_cfg "acs_block_chan_list=$(echo $acs_block_chan_list)" "$N"
+	fi
 
 	cat >> "$hostapd_conf_file" <<EOF
 ${channel:+channel=$channel}
