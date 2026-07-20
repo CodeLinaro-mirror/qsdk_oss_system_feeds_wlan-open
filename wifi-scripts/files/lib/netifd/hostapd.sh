@@ -1292,7 +1292,7 @@ hostapd_set_bss_options() {
 			append bss_conf "rsn_preauth_interfaces=$network_bridge" "$N"
 		else
 			case "$auth_type" in
-			*sae*|owe|dpp|eap2)
+			*sae*|owe|dpp|eap*)
 				set_default auth_cache 1
 			;;
 			*)
