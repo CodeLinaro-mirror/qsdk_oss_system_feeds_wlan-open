@@ -2008,7 +2008,7 @@ mac80211_prepare_vif() {
 
 	default_macaddr=
 
-	if [ "$mode" = "sta" ] && [ -n "$mld" ] && [[ "$htmode" == EHT* ]]; then
+	if [ "$mode" = "sta" ] && [ -n "$mld" ]; then
 		config_get mld_macaddr "$mld" mld_macaddr
 		[ -n "$mld_macaddr" ] && macaddr="$mld_macaddr"
 	fi
