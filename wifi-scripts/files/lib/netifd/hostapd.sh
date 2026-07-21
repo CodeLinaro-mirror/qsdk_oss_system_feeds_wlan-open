@@ -135,6 +135,12 @@ hostapd_append_wpa_key_mgmt() {
 		eppk)
 			append wpa_key_mgmt "EPPKE"
 		;;
+		sae-eppke)
+			append wpa_key_mgmt "SAE SAE-EXT-KEY EPPKE"
+		;;
+		psk-sae-eppke)
+			append wpa_key_mgmt "WPA-PSK SAE SAE-EXT-KEY EPPKE"
+		;;
 	esac
 
 	[ "$fils" -gt 0 ] && {
@@ -1996,7 +2002,8 @@ wpa_supplicant_add_network() {
 			[[ "$auth_type" == *sae* ]] && set_default saepwe "sae_pwe=2"
 			key_mgmt="$wpa_key_mgmt"
 
-			if [ "$_w_mode" = "mesh" ] || [ "$auth_type" = "sae" ]; then
+			if [ "$_w_mode" = "mesh" ] || [ "$auth_type" = "sae" ] || \
+			   [ "$auth_type" = "sae-eppke" ] || [ "$auth_type" = "psk-sae-eppke" ]; then
 				passphrase="sae_password=\"${key}\""
 			else
 				if [ ${#key} -eq 64 ]; then
