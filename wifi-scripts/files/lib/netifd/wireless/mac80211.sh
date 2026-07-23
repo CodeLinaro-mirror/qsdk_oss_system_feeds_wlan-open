@@ -221,6 +221,7 @@ rptr_allow_chan_sw=
 vap_submode=
 CSwOpts=
 rpt_max_phy=
+interCACChan=
 
 #dpp
 dpp_ifaces=
@@ -330,7 +331,7 @@ ubus_call() {
 		config_add_string ht40
 		config_add_int radio beacon_int chanbw frag rts
 		config_add_int rxantenna txantenna txpower min_tx_power antenna_gain
-		config_add_int num_global_macaddr multiple_bssid
+		config_add_int num_global_macaddr multiple_bssid interCACChan
 		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
 		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy acs_2g_scan_all
@@ -951,12 +952,13 @@ mac80211_hostapd_setup_base() {
 		;;
 	esac
 	[ "$band" = "5g" ] && {
-		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0 rcac_freq:0
+		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0 rcac_freq:0 interCACChan
 
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 		[ "$bgcac_en" -eq 1 ] && append base_cfg "bgcac_en=1" "$N"
 		[ "$dfs_bw_reduce_en" -eq 1 ] && append base_cfg "dfs_bw_reduce_en=1" "$N"
 		[ "$rcac_freq" -gt 0 ] && append base_cfg "rcac_freq=$rcac_freq" "$N"
+		[ "$interCACChan" -gt 0 ] && append base_cfg "interCACChan=$interCACChan" "$N"
 	}
 
 	case "$htmode" in
