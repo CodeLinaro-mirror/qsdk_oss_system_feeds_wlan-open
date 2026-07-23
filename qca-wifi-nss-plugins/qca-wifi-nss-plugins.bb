@@ -24,7 +24,7 @@ SRC_URI = "file://qca-wifi-nss-plugins/"
 
 DEPENDS = "virtual/kernel qca-nss-ecm qca-nss-ppe qca-nss-ppe-ds open-mac80211"
 
-DEPENDS:echo = "virtual/kernel dataipa open-mac80211"
+DEPENDS:echo = "virtual/kernel dataipa open-mac80211 qca-nss-ecm"
 
 S = "${WORKDIR}/qca-wifi-nss-plugins"
 
@@ -46,6 +46,7 @@ WIFI_NSS_MAKE_OPTS += " \
     "
 WIFI_NSS_MAKE_OPTS:echo = " \
     QCA_WIFI_NSS_PLUGINS_IPA_FSE=y \
+    QCA_WIFI_NSS_PLUGINS_ECM_FSE=y \
     "
 
 EXTRA_CFLAGS += " \
@@ -57,8 +58,10 @@ EXTRA_CFLAGS += " \
     "
 KCFLAGS:append:echo = " \
     -I${STAGING_INCDIR} \
-    -I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/ \
-    -I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/uapi \
+    -I${STAGING_INCDIR}/ath \
+    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/ \
+    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/uapi \
+    -I${TOPDIR}/${SRCPREFIX}/src/qca-nss-ecm/exports \
     "
 
 MODULE_EXTRA_SYMBOLS = " \
@@ -71,6 +74,7 @@ MODULE_EXTRA_SYMBOLS = " \
 MODULE_EXTRA_SYMBOLS:echo = " \
     ${STAGING_INCDIR}/dataipa/Module.symvers \
     ${STAGING_INCDIR}/open-mac80211/Module.symvers \
+    ${STAGING_INCDIR}/qca-nss-ecm/Module.symvers \
     "
 
 do_compile() {
