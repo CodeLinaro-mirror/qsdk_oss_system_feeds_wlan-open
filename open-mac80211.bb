@@ -215,6 +215,9 @@ CPTCFG_ATH11K_PKTLOG=y
 CPTCFG_MAC80211_PPE_SUPPORT=y
 EOF
 	fi
+
+# Disable wifi7 module build
+sed -i '/obj-$(CPTCFG_ATH12K) += wifi7\//d' ${S}/drivers/net/wireless/ath/ath12k/Makefile
 }
 
 #do_patch[postfuncs] += "do_refactor_alloc_cocci"
@@ -401,7 +404,6 @@ RDEPENDS:kernel-module-ath11k-ahb = "kernel-module-ath11k"
 RDEPENDS:kernel-module-ath11k-pci = "kernel-module-ath11k"
 RDEPENDS:kernel-module-ath12k = "kernel-module-ath"
 RDEPENDS:kernel-module-ath-debug = "kernel-module-ath12k"
-RDEPENDS:kernel-module-ath12k-wifi7 = "kernel-module-ath12k"
 RDEPENDS:kernel-module-ath12k-wifi8 = "kernel-module-ath12k"
 RDEPENDS:${PN}-scripts = "bash"
 
@@ -419,7 +421,6 @@ RDEPENDS:${PN} += " \
 	kernel-module-ath11k-pci \
 	kernel-module-ath12k \
 	kernel-module-ath-debug \
-	kernel-module-ath12k-wifi7 \
 	kernel-module-ath12k-wifi8 \
 	${PN}-firmware-ath11k \
 	${PN}-firmware-ath12k \
@@ -458,7 +459,6 @@ KERNEL_MODULE_AUTOLOAD:append = " ath11k_ahb"
 KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k"
 KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
-KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
 
 # Configure modprobe options using module_conf (same pattern as reference)
