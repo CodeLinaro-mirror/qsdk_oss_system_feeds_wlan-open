@@ -166,7 +166,7 @@ mlo_add_link() {
 	local key
 	local channels
 	local mld
-	local iface_data
+	local iface_data first_bss disable_radio_bss
 	local check_band result select_iface
 	local hw_idx band check_disabled start_freq end_freq check_config
 	local radio_id=
@@ -612,8 +612,20 @@ mlo_add_link() {
 			return
 		fi
 	fi
-	uci set wireless.${link}.disabled='0'
-	uci commit wireless
+	first_bss=$(uci show wireless.${link}.disabled | cut -d "'" -f 2) 2>/dev/null
+	disable_radio_bss=$(uci show wireless | grep "device" | grep "'${link}'" | cut -d "." -f 2 | cut -d "=" -f 1) 2>/dev/null
+
+	if [ "$first_bss" -gt "0" ]; then
+		for i in ${disable_radio_bss}; do
+			if [ "$i" = "$select_iface" ];then
+				continue;
+			fi
+			uci set wireless.${i}.disabled='1'
+		done
+		uci set wireless.${link}.disabled='0'
+		uci commit wireless
+		ubus call network reload
+	fi
 	rm /tmp/mlo_support.txt 2>/dev/null
 }
 
