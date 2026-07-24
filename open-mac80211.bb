@@ -124,6 +124,8 @@ do_cp_src_wlan_open_extns() {
 	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
 	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
 	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.c ${S}/net/wireless/cfg80211_scan_radio_extn.c
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.h ${S}/net/wireless/cfg80211_scan_radio_extn.h
 }
 
 LINUX_SRC_DIR = "${TOPDIR}/${SRCPREFIX}files-6.6"
