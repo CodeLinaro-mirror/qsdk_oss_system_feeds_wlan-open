@@ -190,6 +190,10 @@ hostapd_common_add_device_config() {
 	config_add_int airtime_mode
 	config_add_int mbssid
 
+	config_add_boolean mqtt_enabled
+	config_add_string mqtt_broker_host
+	config_add_int mqtt_broker_port
+
 	hostapd_add_log_config
 }
 
@@ -202,7 +206,7 @@ hostapd_prepare_device_config() {
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
 		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
-		mbssid:0
+		mbssid:0 mqtt_enabled mqtt_broker_host mqtt_broker_port
 
 	hostapd_set_log_options base_cfg
 
@@ -310,6 +314,10 @@ hostapd_prepare_device_config() {
 	[ "$airtime_mode" -gt 0 ] && append base_cfg "airtime_mode=$airtime_mode" "$N"
 	[ -n "$maxassoc" ] && append base_cfg "iface_max_num_sta=$maxassoc" "$N"
 	[ "$mbssid" -gt 0 ] && [ "$mbssid" -le 2 ] && append base_cfg "mbssid=$mbssid" "$N"
+
+	[ -n "$mqtt_enabled" ] && append base_cfg "mqtt_enabled=$mqtt_enabled" "$N"
+	[ -n "$mqtt_broker_host" ] && append base_cfg "mqtt_broker_host=$mqtt_broker_host" "$N"
+	[ -n "$mqtt_broker_port" ] && append base_cfg "mqtt_broker_port=$mqtt_broker_port" "$N"
 
 	json_get_values opts hostapd_options
 	for val in $opts; do
