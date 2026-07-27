@@ -1319,7 +1319,7 @@ mac80211_hostapd_setup_base() {
 		fi
 
 		if [ "$band" = "6g" ]; then
-			if [ -z "$multiple_bssid" ] && [ "$has_ap" -ge 1 ]; then
+			if [ -z "$multiple_bssid" ] && [ "$has_ap" -gt 1 ]; then
 				multiple_bssid=3
 			fi
 		fi
@@ -1331,7 +1331,7 @@ mac80211_hostapd_setup_base() {
 		fi
 
 		if [[ "$htmode" == "HE"* ]] || [ "$band" = "6g" ]; then
-			if [ "$has_ap" -ge 1 ] && [ ! -z "$multiple_bssid" ]; then
+			if [ "$has_ap" -gt 1 ] && [ ! -z "$multiple_bssid" ]; then
 				append base_cfg "mbssid=$multiple_bssid" "$N"
 			fi
 
