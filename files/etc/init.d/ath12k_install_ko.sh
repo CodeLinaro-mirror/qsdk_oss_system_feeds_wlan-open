@@ -3,7 +3,7 @@
 # Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: ISC
 
-START=90
+START=30
 STOP=94
 
 start()
