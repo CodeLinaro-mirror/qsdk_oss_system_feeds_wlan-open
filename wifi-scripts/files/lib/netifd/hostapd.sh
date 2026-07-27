@@ -411,6 +411,7 @@ hostapd_common_add_bss_config() {
 	config_add_int rnr rnr_ie_allowed
 
 	config_add_boolean ftm_responder stationary_ap
+	config_add_int rtt_responder_role
 	config_add_string lci civic
 
 	config_add_boolean ieee80211r pmk_r1_push ft_psk_generate_local ft_over_ds
@@ -1211,7 +1212,7 @@ hostapd_set_bss_options() {
 	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
 	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
-	json_get_vars ftm_responder stationary_ap lci civic
+	json_get_vars ftm_responder stationary_ap lci civic rtt_responder_role
 	set_default ftm_responder 0
 	if [ "$ftm_responder" -eq "1" ]; then
 		set_default stationary_ap 0
@@ -1220,6 +1221,11 @@ hostapd_set_bss_options() {
 			[ "$stationary_ap" -eq "1" ] && append bss_conf "stationary_ap=1" "$N"
 			[ -n "$lci" ] && append bss_conf "lci=$lci" "$N"
 			[ -n "$civic" ] && append bss_conf "civic=$civic" "$N"
+		}
+	fi
+	if [ -n "$rtt_responder_role" ]; then
+		iw phy "$phy" info | grep -q "ENABLE_FTM_RESPONDER" && {
+			append bss_conf "rtt_responder_role=$rtt_responder_role" "$N"
 		}
 	fi
 
