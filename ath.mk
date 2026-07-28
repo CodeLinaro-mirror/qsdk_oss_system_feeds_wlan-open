@@ -172,9 +172,7 @@ ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
 else
   DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT
 endif
-ifeq ($(CONFIG_PACKAGE_kmod-qca-debug-uio),y)
-  DEPENDS+= +kmod-qca-debug-uio
-endif
+  DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 ifneq ($(CONFIG_TARGET_ipq96xx),y)
