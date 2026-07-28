@@ -553,6 +553,7 @@ hostapd_common_add_bss_config() {
 	config_add_int assoc_frame_encryption
 	config_add_int eap_using_authentication_frames
 	config_add_int pmksa_caching_privacy
+	config_add_int report_connection_failures
 }
 
 hostapd_set_vlan_file() {
@@ -773,7 +774,8 @@ hostapd_set_bss_options() {
 		dcs_random_chan_bitmap dcs_bw_reduction_ctrl \
 		rsnxe_capab_mask \
 		sae_pw_id_num sae_pw_id_key sae_password \
-		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
+		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
+		report_connection_failures
 
 
 	json_get_values sae_groups sae_groups
@@ -967,6 +969,7 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
 	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
+	[ -n "$report_connection_failures" ] && append bss_conf "report_connection_failures=$report_connection_failures" "$N"
 	for action_policy_var in $hostapd_if_action_policy_uci_vars; do
 		eval "action_policy_val=\"\${$action_policy_var}\""
 		[ -n "$action_policy_val" ] && append bss_conf "${action_policy_var}=$action_policy_val" "$N"
