@@ -1799,6 +1799,14 @@ $ap_scan
 $country_str
 $ctrl_intf_str
 EOF
+	# Match the ownership wpad.init already applied to $_rpath (the
+	# ctrl_interface dir) for the ujailed wpa_supplicant user/group,
+	# instead of hardcoding a user/group name here. Any ujail consumer
+	# that runs under a different identity gets the correct owner
+	# without needing a matching edit in this generic netifd script.
+	local _rpath_owner
+	_rpath_owner="$(stat -c '%U:%G' "$_rpath" 2>/dev/null)"
+	[ -n "$_rpath_owner" ] && chown "$_rpath_owner" "$_config"
 	return 0
 }
 
