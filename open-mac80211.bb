@@ -17,7 +17,16 @@ MAC80211_PKG_VERSION := "20250213"
 MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
 SRCPREFIX := "../"
-FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
+python () {
+    import os
+    topdir = d.getVar("TOPDIR")
+    srcprefix = d.getVar("SRCPREFIX") or ""
+    if os.path.isdir(os.path.join(topdir, srcprefix, "src/ipq/mac80211/wlan-open")):
+        d.setVar("WLAN_SRCPREFIX", "src/ipq/")
+    else:
+        d.setVar("WLAN_SRCPREFIX", "qca/src/")
+}
+FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}mac80211/wlan-open/:"
 
 SRC_URI = " \
 	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
@@ -61,7 +70,7 @@ EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
 	-I${STAGING_DIR}/usr/include \
 	-I${STAGING_INCDIR}/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
-	-I${TOPDIR}/${SRCPREFIX}src/ipq/qca-wifi/telemetry_agent/inc/ \
+	-I${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}qca-wifi/telemetry_agent/inc/ \
 	-Wno-error=unused-variable -Wno-unused-variable \
 "
 
@@ -108,13 +117,13 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
 
 do_cp_src_wlan_open_extns() {
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/ath12k/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/ath12k/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
 }
 
 LINUX_SRC_DIR = "${TOPDIR}/${SRCPREFIX}files-6.6"

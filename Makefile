@@ -43,7 +43,9 @@ else
 	SRCPREFIX:="qca/"
 endif
 
-LOCAL_SRC:=$(TOPDIR)/$(SRCPREFIX)src/mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
+WLAN_SRCPREFIX:=$(shell if [ -d $(TOPDIR)/src/ipq ]; then echo "src/ipq/"; else echo "qca/src/"; fi)
+
+LOCAL_SRC:=$(TOPDIR)/$(WLAN_SRCPREFIX)mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
@@ -447,7 +449,7 @@ ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
   C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
 endif
   LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
 
   KBUILD_EXTRA_SYMBOLS_IPA="$(PKG_BUILD_DIR)/../dataipa-1.0/Module.symvers"
   MAKE_OPTS:= \
@@ -464,7 +466,7 @@ endef
 
 else
   ifeq ($(CONFIG_TARGET_echo),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(SRCPREFIX)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
    MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
@@ -475,7 +477,7 @@ else
 	KBUILD_LDFLAGS_MODULE_PREREQ=
 	CFLAGS="-DPLATFORM_SDX"
   else
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(SRCPREFIX)/src/qca-wifi/telemetry_agent/inc/ -Wall"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
 
   MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
@@ -509,13 +511,13 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	cp -rf $(LOCAL_SRC)/* $(PKG_BUILD_DIR)
 ifdef CONFIG_PACKAGE_QCN_EXTN
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.c
-	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_dfs_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.c
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
 endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
@@ -548,14 +550,14 @@ define Quilt/Refresh/Package
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/build,build/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/subsys,subsys/)
 ifdef CONFIG_PACKAGE_QCN_EXTN
-	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/patches,patches/)
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/patches,patches/)
 endif
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath,ath/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath11k,ath11k/)
 	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(PATCH_DIR)/ath12k,ath12k/)
 ifdef CONFIG_PACKAGE_QCN_EXTN
-	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/patches,patches/)
-	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/wifi7/patches,patches/)
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/patches,patches/)
+	$(call Quilt/RefreshDir,$(PKG_BUILD_DIR),$(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi7/patches,patches/)
 endif
 endef
 
@@ -604,12 +606,12 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/vendor.h $(1)/usr/include/mac80211/ath/
 	rm -f $(1)/usr/include/mac80211-backport/linux/module.h
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-	if [ -f "$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole" ]; then \
-		$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
-			$(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
-		lzma e $(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt \
-			$(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
-		rm -f $(TOPDIR)/qca/feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
+	if [ -f "$(TOPDIR)/$(WLAN_SRCPREFIX)ath-tools/athstruct-parser/pahole" ]; then \
+		$(TOPDIR)/$(WLAN_SRCPREFIX)ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
+			$(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
+		lzma e $(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt \
+			$(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
+		rm -f $(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
 	fi
 endif
 endef

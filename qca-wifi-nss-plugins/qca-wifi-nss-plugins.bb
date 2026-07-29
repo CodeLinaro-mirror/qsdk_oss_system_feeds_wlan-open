@@ -7,10 +7,18 @@ inherit module
 CLEANBROKEN = "1"
 
 SRCPREFIX:echo = "../"
+python () {
+    import os
+    topdir = d.getVar("TOPDIR")
+    if os.path.isdir(os.path.join(topdir, "..", "src/ipq/mac80211/wlan-open")):
+        d.setVar("WLAN_SRCPREFIX", "src/ipq/")
+    else:
+        d.setVar("WLAN_SRCPREFIX", "qca/src/")
+}
 
 KARCH:echo = "${ARCH}"
 
-FILESPATH =+ "${TOPDIR}/../src/ipq/wlan-open-extns/ath/plugin:"
+FILESPATH =+ "${TOPDIR}/../${WLAN_SRCPREFIX}wlan-open-extns/ath/plugin:"
 
 SRC_URI = "file://qca-wifi-nss-plugins/"
 
@@ -49,8 +57,8 @@ EXTRA_CFLAGS += " \
     "
 KCFLAGS:append:echo = " \
     -I${STAGING_INCDIR} \
-    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/ \
-    -I${TOPDIR}/${SRCPREFIX}/src/dataipa/drivers/platform/msm/include/uapi \
+    -I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/ \
+    -I${TOPDIR}/${SRCPREFIX}src/dataipa/drivers/platform/msm/include/uapi \
     "
 
 MODULE_EXTRA_SYMBOLS = " \
