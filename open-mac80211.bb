@@ -226,13 +226,19 @@ EOF
 	fi
 }
 
-#do_patch[postfuncs] += "do_refactor_alloc_cocci"
+do_patch[postfuncs] += "do_refactor_alloc_cocci"
 
 do_refactor_alloc_cocci() {
 	set -e
+	if [ "${DEBUG_PROFILE}" = "true" ]; then
+		bbwarn "Skipping do_refactor_alloc_cocci: DEBUG_PROFILE=true enables CONFIG_DEBUG_MEM_USAGE=y which redefines kzalloc to a 2-arg wrapper, incompatible with the 3-arg cocci transformation"
+		return
+	fi
 	SPATCH="spatch"
 	COCCI="${WORKDIR}/alloc.cocci"
 	WLAN_DIR="${S}/drivers/net/wireless/ath/ath12k"
+
+	cp -af ${TOPDIR}/${SRCPREFIX}/meta-ipq/recipes-wifi/wlan-open/alloc.cocci ${COCCI}
 
 	if [ ! -f "${COCCI}" ]; then
 		bbfatal "Missing semantic patch: ${COCCI}"
