@@ -9,7 +9,7 @@ PR = "r2"
 INHIBIT_PACKAGE_STRIP = "0"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "0"
 
-inherit module
+inherit module deploy
 
 MAC80211_PKG_SUBDIR := "backports-${MAC80211_PKG_VERSION}-${LINUX_VERSION}-${MAC80211_PKG_KERNEL_VERSION}"
 MAC80211_S := "${KERNEL_BUILD_DIR}"
@@ -313,6 +313,18 @@ do_install:append:echo() {
 		${D}${systemd_unitdir}/system/multi-user.target.wants/ath12k-wifi8-load.service
 }
 
+do_deploy() {
+}
+
+do_deploy:append:echo() {
+	install -d ${DEPLOYDIR}/kernel_modules/${PN}
+	for kmod in $(find ${S} -name '*.ko' ! -name 'ath12k_wifi7.ko'); do
+		install -m 0644 $kmod ${DEPLOYDIR}/kernel_modules/${PN}
+	done
+}
+
+addtask deploy before do_build after do_install
+
 do_install:append() {
 	install -d ${D}/ini
 	install -d ${D}/ini/internal/
@@ -374,6 +386,7 @@ do_install:append() {
 
     install -d ${D}/lib/functions
     install -m 0755 ${WORKDIR}/rdk_init_helper.sh ${D}/lib/functions/rdk_init_helper.sh
+
 }
 
 
