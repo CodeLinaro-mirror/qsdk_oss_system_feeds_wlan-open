@@ -335,6 +335,20 @@ do_install:append() {
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
 
+	if [ "${BASEMACHINE}" = "echo" ]; then
+		install -d ${D}${nonarch_base_libdir}/firmware/internal
+		for f in ${D}/ini/*.ini; do
+			[ -f "$f" ] || continue
+			b="$(basename "$f")"
+			ln -sfn "/ini/$b" "${D}${nonarch_base_libdir}/firmware/$b"
+		done
+
+		for f in ${D}/ini/internal/*.ini; do
+			[ -f "$f" ] || continue
+			b="$(basename "$f")"
+			ln -sfn "/ini/internal/$b" "${D}${nonarch_base_libdir}/firmware/internal/$b"
+		done
+	fi
 	cp -r ${S}/net/mac80211/*.h ${D}${includedir}/mac80211/
 	cp -r ${S}/include/* ${D}${includedir}/mac80211/
 	cp -r ${S}/backport-include/* ${D}${includedir}/mac80211-backport/
@@ -455,6 +469,12 @@ FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
 FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 FILES:${PN}:append:echo = " ${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules"
 FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
+FILES:${PN}:append:echo = " \
+      ${nonarch_base_libdir}/firmware \
+      ${nonarch_base_libdir}/firmware/* \
+      ${nonarch_base_libdir}/firmware/internal \
+      ${nonarch_base_libdir}/firmware/internal/* \
+  "
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
