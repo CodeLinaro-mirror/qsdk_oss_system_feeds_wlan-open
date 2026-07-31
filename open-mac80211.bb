@@ -65,6 +65,7 @@ RDEPENDS:${PN} = " \
 "
 
 TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
+TARGET_CFLAGS:append = "${@' -DATH12K_CMA_SUPPORT' if d.getVar('MACHINE').startswith(('ipq96xx', 'ipq52xx')) else ''}"
 
 EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
