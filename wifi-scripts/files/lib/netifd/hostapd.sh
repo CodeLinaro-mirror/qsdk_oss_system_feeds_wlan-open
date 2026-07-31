@@ -497,7 +497,7 @@ hostapd_common_add_bss_config() {
 	config_add_array 'sae_groups:list(saelist)'
 	config_add_array 'owe_groups:list(owelist)'
 
-	config_add_int dpp
+	config_add_int dpp pasn pasn_noauth
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
 	config_add_int dpp_configurator_connectivity
 	config_add_int ssid_protection
@@ -742,7 +742,7 @@ hostapd_set_bss_options() {
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
-		vendor_elements fils ocv apup dpp ssid_protection \
+		vendor_elements fils ocv apup dpp pasn pasn_noauth ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
 		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
@@ -1235,8 +1235,13 @@ hostapd_set_bss_options() {
 
 		append bss_conf "wpa_disable_eapol_key_retries=$wpa_disable_eapol_key_retries" "$N"
 
+		set_default pasn 0
+		set_default pasn_noauth 1
+		[ "$pasn" -eq "1" ] && append bss_conf "pasn_noauth=$pasn_noauth" "$N"
+
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
+		[ "$pasn" -eq "1" ] && append wpa_key_mgmt "PASN"
 		[ "$eppk" -eq "1" ] && append wpa_key_mgmt "EPPKE"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
 		if [ "$group_cipher" != "GCMP-256" ]; then
