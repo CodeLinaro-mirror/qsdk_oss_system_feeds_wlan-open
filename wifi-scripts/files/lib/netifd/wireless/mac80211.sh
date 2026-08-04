@@ -463,6 +463,10 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean ttlm_enable
 	config_add_boolean enable_mscs
 	config_add_boolean enable_dscp_policy_capa
+	config_add_boolean vht_mcs_10_11_supp
+	config_add_boolean vht_mcs_10_11_nq2q_peer_supp
+	config_add_boolean he_400ns_sgi_supp
+	config_add_boolean he_2xltf_160_80p80_supp
 
 	#atf
 	config_add_boolean commitatf
@@ -1581,6 +1585,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars commitatf atfssidsched atfssidgroup
 	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
+	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
 	json_get_vars mapc_cotdma_enable
 
 	#epcs params
@@ -1702,6 +1707,19 @@ mac80211_hostapd_setup_bss() {
 
 	if [ -n "$enable_dscp_policy_capa" ]; then
 		append hostapd_cfg "enable_dscp_policy_capa=$enable_dscp_policy_capa" "$N"
+	fi
+
+	if [ -n "$vht_mcs_10_11_supp" ]; then
+		append hostapd_cfg "vht_mcs_10_11_supp=$vht_mcs_10_11_supp" "$N"
+	fi
+	if [ -n "$vht_mcs_10_11_nq2q_peer_supp" ]; then
+		append hostapd_cfg "vht_mcs_10_11_nq2q_peer_supp=$vht_mcs_10_11_nq2q_peer_supp" "$N"
+	fi
+	if [ -n "$he_400ns_sgi_supp" ]; then
+		append hostapd_cfg "he_400ns_sgi_supp=$he_400ns_sgi_supp" "$N"
+	fi
+	if [ -n "$he_2xltf_160_80p80_supp" ]; then
+		append hostapd_cfg "he_2xltf_160_80p80_supp=$he_2xltf_160_80p80_supp" "$N"
 	fi
 
 	case "$htmode" in
