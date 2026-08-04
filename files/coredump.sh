@@ -35,7 +35,13 @@ LATEST_FILE=$(basename "$DEVPATH")
 
 if [ -n "$LATEST_FILE" ] && [ -e "$COREDUMP_PATH/$LATEST_FILE/data" ]; then
     TARGET_PATH="$COREDUMP_PATH/$LATEST_FILE/failing_device"
-
+    hdr=$(dd if=$COREDUMP_PATH/$LATEST_FILE/data bs=4 count=1 2>/dev/null)
+    hdr=${hdr:1}
+    if [ "$hdr" = "ELF" ]; then
+       file_prefix="q6dump"
+   else
+       file_prefix="q6dbgdump"
+   fi
     if [ -e "$TARGET_PATH/subsystem_device" ]; then
         # Extract the hexadecimal value (without '0x') from the file 'subsystem_device'
         target=$(sed -n 's/.*0x\([0-9a-fA-F]*\).*/\1/p' "$TARGET_PATH/subsystem_device")
@@ -43,18 +49,18 @@ if [ -n "$LATEST_FILE" ] && [ -e "$COREDUMP_PATH/$LATEST_FILE/data" ]; then
         pci_path=$(basename "$TARGET_PATH_N")
         pci_slot=$(echo "$pci_path" | awk '{print substr($0, 4, 1)}')
 
-        FILENAME="q6dump-${target}-pci${pci_slot}-${TIMESTAMP}.bin"
+        FILENAME="${file_prefix}-${target}-pci${pci_slot}-${TIMESTAMP}.bin"
     else
         BOARD_NAME_PATH="/tmp/sysinfo/board_name"
         PD_PATH="$TARGET_PATH"
 
         if [ -e "$PD_PATH/name" ]; then
             target=$(awk -F'[,-]' '{print $2}' "$BOARD_NAME_PATH")
-            FILENAME="q6dump-${target}-rootpd-${TIMESTAMP}.bin"
+            FILENAME="${file_prefix}-${target}-rootpd-${TIMESTAMP}.bin"
         else
             target=$(awk -F'[,-]' '{print $2}' "$BOARD_NAME_PATH")
             pd_name=$(awk -F'_' '{print $NF}' "$PD_PATH/of_node/qcom,userpd-subsys-name")
-            FILENAME="q6dump-${target}-${pd_name}-${TIMESTAMP}.bin"
+            FILENAME="${file_prefix}-${target}-${pd_name}-${TIMESTAMP}.bin"
         fi
     fi
 
