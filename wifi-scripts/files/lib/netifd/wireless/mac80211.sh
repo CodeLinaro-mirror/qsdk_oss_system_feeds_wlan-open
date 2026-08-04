@@ -449,7 +449,6 @@ drv_mac80211_init_iface_config() {
 	config_add_int dtim_period
 	config_add_int start_disabled
 	config_add_int ieee80211w
-	config_add_int beacon_prot
 	config_add_boolean disable_sa_query
 	config_add_int unsol_bcast_presp
 	config_add_int fils_discovery force_disable_in_band_discovery
@@ -1569,7 +1568,7 @@ mac80211_hostapd_setup_bss() {
 	append hostapd_cfg "$type=$ifname" "$N"
 
 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot disable_sa_query ppe_vp multi_ap 
+	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w disable_sa_query ppe_vp multi_ap
 	json_get_vars dynamic_vlan vlan_tagged_interface vlan_bridge vlan_naming
 	json_get_vars accept_mac_file wpa_psk_file sae_password_file
 	json_get_vars bss_index
@@ -1601,14 +1600,6 @@ mac80211_hostapd_setup_bss() {
 		fi
 	fi
 	set_default start_disabled 0
-
-	case "$auth_type" in
-		psk|sae|psk-sae|owe|eap*|wep|sae-mixed|ft-sae-ext-key)
-			if [ "$ieee80211w" -gt 0 ] && [ "$beacon_prot" -gt 0 ]; then
-				append hostapd_cfg "beacon_prot=1" "$N"
-			fi
-		;;
-	esac
 
 	if [ "$wds" -gt 0 ] || [ "$wds_ie" -gt 0 ]; then
 		wds_support=$(mac80211_wds_support_check "$phy")

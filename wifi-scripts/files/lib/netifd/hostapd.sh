@@ -348,6 +348,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_boolean rsn_preauth auth_cache
 	config_add_int ieee80211w
+	config_add_int beacon_prot
 	config_add_int eapol_version
 	config_add_int ieee8021x
 
@@ -1332,7 +1333,7 @@ hostapd_set_bss_options() {
 		# RSN -> allow management frame protection
 		case "$ieee80211w" in
 			[012])
-				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout
+				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout beacon_prot
 				if [[ "$auth_type" == "sae" || "$auth_type" == "ft-sae-ext-key" || "$auth_type" == "sae-ext-key" ]]; then
 					ieee80211w=2
 				fi
@@ -1347,6 +1348,8 @@ hostapd_set_bss_options() {
 						append bss_conf "assoc_sa_query_max_timeout=$ieee80211w_max_timeout" "$N"
 					[ -n "$ieee80211w_retry_timeout" ] && \
 						append bss_conf "assoc_sa_query_retry_timeout=$ieee80211w_retry_timeout" "$N"
+					[ -n "$beacon_prot" ] && \
+						append bss_conf "beacon_prot=$beacon_prot" "$N"
 				}
 			;;
 		esac
