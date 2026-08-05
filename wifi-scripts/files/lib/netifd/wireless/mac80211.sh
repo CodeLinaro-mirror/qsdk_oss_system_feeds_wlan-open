@@ -441,6 +441,7 @@ ubus_call() {
 		uplink_csa
 	config_add_string CSwOpts acs_block_chan_list
 	config_add_int cac_timeout bgcac_timeout
+	config_add_int chan_coex_disable
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
@@ -3195,7 +3196,8 @@ drv_mac80211_setup() {
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
 		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
-		cac_timeout bgcac_timeout
+		cac_timeout bgcac_timeout \
+		chan_coex_disable
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -3440,6 +3442,11 @@ drv_mac80211_setup() {
 		[ -n "$bgcac_timeout" ] && {
 			cfg80211tool "${phy}:${radio_idx}" pCACTimeout "$bgcac_timeout" >/dev/null 2>&1 || \
 				echo "pCACTimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$chan_coex_disable" ] && {
+			cfg80211tool "${phy}:${radio_idx}" chan_coex_disable "$chan_coex_disable" >/dev/null 2>&1 || \
+				echo "chan_coex_disable failed for ${phy}:${radio_idx}" > /dev/console
 		}
 	fi
 
