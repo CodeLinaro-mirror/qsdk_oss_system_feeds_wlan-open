@@ -535,6 +535,7 @@ ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_scan_radio_extn.c
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_scan_radio_extn.h
 endif
+	$(CP) $(STAGING_DIR)/usr/include/qca-vendor.h $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qca-vendor.h
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
@@ -621,7 +622,7 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/backport-include/* $(1)/usr/include/mac80211-backport/
 	$(CP) $(PKG_BUILD_DIR)/net/mac80211/rate.h $(1)/usr/include/net/mac80211/
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/*.h $(1)/usr/include/mac80211/ath/
-	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/vendor.h $(1)/usr/include/mac80211/ath/
+	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qca-vendor.h $(1)/usr/include/mac80211/ath/
 	rm -f $(1)/usr/include/mac80211-backport/linux/module.h
 
 ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
