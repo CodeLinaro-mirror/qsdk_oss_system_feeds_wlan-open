@@ -390,6 +390,11 @@ do_install:append() {
 	# Clean up empty updates/ dir
 	rm -rf ${D}/lib/modules/${KERNEL_VERSION}/updates
 
+	# Remove ath12k_wifi7.ko from the rootfs for echo
+	if [ "${BASEMACHINE}" = "echo" ]; then
+		rm -f ${D}/lib/modules/${KERNEL_VERSION}/ath12k_wifi7.ko
+	fi
+
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi8.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi8.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
@@ -463,6 +468,7 @@ RDEPENDS:${PN}:remove:echo = " \
 	kernel-module-ath11k-ahb \
 	kernel-module-ath11k-pci \
 	${PN}-firmware-ath11k \
+	kernel-module-ath12k-wifi7 \
 "
 
 FILES:${PN} += "/ini/* /ini/internal/*"
@@ -492,6 +498,7 @@ KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k"
 KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
+KERNEL_MODULE_AUTOLOAD:remove:echo = "ath12k_wifi7"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
 
 # Configure modprobe options using module_conf (same pattern as reference)
