@@ -502,6 +502,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean smd_ap smd_ptk_mode smd_dl_data_fwd
 	config_add_string 'smd_identifier:macaddr' 'smd_partner:macaddr'
 	config_add_int smd_timeout smd_max_peer_apmlds smd_dl_drain_time
+	config_add_boolean mapc_cotdma_enable
 }
 
 mac80211_add_capabilities() {
@@ -1580,6 +1581,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars commitatf atfssidsched atfssidgroup
 	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
+	json_get_vars mapc_cotdma_enable
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -1679,6 +1681,10 @@ mac80211_hostapd_setup_bss() {
 
 	if [ -n "$smd_type" ]; then
 		append hostapd_cfg "smd_type=$smd_type" "$N"
+	fi
+
+	if [ -n "$mapc_cotdma_enable" ]; then
+		append hostapd_cfg "mapc_cotdma_enable=$mapc_cotdma_enable" "$N"
 	fi
 
 
