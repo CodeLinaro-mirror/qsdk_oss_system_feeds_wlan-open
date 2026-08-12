@@ -3389,6 +3389,9 @@ list_phy_interfaces() {
 }
 
 drv_mac80211_teardown() {
+	local hostapd_run_dir="/var/run/hostapd"
+	local ctrl_path ctrl_name netdev_name
+
 	# Remove HMMC default deny-list entries from all VAPs on wifi down
 	configure_hmmc_denylist_all del
 
@@ -3403,6 +3406,31 @@ drv_mac80211_teardown() {
 	mac80211_set_suffix
 	mac80211_reclaim_all_vif_macs
 	mac80211_reset_config "$phy"
+
+	# Remove stale per-interface hostapd ctrl sockets after netdev teardown.
+	if [ -d "$hostapd_run_dir" ]; then
+		for ctrl_path in "$hostapd_run_dir"/*; do
+			[ -e "$ctrl_path" ] || continue
+
+			ctrl_name="${ctrl_path##*/}"
+			case "$ctrl_name" in
+				global|hostapd_if_eloop_*.sock)
+					continue
+					;;
+			esac
+
+			netdev_name="$ctrl_name"
+			case "$netdev_name" in
+				*_link[0-9]*)
+					netdev_name="${netdev_name%%_link*}"
+					;;
+			esac
+
+			[ -e "/sys/class/net/$netdev_name" ] && continue
+			rm -f "$ctrl_path"
+		done
+	fi
+
 	killall rptr-mgr
 	rm /var/run/rptr_mgr.conf
 	rm -f /tmp/CSwOpts_saved
