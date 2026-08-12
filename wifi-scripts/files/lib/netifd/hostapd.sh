@@ -408,7 +408,8 @@ hostapd_common_add_bss_config() {
 	config_add_string time_zone
 	config_add_string vendor_elements
 
-	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report
+	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report smd_neighbor_update
+	config_add_int smd_neighbor_expiry_time smd_neighbor_pull_interval
 	config_add_int rnr rnr_ie_allowed
 
 	config_add_boolean ftm_responder stationary_ap
@@ -1201,10 +1202,11 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 	[ "$mbo" -eq 1 ] && set_default ieee80211w 1
 
-	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
+	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed smd_neighbor_update smd_neighbor_expiry_time smd_neighbor_pull_interval
 	set_default ieee80211k 0
 	set_default rnr 0
 	set_default rnr_ie_allowed 0
+	set_default smd_neighbor_update 0
 	if [ "$ieee80211k" -eq "1" ]; then
 		set_default rrm_neighbor_report 1
 		set_default rrm_beacon_report 1
@@ -1215,6 +1217,9 @@ hostapd_set_bss_options() {
 
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
+	[ "$smd_neighbor_update" -eq "1" ] && append bss_conf "smd_neighbor_update=1" "$N"
+	[ -n "$smd_neighbor_expiry_time" ] && append bss_conf "smd_neighbor_expiry_time=$smd_neighbor_expiry_time" "$N"
+	[ -n "$smd_neighbor_pull_interval" ] && append bss_conf "smd_neighbor_pull_interval=$smd_neighbor_pull_interval" "$N"
 	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
 	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
