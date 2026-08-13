@@ -3416,6 +3416,8 @@ drv_mac80211_setup() {
 	wpa_supp_init=
 	oce_ap=
 	mon_ifname=
+	mc_count=0
+	rm -f /var/run/hostapd_cred_${phy}.bin
 	for_each_interface "ap" mac80211_check_ap
 
 	[ -f "$hostapd_conf_file" ] && mv "$hostapd_conf_file" "$hostapd_conf_file.prev"
