@@ -1915,6 +1915,14 @@ find_phy() {
 	return 1
 }
 
+mac80211_recovery_in_progress() {
+	local f
+	for f in /sys/kernel/debug/ath12k/*/recovery_in_progress; do
+		[ -f "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "1" ] && return 0
+	done
+	return 1
+}
+
 mac80211_check_ap() {
         has_ap=$((has_ap+1))
 }
@@ -3111,6 +3119,12 @@ drv_mac80211_setup() {
 
 	find_phy || {
 		echo "Could not find PHY for device '$1'"
+		wireless_set_retry 1
+		return 1
+	}
+
+	mac80211_recovery_in_progress && {
+		echo "ath12k recovery in progress; deferring setup for $phy"
 		wireless_set_retry 1
 		return 1
 	}
