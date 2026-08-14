@@ -499,6 +499,7 @@ hostapd_common_add_bss_config() {
 	config_add_int ocv
 	config_add_array 'sae_groups:list(saelist)'
 	config_add_array 'owe_groups:list(owelist)'
+	config_add_array 'pasn_groups:list(pasnlist)'
 
 	config_add_int dpp pasn pasn_noauth
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
@@ -555,6 +556,7 @@ hostapd_common_add_bss_config() {
 	config_add_int eap_using_authentication_frames
 	config_add_int pmksa_caching_privacy
 	config_add_int report_connection_failures
+	config_add_int eppke_unauth
 }
 
 hostapd_set_vlan_file() {
@@ -776,12 +778,13 @@ hostapd_set_bss_options() {
 		rsnxe_capab_mask \
 		sae_pw_id_num sae_pw_id_key sae_password \
 		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
-		report_connection_failures
+		report_connection_failures eppke_unauth
 
 
 	json_get_values sae_groups sae_groups
 	json_get_values owe_groups owe_groups
 	json_get_values security_profiles security_profiles
+	json_get_values pasn_groups pasn_groups
 
 	set_default fils 0
 	set_default isolate 0
@@ -971,11 +974,13 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
 	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
 	[ -n "$report_connection_failures" ] && append bss_conf "report_connection_failures=$report_connection_failures" "$N"
+	[ -n "$eppke_unauth" ] && append bss_conf "eppke_unauth=$eppke_unauth" "$N"
 	for action_policy_var in $hostapd_if_action_policy_uci_vars; do
 		eval "action_policy_val=\"\${$action_policy_var}\""
 		[ -n "$action_policy_val" ] && append bss_conf "${action_policy_var}=$action_policy_val" "$N"
 	done
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
+	[ -n "$pasn_groups" ] && append bss_conf "pasn_groups=$pasn_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
 	fi
