@@ -442,6 +442,7 @@ ubus_call() {
 	config_add_string CSwOpts acs_block_chan_list
 	config_add_int cac_timeout bgcac_timeout
 	config_add_int chan_coex_disable
+	config_add_boolean blockdfslist
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
@@ -3197,7 +3198,8 @@ drv_mac80211_setup() {
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
 		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
 		cac_timeout bgcac_timeout \
-		chan_coex_disable
+		chan_coex_disable \
+		blockdfslist
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -3447,6 +3449,11 @@ drv_mac80211_setup() {
 		[ -n "$chan_coex_disable" ] && {
 			cfg80211tool "${phy}:${radio_idx}" chan_coex_disable "$chan_coex_disable" >/dev/null 2>&1 || \
 				echo "chan_coex_disable failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$blockdfslist" ] && {
+			cfg80211tool "$phy" radio_idx "$radio_idx" blockdfslist "$blockdfslist" >/dev/null 2>&1 || \
+				echo "blockdfslist failed for ${phy} radio_idx ${radio_idx}" > /dev/ttyMSM0
 		}
 	fi
 
