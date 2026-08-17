@@ -2490,9 +2490,21 @@ mac80211_apply_monitor_mac() {
 
 	if [ -n "$mon_mac" ] && [ -n "$ifname" ]; then
 		ip link set dev "$ifname" address "$mon_mac" >/dev/null 2>&1 || {
+			local cur_chandef
+			cur_chandef=$(iw dev "$ifname" info 2>/dev/null | awk "
+				/[[:space:]]channel / {
+					gsub(/[^0-9]/,\"\",\$3); gsub(/,/,\"\",\$6)
+					s=\$3\" \"\$6
+					if (\$6+0 >= 40) {
+						if (\$9 != \"\") s=s\" \"\$9
+						if (\$12 != \"\") s=s\" \"\$12
+					}
+					print s; exit
+				}")
 			ip link set dev "$ifname" down >/dev/null 2>&1 || true
 			ip link set dev "$ifname" address "$mon_mac" >/dev/null 2>&1 || true
 			ip link set dev "$ifname" up >/dev/null 2>&1 || true
+			[ -n "$cur_chandef" ] && iw dev "$ifname" set freq $cur_chandef >/dev/null 2>&1 || true
 		}
 
 		if [ -n "$i" ]; then
