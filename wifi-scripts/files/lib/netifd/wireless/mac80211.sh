@@ -1674,7 +1674,7 @@ mac80211_hostapd_setup_bss() {
 		;;
 	esac
 
-	if [ -n "$enable_link_id" ]; then
+	if [ "$enable_link_id" = "1" ]; then
 		append hostapd_cfg "mld_link_id=$([ "$radio" = "-1" ] && echo 0 || echo "$radio")" "$N"
 	fi
 
