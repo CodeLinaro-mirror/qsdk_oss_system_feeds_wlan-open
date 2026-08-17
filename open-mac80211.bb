@@ -65,6 +65,7 @@ RDEPENDS:${PN} = " \
 "
 
 TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
+TARGET_CFLAGS:append:echo = " -DATH12K_CMA_SUPPORT"
 TARGET_CFLAGS:append = "${@' -DATH12K_CMA_SUPPORT' if d.getVar('MACHINE').startswith(('ipq96xx', 'ipq52xx')) else ''}"
 
 EXTRA_MAKE_CFLAGS=" \
@@ -236,7 +237,7 @@ do_patch[postfuncs] += "do_refactor_alloc_cocci"
 
 do_refactor_alloc_cocci() {
 	set -e
-	if [ "${DEBUG_PROFILE}" = "true" ]; then
+	if [ "${DEBUG_PROFILE}" = "true" ] || [ "${BASEMACHINE}" = "echo" ]; then
 		bbwarn "Skipping do_refactor_alloc_cocci: DEBUG_PROFILE=true enables CONFIG_DEBUG_MEM_USAGE=y which redefines kzalloc to a 2-arg wrapper, incompatible with the 3-arg cocci transformation"
 		return
 	fi
@@ -244,7 +245,7 @@ do_refactor_alloc_cocci() {
 	COCCI="${WORKDIR}/alloc.cocci"
 	WLAN_DIR="${S}/drivers/net/wireless/ath/ath12k"
 
-	cp -af ${TOPDIR}/${SRCPREFIX}/meta-ipq/recipes-wifi/wlan-open/alloc.cocci ${COCCI}
+	cp -af ${THISDIR}/alloc.cocci ${COCCI}
 
 	if [ ! -f "${COCCI}" ]; then
 		bbfatal "Missing semantic patch: ${COCCI}"
