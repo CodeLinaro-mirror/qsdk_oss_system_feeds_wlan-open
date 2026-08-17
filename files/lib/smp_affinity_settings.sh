@@ -1309,6 +1309,9 @@ enable_affinity_mi01_9() {
 	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_10' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
 
+	#For monitor interrupts
+	set_wifi_dp_mon_affinity "wlan_dp_8"
+
 	enable_affinity_ds
 
 }
