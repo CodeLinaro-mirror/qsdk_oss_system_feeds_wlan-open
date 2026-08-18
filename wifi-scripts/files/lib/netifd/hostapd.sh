@@ -912,7 +912,7 @@ hostapd_set_bss_options() {
 	json_get_values supported_rates_list supported_rates
 	[ -z "$supported_rates_list" ] && json_get_var supported_rates_list supported_rates
 	[ -n "$supported_rates_list" ] && append bss_conf "supported_rates=$supported_rates_list" "$N"
-	
+
 	# Basic rates (array or string)
 	local basic_rates_list
 	json_get_values basic_rates_list basic_rates
@@ -1806,7 +1806,7 @@ wpa_supplicant_prepare_interface() {
 
 	_wpa_supplicant_common "$1"
 
-	json_get_vars mode wds multi_ap rtt_initiator_role
+	json_get_vars mode wds multi_ap rtt_initiator_role extap
 	set_default rtt_initiator_role 0
 
 	local rtt_initiator_role_str=
@@ -1819,7 +1819,7 @@ wpa_supplicant_prepare_interface() {
 				fail=1
 			;;
 			sta)
-				([ "$wds_ie" ] || [ "$wds" = 1 ] || [ "$multi_ap" = 1 ]) || fail=1
+				([ "$wds_ie" ] || [ "$wds" = 1 ] || [ "$multi_ap" = 1 ] || [ "$extap" = 1 ]) || fail=1
 			;;
 		esac
 
@@ -1929,6 +1929,7 @@ wpa_supplicant_add_network() {
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
+		extap extap_max_clients \
 		scan_freq bgscan bgscan_freq \
 		sae_password_id \
 		sae_password_id_change \
@@ -2053,6 +2054,9 @@ wpa_supplicant_add_network() {
 			        append network_data "multi_ap_profile=$multi_ap_profile" "$N$T"
 		        }
 		}
+		[ "$extap" = "1" ] && append network_data "extap_mode=1" "$N$T"
+		[ "$extap" = "1" ] && [ "$extap_max_clients" -gt 0 ] 2>/dev/null && \
+			append network_data "extap_max_clients=$extap_max_clients" "$N$T"
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
 		[ "$allow_3addr_mc" = "1" ] && append network_data "allow_3addr_mc=1" "$N$T"
