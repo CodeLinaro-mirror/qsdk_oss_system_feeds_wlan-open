@@ -125,10 +125,16 @@ define KernelPackage/cfg80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=cfg80211 - wireless configuration API
   DEPENDS+= +iw-full +iwinfo +!USE_PRPLMESH_WHM:wifi-scripts +wireless-regdb +USE_RFKILL:kmod-rfkill
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
+  DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
+endif
   ABI_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
 	$(PKG_BUILD_DIR)/net/wireless/cfg80211.ko
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
+  FILES+= $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
+endif
 endef
 
 define Package/ath-legacy-wifi-scripts
@@ -214,9 +220,13 @@ ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/compat/compat.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/net/wireless/cfg80211.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 endif
-	if [ -f "./files/lib/wifi/ath12k_struct_layout.txt.lzma" ]; then \
-		$(INSTALL_BIN) ./files/lib/wifi/ath12k_struct_layout.txt.lzma $(1)/lib/wifi/; \
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
+ ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+	if [ -f "$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt.lzma" ]; then \
+		$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt.lzma $(1)/lib/wifi/; \
 	fi
+ endif
+endif
 endef
 
 define KernelPackage/cfg80211/description
@@ -312,11 +322,11 @@ define KernelPackage/mac80211/config
 		bool "Enable 802.11s mesh support"
 		default y
 
-	config PACKAGE_MAC80211_ATHDEBUG
-                bool "Enable athdebug module support"
-                default y
-                help
-                  This option enables ATHDEBUG module support.
+	config PACKAGE_ATHDEBUG
+		bool "Enable athdebug module support"
+		default y
+		help
+		  This option enables ATHDEBUG module support.
 
 	config PACKAGE_QCN_EXTN
 		bool "Enable QCN extensions support"
@@ -365,10 +375,14 @@ define KernelPackage/ath12k/install
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
+endif
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(1)/lib/modules/$(UNAME_VERSION)
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(1)/lib/modules/$(UNAME_VERSION)
+endif
 	$(INSTALL_DIR) $(1)/lib/firmware
 ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN92XX
@@ -384,7 +398,9 @@ endif
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(TOPDIR)/bin/targets/$(TARGET_VARIANT)/modules/
+endif
 endef
 endif
 
@@ -423,7 +439,7 @@ config-$(CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT) += QCN_EXTN_MESH_SUPPORT
 
 config-$(call config_package,mac80211-hwsim) += MAC80211_HWSIM
 
-config-$(CONFIG_PACKAGE_MAC80211_ATHDEBUG) += ATHDEBUG
+config-$(CONFIG_PACKAGE_ATHDEBUG) += ATHDEBUG
 
 config-y += WL_TI WILINK_PLATFORM_DATA
 
@@ -524,7 +540,7 @@ endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)
  ifneq ($(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG),y)
-  ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+  ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
    ifeq ($(CONFIG_QCA_MINIDUMP),y)
     ifeq ($(SPATCH),1)
 	$(Build/refactor)
@@ -581,6 +597,8 @@ define Build/refactor
 	spatch -sp_file alloc.cocci --in-place $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/reg.c
 	spatch -sp_file alloc.cocci --in-place $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wmi.c
 	spatch -sp_file alloc.cocci --in-place $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wow.c
+	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/net/mac80211
+	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/net/wireless
 	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7
 	spatch -cocci_file alloc.cocci --in-place -dir $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8
 endef
@@ -607,14 +625,22 @@ define Build/InstallDev
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/*.h $(1)/usr/include/mac80211/ath/
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/vendor.h $(1)/usr/include/mac80211/ath/
 	rm -f $(1)/usr/include/mac80211-backport/linux/module.h
-ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-	if [ -f "$(TOPDIR)/$(WLAN_SRCPREFIX)ath-tools/athstruct-parser/pahole" ]; then \
-		$(TOPDIR)/$(WLAN_SRCPREFIX)ath-tools/athstruct-parser/pahole $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko > \
-			$(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
-		lzma e $(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt \
-			$(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt.lzma || true; \
-		rm -f $(TOPDIR)/$(SRCPREFIX)feeds/wlan-open/mac80211/files/lib/wifi/ath12k_struct_layout.txt; \
+
+ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
+ ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+	if [ -f "$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole" ]; then \
+		$(TOPDIR)/qca/src/ath-tools/athstruct-parser/pahole \
+			$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
+			$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
+			$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko \
+			$(PKG_BUILD_DIR)/net/wireless/cfg80211.ko \
+			$(PKG_BUILD_DIR)/net/mac80211/mac80211.ko >> \
+			$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt; \
+		lzma e $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt \
+			$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt.lzma || true; \
+		rm -f $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/hostdrv_struct_layout.txt; \
 	fi
+ endif
 endif
 endef
 
