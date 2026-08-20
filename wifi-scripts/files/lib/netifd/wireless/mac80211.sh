@@ -169,6 +169,7 @@ max_amsdu=
 dsss_cck_40=
 background_radar=
 dfs_bw_reduce_en=
+dfs_chan_recovery=
 rxldpc=
 short_gi_80=
 short_gi_160=
@@ -344,7 +345,7 @@ ubus_call() {
 		config_add_int num_global_macaddr multiple_bssid interCACChan
 		config_add_boolean sta_dfs_en
 		config_add_boolean use_driver_vendor_addr
-		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en rpt_max_phy acs_2g_scan_all
+		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en dfs_chan_recovery rpt_max_phy acs_2g_scan_all
 		config_add_int rcac_freq
 	# ACS behavior tuning
 	config_add_int acs_retry_interval acs_retry_count acs_periodic_interval acs_pcac_only
@@ -978,11 +979,12 @@ mac80211_hostapd_setup_base() {
 		;;
 	esac
 	[ "$band" = "5g" ] && {
-		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0 rcac_freq:0 interCACChan
+		json_get_vars background_radar:0 bgcac_en:0 dfs_bw_reduce_en:0 dfs_chan_recovery:0 rcac_freq:0 interCACChan
 
 		[ "$background_radar" -eq 1 ] && append base_cfg "enable_background_radar=1" "$N"
 		[ "$bgcac_en" -eq 1 ] && append base_cfg "bgcac_en=1" "$N"
 		[ "$dfs_bw_reduce_en" -eq 1 ] && append base_cfg "dfs_bw_reduce_en=1" "$N"
+		[ "$dfs_chan_recovery" -eq 1 ] && append base_cfg "dfs_chan_recovery=1" "$N"
 		[ "$rcac_freq" -gt 0 ] && append base_cfg "rcac_freq=$rcac_freq" "$N"
 		[ "$interCACChan" -gt 0 ] && append base_cfg "interCACChan=$interCACChan" "$N"
 	}
