@@ -472,6 +472,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
 	config_add_boolean enable_mscs
+	config_add_boolean deferred_scs
 	config_add_boolean enable_dscp_policy_capa
 	config_add_boolean vht_mcs_10_11_supp
 	config_add_boolean vht_mcs_10_11_nq2q_peer_supp
@@ -1591,7 +1592,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars disable_11ax
 	json_get_vars disable_11bn
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs deferred_scs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
 	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
@@ -1707,6 +1708,10 @@ mac80211_hostapd_setup_bss() {
 		append hostapd_cfg "enable_scs=$enable_scs" "$N"
 	else
 		append hostapd_cfg "enable_scs=1" "$N"
+	fi
+
+	if [ -n "$deferred_scs" ]; then
+		append hostapd_cfg "deferred_scs=$deferred_scs" "$N"
 	fi
 
 	if [ -n "$enable_mscs" ]; then
