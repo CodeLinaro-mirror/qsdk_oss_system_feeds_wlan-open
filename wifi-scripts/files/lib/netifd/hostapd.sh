@@ -183,6 +183,8 @@ hostapd_common_add_device_config() {
 	config_add_int rssi_deauth_grace_samples
 	config_add_int rssi_ignore_probe_request
 	config_add_int maxassoc
+	config_add_int next_radar_freq
+	config_add_int next_radar_width
 
 	config_add_string acs_chan_bias
 	config_add_int post_nol_freq
@@ -210,7 +212,7 @@ hostapd_prepare_device_config() {
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
 		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
 		mbssid:0 mqtt_enabled mqtt_broker_host mqtt_broker_port \
-		post_nol_freq post_nol_width post_nol_bgcac_en:1
+		post_nol_freq post_nol_width post_nol_bgcac_en:1 next_radar_freq next_radar_width
 
 	hostapd_set_log_options base_cfg
 
@@ -326,6 +328,9 @@ hostapd_prepare_device_config() {
 	[ -n "$post_nol_freq" ] && append base_cfg "post_nol_freq=$post_nol_freq" "$N"
 	[ -n "$post_nol_width" ] && append base_cfg "post_nol_width=$post_nol_width" "$N"
 	[ -n "$post_nol_freq" ] && append base_cfg "post_nol_bgcac_en=$post_nol_bgcac_en" "$N"
+
+	[ -n "$next_radar_freq" ] && append base_cfg "next_radar_freq=$next_radar_freq" "$N"
+	[ -n "$next_radar_width" ] && append base_cfg "next_radar_width=$next_radar_width" "$N"
 
 	json_get_values opts hostapd_options
 	for val in $opts; do
