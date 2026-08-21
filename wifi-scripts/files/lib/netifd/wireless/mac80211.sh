@@ -8,6 +8,12 @@
 . /lib/netifd/hostapd.sh
 . /lib/functions/system.sh
 
+# Cache of disabled MLO links in the form "mld:device", rebuilt once
+# per drv_mac80211_setup(). UCI remains the source of truth so link
+# removals (e.g. via `wifi mlo_remove_link`) survive hostapd restarts
+# even when netifd has not been reloaded.
+_mlo_disabled_links=
+
 # ---------------------------------------------------------------------------
 # HMMC Default Deny List Configuration
 # ---------------------------------------------------------------------------
@@ -1951,7 +1957,15 @@ mac80211_recovery_in_progress() {
 }
 
 mac80211_check_ap() {
-        has_ap=$((has_ap+1))
+	local mld
+
+	json_select config
+	json_get_vars mld
+	json_select ..
+
+	mac80211_mlo_link_disabled "$mld" "$device" && return
+
+	has_ap=$((has_ap+1))
 }
 
 mac80211_get_band_name() {
@@ -1995,12 +2009,59 @@ mac80211_set_ifname() {
 	eval "ifname=\"$phy-$prefix\${idx_$prefix:-0}\"; idx_$prefix=\$((\${idx_$prefix:-0 } + 1))"
 }
 
+# Build a cache of disabled MLO links in the format:
+#       <mld>:<device> <mld>:<device> ...
+# Called once per drv_mac80211_setup().
+mac80211_build_mlo_disabled_cache() {
+	_mlo_disabled_links=
+
+	config_load wireless
+
+	__scan_wifi_iface_disabled() {
+		local iface_mld iface_device iface_disabled
+
+		config_get iface_disabled "$1" disabled 0
+		[ "$iface_disabled" -eq 1 ] || return 0
+
+		config_get iface_mld "$1" mld
+		[ -n "$iface_mld" ] || return 0
+
+		config_get iface_device "$1" device
+		[ -n "$iface_device" ] || return 0
+
+		append _mlo_disabled_links "${iface_mld}:${iface_device}"
+	}
+
+	config_foreach __scan_wifi_iface_disabled wifi-iface
+}
+
+# Returns success if the specified MLD link has been marked disabled in UCI.
+mac80211_mlo_link_disabled() {
+	local target_mld="$1"
+	local target_device="$2"
+
+	[ -n "$target_mld" ] || return 1
+        [ -n "$target_device" ] || return 1
+
+	case " $_mlo_disabled_links " in
+	*" ${target_mld}:${target_device} "*)
+		return 0
+		;;
+	esac
+
+	return 1
+}
+
 mac80211_prepare_vif() {
 	ppe_vp="ds"
 	json_select config
 
 	json_get_vars ifname mode ssid wds powersave macaddr enable wpa_psk_file vlan_file ppe_vp mld bss_index vap_submode wds_ie
 
+	if mac80211_mlo_link_disabled "$mld" "$device"; then
+		json_select ..
+		return
+	fi
 
 	[ -n "$ifname" ] || {
                 if [ "$is_wiphy_multi_radio" -eq 1 ]; then
@@ -2853,6 +2914,11 @@ mac80211_setup_vif() {
 	json_get_var default_macaddr _default_macaddr
 	json_get_vars mode wds powersave mld ssid vap_submode monitor_flags
 
+	if mac80211_mlo_link_disabled "$mld" "$device"; then
+		json_select ..
+		return
+	fi
+
 	# Setup SMD parameters
 	json_get_vars smd_enabled smd_enabled
 	json_get_vars smd_id smd_id
@@ -3117,6 +3183,7 @@ drv_mac80211_setup() {
 	local device=$1
 
 	mac80211_derive_ml_info
+	mac80211_build_mlo_disabled_cache
 
 	json_select config
 	json_get_vars \
