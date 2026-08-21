@@ -179,6 +179,8 @@ vht_max_mpdu=
 vht_link_adapt=
 vht_max_a_mpdu_len_exp=
 disable_eml_cap=
+skip_uhr_extn_in_bcn=
+skip_uhr_extn_in_probe_resp=
 enable_aal=
 ml_max_rec_links=
 eht_ulmumimo_80mhz=
@@ -423,6 +425,8 @@ ubus_call() {
 		max_amsdu \
 		dsss_cck_40 \
 		disable_eml_cap \
+		skip_uhr_extn_in_bcn \
+		skip_uhr_extn_in_probe_resp \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
 		ignorecac \
@@ -768,7 +772,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
+	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
@@ -1742,6 +1746,11 @@ mac80211_hostapd_setup_bss() {
 		else
 			append hostapd_cfg "mld_ap=1" "$N"
 		fi
+
+		[ -n "$skip_uhr_extn_in_bcn" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_bcn=$skip_uhr_extn_in_bcn" "$N"
+		[ -n "$skip_uhr_extn_in_probe_resp" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$skip_uhr_extn_in_probe_resp" "$N"
 
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
