@@ -185,6 +185,9 @@ hostapd_common_add_device_config() {
 	config_add_int maxassoc
 
 	config_add_string acs_chan_bias
+	config_add_int post_nol_freq
+	config_add_int post_nol_width
+	config_add_boolean post_nol_bgcac_en
 	config_add_array hostapd_options
 
 	config_add_int airtime_mode
@@ -206,7 +209,8 @@ hostapd_prepare_device_config() {
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
 		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
-		mbssid:0 mqtt_enabled mqtt_broker_host mqtt_broker_port
+		mbssid:0 mqtt_enabled mqtt_broker_host mqtt_broker_port \
+		post_nol_freq post_nol_width post_nol_bgcac_en:1
 
 	hostapd_set_log_options base_cfg
 
@@ -318,6 +322,10 @@ hostapd_prepare_device_config() {
 	[ -n "$mqtt_enabled" ] && append base_cfg "mqtt_enabled=$mqtt_enabled" "$N"
 	[ -n "$mqtt_broker_host" ] && append base_cfg "mqtt_broker_host=$mqtt_broker_host" "$N"
 	[ -n "$mqtt_broker_port" ] && append base_cfg "mqtt_broker_port=$mqtt_broker_port" "$N"
+
+	[ -n "$post_nol_freq" ] && append base_cfg "post_nol_freq=$post_nol_freq" "$N"
+	[ -n "$post_nol_width" ] && append base_cfg "post_nol_width=$post_nol_width" "$N"
+	[ -n "$post_nol_freq" ] && append base_cfg "post_nol_bgcac_en=$post_nol_bgcac_en" "$N"
 
 	json_get_values opts hostapd_options
 	for val in $opts; do
