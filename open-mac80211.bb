@@ -193,9 +193,6 @@ EOF
 		ipq53xx*)
 			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
 			;;
-	esac
-
-	case "${BASEMACHINE}" in
 		echo)
 			echo "CPTCFG_EXT_IPA_OFFLOAD=y" >> ${S}/.config
 			;;
@@ -207,7 +204,7 @@ EOF
 			;;
 	esac
 
-	if [ "${BASEMACHINE}" != "echo" ]; then
+	if [ "${MACHINE}" != "echo" ]; then
 		cat >> ${S}/.config << 'EOF'
 CPTCFG_ATH11K=m
 CPTCFG_ATH11K_AHB=m
