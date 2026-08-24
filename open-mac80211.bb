@@ -475,7 +475,7 @@ KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
 
 # Configure modprobe options using module_conf (same pattern as reference)
 module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
-module_conf_ath12k = "options ath12k dyndbg=+p"
+module_conf_ath12k = "options ath12k dyndbg=+p debug_mask=0xffffffff"
 
 # Register modules that have configuration
 KERNEL_MODULE_PROBECONF += "cfg80211 ath12k"
