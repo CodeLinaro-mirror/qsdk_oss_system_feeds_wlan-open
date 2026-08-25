@@ -1888,6 +1888,50 @@ enable_affinity_hr01() {
 	irq_affinity_num=`grep -E -m1 'pci0_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
 	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
 
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	#assign 3 tcl completions to last 3 CPUs
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	irq_affinity_num=`grep -E -m1 'pci1_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_4' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_5' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_6' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_7' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	#assign 3 tcl completions to last 3 CPUs
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_0' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 1 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_1' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 2 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_2' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 4 > /proc/irq/$irq_affinity_num/smp_affinity
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_3' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
+	irq_affinity_num=`grep -E -m1 'pci2_wlan_dp_8' /proc/interrupts | cut -d ':' -f 1 | tail -n1 | tr -d ' '`
+	[ -n "$irq_affinity_num" ] && echo 8 > /proc/irq/$irq_affinity_num/smp_affinity
+
 	enable_affinity_ds
 }
 
@@ -2051,24 +2095,28 @@ enable_smp_affinity_wifi() {
 					#for RDP487 (IPQ5424(2.4GHz) + QCN9274(5 GHz))
 					enable_affinity_mr03
 					;;
+			rdp498 | \
+			rdp500 | \
 			rdp501)
-					#for RDP501 (QCN6432 2.4GHz + 5GHz)
 					enable_affinity_hr01
+					#for Hermosa based RDPs
+					#Split monitor destination ring (wlan_dp_10) and
+					#monitor low watermark threshold (wlan_dp_12) interrupts
+					#across available CPUs
+					set_wifi_dp_mon_affinity "wlan_dp_10"
+					set_wifi_dp_mon_affinity "wlan_dp_12"
 					;;
 			rdp497 | \
-			rdp498 | \
 			rdp499 | \
-			rdp500 | \
-			rdp501 | \
 			rdp502 | \
 			rdp503 | \
 			rdp504 | \
 			rdp505 | \
 			rdp511 | \
 			rdp512)
-					#for Hermoza based RDPs
-					#Split monitor destination ring (wlan_dp_10) and 
-					#monitor low watermark threshold (wlan_dp_12) interrupts 
+					#for Hermosa based RDPs
+					#Split monitor destination ring (wlan_dp_10) and
+					#monitor low watermark threshold (wlan_dp_12) interrupts
 					#across available CPUs
 					set_wifi_dp_mon_affinity "wlan_dp_10"
 					set_wifi_dp_mon_affinity "wlan_dp_12"
@@ -2079,8 +2127,8 @@ enable_smp_affinity_wifi() {
 			rdp491 | \
 			rdp506)
 					#for Juhu based RDPs
-					#Split monitor destination ring (wlan_dp_10) and 
-					#monitor low watermark threshold (wlan_dp_12) interrupts 
+					#Split monitor destination ring (wlan_dp_10) and
+					#monitor low watermark threshold (wlan_dp_12) interrupts
 					#across available CPUs
 					set_wifi_dp_mon_affinity "wlan_dp_10"
 					set_wifi_dp_mon_affinity "wlan_dp_12"

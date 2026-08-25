@@ -9,7 +9,7 @@ PR = "r2"
 INHIBIT_PACKAGE_STRIP = "0"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "0"
 
-inherit module
+inherit module deploy
 
 MAC80211_PKG_SUBDIR := "backports-${MAC80211_PKG_VERSION}-${LINUX_VERSION}-${MAC80211_PKG_KERNEL_VERSION}"
 MAC80211_S := "${KERNEL_BUILD_DIR}"
@@ -17,7 +17,16 @@ MAC80211_PKG_VERSION := "20250213"
 MAC80211_PKG_KERNEL_VERSION := "9a0dddfb3"
 
 SRCPREFIX := "../"
-FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}src/ipq/mac80211/wlan-open/:"
+python () {
+    import os
+    topdir = d.getVar("TOPDIR")
+    srcprefix = d.getVar("SRCPREFIX") or ""
+    if os.path.isdir(os.path.join(topdir, srcprefix, "src/ipq/mac80211/wlan-open")):
+        d.setVar("WLAN_SRCPREFIX", "src/ipq/")
+    else:
+        d.setVar("WLAN_SRCPREFIX", "qca/src/")
+}
+FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}mac80211/wlan-open/:"
 
 SRC_URI = " \
 	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
@@ -56,12 +65,13 @@ RDEPENDS:${PN} = " \
 "
 
 TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
+TARGET_CFLAGS:append = "${@' -DATH12K_CMA_SUPPORT' if d.getVar('MACHINE').startswith(('ipq96xx', 'ipq52xx')) else ''}"
 
 EXTRA_MAKE_CFLAGS=" \
 	-I${S}/include \
 	-I${STAGING_DIR}/usr/include \
 	-I${STAGING_INCDIR}/qca-nss-ppe/qca-nss-ppe/drv/ppe_ds/exports/ \
-	-I${TOPDIR}/${SRCPREFIX}src/ipq/qca-wifi/telemetry_agent/inc/ \
+	-I${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}qca-wifi/telemetry_agent/inc/ \
 	-Wno-error=unused-variable -Wno-unused-variable \
 "
 
@@ -108,13 +118,15 @@ MODULE_EXTRA_SYMBOLS ="${STAGING_INCDIR}/qca-nss-ppe-vp/Module.symvers \
 do_unpack[postfuncs] += "do_cp_src_wlan_open_extns do_cp_headers"
 
 do_cp_src_wlan_open_extns() {
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/ath12k/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
-	cp -af ${TOPDIR}/${SRCPREFIX}src/ipq/wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src ${S}/net/mac80211/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/ath12k/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi7/src ${S}/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi6/src ${S}/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/ath/wifi8/src ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.c ${S}/net/wireless/cfg80211_dfs_extn.c
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_dfs_extn.h ${S}/net/wireless/cfg80211_dfs_extn.h
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.c ${S}/net/wireless/cfg80211_scan_radio_extn.c
+	cp -af ${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.h ${S}/net/wireless/cfg80211_scan_radio_extn.h
 }
 
 do_cp_headers() {
@@ -156,8 +168,6 @@ CPTCFG_ATH12K_SAWF=y
 CPTCFG_WLAN_VENDOR_ATH=y
 CPTCFG_NL80211_TESTMODE=y
 CPTCFG_CFG80211_CERTIFICATION_ONUS=y
-CPTCFG_MAC80211_DS_SUPPORT=y
-CPTCFG_ATH12K_PPE_DS_SUPPORT=y
 CPTCFG_MAC80211_SFE_SUPPORT=y
 CPTCFG_QCN_EXTN=y
 CPTCFG_MAC80211_ATHDEBUG=y
@@ -189,6 +199,9 @@ EOF
 		ipq53xx*)
 			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
 			;;
+	esac
+
+	case "${BASEMACHINE}" in
 		echo)
 			echo "CPTCFG_EXT_IPA_OFFLOAD=y" >> ${S}/.config
 			;;
@@ -200,7 +213,7 @@ EOF
 			;;
 	esac
 
-	if [ "${MACHINE}" != "echo" ]; then
+	if [ "${BASEMACHINE}" != "echo" ]; then
 		cat >> ${S}/.config << 'EOF'
 CPTCFG_ATH11K=m
 CPTCFG_ATH11K_AHB=m
@@ -210,17 +223,25 @@ CPTCFG_ATH11K_DEBUGFS=y
 CPTCFG_ATH11K_TRACING=y
 CPTCFG_ATH11K_PKTLOG=y
 CPTCFG_MAC80211_PPE_SUPPORT=y
+CPTCFG_MAC80211_DS_SUPPORT=y
+CPTCFG_ATH12K_PPE_DS_SUPPORT=y
 EOF
 	fi
 }
 
-#do_patch[postfuncs] += "do_refactor_alloc_cocci"
+do_patch[postfuncs] += "do_refactor_alloc_cocci"
 
 do_refactor_alloc_cocci() {
 	set -e
+	if [ "${DEBUG_PROFILE}" = "true" ]; then
+		bbwarn "Skipping do_refactor_alloc_cocci: DEBUG_PROFILE=true enables CONFIG_DEBUG_MEM_USAGE=y which redefines kzalloc to a 2-arg wrapper, incompatible with the 3-arg cocci transformation"
+		return
+	fi
 	SPATCH="spatch"
 	COCCI="${WORKDIR}/alloc.cocci"
 	WLAN_DIR="${S}/drivers/net/wireless/ath/ath12k"
+
+	cp -af ${TOPDIR}/${SRCPREFIX}/meta-ipq/recipes-wifi/wlan-open/alloc.cocci ${COCCI}
 
 	if [ ! -f "${COCCI}" ]; then
 		bbfatal "Missing semantic patch: ${COCCI}"
@@ -303,6 +324,18 @@ do_install:append:echo() {
 		${D}${systemd_unitdir}/system/multi-user.target.wants/ath12k-wifi8-load.service
 }
 
+do_deploy() {
+}
+
+do_deploy:append:echo() {
+	install -d ${DEPLOYDIR}/kernel_modules/${PN}
+	for kmod in $(find ${S} -name '*.ko' ! -name 'ath12k_wifi7.ko'); do
+		install -m 0644 $kmod ${DEPLOYDIR}/kernel_modules/${PN}
+	done
+}
+
+addtask deploy before do_build after do_install
+
 do_install:append() {
 	install -d ${D}/ini
 	install -d ${D}/ini/internal/
@@ -321,6 +354,20 @@ do_install:append() {
 	cp -r ${WORKDIR}/ini/* ${D}/ini/
 	cp -r ${WORKDIR}/ini/internal/* ${D}/ini/internal/
 
+	if [ "${BASEMACHINE}" = "echo" ]; then
+		install -d ${D}${nonarch_base_libdir}/firmware/internal
+		for f in ${D}/ini/*.ini; do
+			[ -f "$f" ] || continue
+			b="$(basename "$f")"
+			ln -sfn "/ini/$b" "${D}${nonarch_base_libdir}/firmware/$b"
+		done
+
+		for f in ${D}/ini/internal/*.ini; do
+			[ -f "$f" ] || continue
+			b="$(basename "$f")"
+			ln -sfn "/ini/internal/$b" "${D}${nonarch_base_libdir}/firmware/internal/$b"
+		done
+	fi
 	cp -r ${S}/net/mac80211/*.h ${D}${includedir}/mac80211/
 	cp -r ${S}/include/* ${D}${includedir}/mac80211/
 	cp -r ${S}/backport-include/* ${D}${includedir}/mac80211-backport/
@@ -357,6 +404,11 @@ do_install:append() {
 
 	# Clean up empty updates/ dir
 	rm -rf ${D}/lib/modules/${KERNEL_VERSION}/updates
+
+	# Remove ath12k_wifi7.ko from the rootfs for echo
+	if [ "${BASEMACHINE}" = "echo" ]; then
+		rm -f ${D}/lib/modules/${KERNEL_VERSION}/ath12k_wifi7.ko
+	fi
 
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k.conf ${D}${sysconfdir}/modprobe.d/ath12k.conf
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
@@ -430,6 +482,7 @@ RDEPENDS:${PN}:remove:echo = " \
 	kernel-module-ath11k-ahb \
 	kernel-module-ath11k-pci \
 	${PN}-firmware-ath11k \
+	kernel-module-ath12k-wifi7 \
 "
 
 FILES:${PN} += "/ini/* /ini/internal/*"
@@ -440,6 +493,12 @@ FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 FILES:${PN}:append:echo = " ${systemd_unitdir}/system/ath12k-wifi8-load.service"
 FILES:${PN}:append:echo = " ${systemd_unitdir}/system/multi-user.target.wants/ath12k-wifi8-load.service"
 FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
+FILES:${PN}:append:echo = " \
+      ${nonarch_base_libdir}/firmware \
+      ${nonarch_base_libdir}/firmware/* \
+      ${nonarch_base_libdir}/firmware/internal \
+      ${nonarch_base_libdir}/firmware/internal/* \
+  "
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
 
@@ -459,11 +518,12 @@ KERNEL_MODULE_AUTOLOAD:append = " ath11k_pci"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k"
 KERNEL_MODULE_AUTOLOAD:append = " ath_debug"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi7"
+KERNEL_MODULE_AUTOLOAD:remove:echo = "ath12k_wifi7"
 KERNEL_MODULE_AUTOLOAD:append = " ath12k_wifi8"
 
 # Configure modprobe options using module_conf (same pattern as reference)
 module_conf_cfg80211 = "options cfg80211 ieee80211_regdom=US"
-module_conf_ath12k = "options ath12k dyndbg=+p debug_mask=0xffffffff"
+module_conf_ath12k = "options ath12k dyndbg=+p debug_mask=0x60"
 
 # Register modules that have configuration
 KERNEL_MODULE_PROBECONF += "cfg80211 ath12k"

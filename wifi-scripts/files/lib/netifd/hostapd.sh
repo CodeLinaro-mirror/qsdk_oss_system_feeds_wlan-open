@@ -190,6 +190,10 @@ hostapd_common_add_device_config() {
 	config_add_int airtime_mode
 	config_add_int mbssid
 
+	config_add_boolean mqtt_enabled
+	config_add_string mqtt_broker_host
+	config_add_int mqtt_broker_port
+
 	hostapd_add_log_config
 }
 
@@ -202,7 +206,7 @@ hostapd_prepare_device_config() {
 	json_get_vars country country3 country_ie beacon_int:100 doth require_mode legacy_rates \
 		acs_chan_bias local_pwr_constraint spectrum_mgmt_required airtime_mode cell_density \
 		rts_threshold rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples rssi_ignore_probe_request maxassoc \
-		mbssid:0
+		mbssid:0 mqtt_enabled mqtt_broker_host mqtt_broker_port
 
 	hostapd_set_log_options base_cfg
 
@@ -311,6 +315,10 @@ hostapd_prepare_device_config() {
 	[ -n "$maxassoc" ] && append base_cfg "iface_max_num_sta=$maxassoc" "$N"
 	[ "$mbssid" -gt 0 ] && [ "$mbssid" -le 2 ] && append base_cfg "mbssid=$mbssid" "$N"
 
+	[ -n "$mqtt_enabled" ] && append base_cfg "mqtt_enabled=$mqtt_enabled" "$N"
+	[ -n "$mqtt_broker_host" ] && append base_cfg "mqtt_broker_host=$mqtt_broker_host" "$N"
+	[ -n "$mqtt_broker_port" ] && append base_cfg "mqtt_broker_port=$mqtt_broker_port" "$N"
+
 	json_get_values opts hostapd_options
 	for val in $opts; do
 		append base_cfg "$val" "$N"
@@ -328,7 +336,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int rssi_reject_assoc_rssi rssi_reject_assoc_timeout rssi_deauth_grace_samples
 	config_add_int maxassoc max_inactivity
-	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll
+	config_add_boolean disassoc_low_ack isolate short_preamble skip_inactivity_poll skip_disconnect
 
 	config_add_int \
 		wep_rekey eap_reauth_period \
@@ -340,6 +348,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_boolean rsn_preauth auth_cache
 	config_add_int ieee80211w
+	config_add_int beacon_prot
 	config_add_int eapol_version
 	config_add_int ieee8021x
 
@@ -399,10 +408,12 @@ hostapd_common_add_bss_config() {
 	config_add_string time_zone
 	config_add_string vendor_elements
 
-	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report
+	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report smd_neighbor_update
+	config_add_int smd_neighbor_expiry_time smd_neighbor_pull_interval
 	config_add_int rnr rnr_ie_allowed
 
 	config_add_boolean ftm_responder stationary_ap
+	config_add_int rtt_responder_role
 	config_add_string lci civic
 
 	config_add_boolean ieee80211r pmk_r1_push ft_psk_generate_local ft_over_ds
@@ -488,8 +499,9 @@ hostapd_common_add_bss_config() {
 	config_add_int ocv
 	config_add_array 'sae_groups:list(saelist)'
 	config_add_array 'owe_groups:list(owelist)'
+	config_add_array 'pasn_groups:list(pasnlist)'
 
-	config_add_int dpp
+	config_add_int dpp pasn pasn_noauth
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
 	config_add_int dpp_configurator_connectivity
 	config_add_int ssid_protection
@@ -505,6 +517,7 @@ hostapd_common_add_bss_config() {
 	config_add_string sae_pw_id_key
 	config_add_string sae_password
 	config_add_string eht_tx_mcs_nss_set eht_rx_mcs_nss_set
+	config_add_string he_tx_mcs_nss_set he_rx_mcs_nss_set
 # WMM AC params
 	config_add_int \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
@@ -542,6 +555,8 @@ hostapd_common_add_bss_config() {
 	config_add_int assoc_frame_encryption
 	config_add_int eap_using_authentication_frames
 	config_add_int pmksa_caching_privacy
+	config_add_int report_connection_failures
+	config_add_int eppke_unauth
 }
 
 hostapd_set_vlan_file() {
@@ -729,17 +744,18 @@ hostapd_set_bss_options() {
 		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
 		external_plugin_assoc_policy external_plugin_disassoc_policy \
 		$hostapd_if_action_policy_uci_vars \
-		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll \
+		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll skip_disconnect \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
-		vendor_elements fils ocv apup dpp ssid_protection \
+		vendor_elements fils ocv apup dpp pasn pasn_noauth ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
 		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
 		beacon_rate probe_resp_rate oce vht_mcs_nss_set ht_mcs_nss_set he_6ghz_min_rate \
 		oce_tx_power oce_dl_availcap oce_ul_availcap \
 		oce_ess_report oce_ess_edge oce_ess_rssi_threshold oce_ip_subnet_id \
 		eht_tx_mcs_nss_set eht_rx_mcs_nss_set \
+		he_tx_mcs_nss_set he_rx_mcs_nss_set \
 		wmm_ac_be_aifs wmm_ac_be_cwmin wmm_ac_be_cwmax \
 		wmm_ac_be_txop_limit wmm_ac_be_acm \
 		wmm_ac_bk_aifs wmm_ac_bk_cwmin wmm_ac_bk_cwmax \
@@ -761,12 +777,14 @@ hostapd_set_bss_options() {
 		dcs_random_chan_bitmap dcs_bw_reduction_ctrl \
 		rsnxe_capab_mask \
 		sae_pw_id_num sae_pw_id_key sae_password \
-		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy
+		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
+		report_connection_failures eppke_unauth
 
 
 	json_get_values sae_groups sae_groups
 	json_get_values owe_groups owe_groups
 	json_get_values security_profiles security_profiles
+	json_get_values pasn_groups pasn_groups
 
 	set_default fils 0
 	set_default isolate 0
@@ -775,6 +793,7 @@ hostapd_set_bss_options() {
 	set_default short_preamble 1
 	set_default disassoc_low_ack 1
 	set_default skip_inactivity_poll 0
+	set_default skip_disconnect 0
 	set_default hidden 0
 	set_default wmm 1
 	set_default uapsd 1
@@ -822,6 +841,7 @@ hostapd_set_bss_options() {
 	append bss_conf "chan_util_avg_period=$chan_util_avg_period" "$N"
 	append bss_conf "disassoc_low_ack=$disassoc_low_ack" "$N"
 	append bss_conf "skip_inactivity_poll=$skip_inactivity_poll" "$N"
+	append bss_conf "skip_disconnect=$skip_disconnect" "$N"
 	append bss_conf "preamble=$short_preamble" "$N"
 	append bss_conf "wmm_enabled=$wmm" "$N"
 	append bss_conf "ignore_broadcast_ssid=$hidden" "$N"
@@ -860,6 +880,8 @@ hostapd_set_bss_options() {
 	[ -n "$ht_mcs_nss_set" ] && append bss_conf "ht_mcs_nss_set=$ht_mcs_nss_set" "$N"
 	[ -n "$eht_tx_mcs_nss_set" ] && append bss_conf "eht_tx_mcs_nss_set=$eht_tx_mcs_nss_set" "$N"
 	[ -n "$eht_rx_mcs_nss_set" ] && append bss_conf "eht_rx_mcs_nss_set=$eht_rx_mcs_nss_set" "$N"
+	[ -n "$he_tx_mcs_nss_set" ] && append bss_conf "he_tx_mcs_nss_set=$he_tx_mcs_nss_set" "$N"
+	[ -n "$he_rx_mcs_nss_set" ] && append bss_conf "he_rx_mcs_nss_set=$he_rx_mcs_nss_set" "$N"
 
 	# Per-VAP supported/basic rates (string or array)
 	# Supported rates (array or string)
@@ -951,11 +973,14 @@ hostapd_set_bss_options() {
 	[ -n "$external_plugin_assoc_policy" ] && append bss_conf "external_plugin_assoc_policy=$external_plugin_assoc_policy" "$N"
 	[ -n "$external_plugin_disassoc_policy" ] && append bss_conf "external_plugin_disassoc_policy=$external_plugin_disassoc_policy" "$N"
 	[ -n "$external_plugin_deauth_policy" ] && append bss_conf "external_plugin_deauth_policy=$external_plugin_deauth_policy" "$N"
+	[ -n "$report_connection_failures" ] && append bss_conf "report_connection_failures=$report_connection_failures" "$N"
+	[ -n "$eppke_unauth" ] && append bss_conf "eppke_unauth=$eppke_unauth" "$N"
 	for action_policy_var in $hostapd_if_action_policy_uci_vars; do
 		eval "action_policy_val=\"\${$action_policy_var}\""
 		[ -n "$action_policy_val" ] && append bss_conf "${action_policy_var}=$action_policy_val" "$N"
 	done
 	[ -n "$sae_groups" ] && append bss_conf "sae_groups=$sae_groups" "$N"
+	[ -n "$pasn_groups" ] && append bss_conf "pasn_groups=$pasn_groups" "$N"
 	if [ "$auth_type" = "owe" ]; then
 		[ -n "$owe_groups" ] && append bss_conf "owe_groups=$owe_groups" "$N"
 	fi
@@ -1182,10 +1207,11 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 	[ "$mbo" -eq 1 ] && set_default ieee80211w 1
 
-	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed
+	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed smd_neighbor_update smd_neighbor_expiry_time smd_neighbor_pull_interval
 	set_default ieee80211k 0
 	set_default rnr 0
 	set_default rnr_ie_allowed 0
+	set_default smd_neighbor_update 0
 	if [ "$ieee80211k" -eq "1" ]; then
 		set_default rrm_neighbor_report 1
 		set_default rrm_beacon_report 1
@@ -1196,10 +1222,13 @@ hostapd_set_bss_options() {
 
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
+	[ "$smd_neighbor_update" -eq "1" ] && append bss_conf "smd_neighbor_update=1" "$N"
+	[ -n "$smd_neighbor_expiry_time" ] && append bss_conf "smd_neighbor_expiry_time=$smd_neighbor_expiry_time" "$N"
+	[ -n "$smd_neighbor_pull_interval" ] && append bss_conf "smd_neighbor_pull_interval=$smd_neighbor_pull_interval" "$N"
 	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
 	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
-	json_get_vars ftm_responder stationary_ap lci civic
+	json_get_vars ftm_responder stationary_ap lci civic rtt_responder_role
 	set_default ftm_responder 0
 	if [ "$ftm_responder" -eq "1" ]; then
 		set_default stationary_ap 0
@@ -1208,6 +1237,11 @@ hostapd_set_bss_options() {
 			[ "$stationary_ap" -eq "1" ] && append bss_conf "stationary_ap=1" "$N"
 			[ -n "$lci" ] && append bss_conf "lci=$lci" "$N"
 			[ -n "$civic" ] && append bss_conf "civic=$civic" "$N"
+		}
+	fi
+	if [ -n "$rtt_responder_role" ]; then
+		iw phy "$phy" info | grep -q "ENABLE_FTM_RESPONDER" && {
+			append bss_conf "rtt_responder_role=$rtt_responder_role" "$N"
 		}
 	fi
 
@@ -1221,8 +1255,13 @@ hostapd_set_bss_options() {
 
 		append bss_conf "wpa_disable_eapol_key_retries=$wpa_disable_eapol_key_retries" "$N"
 
+		set_default pasn 0
+		set_default pasn_noauth 1
+		[ "$pasn" -eq "1" ] && append bss_conf "pasn_noauth=$pasn_noauth" "$N"
+
 		hostapd_append_wpa_key_mgmt
 		[ "$dpp" -eq "1" ] && append wpa_key_mgmt "DPP"
+		[ "$pasn" -eq "1" ] && append wpa_key_mgmt "PASN"
 		[ "$eppk" -eq "1" ] && append wpa_key_mgmt "EPPKE"
 		[ -n "$wpa_key_mgmt" ] && append bss_conf "wpa_key_mgmt=$wpa_key_mgmt" "$N"
 		if [ "$group_cipher" != "GCMP-256" ]; then
@@ -1292,7 +1331,7 @@ hostapd_set_bss_options() {
 			append bss_conf "rsn_preauth_interfaces=$network_bridge" "$N"
 		else
 			case "$auth_type" in
-			*sae*|owe|dpp|eap2)
+			*sae*|owe|dpp|eap*)
 				set_default auth_cache 1
 			;;
 			*)
@@ -1307,7 +1346,7 @@ hostapd_set_bss_options() {
 		# RSN -> allow management frame protection
 		case "$ieee80211w" in
 			[012])
-				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout
+				json_get_vars ieee80211w_mgmt_cipher ieee80211w_max_timeout ieee80211w_retry_timeout beacon_prot
 				if [[ "$auth_type" == "sae" || "$auth_type" == "ft-sae-ext-key" || "$auth_type" == "sae-ext-key" ]]; then
 					ieee80211w=2
 				fi
@@ -1322,6 +1361,8 @@ hostapd_set_bss_options() {
 						append bss_conf "assoc_sa_query_max_timeout=$ieee80211w_max_timeout" "$N"
 					[ -n "$ieee80211w_retry_timeout" ] && \
 						append bss_conf "assoc_sa_query_retry_timeout=$ieee80211w_retry_timeout" "$N"
+					[ -n "$beacon_prot" ] && \
+						append bss_conf "beacon_prot=$beacon_prot" "$N"
 				}
 			;;
 		esac
@@ -1717,7 +1758,7 @@ _wpa_supplicant_common() {
 
 wpa_supplicant_teardown_interface() {
 	_wpa_supplicant_common "$1"
-	rm -rf "$_rpath/$1" "$_config"
+	rm -f "$_config"
 }
 
 wpa_supplicant_prepare_interface() {
@@ -1774,6 +1815,14 @@ $ap_scan
 $country_str
 $ctrl_intf_str
 EOF
+	# Match the ownership wpad.init already applied to $_rpath (the
+	# ctrl_interface dir) for the ujailed wpa_supplicant user/group,
+	# instead of hardcoding a user/group name here. Any ujail consumer
+	# that runs under a different identity gets the correct owner
+	# without needing a matching edit in this generic netifd script.
+	local _rpath_owner
+	_rpath_owner="$(stat -c '%U:%G' "$_rpath" 2>/dev/null)"
+	[ -n "$_rpath_owner" ] && chown "$_rpath_owner" "$_config"
 	return 0
 }
 
