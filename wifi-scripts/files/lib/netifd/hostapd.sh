@@ -2528,7 +2528,6 @@ $wps_cred_add_sae
 ppe_vp=$ppe_vp_type
 $freq_list
 $update_config
-ignore_old_scan_res=1
 network={
 	$scan_ssid
 	ssid="$ssid"
