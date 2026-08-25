@@ -409,6 +409,30 @@ function translate_proprietary_to_ath_ud() {
 			if (is_sta_iface(s))
 				changed = normalize_sta_iface(secname, s) || changed;
 
+			let mode = lc(s.mode ?? "");
+			switch (mode) {
+			case 'lite_monitor':
+			case 'ap_smart_monitor':
+				print(`set wireless.${secname}.mode='monitor'\n`);
+				changed = true;
+				break;
+			case 'ap_monitor':
+				print(`set wireless.${secname}.mode='ap'\n`);
+				print(`set wireless.${secname}.vap_submode='scan'\n`);
+				changed = true;
+				break;
+			case 'wrap':
+			case 'ap_lp_iot':
+				print(`set wireless.${secname}.mode='ap'\n`);
+				changed = true;
+				break;
+			}
+
+			if (s.cactimeout != null && s.cactimeout != '' && s.device) {
+				print(`set wireless.${s.device}.cac_timeout='${s.cactimeout}'\n`);
+				changed = true;
+			}
+
 			/* Handle encryption conversion */
 			if (s.encryption) {
 				let new_enc = map_encryption(s.encryption, s.sae);
@@ -445,10 +469,6 @@ function translate_proprietary_to_ath_ud() {
 		if (s.mld_ssid) {
 			print(`set wireless.${secname}.ssid='${s.mld_ssid}'\n`);
 			print(`delete wireless.${secname}.mld_ssid\n`);
-			changed = true;
-		}
-		if (s.mld_macaddr) {
-			print(`delete wireless.${secname}.mld_macaddr\n`);
 			changed = true;
 		}
 	}
