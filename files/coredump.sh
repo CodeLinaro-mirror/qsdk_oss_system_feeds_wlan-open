@@ -56,7 +56,13 @@ if [ -n "$LATEST_FILE" ] && [ -e "$COREDUMP_PATH/$LATEST_FILE/data" ]; then
 
         if [ -e "$PD_PATH/name" ]; then
             target=$(awk -F'[,-]' '{print $2}' "$BOARD_NAME_PATH")
-            FILENAME="${file_prefix}-${target}-rootpd-${TIMESTAMP}.bin"
+            if [ -f "$PD_PATH/firmware" ] && grep -q "cdsp" "$PD_PATH/firmware" 2>/dev/null; then
+                target_num=$(echo "$target" | sed 's/[^0-9]//g')
+                [ -z "$target_num" ] && target_num="0"
+                FILENAME="ramdump_cdsp${target_num}_${TIMESTAMP}.elf"
+            else
+                FILENAME="${file_prefix}-${target}-rootpd-${TIMESTAMP}.bin"
+            fi
         else
             target=$(awk -F'[,-]' '{print $2}' "$BOARD_NAME_PATH")
             pd_name=$(awk -F'_' '{print $NF}' "$PD_PATH/of_node/qcom,userpd-subsys-name")
