@@ -1869,19 +1869,20 @@ wpa_supplicant_set_fixed_freq() {
 	append network_data "frequency=$freq" "$N$T"
 	case "$htmode" in
 		NOHT) append network_data "disable_ht=1" "$N$T";;
-		HE20|HT20|VHT20|EHT20) append network_data "disable_ht40=1" "$N$T";;
-		HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160) append network_data "ht40=1" "$N$T";;
+		HE20|HT20|VHT20|EHT20|UHR20) append network_data "disable_ht40=1" "$N$T";;
+		HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160|UHR40|UHR80|UHR160) append network_data "ht40=1" "$N$T";;
 	esac
 	case "$htmode" in
 		VHT*) append network_data "vht=1" "$N$T";;
+		UHR*) append network_data "uhr=1" "$N$T";;
 	esac
 	case "$htmode" in
-		HE80|VHT80|EHT80) append network_data "max_oper_chwidth=1" "$N$T";;
-		HE160|VHT160|EHT160)
+		HE80|VHT80|EHT80|UHR80) append network_data "max_oper_chwidth=1" "$N$T";;
+		HE160|VHT160|EHT160|UHR160)
 			append network_data "max_oper_chwidth=2" "$N$T"
 		;;
-		HE20|HE40|VHT20|VHT40|EHT20|EHT40) append network_data "max_oper_chwidth=0" "$N$T";;
-		EHT320)
+		HE20|HE40|VHT20|VHT40|EHT20|EHT40|UHR20|UHR40) append network_data "max_oper_chwidth=0" "$N$T";;
+		EHT320|UHR320)
 			append network_data "max_oper_chwidth=9" "$N$T"
 		;;
 		*) append network_data "disable_vht=1" "$N$T";;
@@ -2022,7 +2023,7 @@ wpa_supplicant_add_network() {
 		([ "$encryption" = "none" ] || [ -z "$encryption" ]) || append wpa_key_mgmt "SAE"
 		scan_ssid=""
 
-		[[ "$htmode" == "EHT320" ]] && {
+		[[ "$htmode" == "EHT320" || "$htmode" == "UHR320" ]] && {
                         config_ccfs=$7
                         if [ -n "$config_ccfs" ] && [ "$config_ccfs" -gt 0 ]; then
                                 ccfs=$config_ccfs
