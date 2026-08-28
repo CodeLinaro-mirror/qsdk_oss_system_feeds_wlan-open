@@ -125,9 +125,7 @@ define KernelPackage/cfg80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=cfg80211 - wireless configuration API
   DEPENDS+= +iw-full +iwinfo +!USE_PRPLMESH_WHM:wifi-scripts +wireless-regdb +USE_RFKILL:kmod-rfkill
-ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
   DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
-endif
   ABI_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
   FILES:= \
 	$(PKG_BUILD_DIR)/compat/compat.ko \
