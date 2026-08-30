@@ -523,6 +523,8 @@ hostapd_common_add_bss_config() {
 	config_add_int dpp pasn pasn_noauth
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
 	config_add_int dpp_configurator_connectivity
+	config_add_string dpp_controller
+	config_add_int dpp_map
 	config_add_int ssid_protection
 
 	config_add_int rsn_overriding
@@ -1682,7 +1684,9 @@ hostapd_set_bss_options() {
 	if [ "$dpp" -eq "1" ]; then
 		json_get_vars \
 			dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey\
-			dpp_connector_sign dpp_configurator_connectivity
+			dpp_connector_sign dpp_configurator_connectivity \
+			dpp_controller dpp_map
+
 
 		[ -n "$dpp_csign" ] && append bss_conf "dpp_csign=$dpp_csign" "$N"
 		[ -n "$dpp_connector" ] && append bss_conf "dpp_connector=$dpp_connector" "$N"
@@ -1690,6 +1694,8 @@ hostapd_set_bss_options() {
 		[ -n "$dpp_ppkey" ] && append bss_conf " dpp_ppkey=$dpp_ppkey" "$N"
 		[ -n "$dpp_connector_sign" ] && append bss_conf "dpp_connector_sign=$dpp_connector_sign" "$N"
 		[ -n "$dpp_configurator_connectivity" ] && append bss_conf "dpp_configurator_connectivity=$dpp_configurator_connectivity" "$N"
+		[ -n "$dpp_controller" ] && append bss_conf "dpp_controller=$dpp_controller" "$N"
+		[ -n "$dpp_map" ] && append bss_conf "dpp_map=$dpp_map" "$N"
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 
