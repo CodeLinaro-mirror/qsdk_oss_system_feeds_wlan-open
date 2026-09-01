@@ -507,6 +507,8 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean disable_11be
 	config_add_boolean disable_11ax
 	config_add_boolean disable_11bn
+	config_add_boolean skip_uhr_extn_in_bcn
+	config_add_boolean skip_uhr_extn_in_probe_resp
 
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
@@ -1595,6 +1597,11 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars disable_11be
 	json_get_vars disable_11ax
 	json_get_vars disable_11bn
+	local _bcn _probe
+	json_get_var _bcn skip_uhr_extn_in_bcn
+	json_get_var _probe skip_uhr_extn_in_probe_resp
+	_bcn="${_bcn:-$skip_uhr_extn_in_bcn}"
+	_probe="${_probe:-$skip_uhr_extn_in_probe_resp}"
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
@@ -1761,10 +1768,10 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "mld_ap=1" "$N"
 		fi
 
-		[ -n "$skip_uhr_extn_in_bcn" ] && \
-			append hostapd_cfg "skip_uhr_extn_in_bcn=$skip_uhr_extn_in_bcn" "$N"
-		[ -n "$skip_uhr_extn_in_probe_resp" ] && \
-			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$skip_uhr_extn_in_probe_resp" "$N"
+		[ -n "$_bcn" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_bcn=$_bcn" "$N"
+		[ -n "$_probe" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$_probe" "$N"
 		[ -n "$_rnr" ] && \
 			append hostapd_cfg "skip_uhr_extn_in_rnr=$_rnr" "$N"
 
