@@ -187,6 +187,7 @@ vht_max_a_mpdu_len_exp=
 disable_eml_cap=
 skip_uhr_extn_in_bcn=
 skip_uhr_extn_in_probe_resp=
+skip_uhr_extn_in_rnr=
 enable_aal=
 ml_max_rec_links=
 eht_ulmumimo_80mhz=
@@ -432,6 +433,7 @@ ubus_call() {
 		dsss_cck_40 \
 		disable_eml_cap \
 		skip_uhr_extn_in_bcn \
+		skip_uhr_extn_in_rnr \
 		skip_uhr_extn_in_probe_resp \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
@@ -511,6 +513,7 @@ drv_mac80211_init_iface_config() {
 
 	#uhr_config
 	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+	config_add_boolean skip_uhr_extn_in_rnr
 
 	#monitor
 	config_add_string monitor_flags
@@ -780,7 +783,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
+	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp skip_uhr_extn_in_rnr discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
@@ -1596,6 +1599,9 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
 	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
+	local _rnr
+	json_get_var _rnr skip_uhr_extn_in_rnr
+	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
 	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
 	json_get_vars mapc_cotdma_enable
@@ -1759,6 +1765,8 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "skip_uhr_extn_in_bcn=$skip_uhr_extn_in_bcn" "$N"
 		[ -n "$skip_uhr_extn_in_probe_resp" ] && \
 			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$skip_uhr_extn_in_probe_resp" "$N"
+		[ -n "$_rnr" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_rnr=$_rnr" "$N"
 
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
