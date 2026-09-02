@@ -132,10 +132,14 @@ do_cp_src_wlan_open_extns() {
 
 LINUX_SRC_DIR = "${TOPDIR}/${SRCPREFIX}files-6.6"
 LINUX_SRC_DIR:echo = "${TOPDIR}/${SRCPREFIX}src/kernel-6.18/kernel_platform/kernel"
+QCA_HOSTAP_SRC = "${TOPDIR}/${SRCPREFIX}qca/src/network/services/hostapd"
+QCA_VENDOR_HEADER = "${QCA_HOSTAP_SRC}/src/common/qca-vendor.h"
 
 do_cp_headers() {
 	install -d ${STAGING_DIR}/include/linux/
 	install -m 0644 ${LINUX_SRC_DIR}/include/linux/debug_mem_usage.h ${STAGING_DIR}/include/linux/debug_mem_usage.h
+	install -m 0644 ${QCA_VENDOR_HEADER} ${S}/drivers/net/wireless/ath/ath11k/qca-vendor.h
+	install -m 0644 ${QCA_VENDOR_HEADER} ${S}/drivers/net/wireless/ath/ath12k/qca-vendor.h
 }
 
 # The following compilation flags are enabled for 1G profile
@@ -386,6 +390,10 @@ do_install:append() {
 
 	if [ -f ${S}/drivers/net/wireless/ath/ath12k/vendor.h ]; then
 		cp ${S}/drivers/net/wireless/ath/ath12k/vendor.h ${D}${includedir}/mac80211/ath/
+	fi
+
+	if [ -f ${S}/drivers/net/wireless/ath/ath12k/qca-vendor.h ]; then
+		cp ${S}/drivers/net/wireless/ath/ath12k/qca-vendor.h ${D}${includedir}/mac80211/ath/
 	fi
 
 	if [ -f ${S}/Module.symvers ]; then
