@@ -69,6 +69,8 @@ endif
 config-$(CONFIG_PACKAGE_ATH_UCAST_ENABLE_AST_OVERRIDE) += ATH12K_UCAST_ENABLE_AST_OVERRIDE
 config-$(CONFIG_PACKAGE_kmod-qca-debug-uio) += ATHDEBUG_UIO_LOGGING
 
+config-$(CONFIG_USE_PRPLMESH_WHM) += ATH12K_PRPL
+
 config-$(call config_package,carl9170) += CARL9170
 config-$(call config_package,ar5523) += AR5523
 config-$(call config_package,wil6210) += WIL6210
