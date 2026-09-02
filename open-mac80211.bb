@@ -317,7 +317,9 @@ do_install:append:echo() {
 		cp ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ${D}${includedir}/ipa/wifi8/
 	fi
 	install -d ${D}/lib/firmware/ath12k/QCN9625/
+	install -d ${D}/lib/firmware/ath12k/QCN9589/
 	ln -sf /firmware/image/qcn9625 ${D}/lib/firmware/ath12k/QCN9625/hw1.0
+	ln -sf /firmware/image/qcn9589 ${D}/lib/firmware/ath12k/QCN9589/hw1.0
 	install -d ${D}${sysconfdir}/udev/rules.d
 	install -m 0644 ${WORKDIR}/etc/udev/rules.d/60-ath12k-no-autoload.rules \
 		${D}${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules
