@@ -521,7 +521,7 @@ hostapd_common_add_bss_config() {
 	config_add_array 'pasn_groups:list(pasnlist)'
 
 	config_add_int dpp pasn pasn_noauth
-	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
+	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign dpp_1905_connector
 	config_add_int dpp_configurator_connectivity
 	config_add_string dpp_controller
 	config_add_int dpp_map
@@ -2276,6 +2276,7 @@ wpa_supplicant_add_network() {
 	json_get_values bssid_blacklist bssid_blacklist
 	json_get_values bssid_whitelist bssid_whitelist
 	json_get_var sae_pwe sae_pwe
+	json_get_var dpp_1905_connector dpp_1905_connector
 	json_get_var rsn_overriding rsn_overriding
 	append wps_cred_add_sae "wps_cred_add_sae=1" "$N$T"
 	json_get_var wps_pushbutton wps_pushbutton
@@ -2286,6 +2287,7 @@ wpa_supplicant_add_network() {
 	[ -n "$bssid_whitelist" ] && append network_data "bssid_whitelist=$bssid_whitelist" "$N$T"
 
 	[ -n "$sae_pwe" ] && append saepwe "sae_pwe=$sae_pwe" "$N$T"
+	[ -n "$dpp_1905_connector" ] && append dpp1905connector "dpp_1905_connector=$dpp_1905_connector" "$N$T"
 	[ -n "$rsn_overriding" ] && append rsn_override "rsn_overriding=$rsn_overriding" "$N$T"
 
 	[ -n "$disable_reconfig" ] && append reconfig "disable_reconfig=$disable_reconfig" "$N$T"
@@ -2356,6 +2358,7 @@ $user_mpm
 $disable_csa_dfs
 CSwOpts=$CSwOpts
 $saepwe
+$dpp1905connector
 $rsn_override
 $wps_cred_add_sae
 ppe_vp=$ppe_vp_type
