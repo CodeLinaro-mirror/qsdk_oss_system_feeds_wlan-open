@@ -48,6 +48,7 @@ config-$(CONFIG_ATH11K_THERMAL) += ATH11K_THERMAL
 
 config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB ATH12K_POWER_OPTIMIZATION
 config-$(CONFIG_TARGET_ipq54xx) += ATH12K_AHB
+config-$(CONFIG_TARGET_echo) += EXT_IPA_OFFLOAD
 
 config-$(call config_package,ath11k) += ATH11K ATH11K_AHB ATH11K_PCI
 config-$(call config_package,ath12k,regular) += ATH12K

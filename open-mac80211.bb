@@ -26,7 +26,7 @@ python () {
     else:
         d.setVar("WLAN_SRCPREFIX", "qca/src/")
 }
-FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}mac80211/wlan-open/:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/wifi-scripts/files/lib/functions/:${THISDIR}/:${TOPDIR}/${SRCPREFIX}${WLAN_SRCPREFIX}mac80211/wlan-open/:"
 
 SRC_URI = " \
 	file://backports-6.1-${MAC80211_PKG_KERNEL_VERSION} \
@@ -142,8 +142,10 @@ do_cp_headers() {
 	install -m 0644 ${QCA_VENDOR_HEADER} ${S}/drivers/net/wireless/ath/ath12k/qca-vendor.h
 }
 
-# The following compilation flags are enabled for 1G profile
-# When RDK platform introduces new profiles, configure accordingly in do_configure()
+
+# Strip _64/_32 suffix from MACHINE so it matches CONFIG_TARGET_* names in ath.mk
+SOC_TARGET = "${@d.getVar('MACHINE').split('_64')[0].split('_32')[0] if d.getVar('MACHINE') else d.getVar('BASEMACHINE')}"
+do_configure[vardeps] += "CONFIG_KERNEL_IPQ_MEM_PROFILE SOC_TARGET"
 
 do_configure:prepend:echo() {
 	install -d ${S}/include/qca-debug-uio
@@ -151,90 +153,59 @@ do_configure:prepend:echo() {
 		${S}/include/qca-debug-uio/debug_uio_public.h
 }
 
+def get_mem_cfg_flags(d):
+    import re, os
+    profile = d.getVar('CONFIG_KERNEL_IPQ_MEM_PROFILE')
+    topdir  = d.getVar('TOPDIR')
+    srcprefix = d.getVar('SRCPREFIX') or ''
+    base = os.path.join(topdir, srcprefix,
+                        'meta-ipq/recipes-kernel/linux/linux-ipq')
+    mem_cfg = os.path.join(base, 'ipq_mem_512' if profile == '512' else 'ipq_mem_open')
+    try:
+        with open(mem_cfg) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return ""
+    result = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        line = re.sub(r'=m$', '=y', line)
+        result.append(line)
+    return ' '.join(result)
+
 do_configure:prepend() {
-	cat > ${S}/.config << 'EOF'
-CPTCFG_CFG80211=m
-CPTCFG_CFG80211_DEBUGFS=y
-CPTCFG_MAC80211=m
-CPTCFG_MAC80211_RC_MINSTREL=y
-CPTCFG_MAC80211_RC_MINSTREL_HT=y
-CPTCFG_MAC80211_RC_MINSTREL_VHT=y
-CPTCFG_MAC80211_RC_DEFAULT_MINSTREL=y
-CPTCFG_MAC80211_MESH=y
-CPTCFG_MAC80211_DEBUGFS=y
-CONFIG_QCOM_RPROC_DISABLE_MPD_SUPPORT=y
-CPTCFG_ATHDEBUG=y
-CPTCFG_DEBUG_FS=y
-CPTCFG_MAC80211_LEDS=y
-CPTCFG_ATH_COMMON=m
-CPTCFG_ATH_DEBUG=y
-CPTCFG_ATH12K=m
-CPTCFG_ATH12K_PCI=m
-CPTCFG_ATH12K_DEBUG=y
-CPTCFG_ATH12K_DEBUGFS=y
-CPTCFG_ATH12K_SAWF=y
-CPTCFG_WLAN_VENDOR_ATH=y
-CPTCFG_NL80211_TESTMODE=y
-CPTCFG_CFG80211_CERTIFICATION_ONUS=y
-CPTCFG_MAC80211_SFE_SUPPORT=y
-CPTCFG_QCN_EXTN=y
-CPTCFG_MAC80211_ATHDEBUG=y
-CPTCFG_ATH_REG_DYNAMIC_USER_REG_HINTS=y
-CPTCFG_ATH_USER_REGD=y
-CPTCFG_ATH11K_CFR=y
-CPTCFG_ATH11K_SMART_ANT_ALG=y
-CPTCFG_ATH11K_SPECTRAL=y
-CPTCFG_ATH12K_CFR=y
-CPTCFG_ATH12K_PKTLOG=y
-CPTCFG_ATH12K_POWER_BOOST=y
-CPTCFG_ATH12K_SPECTRAL=y
-CPTCFG_ATH12K_TX_MONITOR=y
-CPTCFG_MAC80211_DEBUG_MENU=y
-CPTCFG_MAC80211_HWSIM=m
-CPTCFG_MAC80211_MLME_DEBUG=y
-CPTCFG_MAC80211_PS_DEBUG=y
-CPTCFG_MAC80211_STA_DEBUG=y
-CPTCFG_MAC80211_VERBOSE_DEBUG=y
-CPTCFG_QCN_EXTN_MESH_SUPPORT=y
-CPTCFG_WILINK_PLATFORM_DATA=y
-CPTCFG_WLAN=y
-CPTCFG_WLAN_VENDOR_ADMTEK=y
-CPTCFG_WLAN_VENDOR_RSI=y
-CPTCFG_WL_TI=y
-EOF
+	mem_cfg_dir="${TOPDIR}/${SRCPREFIX}meta-ipq/recipes-kernel/linux/linux-ipq"
+	mem_cfg_open="${mem_cfg_dir}/ipq_mem_open"
+	mem_cfg_512="${mem_cfg_dir}/ipq_mem_512"
 
-	case "${MACHINE}" in
-		ipq53xx*)
-			echo "CPTCFG_ATH12K_POWER_OPTIMIZATION=y" >> ${S}/.config
-			;;
-	esac
-
-	case "${BASEMACHINE}" in
-		echo)
-			echo "CPTCFG_EXT_IPA_OFFLOAD=y" >> ${S}/.config
-			;;
-	esac
-
-	case "${MACHINE}" in
-		ipq53xx*|ipq54xx*)
-			echo "CPTCFG_ATH12K_AHB=y" >> ${S}/.config
-			;;
-	esac
-
-	if [ "${BASEMACHINE}" != "echo" ]; then
-		cat >> ${S}/.config << 'EOF'
-CPTCFG_ATH11K=m
-CPTCFG_ATH11K_AHB=m
-CPTCFG_ATH11K_PCI=m
-CPTCFG_ATH11K_DEBUG=y
-CPTCFG_ATH11K_DEBUGFS=y
-CPTCFG_ATH11K_TRACING=y
-CPTCFG_ATH11K_PKTLOG=y
-CPTCFG_MAC80211_PPE_SUPPORT=y
-CPTCFG_MAC80211_DS_SUPPORT=y
-CPTCFG_ATH12K_PPE_DS_SUPPORT=y
-EOF
+	if [ ! -f "${mem_cfg_open}" ] || [ ! -f "${mem_cfg_512}" ]; then
+		bberror "Required memory profile config files are missing."
+		bberror "Expected file: ${mem_cfg_open}"
+		bberror "Expected file: ${mem_cfg_512}"
+		if [ -d "${mem_cfg_dir}" ]; then
+			bberror "Directory exists, current contents:" 
+			ls -la "${mem_cfg_dir}" || true
+		else
+			bberror "Directory does not exist: ${mem_cfg_dir}"
+		fi
+		bbfatal "Missing ipq_mem_open/ipq_mem_512; ensure the meta-ipq config-file change is present in this build environment."
 	fi
+
+	bbnote "Found required memory profile config files: ${mem_cfg_open} and ${mem_cfg_512}"
+
+	# Run rdk.mk (which includes ath.mk) to generate CPTCFG_* flags.
+	# Pass all CONFIG_PACKAGE_* / CONFIG_* vars from the profile fragment
+	# so ath.mk evaluates the same way as in QSDK.
+	${MAKE} -C ${THISDIR} -f ${THISDIR}/rdk.mk print-config \
+		OUTPUT_CONFIG="${S}/.config" \
+		CONFIG_KERNEL_IPQ_MEM_PROFILE="${CONFIG_KERNEL_IPQ_MEM_PROFILE}" \
+		CONFIG_TARGET_${SOC_TARGET}=y \
+		${@get_mem_cfg_flags(d)}
+
+	# Set all unrecognised flags to disabled (n), same as QSDK Build/Compile
+	${MAKE} ${MAKE_OPTS} KLIB_BUILD="${STAGING_KERNEL_BUILDDIR}" allnoconfig
 }
 
 do_patch[postfuncs] += "do_refactor_alloc_cocci"
@@ -500,8 +471,8 @@ FILES:${PN} += "/ini/* /ini/internal/*"
 FILES:${PN} += "/lib/functions/rdk_init_helper.sh"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
-FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
-FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
+FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
+FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 FILES:${PN}:append:echo = " ${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules"
 FILES:${PN} += "${nonarch_base_libdir}/boost_performance.sh"
 FILES:${PN}:append:echo = " \
@@ -512,6 +483,8 @@ FILES:${PN}:append:echo = " \
   "
 
 FILES:${PN}-dev += "${includedir}/open-mac80211/*"
+FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
+FILES:kernel-module-ath12k-wifi6 += "${sysconfdir}/modprobe.d/ath12k_wifi6.conf"
 
 COMPATIBLE_MACHINE = "(ipq807x|ipq60xx|ipq50xx|ipq95xx|ipq53xx|ipq54xx|ipq52xx|ipq96xx|sdx85|echo)"
 
