@@ -427,7 +427,7 @@ hostapd_common_add_bss_config() {
 	config_add_string time_zone
 	config_add_string vendor_elements
 
-	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report smd_neighbor_update
+	config_add_boolean ieee80211k rrm_neighbor_report rrm_beacon_report rrm_channel_load rrm_noise_histogram smd_neighbor_update
 	config_add_int smd_neighbor_expiry_time smd_neighbor_pull_interval
 	config_add_int rnr rnr_ie_allowed
 
@@ -523,6 +523,8 @@ hostapd_common_add_bss_config() {
 	config_add_int dpp pasn pasn_noauth
 	config_add_string dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey dpp_connector_sign
 	config_add_int dpp_configurator_connectivity
+	config_add_string dpp_controller
+	config_add_int dpp_map
 	config_add_int ssid_protection
 
 	config_add_int rsn_overriding
@@ -1226,7 +1228,7 @@ hostapd_set_bss_options() {
 	[ "$mbo" -eq 1 ] && [ -n "$mbo_cell_data_conn_pref" ] && append bss_conf "mbo_cell_data_conn_pref=$mbo_cell_data_conn_pref" "$N"
 	[ "$mbo" -eq 1 ] && set_default ieee80211w 1
 
-	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rnr rnr_ie_allowed smd_neighbor_update smd_neighbor_expiry_time smd_neighbor_pull_interval
+	json_get_vars ieee80211k rrm_neighbor_report rrm_beacon_report rrm_channel_load rrm_noise_histogram rnr rnr_ie_allowed smd_neighbor_update smd_neighbor_expiry_time smd_neighbor_pull_interval
 	set_default ieee80211k 0
 	set_default rnr 0
 	set_default rnr_ie_allowed 0
@@ -1234,13 +1236,19 @@ hostapd_set_bss_options() {
 	if [ "$ieee80211k" -eq "1" ]; then
 		set_default rrm_neighbor_report 1
 		set_default rrm_beacon_report 1
+		set_default rrm_channel_load 1
+		set_default rrm_noise_histogram 1
 	else
 		set_default rrm_neighbor_report 0
 		set_default rrm_beacon_report 0
+		set_default rrm_channel_load 0
+		set_default rrm_noise_histogram 0
 	fi
 
 	[ "$rrm_neighbor_report" -eq "1" ] && append bss_conf "rrm_neighbor_report=1" "$N"
 	[ "$rrm_beacon_report" -eq "1" ] && append bss_conf "rrm_beacon_report=1" "$N"
+	[ "$rrm_channel_load" -eq "1" ] && append bss_conf "rrm_channel_load=1" "$N"
+	[ "$rrm_noise_histogram" -eq "1" ] && append bss_conf "rrm_noise_histogram=1" "$N"
 	[ "$smd_neighbor_update" -eq "1" ] && append bss_conf "smd_neighbor_update=1" "$N"
 	[ -n "$smd_neighbor_expiry_time" ] && append bss_conf "smd_neighbor_expiry_time=$smd_neighbor_expiry_time" "$N"
 	[ -n "$smd_neighbor_pull_interval" ] && append bss_conf "smd_neighbor_pull_interval=$smd_neighbor_pull_interval" "$N"
@@ -1682,7 +1690,9 @@ hostapd_set_bss_options() {
 	if [ "$dpp" -eq "1" ]; then
 		json_get_vars \
 			dpp_csign dpp_connector dpp_netaccesskey dpp_ppkey\
-			dpp_connector_sign dpp_configurator_connectivity
+			dpp_connector_sign dpp_configurator_connectivity \
+			dpp_controller dpp_map
+
 
 		[ -n "$dpp_csign" ] && append bss_conf "dpp_csign=$dpp_csign" "$N"
 		[ -n "$dpp_connector" ] && append bss_conf "dpp_connector=$dpp_connector" "$N"
@@ -1690,6 +1700,8 @@ hostapd_set_bss_options() {
 		[ -n "$dpp_ppkey" ] && append bss_conf " dpp_ppkey=$dpp_ppkey" "$N"
 		[ -n "$dpp_connector_sign" ] && append bss_conf "dpp_connector_sign=$dpp_connector_sign" "$N"
 		[ -n "$dpp_configurator_connectivity" ] && append bss_conf "dpp_configurator_connectivity=$dpp_configurator_connectivity" "$N"
+		[ -n "$dpp_controller" ] && append bss_conf "dpp_controller=$dpp_controller" "$N"
+		[ -n "$dpp_map" ] && append bss_conf "dpp_map=$dpp_map" "$N"
 	fi
 	[ -n "$ssid_protection" ] && append bss_conf "ssid_protection=$ssid_protection" "$N"
 

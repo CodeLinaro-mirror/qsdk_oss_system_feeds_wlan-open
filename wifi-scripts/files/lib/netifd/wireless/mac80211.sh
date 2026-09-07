@@ -187,6 +187,7 @@ vht_max_a_mpdu_len_exp=
 disable_eml_cap=
 skip_uhr_extn_in_bcn=
 skip_uhr_extn_in_probe_resp=
+skip_uhr_extn_in_rnr=
 enable_aal=
 ml_max_rec_links=
 eht_ulmumimo_80mhz=
@@ -432,6 +433,7 @@ ubus_call() {
 		dsss_cck_40 \
 		disable_eml_cap \
 		skip_uhr_extn_in_bcn \
+		skip_uhr_extn_in_rnr \
 		skip_uhr_extn_in_probe_resp \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
@@ -441,6 +443,8 @@ ubus_call() {
 		uplink_csa
 	config_add_string CSwOpts acs_block_chan_list
 	config_add_int cac_timeout bgcac_timeout
+	config_add_int chan_coex_disable
+	config_add_boolean blockdfslist
 	config_add_boolean disable_iface_during_cac
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
@@ -472,6 +476,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
 	config_add_boolean enable_mscs
+	config_add_boolean deferred_scs
 	config_add_boolean enable_dscp_policy_capa
 	config_add_boolean vht_mcs_10_11_supp
 	config_add_boolean vht_mcs_10_11_nq2q_peer_supp
@@ -503,12 +508,15 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean disable_11be
 	config_add_boolean disable_11ax
 	config_add_boolean disable_11bn
+	config_add_boolean skip_uhr_extn_in_bcn
+	config_add_boolean skip_uhr_extn_in_probe_resp
 
 	config_add_boolean dynamic_vlan vlan_naming
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
 
 	#uhr_config
 	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+	config_add_boolean skip_uhr_extn_in_rnr
 
 	#monitor
 	config_add_string monitor_flags
@@ -778,7 +786,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
-	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
+	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp skip_uhr_extn_in_rnr discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
@@ -1590,10 +1598,18 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars disable_11be
 	json_get_vars disable_11ax
 	json_get_vars disable_11bn
+	local _bcn _probe
+	json_get_var _bcn skip_uhr_extn_in_bcn
+	json_get_var _probe skip_uhr_extn_in_probe_resp
+	_bcn="${_bcn:-$skip_uhr_extn_in_bcn}"
+	_probe="${_probe:-$skip_uhr_extn_in_probe_resp}"
 	json_get_vars unsol_bcast_presp fils_discovery
-	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
+	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs deferred_scs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
 	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
+	local _rnr
+	json_get_var _rnr skip_uhr_extn_in_rnr
+	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
 	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
 	json_get_vars mapc_cotdma_enable
@@ -1709,6 +1725,10 @@ mac80211_hostapd_setup_bss() {
 		append hostapd_cfg "enable_scs=1" "$N"
 	fi
 
+	if [ -n "$deferred_scs" ]; then
+		append hostapd_cfg "deferred_scs=$deferred_scs" "$N"
+	fi
+
 	if [ -n "$enable_mscs" ]; then
 		append hostapd_cfg "enable_mscs=$enable_mscs" "$N"
 	else
@@ -1753,10 +1773,12 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "mld_ap=1" "$N"
 		fi
 
-		[ -n "$skip_uhr_extn_in_bcn" ] && \
-			append hostapd_cfg "skip_uhr_extn_in_bcn=$skip_uhr_extn_in_bcn" "$N"
-		[ -n "$skip_uhr_extn_in_probe_resp" ] && \
-			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$skip_uhr_extn_in_probe_resp" "$N"
+		[ -n "$_bcn" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_bcn=$_bcn" "$N"
+		[ -n "$_probe" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$_probe" "$N"
+		[ -n "$_rnr" ] && \
+			append hostapd_cfg "skip_uhr_extn_in_rnr=$_rnr" "$N"
 
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
@@ -3195,7 +3217,9 @@ drv_mac80211_setup() {
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
 		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
-		cac_timeout bgcac_timeout
+		cac_timeout bgcac_timeout \
+		chan_coex_disable \
+		blockdfslist
 	json_get_values basic_rate_list basic_rate
 	json_get_values scan_list scan_list
 	json_select ..
@@ -3440,6 +3464,16 @@ drv_mac80211_setup() {
 		[ -n "$bgcac_timeout" ] && {
 			cfg80211tool "${phy}:${radio_idx}" pCACTimeout "$bgcac_timeout" >/dev/null 2>&1 || \
 				echo "pCACTimeout failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$chan_coex_disable" ] && {
+			cfg80211tool "${phy}:${radio_idx}" chan_coex_disable "$chan_coex_disable" >/dev/null 2>&1 || \
+				echo "chan_coex_disable failed for ${phy}:${radio_idx}" > /dev/console
+		}
+
+		[ -n "$blockdfslist" ] && {
+			cfg80211tool "$phy" radio_idx "$radio_idx" blockdfslist "$blockdfslist" >/dev/null 2>&1 || \
+				echo "blockdfslist failed for ${phy} radio_idx ${radio_idx}" > /dev/ttyMSM0
 		}
 	fi
 

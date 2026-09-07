@@ -65,6 +65,7 @@ RDEPENDS:${PN} = " \
 "
 
 TARGET_CFLAGS:append:echo = " -DPLATFORM_SDX"
+TARGET_CFLAGS:append:echo = " -DATH12K_CMA_SUPPORT"
 TARGET_CFLAGS:append = "${@' -DATH12K_CMA_SUPPORT' if d.getVar('MACHINE').startswith(('ipq96xx', 'ipq52xx')) else ''}"
 
 EXTRA_MAKE_CFLAGS=" \
@@ -236,7 +237,7 @@ do_patch[postfuncs] += "do_refactor_alloc_cocci"
 
 do_refactor_alloc_cocci() {
 	set -e
-	if [ "${DEBUG_PROFILE}" = "true" ]; then
+	if [ "${DEBUG_PROFILE}" = "true" ] || [ "${BASEMACHINE}" = "echo" ]; then
 		bbwarn "Skipping do_refactor_alloc_cocci: DEBUG_PROFILE=true enables CONFIG_DEBUG_MEM_USAGE=y which redefines kzalloc to a 2-arg wrapper, incompatible with the 3-arg cocci transformation"
 		return
 	fi
@@ -244,7 +245,7 @@ do_refactor_alloc_cocci() {
 	COCCI="${WORKDIR}/alloc.cocci"
 	WLAN_DIR="${S}/drivers/net/wireless/ath/ath12k"
 
-	cp -af ${TOPDIR}/${SRCPREFIX}/meta-ipq/recipes-wifi/wlan-open/alloc.cocci ${COCCI}
+	cp -af ${THISDIR}/alloc.cocci ${COCCI}
 
 	if [ ! -f "${COCCI}" ]; then
 		bbfatal "Missing semantic patch: ${COCCI}"
@@ -317,7 +318,9 @@ do_install:append:echo() {
 		cp ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ${D}${includedir}/ipa/wifi8/
 	fi
 	install -d ${D}/lib/firmware/ath12k/QCN9625/
+	install -d ${D}/lib/firmware/ath12k/QCN9589/
 	ln -sf /firmware/image/qcn9625 ${D}/lib/firmware/ath12k/QCN9625/hw1.0
+	ln -sf /firmware/image/qcn9589 ${D}/lib/firmware/ath12k/QCN9589/hw1.0
 	install -d ${D}${sysconfdir}/udev/rules.d
 	install -m 0644 ${WORKDIR}/etc/udev/rules.d/60-ath12k-no-autoload.rules \
 		${D}${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules
