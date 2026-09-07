@@ -97,9 +97,30 @@ function get_band(freq) {
 	return band_name;
 }
 
-function get_channel_list(start_freq, end_freq) {
-	channels = freq_to_channel(start_freq) + "-" + freq_to_channel(end_freq);
-	return channels;
+function get_channel_list_for_range(band, start_freq, end_freq) {
+	let first_channel = 0;
+	let last_channel = 0;
+
+	for (let freq in band.freqs) {
+		if (freq.freq < start_freq || freq.freq > end_freq)
+			continue;
+
+		if (freq.disabled)
+			continue;
+
+		let channel = freq_to_channel(freq.freq);
+		if (!channel)
+			continue;
+
+		if (!first_channel)
+			first_channel = channel;
+		last_channel = channel;
+	}
+
+	if (!first_channel || !last_channel)
+		return "";
+
+	return first_channel + "-" + last_channel;
 }
 
 /* ADDED: helpers for proprietary→ath-ud translator */
@@ -314,8 +335,10 @@ function translate_proprietary_to_ath_ud() {
 						continue;
 					}
 
-					/* Calculate channels from frequency range from board.json */
-					let channels = get_channel_list(radio_idx.first_freq, radio_idx.last_freq);
+					/* Calculate channels from enabled frequencies in this radio's range */
+					let band = phy.info.bands[band_name];
+					let channels = get_channel_list_for_range(band,
+						radio_idx.first_freq, radio_idx.last_freq);
 
 					radio_map[band_num] = {
 						path: phy.path,
@@ -556,7 +579,7 @@ function generate_config(info, name, single_wiphy, id, radio_idx, is_scan) {
 	if (single_wiphy) {
 		let start_freq = radio_idx.first_freq;
 		let end_freq = radio_idx.last_freq;
-		channels = get_channel_list(start_freq, end_freq);
+		channels = get_channel_list_for_range(band, start_freq, end_freq);
 		if (band_name == "6G") {
 			let start_freq = radio_idx.first_freq;
 			if (freq_to_channel(start_freq) >= 129)
