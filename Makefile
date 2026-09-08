@@ -31,7 +31,7 @@ PKG_SUBDIR:=$(MAC80211_PKG_SUBDIR)
 PKG_RELEASE:=1
 PKG_BUILD_ID:=1
 
-PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)/backports$(if $(filter noextns,$(BUILD_VARIANT)),-noextns,)-6.1-$(MAC80211_PKG_KERNEL_VERSION)
+PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 PKG_BUILD_PARALLEL:=1
 
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
@@ -431,11 +431,9 @@ config-$(CONFIG_PACKAGE_MAC80211_DEBUG_MENU) += MAC80211_DEBUG_MENU
 config-$(CONFIG_PACKAGE_MAC80211_VERBOSE_DEBUG) += MAC80211_VERBOSE_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_PS_DEBUG) += MAC80211_PS_DEBUG
 config-$(CONFIG_PACKAGE_MAC80211_ATHMEMDEBUG) += MAC80211_ATHMEMDEBUG
-ifneq ($(BUILD_VARIANT),noextns)
 config-$(CONFIG_PACKAGE_QCN_EXTN) += QCN_EXTN
 config-$(CONFIG_PACKAGE_QCA_LAB_TEST_FEATURES) += QCA_LAB_TEST_FEATURES
 config-$(CONFIG_PACKAGE_QCN_EXTN_MESH_SUPPORT) += QCN_EXTN_MESH_SUPPORT
-endif
 
 config-$(call config_package,mac80211-hwsim) += MAC80211_HWSIM
 
@@ -527,7 +525,6 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	cp -rf $(LOCAL_SRC)/* $(PKG_BUILD_DIR)
 ifdef CONFIG_PACKAGE_QCN_EXTN
-ifneq ($(BUILD_VARIANT),noextns)
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
@@ -537,7 +534,6 @@ ifneq ($(BUILD_VARIANT),noextns)
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_scan_radio_extn.c
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_scan_radio_extn.h
-endif
 endif
 
 ifneq ($(CONFIG_DEBUG_MEM_USAGE),y)

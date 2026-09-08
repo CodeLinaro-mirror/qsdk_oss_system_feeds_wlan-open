@@ -1,5 +1,5 @@
 PKG_DRIVERS += \
-	ath ath12k ath12k-noextns carl9170 owl-loader ar5523 wil6210
+	ath ath12k carl9170 owl-loader ar5523 wil6210
 
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 PKG_DRIVERS += ath11k ath11k-ahb ath11k-pci
@@ -50,11 +50,10 @@ config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB ATH12K_POWER_OPTIMIZATION
 config-$(CONFIG_TARGET_ipq54xx) += ATH12K_AHB
 
 config-$(call config_package,ath11k) += ATH11K ATH11K_AHB ATH11K_PCI
-config-$(call config_package,ath12k,regular) += ATH12K
-config-$(call config_package,ath12k-noextns,noextns) += ATH12K
+config-$(call config_package,ath12k) += ATH12K
 
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-config-$(if $(CONFIG_PACKAGE_kmod-ath12k)$(CONFIG_PACKAGE_kmod-ath12k-noextns),y) += ATH12K_SPECTRAL
+config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
 config-$(CONFIG_PACKAGE_ATH12K_SAWF) += ATH12K_SAWF
 endif
 config-$(CONFIG_PACKAGE_ATH12K_TEST_FW_FOR_11S_MLO) += ATH12K_TEST_FW_FOR_11S_MLO
@@ -191,59 +190,18 @@ else
 endif
 
 ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
-ifneq ($(BUILD_VARIANT),noextns)
 ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko \
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/sa_test/sa_test.ko
 endif
 endif
-endif
   AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 $(if $(filter y, $(CONFIG_PACKAGE_ATHDEBUG)),ath_debug))
-  VARIANT:=regular
 endef
 
 define KernelPackage/ath12k/description
 This module adds support for Qualcomm Technologies 802.11ax family of
 chipsets.
 endef
-
-define KernelPackage/ath12k-noextns
-  $(call KernelPackage/mac80211/Default)
-  TITLE:=QTI 802.11be wireless cards support (no QCN extn)
-  URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
-ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
-  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT +kmod-dataipa
-else
-  DEPENDS+= +kmod-ath +@DRIVER_11N_SUPPORT +@DRIVER_11W_SUPPORT +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT
-endif
-ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
-  DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
-endif
-  FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
-ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
-ifneq ($(CONFIG_TARGET_ipq96xx),y)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
-endif
-ifeq ($(CONFIG_TARGET_ipq52xx),y)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
-endif
-ifeq ($(CONFIG_TARGET_ipq96xx),y)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
-endif
-else
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
-         $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
-endif
-
-ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
-endif
-  AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 $(if $(filter y,$(CONFIG_PACKAGE_ATHDEBUG)),ath_debug))
-  VARIANT:=noextns
-  DEFAULT:=m if PACKAGE_kmod-ath12k
-endef
-
-KernelPackage/ath12k-noextns/description = $(KernelPackage/ath12k/description)
 
 define KernelPackage/ath12k/config
 	config PACKAGE_ATH12K_SAWF
