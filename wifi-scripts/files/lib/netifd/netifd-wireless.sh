@@ -291,11 +291,11 @@ wireless_vif_parse_encryption() {
 		psk3-mixed*|sae-mixed*)
 			auth_type=psk-sae
 		;;
-		sae-sae_ext_key)
-			auth_type=sae-sae_ext_key
+		sae-sae-ext-key)
+			auth_type=sae-sae-ext-key
 		;;
 		akm24-sae-mixed)
-			auth_type=psk-sae-sae_ext_key
+			auth_type=psk-sae-sae-ext-key
 		;;
 		sae-ext-key)
 			auth_type=sae-ext-key
