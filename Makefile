@@ -534,8 +534,10 @@ ifneq ($(BUILD_VARIANT),noextns)
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi7/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/src/mesh-extn.c $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/qcn_extns/
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi6/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/wifi8/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns
+	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/ath/ath12k/src/mesh-extn.c $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_dfs_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.c
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_dfs_extn.h $(PKG_BUILD_DIR)/net/wireless/cfg80211_dfs_extn.h
 	$(CP) $(TOPDIR)/$(WLAN_SRCPREFIX)wlan-open-extns/subsys/src/cfg80211_scan_radio_extn.c $(PKG_BUILD_DIR)/net/wireless/cfg80211_scan_radio_extn.c
