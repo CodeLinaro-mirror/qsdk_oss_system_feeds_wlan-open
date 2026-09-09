@@ -3079,6 +3079,27 @@ mac80211_is_last_enabled_radio() {
 	[ "$radio" = "$max_radio" ]
 }
 
+mac80211_has_enabled_vap() {
+	local found=
+
+	config_load wireless
+	__scan_wifi_iface() {
+		local dev dev_type dev_disabled if_disabled
+
+		config_get dev "$1" device
+		[ -z "$dev" ] && return 0
+		config_get dev_type "$dev" type
+		[ "$dev_type" != "mac80211" ] && return 0
+		config_get dev_disabled "$dev" disabled 0
+		[ "$dev_disabled" -eq 1 ] && return 0
+		config_get if_disabled "$1" disabled 0
+		[ "$if_disabled" -eq 1 ] && return 0
+		found=1
+	}
+	config_foreach __scan_wifi_iface wifi-iface
+	[ -n "$found" ]
+}
+
 # Global repeater flag: set to 1 if any enabled radio has both AP and STA VAPs
 is_repeater=0
 
@@ -3507,6 +3528,14 @@ drv_mac80211_setup() {
 		. /lib/performance.sh
 	}
 
+	if mac80211_is_last_enabled_radio && mac80211_has_enabled_vap; then
+		config_get_bool lowi_enable lowi enable 0
+		[ "$lowi_enable" -eq 1 ] && [ -f "/lib/wifi/lowi.sh" ] && {
+			. /lib/wifi/lowi.sh
+			lowi_setup
+		}
+	fi
+
 	hostapd_dpp_action "$dpp_ifaces"
 
 	for_each_interface "ap mesh" mac80211_set_fq_limit
@@ -3594,6 +3623,11 @@ drv_mac80211_teardown() {
 	killall rptr-mgr
 	rm /var/run/rptr_mgr.conf
 	rm -f /tmp/CSwOpts_saved
+
+	[ -f "/lib/wifi/lowi.sh" ] && {
+		. /lib/wifi/lowi.sh
+		lowi_teardown
+	}
 }
 
 _sta_radios=
