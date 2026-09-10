@@ -529,6 +529,8 @@ hostapd_common_add_bss_config() {
 
 	config_add_int rsn_overriding
 	config_add_int rsn_override_mfp
+	config_add_int rsn_override_mlo_compat
+	config_add_int rsn_override_omit_rsnxe
 	config_add_string rsn_override_key_mgmt rsn_override_pairwise
 
 	config_add_int rsn_override_mfp_2
@@ -799,7 +801,7 @@ hostapd_set_bss_options() {
 		rsnxe_capab_mask \
 		sae_pw_id_num sae_pw_id_key sae_password \
 		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
-		report_connection_failures eppke_unauth
+		report_connection_failures eppke_unauth rsn_override_mlo_compat rsn_override_omit_rsnxe
 
 
 	json_get_values sae_groups sae_groups
@@ -977,6 +979,8 @@ hostapd_set_bss_options() {
 		append bss_conf "rsn_override_key_mgmt_2=$rsn_override_key_mgmt_2" "$N"
 		append bss_conf "rsn_override_pairwise_2=$rsn_override_pairwise_2" "$N"
 		append bss_conf "rsn_override_mfp_2=$rsn_override_mfp_2" "$N"
+		[ -n "$rsn_override_mlo_compat" ] && append bss_conf "rsn_override_mlo_compat=$rsn_override_mlo_compat" "$N"
+		[ -n "$rsn_override_omit_rsnxe" ] && append bss_conf "rsn_override_omit_rsnxe=$rsn_override_omit_rsnxe" "$N"
 	}
 
 	[ -n "$assoc_frame_encryption" ] && append bss_conf "assoc_frame_encryption=$assoc_frame_encryption" "$N"
