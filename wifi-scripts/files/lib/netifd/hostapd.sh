@@ -431,8 +431,8 @@ hostapd_common_add_bss_config() {
 	config_add_int smd_neighbor_expiry_time smd_neighbor_pull_interval
 	config_add_int rnr rnr_ie_allowed
 
-	config_add_boolean ftm_responder stationary_ap
 	config_add_int rtt_responder_role
+	config_add_boolean ftm_responder rtt_initiator_role stationary_ap
 	config_add_string lci civic
 
 	config_add_boolean ieee80211r pmk_r1_push ft_psk_generate_local ft_over_ds
@@ -1259,8 +1259,12 @@ hostapd_set_bss_options() {
 	[ "$rnr" -gt 0 ] && append bss_conf "rnr=$rnr" "$N"
 	[ "$rnr_ie_allowed" -gt 0 ] && append bss_conf "rnr_ie_allowed=$rnr_ie_allowed" "$N"
 
-	json_get_vars ftm_responder stationary_ap lci civic rtt_responder_role
+	json_get_vars ftm_responder stationary_ap lci civic rtt_responder_role rtt_initiator_role
 	set_default ftm_responder 0
+	set_default rtt_initiator_role 0
+
+	[ "$rtt_initiator_role" -eq "1" ] && append bss_conf "rtt_initiator_role=1" "$N"
+
 	if [ "$ftm_responder" -eq "1" ]; then
 		set_default stationary_ap 0
 		iw phy "$phy" info | grep -q "ENABLE_FTM_RESPONDER" && {
@@ -1802,7 +1806,11 @@ wpa_supplicant_prepare_interface() {
 
 	_wpa_supplicant_common "$1"
 
-	json_get_vars mode wds multi_ap
+	json_get_vars mode wds multi_ap rtt_initiator_role
+	set_default rtt_initiator_role 0
+
+	local rtt_initiator_role_str=
+	[ "$rtt_initiator_role" -eq "1" ] && rtt_initiator_role_str="rtt_initiator_role=1"
 
 	[ -n "$network_bridge" ] && {
 		fail=
@@ -1849,6 +1857,7 @@ ${scan_list:+freq_list=$scan_list}
 $ap_scan
 $country_str
 $ctrl_intf_str
+$rtt_initiator_role_str
 EOF
 	# Match the ownership wpad.init already applied to $_rpath (the
 	# ctrl_interface dir) for the ujailed wpa_supplicant user/group,
