@@ -237,15 +237,16 @@ else
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
 endif
 
-ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
-endif
+  FILES:=
   AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 $(if $(filter y,$(CONFIG_PACKAGE_ATHDEBUG)),ath_debug))
   VARIANT:=noextns
   DEFAULT:=m if PACKAGE_kmod-ath12k
 endef
 
 KernelPackage/ath12k-noextns/description = $(KernelPackage/ath12k/description)
+
+define KernelPackage/ath12k-noextns/install
+endef
 
 define KernelPackage/ath12k/config
 	config PACKAGE_ATH12K_SAWF
