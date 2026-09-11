@@ -70,6 +70,7 @@ mac80211_update_mld_iface_config() {
 	config_get mld_vp "$mld_name" ppe_vp
 	config_get mld_enable_epcs "$mld_name" enable_epcs
 	config_get mld_ttlm_enable "$mld_name" ttlm_enable
+	config_get mld_uhr_adv_notif_dur_ms "$mld_name" uhr_adv_notification_duration_ms
 	if [ -n "$mld_ssid" ]; then
 		uci_set wireless "$vif_name" ssid "$mld_ssid"
 	fi
@@ -101,6 +102,9 @@ mac80211_update_mld_iface_config() {
 	fi
 	if [ -n "$mld_ttlm_enable" ];then
 		uci_set wireless "$vif_name" ttlm_enable "$mld_ttlm_enable"
+	fi
+	if [ -n "$mld_uhr_adv_notif_dur_ms" ] && [ "$mld_uhr_adv_notif_dur_ms" -gt 0 ]; then
+		uci_set wireless "$vif_name" uhr_adv_notification_duration_ms "$mld_uhr_adv_notif_dur_ms"
 	fi
 	uci commit wireless
 }
@@ -515,7 +519,7 @@ drv_mac80211_init_iface_config() {
 	config_add_string vlan_tagged_interface vlan_bridge accept_mac_file wpa_psk_file sae_password_file
 
 	#uhr_config
-	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+	config_add_int uhr_adv_notification_interval uhr_adv_notification_duration_ms uhr_update_in_tim_interval
 	config_add_boolean skip_uhr_extn_in_rnr
 
 	#monitor
@@ -1613,7 +1617,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs deferred_scs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
-	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
+	json_get_vars uhr_adv_notification_interval uhr_adv_notification_duration_ms uhr_update_in_tim_interval
 	local _rnr
 	json_get_var _rnr skip_uhr_extn_in_rnr
 	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
@@ -1766,6 +1770,9 @@ mac80211_hostapd_setup_bss() {
 			[ "$disable_11bn" = "1" ] && append hostapd_cfg "disable_11bn=1" "$N"
 			[ -n "$uhr_adv_notification_interval" ] && \
 				append hostapd_cfg "uhr_adv_notification_interval=$uhr_adv_notification_interval" "$N"
+			[ -n "$uhr_adv_notification_duration_ms" ] && \
+				[ "$uhr_adv_notification_duration_ms" -gt 0 ] && \
+					append hostapd_cfg "uhr_adv_notification_duration_ms=$uhr_adv_notification_duration_ms" "$N"
 			[ -n "$uhr_update_in_tim_interval" ] && \
 				append hostapd_cfg "uhr_update_in_tim_interval=$uhr_update_in_tim_interval" "$N"
 		;;
