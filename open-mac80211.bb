@@ -284,6 +284,8 @@ MAKE_OPTS = " \
 "
 
 MODULE_EXTRA_SYMBOLS:echo = "${STAGING_INCDIR}/qca-debug-uio/Module.symvers"
+ATH12K_FW_FILES:echo = "Data.msc amss.bin aux.bin board-2.bin fw_ini_cfg.bin m3.bin \
+			mcss.bin qdss_trace_config.bin"
 
 do_compile[vardepsexclude] += "MODULE_EXTRA_SYMBOLS"
 
@@ -305,10 +307,13 @@ do_install:append:echo() {
 	if [ -f ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ]; then
 		cp ${S}/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h ${D}${includedir}/ipa/wifi8/
 	fi
-	install -d ${D}/lib/firmware/ath12k/QCN9625/
-	install -d ${D}/lib/firmware/ath12k/QCN9589/
-	ln -sf /firmware/image/qcn9625 ${D}/lib/firmware/ath12k/QCN9625/hw1.0
-	ln -sf /firmware/image/qcn9589 ${D}/lib/firmware/ath12k/QCN9589/hw1.0
+	install -d ${D}/lib/firmware/ath12k/QCN9625/hw1.0
+	install -d ${D}/lib/firmware/ath12k/QCN9589/hw1.0
+	for f in ${ATH12K_FW_FILES}; do
+		ln -snf /firmware/image/qcn9625/$f ${D}/lib/firmware/ath12k/QCN9625/hw1.0/$f
+		ln -snf /firmware/image/qcn9589/$f ${D}/lib/firmware/ath12k/QCN9589/hw1.0/$f
+	done
+
 	install -d ${D}${sysconfdir}/udev/rules.d
 	install -m 0644 ${WORKDIR}/etc/udev/rules.d/60-ath12k-no-autoload.rules \
 		${D}${sysconfdir}/udev/rules.d/60-ath12k-no-autoload.rules
