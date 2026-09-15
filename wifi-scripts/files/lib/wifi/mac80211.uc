@@ -248,10 +248,9 @@ function is_sta_iface(s) {
 /* Helper: normalize station interface options */
 function normalize_sta_iface(secname, s) {
 	let changed = false;
-	/* Switch LAN->WAN only when extap is enabled and WDS is NOT enabled */
-	let extap_enabled = (s.extap && s.extap == '1');
+	/* Switch LAN->WAN only when WDS is NOT enabled */
 	let wds_enabled = (s.wds && s.wds == '1');
-	if (extap_enabled && !wds_enabled) {
+	if (!wds_enabled) {
 		if (!s.network || lc(s.network) == 'lan') {
 			print(`set wireless.${secname}.network='wan'\n`);
 			changed = true;
