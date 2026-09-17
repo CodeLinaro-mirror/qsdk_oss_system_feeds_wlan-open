@@ -1889,6 +1889,19 @@ wpa_supplicant_set_fixed_freq() {
 	esac
 }
 
+wpa_supplicant_htmode_sta_max_bw() {
+	case "$1" in
+		EHT320) echo 320;;
+		EHT160) echo 160;;
+		*80P80) echo 160;;
+		EHT80)  echo 80;;
+		EHT40*|EHT40) echo 40;;
+		EHT20)  echo 20;;
+		HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160) echo 40;;
+		NOHT|HT20|VHT20|HE20) echo 20;;
+	esac
+}
+
 wpa_supplicant_add_network() {
 	local ifname="$1"
 
@@ -1898,6 +1911,7 @@ wpa_supplicant_add_network() {
 		local channel="$4"
 		local uplink_csa="$5"
 		local CSwOpts="$6"
+		local force_bw="$7"
 	else
 		local freq="$2"
 		local htmode="$3"
@@ -1963,6 +1977,12 @@ wpa_supplicant_add_network() {
 	}
 
 	[[ "$_w_mode" = "sta" ]] && {
+		local sta_max_bw
+		sta_max_bw="$(wpa_supplicant_htmode_sta_max_bw "$htmode")"
+		[ "$force_bw" = "1" ] && [ -n "$sta_max_bw" ] && {
+			append network_data "sta_max_bw=$sta_max_bw" "$N$T"
+		}
+
 		[ -n "$freq_list" ] && {
 			freq_list="freq_list=$freq_list"
 		}
