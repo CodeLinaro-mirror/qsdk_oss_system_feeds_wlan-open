@@ -43,12 +43,12 @@ else
 	SRCPREFIX:="qca/"
 endif
 
-WLAN_SRCPREFIX:=$(shell if [ -d $(TOPDIR)/src/ipq ]; then echo "src/"; else echo "qca/src/"; fi)
+WLAN_SRCPREFIX:=$(shell if [ -d $(TOPDIR)/src/ipq ]; then echo "src/ipq/"; else echo "qca/src/"; fi)
 
 LOCAL_SRC:=$(TOPDIR)/$(WLAN_SRCPREFIX)mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 
 ifeq ($(CONFIG_TARGET_sdx85),y)
-	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/
+	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/hostapd/priv_patches/
 else ifeq ($(CONFIG_TARGET_echo),y)
 	EXTERNAL_HOSTAP_FILE_DIR:=$(TOPDIR)/owrt-qti-ipq-open/feeds/wlan-hostapd/hostapd/
 else ifeq ($(CONFIG_USE_PRPLMESH_WHM),y)
@@ -380,7 +380,6 @@ ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
 endif
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko $(1)/lib/modules/$(UNAME_VERSION)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko $(1)/lib/modules/$(UNAME_VERSION)
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko $(1)/lib/modules/$(UNAME_VERSION)
 ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko $(1)/lib/modules/$(UNAME_VERSION)
 endif
@@ -389,6 +388,7 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN92XX
 	ln -sf /firmware/image/qcn9224 $(1)/lib/firmware
 	ln -sf /firmware/image/qcn9224 $(1)/lib/firmware/ath12k/QCN92XX/hw1.0
+else ifeq ($(CONFIG_TARGET_echo),y)
 	$(INSTALL_DIR) $(1)/lib/firmware/ath12k/QCN9625
 	ln -sf /firmware/image/qcn9625 $(1)/lib/firmware
 	ln -sf /firmware/image/qcn9625 $(1)/lib/firmware/ath12k/QCN9625/hw1.0
@@ -451,12 +451,8 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 	C_DEFINES+= -DCONFIG_ATH10K_SMALLBUFFERS
 endif
 
-CMA_TARGETS :=  $(CONFIG_TARGET_ipq96xx) \
-	        $(CONFIG_TARGET_ipq52xx) \
-		$(CONFIG_TARGET_ipq52xx) \
-		$(CONFIG_TARGET_echo_cpe) \
-		$(CONFIG_TARGET_sdx85_cpe) \
-		$(CONFIG_TARGET_sdx85_cpe-v1)
+CMA_TARGETS := $(CONFIG_TARGET_ipq96xx) \
+	       $(CONFIG_TARGET_ipq52xx)
 
 ifeq ($(filter y,$(CMA_TARGETS)),y)
 ifeq ($(CONFIG_DMA_CMA),y)
@@ -469,14 +465,13 @@ ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
   C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
 endif
   LINUX_HDRS=$(TOPDIR)/src/kernel-$(LINUX_VERSION)/kernel_platform/temp_out_dir/msm-kernel
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-unused-variable -Wno-switch -Wno-uninitialized -Wno-visibility -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi -I$(STAGING_DIR)/usr/include"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall -DPLATFORM_SDX -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-pointer-bool-conversion -Wno-tautological-constant-out-of-range-compare -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-logical-not-parentheses -Wno-uninitialized -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
 
-  KBUILD_EXTRA_SYMBOLS_IPA:="$(PKG_BUILD_DIR)/../dataipa-1.0/Module.symvers $(PKG_BUILD_DIR)/../qca-debug-uio-1/Module.symvers"
-
+  KBUILD_EXTRA_SYMBOLS_IPA="$(PKG_BUILD_DIR)/../dataipa-1.0/Module.symvers"
   MAKE_OPTS:= \
 	-C $(LINUX_DIR) M="$(PKG_BUILD_DIR)" \
 	KBUILD_EXTRA_SYMBOLS=$(KBUILD_EXTRA_SYMBOLS_IPA) \
-	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
+	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS)
 	KLIB_BUILD=$(LINUX_HDRS)
 
 define Build/PreCompile
@@ -487,7 +482,7 @@ endef
 
 else
   ifeq ($(CONFIG_TARGET_echo),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(SRCPREFIX)/src/ipq/qca-wifi/telemetry_agent/inc/ -Wall"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
    MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
@@ -495,10 +490,10 @@ else
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
-	KBUILD_LDFLAGS_MODULE_PREREQ= \
+	KBUILD_LDFLAGS_MODULE_PREREQ=
 	CFLAGS="-DPLATFORM_SDX"
   else
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(SRCPREFIX)/src/qca-wifi/telemetry_agent/inc/ -Wall"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
 
   MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
