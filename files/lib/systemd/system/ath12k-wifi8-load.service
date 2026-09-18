@@ -1,0 +1,38 @@
+[Unit]
+Description=Load ath12k_wifi8 WiFi driver after modem and IPA uC are fully ready
+Requires=init_sys_mss.service
+After=init_sys_mss.service
+Wants=init_sys_mss.service
+ConditionPathExists=/sys/class/remoteproc/remoteproc0/state
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=125
+
+ExecStart=/bin/sh -c '\
+    found=0; \
+    for pci_dev in /sys/bus/pci/devices/*; do \
+        [ -d "$pci_dev" ] || continue; \
+        id=$(cat "$pci_dev/device" 2>/dev/null) || continue; \
+        if [ "$id" = "0x1113" ] || [ "$id" = "0x1114" ]; then \
+            found=1; \
+            break; \
+        fi; \
+    done; \
+    [ "$found" = "1" ] || exit 0; \
+    count=0; \
+    while true; do \
+        state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null); \
+        [ "$state" = "running" ] && break; \
+        count=$((count + 1)); \
+        if [ $count -ge 120 ]; then \
+            echo "ath12k-wifi8-load: remoteproc0 not running after 120 s, aborting" >&2; \
+            exit 1; \
+        fi; \
+        sleep 1; \
+    done; \
+    /sbin/modprobe ath12k_wifi8 && /sbin/modprobe qca-wifi-nss-plugins'
+
+[Install]
+WantedBy=multi-user.target

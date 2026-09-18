@@ -96,3 +96,4 @@ do_install() {
 }
 
 KERNEL_MODULE_AUTOLOAD += "qca-wifi-nss-plugins"
+KERNEL_MODULE_AUTOLOAD:remove:echo = "qca-wifi-nss-plugins"
