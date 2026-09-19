@@ -421,6 +421,7 @@ hostapd_common_add_bss_config() {
 	config_add_int wps_ap_setup_locked wps_independent
 	config_add_string wps_device_type wps_device_name wps_manufacturer wps_pin
 	config_add_string multi_ap_backhaul_ssid multi_ap_backhaul_key
+	config_add_int multi_cred
 
 	config_add_boolean wnm_sleep_mode wnm_sleep_mode_no_keys bss_transition mbo
 	config_add_int time_advertisement mbo_cell_data_conn_pref
@@ -742,6 +743,107 @@ append_acct_server() {
 	[ -n "$acct_secret" ] && append bss_conf "acct_server_shared_secret=$acct_secret" "$N"
 }
 
+hostapd_set_extra_cred() {
+	local var="$1"
+	local ssid="$2"
+	local psk="$3"
+	local enc="$4"
+	local temp enc_list
+
+	enc=$(echo "$enc" | awk '{ print tolower($0) }')
+
+	#wps_build_cred_network_idx
+	append "$var" "1026"
+	append "$var" "0001"
+	append "$var" "01"
+
+	temp=`expr length "$ssid"`
+	temp=`printf "%04X" $temp`
+
+	#wps_build_cred_ssid
+	append "$var" "1045"
+	append "$var" "$temp"
+	temp=`echo -n "$ssid" | hexdump -v -e '/1 "%02X "'`
+	append "$var" "$temp"
+
+	#wps_build_cred_auth_type
+	append "$var" "1003"
+	append "$var" "0002"
+
+	case "$enc" in
+		none)
+			append "$var" "0001"
+			;;
+		wpa2*|*psk2*|ccmp*|gcmp*|sae*|dpp)
+			append "$var" "0020"
+			;;
+		*)
+			append "$var" "0022"
+			;;
+	esac
+
+	#wps_build_cred_encr_type
+	append "$var" "100f"
+	append "$var" "0002"
+
+	enc_list=`echo "$enc" | sed "s/+/ /g"`
+	case "$enc_list" in
+		*tkip*)
+			append "$var" "0004"
+			;;
+		*mixed*)
+			append "$var" "000c"
+			;;
+		*)
+			append "$var" "0008"
+			;;
+	esac
+
+	#Key Index
+	append "$var" "1028"
+	append "$var" "0001"
+	append "$var" "01"
+
+	#wps_build_cred_network_key
+	append "$var" "1027"
+	temp=`expr length "$psk"`
+	temp=`printf "%04X" $temp`
+	append "$var" "$temp"
+	temp=`echo -n "$psk" | hexdump -v -e '/1 "%02X "'`
+	append "$var" "$temp"
+
+	#wps_build_mac_addr
+	append "$var" "1020"
+	append "$var" "0006"
+	append "$var" "00:00:00:00:00:00"
+}
+
+hostapd_config_multi_cred() {
+	local phy="$1"
+	local ssid="$2"
+	local psk="$3"
+	local enc="$4"
+	local extra_cred temp cred_config
+
+	extra_cred=
+	hostapd_set_extra_cred extra_cred "$ssid" "$psk" "$enc"
+
+	extra_cred=$(echo $extra_cred | tr -d ' ')
+	extra_cred=$(echo $extra_cred | tr -d ':')
+
+	temp=`expr length "$extra_cred" / 2`
+	temp=`printf "%04X" $temp`
+
+	#ATTR_CRED
+	cred_config="100e$temp$extra_cred"
+
+	cat > /var/run/hostapd_cred_tmp_${phy}.conf <<EOF
+$cred_config
+EOF
+	sed 's/\([0-9A-F]\{2\}\)/\\\\\\x\1/gI' /var/run/hostapd_cred_tmp_${phy}.conf | xargs printf >> /var/run/hostapd_cred_${phy}.bin
+	rm -f /var/run/hostapd_cred_tmp_${phy}.conf
+}
+
 hostapd_set_bss_options() {
 	local var="$1"
 	local phy="$2"
@@ -767,7 +869,7 @@ hostapd_set_bss_options() {
 		external_plugin_auth_policy external_plugin_remote_auth_policy external_plugin_deauth_policy \
 		external_plugin_assoc_policy external_plugin_disassoc_policy \
 		$hostapd_if_action_policy_uci_vars \
-		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll skip_disconnect \
+		multi_ap multi_ap_vlanid multi_ap_profile multi_ap_backhaul_ssid multi_ap_backhaul_key skip_inactivity_poll skip_disconnect  multi_cred \
 		ppsk airtime_bss_weight airtime_bss_limit airtime_sta_weight \
 		multicast_to_unicast_all proxy_arp per_sta_vif \
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
@@ -1203,6 +1305,25 @@ hostapd_set_bss_options() {
 			fi
 		}
 	}
+
+	set_default multi_cred 0
+
+	# Add this BSS's credential to the shared per-phy blob if it has a
+	# real key, up to the first 2 encrypted AP BSSes on this phy. This
+	# runs for every qualifying BSS, not just ones with multi_cred=1, so
+	# the blob always ends up with up to 2 credentials for hostapd to
+	# offer over WPS.
+	if [ -n "$key" ] && [ "${mc_count:-0}" -lt 2 ]; then
+		hostapd_config_multi_cred "$phy" "$ssid" "$key" "$encryption"
+		mc_count=$(( ${mc_count:-0} + 1 ))
+	fi
+
+	# Only a BSS with its own multi_cred=1 hands out the shared blob
+	# during its WPS session.
+	if [ "$multi_cred" -gt 0 ]; then
+		append bss_conf "skip_cred_build=1" "$N"
+		append bss_conf "extra_cred=/var/run/hostapd_cred_${phy}.bin" "$N"
+	fi
 
 	append bss_conf "ssid=$ssid" "$N"
 	[ -n "$network_bridge" ] && append bss_conf "bridge=$network_bridge${N}wds_bridge=" "$N"
@@ -2385,6 +2506,25 @@ rptr_mgr_mode=$rptr_mgr_mode
 channel=$channel
 uplink_csa=$uplink_csa
 EOF
+	fi
+	if [ -f "/etc/wireless/wps_creds-${ifname}.conf" ]; then
+		awk -v skip="$ssid" '
+			/^network=\{/ { blk=$0 ORS; cur=""; next }
+			blk != "" {
+				blk = blk $0 ORS
+				line=$0
+				sub(/^[ \t]*/, "", line)
+				if (line ~ /^ssid=/) {
+					cur=line
+					sub(/^ssid="/, "", cur)
+					sub(/"$/, "", cur)
+				}
+				if ($0 ~ /^\}/) {
+					if (cur != skip) printf "%s", blk
+					blk=""
+				}
+			}
+		' "/etc/wireless/wps_creds-${ifname}.conf" >> "$_config"
 	fi
 	return 0
 }
