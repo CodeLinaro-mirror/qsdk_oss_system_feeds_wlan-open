@@ -146,6 +146,8 @@ do_cp_headers() {
 
 # Strip _64/_32 suffix from MACHINE so it matches CONFIG_TARGET_* names in ath.mk
 SOC_TARGET = "${@d.getVar('MACHINE').split('_64')[0].split('_32')[0] if d.getVar('MACHINE') else d.getVar('BASEMACHINE')}"
+POKY_DIR = ""
+POKY_DIR:echo = "poky/"
 do_configure[vardeps] += "CONFIG_KERNEL_IPQ_MEM_PROFILE SOC_TARGET"
 
 do_configure:prepend:echo() {
@@ -159,9 +161,17 @@ def get_mem_cfg_flags(d):
     profile = d.getVar('CONFIG_KERNEL_IPQ_MEM_PROFILE')
     topdir  = d.getVar('TOPDIR')
     srcprefix = d.getVar('SRCPREFIX') or ''
-    base = os.path.join(topdir, srcprefix,
+    pokyprefix = d.getVar('POKY_DIR') or ''
+    base_machine = d.getVar('BASEMACHINE') or ''
+    base = os.path.join(topdir, srcprefix, pokyprefix,
                         'meta-ipq/recipes-kernel/linux/linux-ipq')
-    mem_cfg = os.path.join(base, 'ipq_mem_512' if profile == '512' else 'ipq_mem_open')
+    if base_machine == 'echo':
+        mem_file = 'ipq_mem_sdx'
+    elif profile == '512':
+        mem_file = 'ipq_mem_512'
+    else:
+        mem_file = 'ipq_mem_open'
+    mem_cfg = os.path.join(base, mem_file)
     try:
         with open(mem_cfg) as f:
             lines = f.readlines()
@@ -177,14 +187,16 @@ def get_mem_cfg_flags(d):
     return ' '.join(result)
 
 do_configure:prepend() {
-	mem_cfg_dir="${TOPDIR}/${SRCPREFIX}meta-ipq/recipes-kernel/linux/linux-ipq"
+	mem_cfg_dir="${TOPDIR}/${SRCPREFIX}${POKY_DIR}meta-ipq/recipes-kernel/linux/linux-ipq"
 	mem_cfg_open="${mem_cfg_dir}/ipq_mem_open"
 	mem_cfg_512="${mem_cfg_dir}/ipq_mem_512"
+	mem_cfg_sdx="${mem_cfg_dir}/ipq_mem_sdx"
 
-	if [ ! -f "${mem_cfg_open}" ] || [ ! -f "${mem_cfg_512}" ]; then
+	if [ ! -f "${mem_cfg_open}" ] || [ ! -f "${mem_cfg_512}" ] || [ ! -f "${mem_cfg_sdx}" ]; then
 		bberror "Required memory profile config files are missing."
 		bberror "Expected file: ${mem_cfg_open}"
 		bberror "Expected file: ${mem_cfg_512}"
+		bberror "Expected file: ${mem_cfg_sdx}"
 		if [ -d "${mem_cfg_dir}" ]; then
 			bberror "Directory exists, current contents:" 
 			ls -la "${mem_cfg_dir}" || true
