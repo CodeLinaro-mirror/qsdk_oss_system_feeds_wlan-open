@@ -43,7 +43,7 @@ else
 	SRCPREFIX:="qca/"
 endif
 
-WLAN_SRCPREFIX:=$(shell if [ -d $(TOPDIR)/src/ipq ]; then echo "src/ipq/"; else echo "qca/src/"; fi)
+WLAN_SRCPREFIX:=$(shell if [ -d $(TOPDIR)/src/ipq ]; then echo "src/"; else echo "qca/src/"; fi)
 
 LOCAL_SRC:=$(TOPDIR)/$(WLAN_SRCPREFIX)mac80211/wlan-open/backports-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 
@@ -452,7 +452,10 @@ ifeq ($(BUILD_VARIANT),smallbuffers)
 endif
 
 CMA_TARGETS := $(CONFIG_TARGET_ipq96xx) \
-	       $(CONFIG_TARGET_ipq52xx)
+	       $(CONFIG_TARGET_ipq52xx) \
+	       $(CONFIG_TARGET_echo_cpe) \
+	       $(CONFIG_TARGET_sdx85_cpe) \
+	       $(CONFIG_TARGET_sdx85_cpe-v1)
 
 ifeq ($(filter y,$(CMA_TARGETS)),y)
 ifeq ($(CONFIG_DMA_CMA),y)
@@ -482,7 +485,7 @@ endef
 
 else
   ifeq ($(CONFIG_TARGET_echo),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)/ipq/telemetry_agent/inc/ -Wall"
    MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
@@ -490,8 +493,8 @@ else
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
-	KBUILD_LDFLAGS_MODULE_PREREQ=
-	CFLAGS="-DPLATFORM_SDX"
+	KBUILD_LDFLAGS_MODULE_PREREQ= \
+	CFLAGS="-DPLATFORM_SDX $(C_DEFINES)"
   else
   EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
 
