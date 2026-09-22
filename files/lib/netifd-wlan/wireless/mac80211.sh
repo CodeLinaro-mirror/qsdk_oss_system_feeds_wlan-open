@@ -2019,7 +2019,7 @@ drv_mac80211_setup() {
 	json_select config
 	json_get_vars \
 		phy macaddr path \
-		country chanbw distance \
+		country chanbw distance band cck_rx_support:0 \
 		txpower antenna_gain \
 		multiple_bssid noscan \
 		rxantenna txantenna \
