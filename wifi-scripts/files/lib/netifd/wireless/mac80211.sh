@@ -352,6 +352,7 @@ ubus_call() {
 		config_add_boolean use_driver_vendor_addr
 		config_add_boolean noscan ht_coex acs_exclude_dfs background_radar bgcac_en dfs_bw_reduce_en dfs_chan_recovery rpt_max_phy acs_2g_scan_all
 		config_add_int rcac_freq
+		config_add_boolean disable_auto_mbssid_tx_bss
 	# ACS behavior tuning
 	config_add_int acs_retry_interval acs_retry_count acs_periodic_interval acs_pcac_only
 	config_add_array ht_capab
@@ -493,6 +494,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean vht_mcs_10_11_nq2q_peer_supp
 	config_add_boolean he_400ns_sgi_supp
 	config_add_boolean he_2xltf_160_80p80_supp
+	config_add_boolean mbssid_tx_bss
 
 	#atf
 	config_add_boolean commitatf
@@ -802,6 +804,7 @@ mac80211_hostapd_setup_base() {
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list dcs_channel_penalty
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
+	json_get_vars disable_auto_mbssid_tx_bss
 
 	# Optional user override for HT40 capability string
 	json_get_vars ht40
@@ -1373,6 +1376,10 @@ mac80211_hostapd_setup_base() {
 			if [ "$multiple_bssid" == "3" ]; then
 				append base_cfg "mbssid_group_size=$mbssid_group_size" "$N"
 			fi
+
+			if [ -n "$disable_auto_mbssid_tx_bss" ]; then
+				append base_cfg "disable_auto_mbssid_tx_bss=$disable_auto_mbssid_tx_bss" "$N"
+			fi
 		fi
 	fi
 
@@ -1637,6 +1644,7 @@ mac80211_hostapd_setup_bss() {
 	json_for_each_item append_smd_partner smd_partner
 	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
 	json_get_vars mapc_cotdma_enable
+	json_get_vars mbssid_tx_bss
 
 	#epcs params
 	json_get_vars enable_epcs
@@ -1873,6 +1881,10 @@ mac80211_hostapd_setup_bss() {
         [ -n "$commitatf" ] && append hostapd_cfg "commitatf=$commitatf" "$N"
         [ -n "$atfssidsched" ] && append hostapd_cfg "atfssidsched=$atfssidsched" "$N"
         [ -n "$atfssidgroup" ] && append hostapd_cfg "atfssidgroup=$atfssidgroup" "$N"
+
+	if [ -n "$mbssid_tx_bss" ]; then
+		append hostapd_cfg "mbssid_tx_bss=$mbssid_tx_bss" "$N"
+	fi
 
 	if [ "$use_driver_vendor_addr" = "1" ] && [ -n "$bss_index" ]; then
 		append hostapd_cfg "bss_index=$bss_index" "$N"
