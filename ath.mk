@@ -222,6 +222,7 @@ endif
 ifeq ($(CONFIG_PACKAGE_ATHDEBUG),y)
   DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
 endif
+ifeq ($(CONFIG_PACKAGE_kmod-ath12k),)
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
 ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
 ifneq ($(CONFIG_TARGET_ipq96xx),y)
@@ -237,8 +238,8 @@ else
   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko \
          $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
 endif
+endif
 
-  FILES:=
   AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 $(if $(filter y,$(CONFIG_PACKAGE_ATHDEBUG)),ath_debug))
   VARIANT:=noextns
   DEFAULT:=m if PACKAGE_kmod-ath12k
