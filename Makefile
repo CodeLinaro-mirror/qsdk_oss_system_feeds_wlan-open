@@ -34,6 +34,10 @@ PKG_BUILD_ID:=1
 PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)/backports$(if $(filter noextns,$(BUILD_VARIANT)),-noextns,)-6.1-$(MAC80211_PKG_KERNEL_VERSION)
 PKG_BUILD_PARALLEL:=1
 
+ifneq ($(findstring QSDK_MinEntOpen,$(CONFIG_TARGET_PROFILE)),)
+PKG_BUILD_DEPENDS += PACKAGE_hostapd-openssl:hostapd
+endif
+
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
 PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
 
