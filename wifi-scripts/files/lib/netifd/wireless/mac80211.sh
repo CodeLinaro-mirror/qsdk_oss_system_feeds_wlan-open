@@ -258,6 +258,7 @@ atf_offload=
 #qacs commands
 qacs_enable=
 acs_rank_en=
+dcs_channel_penalty=
 acs_6g_only_psc=
 acs_wradar=
 acsmin_dwell=
@@ -408,6 +409,7 @@ ubus_call() {
 		chan_util_avg_period \
 		acsmin_dwell \
 		acsmax_dwell \
+		dcs_channel_penalty \
 		acs_dwelltime \
 		acs_dbgtrace \
 		acs_txpwr_opt \
@@ -790,7 +792,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp skip_uhr_extn_in_rnr discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id
-	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list
+	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list dcs_channel_penalty
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
 
@@ -1416,6 +1418,10 @@ mac80211_hostapd_setup_base() {
 
 	if [ -n "$acs_rank_en" ]; then
 		append base_cfg "acs_rank_en=$acs_rank_en" "$N"
+	fi
+
+	if [ -n "$dcs_channel_penalty" ]; then
+		append base_cfg "dcs_channel_penalty=$dcs_channel_penalty" "$N"
 	fi
 
 	if [ -n "$acs_6g_only_psc" ]; then
