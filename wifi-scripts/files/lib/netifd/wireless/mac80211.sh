@@ -522,7 +522,8 @@ drv_mac80211_init_iface_config() {
 	config_add_string monitor_flags
 	config_add_int tx_monitor
 	config_add_boolean smd_ap smd_ptk_mode smd_dl_data_fwd
-	config_add_string 'smd_identifier:macaddr' 'smd_partner:macaddr'
+	config_add_string 'smd_identifier:macaddr'
+	config_add_array smd_partner
 	config_add_int smd_timeout smd_max_peer_apmlds smd_dl_drain_time
 	config_add_boolean mapc_cotdma_enable
 }
@@ -1580,6 +1581,12 @@ mac80211_wds_support_check() {
 	echo "$wds_support"
 }
 
+append_smd_partner() {
+	local partner="$1"
+
+	[ -n "$partner" ] || return 0
+	append hostapd_cfg "smd_partner=$partner" "$N"
+}
 
 mac80211_hostapd_setup_bss() {
 	local phy="$1"
@@ -1610,7 +1617,8 @@ mac80211_hostapd_setup_bss() {
 	local _rnr
 	json_get_var _rnr skip_uhr_extn_in_rnr
 	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
-	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_partner smd_dl_drain_time
+	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_dl_drain_time
+	json_for_each_item append_smd_partner smd_partner
 	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
 	json_get_vars mapc_cotdma_enable
 
@@ -1690,9 +1698,6 @@ mac80211_hostapd_setup_bss() {
 		append hostapd_cfg "smd_ap=$smd_ap" "$N"
 	fi
 
-	if [ -n "$smd_partner" ]; then
-		append hostapd_cfg "smd_partner=$smd_partner" "$N"
-	fi
 
 	if [ -n "$smd_identifier" ]; then
 		append hostapd_cfg "smd_identifier=$smd_identifier" "$N"
