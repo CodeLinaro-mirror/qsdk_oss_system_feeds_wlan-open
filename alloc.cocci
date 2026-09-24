@@ -79,3 +79,8 @@ struct p1 *p;
 -p = (struct p1 *) kzalloc(E1,E2);
 +p = (struct p1 *) kzalloc(E1,E2,p1);
 
+@@
+expression E1, E2;
+@@
+-kfree_rcu(E1,E2);
++ath_kfree_rcu(E1,E2);
