@@ -223,6 +223,7 @@ chan_util_avg_period=
 use_driver_vendor_addr=
 athnewind=
 skip_cac=
+force_bw=
 uplink_csa=
 sta_dfs_en=
 rptr_mgr_mode=
@@ -440,7 +441,8 @@ ubus_call() {
 		ignorecac \
 		skip_cac \
 		rptr_allow_chan_sw \
-		uplink_csa
+		uplink_csa \
+		force_bw
 	config_add_string CSwOpts acs_block_chan_list
 	config_add_int cac_timeout bgcac_timeout
 	config_add_int chan_coex_disable
@@ -2921,7 +2923,7 @@ mac80211_setup_supplicant() {
 	[ "$auto_channel" -gt 0 ] && channel=0
 
 	if [ "$mode" = "sta" ]; then
-		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa" "$CSwOpts"
+		wpa_supplicant_add_network "$ifname" "$athnewind" "$rptr_mgr_mode" "$channel" "$is_uplink_csa" "$CSwOpts" "$force_bw"
 	else
 		wpa_supplicant_add_network "$ifname" "$freq" "$htmode" "$hostapd_noscan" "$ru_punct_bitmap" "$disable_csa_dfs" "$ccfs"
 	fi
@@ -3221,7 +3223,7 @@ drv_mac80211_setup() {
 		frag rts beacon_int:100 htmode \
 		num_global_macaddr:1 multiple_bssid \
 		eht_ulmumimo_80mhz eht_ulmumimo_160mhz eht_ulmumimo_320mhz \
-		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en \
+		ccfs disable_csa_dfs ru_punct_bitmap sta_dfs_en force_bw \
 		cac_timeout bgcac_timeout \
 		chan_coex_disable \
 		blockdfslist
