@@ -309,6 +309,8 @@ do_install:append:echo() {
 	fi
 	install -d ${D}/lib/firmware/ath12k/QCN9625/hw1.0
 	install -d ${D}/lib/firmware/ath12k/QCN9589/hw1.0
+	install -d ${D}/lib/firmware/qcn9625
+	install -d ${D}/lib/firmware/qcn9589
 	for f in ${ATH12K_FW_FILES}; do
 		ln -snf /firmware/image/qcn9625/$f ${D}/lib/firmware/ath12k/QCN9625/hw1.0/$f
 		ln -snf /firmware/image/qcn9589/$f ${D}/lib/firmware/ath12k/QCN9589/hw1.0/$f
@@ -442,6 +444,10 @@ FILES:${PN}-firmware-ath11k = " \
 FILES:${PN}-firmware-ath12k = " \
 	${nonarch_base_libdir}/firmware/ath12k/* \
 	${nonarch_base_libdir}/firmware/qcn9224 \
+"
+FILES:${PN}-firmware-ath12k:append:echo = " \
+	${nonarch_base_libdir}/firmware/qcn9625 \
+	${nonarch_base_libdir}/firmware/qcn9589 \
 "
 
 FILES:${PN}-dev = " \
