@@ -580,7 +580,7 @@ mlo_add_link() {
 		end_string='"section": "${select_iface}"'
 		start_index=$(echo "$data" | awk -v pat="$start_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
 		end_index=$(echo "$data" | awk -v pat="$end_string" 'BEGIN{IGNORECASE=1} index($0,pat) {print index($0,pat)}')
-		m_data="${data:0:start_index}${data:end_index}"
+		m_data=$(echo "$data" | awk -v s="$start_index" -v e="$end_index" '{print substr($0,1,s-1) substr($0,e)}')
 		data="$m_data"
 		data=$(echo "$data" | sed -e "s/\"section\": \"${select_iface}\"/\"bridge\": \"br-lan\", \"bridge_ifname\": \"br-lan\"/")
 		data=$(echo "$data" | sed -e 's/\[\ ]/{ }/g' -e 's/"stations"/"stas"/g')
