@@ -44,8 +44,12 @@ boot()
 update_ath12k_module_parameters()
 {
 	ath12k_config_file="/etc/modules.d/ath12k"
+	if [ ! -e "$ath12k_config_file" ]; then
+		ath12k_config_file="/etc/modules.d/ath12k-noextns"
+	fi
+
 	[ ! -e "$ath12k_config_file" ] && {
-		echo "Error: ath12k config file not found at $ath12k_config_file" > /dev/console
+		echo "Error: ath12k module config file not found" > /dev/console
 		return
 	}
 
