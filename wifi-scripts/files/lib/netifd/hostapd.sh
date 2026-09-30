@@ -2065,7 +2065,7 @@ wpa_supplicant_add_network() {
 		default_disabled dpp \
 		ppe_vp \
 		ssid_protection \
-		extap extap_max_clients \
+		extap \
 		scan_freq bgscan bgscan_freq \
 		sae_password_id \
 		sae_password_id_change \
@@ -2197,8 +2197,6 @@ wpa_supplicant_add_network() {
 		        }
 		}
 		[ "$extap" = "1" ] && append network_data "extap_mode=1" "$N$T"
-		[ "$extap" = "1" ] && [ "$extap_max_clients" -gt 0 ] 2>/dev/null && \
-			append network_data "extap_max_clients=$extap_max_clients" "$N$T"
 		[ "$default_disabled" = 1 ] && append network_data "disabled=1" "$N$T"
 		[ "$wds_ie" = "1" ] && append network_data "wds_ie=1" "$N$T"
 		[ "$allow_3addr_mc" = "1" ] && append network_data "allow_3addr_mc=1" "$N$T"
