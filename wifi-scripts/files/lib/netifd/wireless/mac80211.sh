@@ -485,7 +485,7 @@ ubus_call() {
 	config_add_int cac_timeout bgcac_timeout
 	config_add_int chan_coex_disable
 	config_add_boolean blockdfslist
-	config_add_boolean disable_iface_during_cac
+	config_add_boolean disable_bootup_cac_feature
 	config_add_boolean atfstrictsched
 	config_add_boolean downgrade_320mhz_opclass
 	config_add_boolean enable_link_id
@@ -826,7 +826,6 @@ mac80211_hostapd_setup_base() {
 	[ -n "$acs_retry_count" ] && append base_cfg "acs_scan_retry_max_count=$acs_retry_count" "$N"
 
 	json_get_vars noscan ht_coex min_tx_power:0 tx_burst disable_csa_dfs use_ru_puncture_dfs uplink_csa CSwOpts rptr_allow_chan_sw
-	json_get_vars disable_iface_during_cac
 	json_get_values ht_capab_list ht_capab
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
@@ -853,7 +852,6 @@ mac80211_hostapd_setup_base() {
 	fi
 
 	set_default noscan 0
-	set_default disable_iface_during_cac 0
 
 	[ "$noscan" -gt 0 ] && hostapd_noscan=1
 	[ "$tx_burst" = 0 ] && tx_burst=
@@ -1434,7 +1432,8 @@ mac80211_hostapd_setup_base() {
 	[ -n "$disable_csa_dfs" ] && append base_cfg "disable_csa_dfs=$disable_csa_dfs" "$N"
 	[ -n "$uplink_csa" ] && append base_cfg "uplink_csa=$uplink_csa" "$N"
 	[ -n "$CSwOpts" ] && append base_cfg "CSwOpts=$CSwOpts" "$N"
-	[ -n "$disable_iface_during_cac" ] && append base_cfg "disable_iface_during_cac=$disable_iface_during_cac" "$N"
+	config_get disable_bootup_cac_feature mac80211 disable_bootup_cac_feature 0
+	[ -n "$disable_bootup_cac_feature" ] && append base_cfg "disable_bootup_cac_feature=$disable_bootup_cac_feature" "$N"
 	[ -n "$discard_6g_awgn_event" ] && append base_cfg "discard_6g_awgn_event=$discard_6g_awgn_event" "$N"
 	[ -n "$atfstrictsched" ] && append base_cfg "atfstrictsched=$atfstrictsched" "$N"
 	[ -n "$downgrade_320mhz_opclass" ] && append base_cfg "downgrade_320mhz_opclass=$downgrade_320mhz_opclass" "$N"
