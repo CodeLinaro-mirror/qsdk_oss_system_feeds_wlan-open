@@ -118,7 +118,6 @@ function wiphy_detect() {
 			else
 				continue;
 			bands[band_name] = band_info;
-			band_info.freqs = band.freqs;
 			if (band.ht_capa > 0)
 				band_info.ht = true;
 			if (band.vht_capa > 0)

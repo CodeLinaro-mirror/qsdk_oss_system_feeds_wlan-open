@@ -2043,18 +2043,18 @@ mac80211_get_band_name() {
 	freq1=$1
 	freq2=$2
 
-	if [ "$freq1" -gt 2300 ] && [ "$freq2" -lt 2800 ]; then
+	if [ "$freq1" -gt 2400 ] && [ "$freq2" -lt 2495 ]; then
 		band_name=2g
-	elif [ "$freq1" -gt 5100 ] && [ "$freq2" -le 5900 ]; then
-		if [ "$freq1" -gt 5100 ] && [ "$freq2" -le 5400 ]; then
+	elif [ "$freq1" -gt 5100 ] && [ "$freq2" -lt 5900 ]; then
+		if [ "$freq1" -gt 5100 ] && [ "$freq2" -lt 5400 ]; then
 			band_name=5gl
-		elif [ "$freq1" -gt 5400 ] && [ "$freq2" -le 5900 ]; then
+		elif [ "$freq1" -gt 5400 ] && [ "$freq2" -lt 5900 ]; then
 			band_name=5gh
 		else
 			band_name=5g
 		fi
-	elif [ "$freq1" -gt 5900 ] && [ "$freq2" -le 7200 ]; then
-		if [ "$freq1" -gt 5900 ] && [ "$freq2" -le 6425 ]; then
+	elif [ "$freq1" -gt 5900 ] && [ "$freq2" -lt 7200 ]; then
+		if [ "$freq1" -gt 5900 ] && [ "$freq2" -lt 6425 ]; then
 			band_name=6gl
 		elif [ "$freq1" -gt 6500 ] && [ "$freq2" -lt 7200 ]; then
 			band_name=6gh
@@ -3391,54 +3391,45 @@ drv_mac80211_setup() {
 
 	Update_channel_list() {
 		local start_freq end_freq start_chan end_chan band_num band_cfg
-		local radio radio_start_freq radio_end_freq phy_info frequencies
+		local radio phy_info
 		local device_name=$1
 		start_chan=0
 		end_chan=0
 		start_freq=
 		end_freq=
-		radio_start_freq=
-		radio_end_freq=
 		phy_info="$(iw $phy info)"
 
+		# For multi-radio wiphy, use per-radio frequency range.
 		if [ "$is_wiphy_multi_radio" -eq 1 ]; then
 			radio=$(uci get wireless.$device_name.radio)
-			radio_start_freq=$(echo "$phy_info" | awk -v radio="$radio" '
-				$1 == "*" && $2 == "Idx" && $3 == radio ":" { in_radio=1; next }
-				in_radio && /Frequency Range:/ { print $3; exit }
+			start_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $3}')
+			start_freq=$((start_freq+10))
+			end_freq=$(iw $phy info | grep -A 2 "Idx $radio:" | grep "Frequency Range:" | awk '{print $6}')
+			end_freq=$((end_freq-10))
+		else
+			# For single radio wiphy, derive channel range from
+			# the Frequencies: list in iw phy info output
+			config_get band_cfg "$device_name" band
+			# Map band name to Band N number used in iw phy info output
+			case "$band_cfg" in
+				2g)           band_num=1 ;;
+				5g|5gl|5gh)   band_num=2 ;;
+				60g)          band_num=3 ;;
+				6g|6gl|6gh)   band_num=4 ;;
+				*) return ;;
+			esac
+			# Collect all non-disabled frequencies from the matching Band N block.
+			# int($2) strips the decimal from float values of frequencies like "5180.0"
+			local Frequencies
+			Frequencies=$(echo "$phy_info" | awk -v band_num="$band_num" '
+				$1 == "Band" && $2 == (band_num ":") { in_band=1; next }
+				$1 == "Band"                          { in_band=0; in_freq=0 }
+				in_band && $1 == "Frequencies:"       { in_freq=1; next }
+				in_freq && $2+0 > 0 && $0 !~ /disabled/ { print int($2) }
 			')
-			radio_end_freq=$(echo "$phy_info" | awk -v radio="$radio" '
-				$1 == "*" && $2 == "Idx" && $3 == radio ":" { in_radio=1; next }
-				in_radio && /Frequency Range:/ { print $6; exit }
-			')
+			start_freq=$(echo "$Frequencies" | head -1)
+			end_freq=$(echo "$Frequencies"   | tail -1)
 		fi
-
-		config_get band_cfg "$device_name" band
-		case "$band_cfg" in
-			2g)           band_num=1 ;;
-			5g|5gl|5gh)   band_num=2 ;;
-			60g)          band_num=3 ;;
-			6g|6gl|6gh)   band_num=4 ;;
-			*) return ;;
-		esac
-
-		# Collect enabled frequencies from the matching Band block, filtered to
-		# this radio's hardware range for multi-radio setups.
-		frequencies=$(echo "$phy_info" | awk \
-			-v band_num="$band_num" \
-			-v min_freq="${radio_start_freq:-0}" \
-			-v max_freq="${radio_end_freq:-999999}" '
-			$1 == "Band" && $2 == (band_num ":") { in_band=1; in_freq=0; next }
-			$1 == "Band"                          { in_band=0; in_freq=0 }
-			in_band && $1 == "Frequencies:"       { in_freq=1; next }
-			in_freq && $2+0 > 0 && $0 !~ /disabled/ {
-				freq = int($2)
-				if (freq >= min_freq && freq <= max_freq)
-					print freq
-			}
-		')
-		start_freq=$(echo "$frequencies" | head -1)
-		end_freq=$(echo "$frequencies"   | tail -1)
 
 		[ -z "$start_freq" ] || [ -z "$end_freq" ] && return
 		start_chan=$(mac80211_freq_to_channel $start_freq)
