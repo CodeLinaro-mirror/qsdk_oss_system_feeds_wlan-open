@@ -67,7 +67,11 @@ function iface_start(wdev)
 	if (wdev.is_multi_radio != null) {
 		if (wdev.mode == "monitor") {
 			if (wdev.center_freq) {
-				system(`iw dev ${ifname} set freq ${wdev.freq} ${wdev.bw} ${wdev.center_freq} punct ${wdev.punct}`);
+				if (wdev.punct) {
+					system(`iw dev ${ifname} set freq ${wdev.freq} ${wdev.bw} ${wdev.center_freq} punct ${wdev.punct}`);
+				} else {
+					system(`iw dev ${ifname} set freq ${wdev.freq} ${wdev.bw} ${wdev.center_freq} punct 0`);
+				}
 			} else {
 				system(`iw dev ${ifname} add freq ${wdev.freq} ${wdev.bw}`);
 			}
