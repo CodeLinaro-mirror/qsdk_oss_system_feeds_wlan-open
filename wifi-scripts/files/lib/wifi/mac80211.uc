@@ -16,6 +16,23 @@ let board = json(readfile("/etc/board.json"));
 if (!board.wlan)
 	exit(0);
 
+/* Sort board.wlan so that single-radio phys (platform/2G) are processed
+ * before multi-radio phys (PCI).  Without this, the idx counter assignment
+ * depends on JSON key order, which changes every time cfg80211 assigns new
+ * sequential phy numbers after rmmod/insmod — causing radio0_band0/radio1
+ * to swap on successive module reloads. */
+let wlan_keys = sort(keys(board.wlan), (a, b) => {
+	let a_multi = board.wlan[a].multi_radio ? 1 : 0;
+	let b_multi = board.wlan[b].multi_radio ? 1 : 0;
+	if (a_multi != b_multi)
+		return a_multi - b_multi;
+	let a_path = board.wlan[a].path ?? "";
+	let b_path = board.wlan[b].path ?? "";
+	if (a_path != b_path)
+		return a_path < b_path ? -1 : 1;
+	return a < b ? -1 : (a > b ? 1 : 0);
+});
+
 let idx = 0;
 let commit;
 let sysupgrade = false;
@@ -68,9 +85,11 @@ function radio_exists(path, macaddr, phy) {
 		if (s[".type"] != "wifi-device")
 			continue;
 
-		/* For multi-radio case: if we find any radio0_bandX device, */
-		/* it means this phy has already been processed */
-		if (match(name, /^radio[0-9]+_band[0-9]+$/)) {
+		/* For multi-radio case: match by path so that a reloaded phy with
+		 * new cfg80211 phy number is not confused with the stale radioN_bandX
+		 * entries left over from the previous load. */
+		if (match(name, /^radio[0-9]+_band[0-9]+$/) &&
+		    path && s.path && substr(s.path, -length(path)) == path) {
 			return true;
 		}
 
@@ -97,7 +116,8 @@ function get_band(freq) {
 	return band_name;
 }
 
-function get_channel_list_for_range(band, start_freq, end_freq) {
+function get_channel_list_for_range(band, start_freq, end_freq,
+					     include_disabled) {
 	let first_channel = 0;
 	let last_channel = 0;
 
@@ -105,7 +125,7 @@ function get_channel_list_for_range(band, start_freq, end_freq) {
 		if (freq.freq < start_freq || freq.freq > end_freq)
 			continue;
 
-		if (freq.disabled)
+		if (!include_disabled && freq.disabled)
 			continue;
 
 		let channel = freq_to_channel(freq.freq);
@@ -338,7 +358,7 @@ function translate_proprietary_to_ath_ud() {
 					/* Calculate channels from enabled frequencies in this radio's range */
 					let band = phy.info.bands[band_name];
 					let channels = get_channel_list_for_range(band,
-						radio_idx.first_freq, radio_idx.last_freq);
+						radio_idx.first_freq, radio_idx.last_freq, false);
 
 					radio_map[band_num] = {
 						path: phy.path,
@@ -579,17 +599,25 @@ function generate_config(info, name, single_wiphy, id, radio_idx, is_scan) {
 	if (single_wiphy) {
 		let start_freq = radio_idx.first_freq;
 		let end_freq = radio_idx.last_freq;
-		channels = get_channel_list_for_range(band, start_freq, end_freq);
+		channels = get_channel_list_for_range(band, start_freq, end_freq, false);
+
+		/*
+		 * Keep the hardware channel range when the current regulatory
+		 * domain disables the complete band.
+		 */
+		if (!channels)
+			channels = get_channel_list_for_range(band, start_freq,
+							      end_freq, true);
+
+		let first_chan = channels ? int(split(channels, "-")[0]) : freq_to_channel(radio_idx.first_freq);
 		if (band_name == "6G") {
-			let start_freq = radio_idx.first_freq;
-			if (freq_to_channel(start_freq) >= 129)
+			if (first_chan >= 129)
 				channel = 197;
 			else
 				channel = 49;
 		}
 		if (band_name == "5G") {
-			let start_freq = radio_idx.first_freq;
-			if (freq_to_channel(start_freq) == 36)
+			if (first_chan > 0 && first_chan <= 64)
 				channel = 36;
 			else
 				channel = 149;
@@ -679,11 +707,34 @@ function add_missing_radio_for_existing(phy, idx) {
 
 	for (let radio_name in multi_radio) {
 		let radio_idx = multi_radio[radio_name];
-		if (!radio_idx || radio_idx.idx == null)
+		if (!radio_idx || radio_idx.idx == null) {
+			hw_idx++;
 			continue;
+		}
 
-		/* Device name matches generate_config(): radio{idx}_band{hw_idx} */
-		let devname = "radio" + idx + "_band" + hw_idx;
+		/* Resolve the existing section by its stable path and band
+		 * suffix rather than constructing "radio{idx}_band{hw_idx}".
+		 * After a sort-order change idx may differ from what was used
+		 * when the config was originally written, so the constructed
+		 * name would point at the wrong (or non-existent) section. */
+		let suffix = "_band" + hw_idx;
+		let devname = null;
+		for (let existing_name, existing in config) {
+			if (existing[".type"] != "wifi-device" || !existing.path)
+				continue;
+			if (substr(existing_name, -length(suffix)) != suffix)
+				continue;
+			if (substr(existing.path, -length(phy.path)) == phy.path) {
+				devname = existing_name;
+				break;
+			}
+		}
+
+		if (!devname) {
+			hw_idx++;
+			continue;
+		}
+
 		let dev = config[devname];
 
 		if (!dev || dev[".type"] != "wifi-device") {
@@ -727,7 +778,8 @@ if (has_qca_cfg80211()) {
 	exit(0);
 }
 
-for (let phy_name, phy in board.wlan) {
+for (let phy_name in wlan_keys) {
+	let phy = board.wlan[phy_name];
 	let info = phy.info;
 	let name;
 	let single_wiphy = false;
