@@ -207,6 +207,9 @@ endif
 	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_module_add.sh $(1)/etc/init.d
+ifeq ($(CONFIG_TARGET_echo),y)
+	$(INSTALL_BIN) ./files/etc/init.d/ath12k_wifi8_deferred_load.sh $(1)/etc/init.d
+endif
 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
 	$(INSTALL_CONF) ./files/ini/internal/*.ini $(1)/ini/internal/
 ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
