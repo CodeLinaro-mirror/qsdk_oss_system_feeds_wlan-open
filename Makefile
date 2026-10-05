@@ -571,6 +571,16 @@ ifeq ($(CONFIG_TARGET_sdx85),y)
 	$(call Build/PreCompile)
 endif
 	+$(MAKE) $(PKG_JOBS) $(MAKE_OPTS) modules
+	mkdir -p "$(BIN_DIR)/debug/modules"; \
+	if [ "$(BUILD_VARIANT)" = "noextns" ]; then \
+		find "$(PKG_BUILD_DIR)" -type f -name '*.ko' \
+			-not -path '*/.pkgdir/*' -not -path '*/ipkg-*/*' \
+			-exec sh -c 'for module do module_name=$$$$(basename "$$$${module}" .ko); cp "$$$${module}" "$(BIN_DIR)/debug/modules/$$$${module_name}-noextns.ko"; done' sh {} +; \
+	else \
+		find "$(PKG_BUILD_DIR)" -type f -name '*.ko' \
+			-not -path '*/.pkgdir/*' -not -path '*/ipkg-*/*' \
+			-exec cp --target-directory="$(BIN_DIR)/debug/modules" {} +; \
+	fi
  endef
 endif
 
