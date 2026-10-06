@@ -2017,12 +2017,14 @@ find_phy() {
 	return 1
 }
 
-mac80211_recovery_in_progress() {
+mac80211_accept_cmd() {
 	local f
-	for f in /sys/kernel/debug/ath12k/*/recovery_in_progress; do
-		[ -f "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "1" ] && return 0
+	# accept_cmd reads 0 when bypass/SSR is in progress (commands blocked),
+	# 1 when the group is idle. Return 1 (busy) when any chip reads 0.
+	for f in /sys/kernel/debug/ath12k/*/accept_cmd; do
+		[ -f "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "0" ] && return 1
 	done
-	return 1
+	return 0
 }
 
 mac80211_check_ap() {
@@ -3300,8 +3302,8 @@ drv_mac80211_setup() {
 		return 1
 	}
 
-	mac80211_recovery_in_progress && {
-		echo "ath12k recovery in progress; deferring setup for $phy"
+	mac80211_accept_cmd || {
+		echo "ath12k bypass/SSR in progress; deferring setup for $phy"
 		wireless_set_retry 1
 		return 1
 	}
