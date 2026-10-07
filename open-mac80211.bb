@@ -143,9 +143,25 @@ do_cp_headers() {
 	install -m 0644 ${QCA_VENDOR_HEADER} ${S}/drivers/net/wireless/ath/ath12k/qca-vendor.h
 }
 
+def get_soc_target(d):
+    machine = d.getVar('MACHINE')
+    if not machine:
+        return d.getVar('BASEMACHINE') or ''
 
-# Strip _64/_32 suffix from MACHINE so it matches CONFIG_TARGET_* names in ath.mk
-SOC_TARGET = "${@d.getVar('MACHINE').split('_64')[0].split('_32')[0] if d.getVar('MACHINE') else d.getVar('BASEMACHINE')}"
+    soc_targets = (
+        'ipq807x', 'ipq60xx', 'ipq50xx', 'ipq95xx', 'ipq53xx',
+        'ipq54xx', 'ipq52xx', 'ipq96xx',
+    )
+
+    for soc in soc_targets:
+        if machine == soc or machine.startswith(soc + '_') or machine.startswith(soc + '-'):
+            return soc
+
+    return machine
+
+# Derive the ath.mk CONFIG_TARGET_* value from MACHINE profile names.
+SOC_TARGET = "${@get_soc_target(d)}"
+SOC_TARGET[vardeps] += "MACHINE BASEMACHINE"
 POKY_DIR = ""
 POKY_DIR:echo = "poky/"
 do_configure[vardeps] += "CONFIG_KERNEL_IPQ_MEM_PROFILE SOC_TARGET"
