@@ -124,10 +124,39 @@ mac80211_update_mld_configs() {
 	done
 }
 
+update_ini_file() {
+	local key="$1"
+	local val="$2"
+	local ini_path="/ini"
+	[ -f "${ini_path}/global.ini" ] || return
+	if grep -q "^${key}=" "${ini_path}/global.ini"; then
+		sed -i "s|^${key}=.*|${key}=${val}|" "${ini_path}/global.ini"
+	else
+		echo "${key}=${val}" >> "${ini_path}/global.ini"
+	fi
+	sync
+}
+
+_get_carrier_profile_config() {
+	local dev="$1"
+	local val
+	config_get val "$dev" carrier_profile_config
+	[ -n "$val" ] && _carrier_profile_config="$val"
+}
+
 mlo_add_flag=0
 [ -f /tmp/mlo_support.txt ] && mlo_add_flag=$(cat /tmp/mlo_support.txt)
 if [ $mlo_add_flag -eq 0 ]; then
 	mac80211_update_mld_configs
+
+	# Update carrier_profile_config in global.ini from wireless config
+	_carrier_profile_config=""
+	config_load wireless
+	config_foreach _get_carrier_profile_config wifi-device
+	if [ -n "$_carrier_profile_config" ]; then
+		update_ini_file carrier_profile_config "$_carrier_profile_config"
+	fi
+
 	init_wireless_driver "$@"
 fi
 
