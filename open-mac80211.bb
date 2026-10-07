@@ -182,7 +182,7 @@ def get_mem_cfg_flags(d):
     base = os.path.join(topdir, srcprefix, pokyprefix,
                         'meta-ipq/recipes-kernel/linux/linux-ipq')
     if base_machine == 'echo':
-        mem_file = 'ipq_mem_sdx'
+        mem_file = 'sdx_mem_open'
     elif profile == '512':
         mem_file = 'ipq_mem_512'
     else:
@@ -206,7 +206,7 @@ do_configure:prepend() {
 	mem_cfg_dir="${TOPDIR}/${SRCPREFIX}${POKY_DIR}meta-ipq/recipes-kernel/linux/linux-ipq"
 	mem_cfg_open="${mem_cfg_dir}/ipq_mem_open"
 	mem_cfg_512="${mem_cfg_dir}/ipq_mem_512"
-	mem_cfg_sdx="${mem_cfg_dir}/ipq_mem_sdx"
+	mem_cfg_sdx="${mem_cfg_dir}/sdx_mem_open"
 
 	if [ ! -f "${mem_cfg_open}" ] || [ ! -f "${mem_cfg_512}" ] || [ ! -f "${mem_cfg_sdx}" ]; then
 		bberror "Required memory profile config files are missing."
