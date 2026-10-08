@@ -473,6 +473,7 @@ hostapd_common_add_bss_config() {
 
 	config_add_int control_frame_protection
 	config_add_int cip_padding_delay
+	config_add_int pmksa_privacy
 
 	config_add_string 'owe_transition_bssid:macaddr' 'owe_transition_ssid:string'
 	config_add_string owe_transition_ifname
@@ -2088,6 +2089,7 @@ wpa_supplicant_add_network() {
 		smd_ptk_mode smd_enabled smd_id \
 		wds_ie \
 		allow_3addr_mc \
+		pmksa_privacy \
 
 	json_get_values security_profiles security_profiles
 
@@ -2498,6 +2500,8 @@ wpa_supplicant_add_network() {
 	[ -n "$control_frame_protection" ] && append network_data "control_frame_protection=$control_frame_protection" "$N$T"
 
 	[ -n "$cip_padding_delay" ] && append network_data "cip_padding_delay=$cip_padding_delay" "$N$T"
+
+	[ -n "$pmksa_privacy" ] && append network_data "pmksa_privacy=$pmksa_privacy" "$N$T"
 
 	[ -n "$security_profiles" ] && append network_data "security_profiles=$security_profiles" "$N$T"
 
