@@ -106,6 +106,19 @@ boost_performance() {
 		esac
 	done
 
+        #Enable TX checksum offload for wlan sta interfaces.
+        #Only enable if tx-checksum-ip-generic is "off" without [fixed] suffix.
+        #When [fixed] is present the capability cannot be changed, so we skip it.
+        for iface in $interfaces; do
+                case "$iface" in
+                        *.sta*)
+                                if ethtool -k "$iface" 2>/dev/null | grep -q "tx-checksum-ip-generic: off$"; then
+                                        ethtool -K "$iface" tx-checksumming on
+                                fi
+                                ;;
+                esac
+        done
+
 	echo "performance" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 	echo "performance" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
 	echo "performance" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
