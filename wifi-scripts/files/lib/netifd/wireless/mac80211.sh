@@ -492,7 +492,7 @@ drv_mac80211_init_iface_config() {
 
 	config_add_boolean wds powersave enable
 	config_add_string wds_bridge mld
-	config_add_int maxassoc
+	config_add_int maxassoc extap_max_clients
 	config_add_int max_listen_int
 	config_add_int dtim_period
 	config_add_int start_disabled
@@ -506,6 +506,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean he_mcs_12_13_supp
 	config_add_boolean wds_ie
 	config_add_boolean allow_3addr_mc
+	config_add_boolean extap
 	config_add_boolean enable_epcs
 	config_add_boolean enable_scs
 	config_add_boolean ttlm_enable
@@ -2803,8 +2804,11 @@ wpa_supplicant_add_interface() {
 	json_add_string config "$_config"
 	[ -n "$default_macaddr" ] || json_add_string macaddr "$macaddr"
 	[ -n "$network_bridge" ] && json_add_string bridge "$network_bridge"
-	[ -n "$wds" ] && json_add_boolean 4addr "$wds"
-	[ -n "$wds_ie" ] && json_add_boolean 4addr "$wds_ie"
+	# For ExtAP, don't set 4addr mode - ExtAP uses 3-address mode
+	if [ "$extap" != "1" ]; then
+		[ -n "$wds" ] && json_add_boolean 4addr "$wds"
+		[ -n "$wds_ie" ] && json_add_boolean 4addr "$wds_ie"
+	fi
 	json_add_boolean powersave "$powersave"
 	[ "$mode" = "mesh" ] && mac80211_add_mesh_params
 	json_close_object
@@ -2981,7 +2985,7 @@ mac80211_setup_vif() {
 	json_get_var ifname _ifname
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
-	json_get_vars mode wds powersave mld ssid vap_submode monitor_flags
+	json_get_vars mode wds extap extap_max_clients powersave mld ssid vap_submode monitor_flags
 
 	if mac80211_mlo_link_disabled "$mld" "$device"; then
 		json_select ..
@@ -2995,6 +2999,8 @@ mac80211_setup_vif() {
 
 	set_default powersave 0
 	set_default wds 0
+	set_default extap 0
+	set_default extap_max_clients 0
 
 	case "$mode" in
 		mesh)
@@ -3161,7 +3167,7 @@ mac80211_update_is_repeater_flag() {
 
 		__scan_iface() {
 			local iface="$1"
-			local if_device mode if_disabled ssid
+			local if_device mode if_disabled ssid extap
 
 			config_get if_device "$iface" device
 			[ "$if_device" != "$dev" ] && return 0
@@ -3178,6 +3184,9 @@ mac80211_update_is_repeater_flag() {
 					ap_ssid="$ssid"
 					;;
 				sta)
+					config_get extap "$iface" extap 0
+					# Skip STA VAPs with ExtAP enabled from repeater detection
+					[ "$extap" -eq 1 ] && return 0
 					sta=1
 					sta_ssid="$ssid"
 					;;
