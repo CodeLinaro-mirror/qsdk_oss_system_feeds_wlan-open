@@ -426,8 +426,18 @@ do_install:append() {
 	install -m 0644 ${WORKDIR}/etc/modprobe.d/ath12k_wifi6.conf ${D}${sysconfdir}/modprobe.d/ath12k_wifi6.conf
 	install -m 0755 ${WORKDIR}/lib/boost_performance.sh ${D}${nonarch_base_libdir}/boost_performance.sh
 
-    install -d ${D}/lib/functions
-    install -m 0755 ${WORKDIR}/rdk_init_helper.sh ${D}/lib/functions/rdk_init_helper.sh
+	install -d ${D}/lib/functions
+	install -m 0755 ${WORKDIR}/rdk_init_helper.sh ${D}/lib/functions/rdk_init_helper.sh
+
+	# Install SAWF service definitions consumed by the RDK OneWiFi helper.
+	install -d ${D}/lib/wifi/sawf
+	install -d ${D}/lib/wifi/sawf/telemetry
+	install -m 0644 ${WORKDIR}/lib/wifi/def_service_classes.json ${D}/lib/wifi/sawf/
+	install -m 0644 ${WORKDIR}/lib/wifi/service_classes.json ${D}/lib/wifi/sawf/
+	# Keep SAWF telemetry JSONs packaged with the service-class database.
+	install -m 0644 ${WORKDIR}/lib/wifi/telemetry/config.json ${D}/lib/wifi/sawf/telemetry/
+	install -m 0644 ${WORKDIR}/lib/wifi/telemetry/sla.json ${D}/lib/wifi/sawf/telemetry/
+	install -m 0644 ${WORKDIR}/lib/wifi/telemetry/sla_detect.json ${D}/lib/wifi/sawf/telemetry/
 }
 
 
@@ -499,6 +509,8 @@ RDEPENDS:${PN}:remove:echo = " \
 
 FILES:${PN} += "/ini/* /ini/internal/*"
 FILES:${PN} += "/lib/functions/rdk_init_helper.sh"
+# Ship the SAWF runtime files installed above in the open-mac80211 package.
+FILES:${PN} += "/lib/wifi/sawf/* /lib/wifi/sawf/telemetry/*"
 
 FILES:${PN} += "${sysconfdir}/modprobe.d/ath12k.conf"
 FILES:kernel-module-ath12k-wifi8 += "${sysconfdir}/modprobe.d/ath12k_wifi8.conf"
