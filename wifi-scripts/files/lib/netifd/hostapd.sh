@@ -2016,12 +2016,12 @@ wpa_supplicant_set_fixed_freq() {
 
 wpa_supplicant_htmode_sta_max_bw() {
 	case "$1" in
-		EHT320) echo 320;;
-		EHT160) echo 160;;
+		UHR320|EHT320) echo 320;;
+		UHR160|EHT160) echo 160;;
 		*80P80) echo 160;;
-		EHT80)  echo 80;;
-		EHT40*|EHT40) echo 40;;
-		EHT20)  echo 20;;
+		UHR80|EHT80) echo 80;;
+		UHR40|EHT40*) echo 40;;
+		UHR20|EHT20) echo 20;;
 		HT40*|VHT40|VHT80|VHT160|HE40|HE80|HE160) echo 40;;
 		NOHT|HT20|VHT20|HE20) echo 20;;
 	esac
