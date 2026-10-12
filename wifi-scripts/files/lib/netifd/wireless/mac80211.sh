@@ -551,6 +551,7 @@ drv_mac80211_init_iface_config() {
 
 	#uhr_config
 	config_add_int uhr_adv_notification_interval uhr_update_in_tim_interval
+	config_add_int uhr_post_notification_interval
 	config_add_boolean skip_uhr_extn_in_rnr
 
 	#monitor
@@ -1656,7 +1657,7 @@ mac80211_hostapd_setup_bss() {
 	json_get_vars unsol_bcast_presp fils_discovery
 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs deferred_scs enable_dscp_policy_capa he_mcs_12_13_supp wds_ie
 	json_get_vars commitatf atfssidsched atfssidgroup
-	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval
+	json_get_vars uhr_adv_notification_interval uhr_update_in_tim_interval uhr_post_notification_interval
 	local _rnr
 	json_get_var _rnr skip_uhr_extn_in_rnr
 	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
@@ -1811,6 +1812,9 @@ mac80211_hostapd_setup_bss() {
 				append hostapd_cfg "uhr_adv_notification_interval=$uhr_adv_notification_interval" "$N"
 			[ -n "$uhr_update_in_tim_interval" ] && \
 				append hostapd_cfg "uhr_update_in_tim_interval=$uhr_update_in_tim_interval" "$N"
+			case "$uhr_post_notification_interval" in
+				[0-7]) append hostapd_cfg "uhr_post_notification_interval=$uhr_post_notification_interval" "$N" ;;
+			esac
 		;;
 		esac
 
