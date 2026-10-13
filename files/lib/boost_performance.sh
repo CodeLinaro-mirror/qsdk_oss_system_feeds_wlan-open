@@ -71,8 +71,12 @@ boost_performance() {
 	#Increase Max skb recycler buffer count per CPU pool
 	echo "16384" > /proc/net/skb_recycler/max_skbs
 
-	#Reduce Max skb recycler buffer count per CPU pool for 256M or 512M profile to 2048.
-	[ -e /proc/device-tree/MP_256 ] || [ -e /proc/device-tree/MP_512 ] && echo "2048" > /proc/net/skb_recycler/max_skbs
+	#Reduce Max skb recycler buffer count per CPU pool for 256M/512M/runtime "balanced" or "optimized" mem-profile to 2048.
+	if [ -e /proc/device-tree/MP_256 ] || \
+	   [ -e /proc/device-tree/MP_512 ] || \
+	   ( [ -f /etc/mem-profile ] && grep -qxE 'balanced|optimized' /etc/mem-profile ); then
+		echo "2048" > /proc/net/skb_recycler/max_skbs
+	fi
 
 	#Reduce max skb of core-3 to 256 and max_spare_skb to 64.
 	echo "256" > /proc/net/skb_recycler/cpu3/max_skb
