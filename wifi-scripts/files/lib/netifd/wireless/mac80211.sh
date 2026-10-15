@@ -474,6 +474,8 @@ ubus_call() {
 		skip_uhr_extn_in_bcn \
 		skip_uhr_extn_in_rnr \
 		skip_uhr_extn_in_probe_resp \
+		elr_tx \
+		elr_rx \
 		disable_csa_dfs \
 		discard_6g_awgn_event \
 		ignorecac \
@@ -560,6 +562,7 @@ drv_mac80211_init_iface_config() {
 	#uhr_config
 	config_add_int uhr_adv_notification_interval uhr_adv_notification_duration_ms uhr_update_in_tim_interval
 	config_add_boolean skip_uhr_extn_in_rnr
+	config_add_boolean elr_tx elr_rx
 
 	#monitor
 	config_add_string monitor_flags
@@ -830,6 +833,7 @@ mac80211_hostapd_setup_base() {
 	json_get_values channel_list channels
 	json_get_values acs_freq_list acs_freq_list
 	json_get_vars disable_eml_cap skip_uhr_extn_in_bcn skip_uhr_extn_in_probe_resp skip_uhr_extn_in_rnr discard_6g_awgn_event ccfs atfstrictsched bss_load_update_period chan_util_avg_period downgrade_320mhz_opclass use_driver_vendor_addr skip_cac dcs_enable obss_snr_threshold obss_rx_snr_threshold ignorecac dcs_bw_reduction_ctrl rpt_max_phy enable_link_id mld_link_id
+	json_get_vars elr_tx elr_rx
 	json_get_vars qacs_enable acs_rank_en acs_6g_only_psc acs_wradar acsmin_dwell acsmax_dwell acs_dwelltime acs_dbgtrace acs_txpwr_opt acs_periodic_interval acs_pcac_only acs_block_chan_list dcs_channel_penalty acs_pri_sec20_penalty
 	json_get_vars npca_primary_channel npca_punct_bitmap npca_enable
 	json_get_vars cbs_enable cbs_resttime cbs_retrigger_time cbs_dwellrest cbs_waittime cbs_dwellsplit cbs_totaldwell cbs_csa_enable punc_eirp_thres_6ghz acs_enable_bw_downgrade
@@ -1673,6 +1677,11 @@ mac80211_hostapd_setup_bss() {
 	local _rnr
 	json_get_var _rnr skip_uhr_extn_in_rnr
 	_rnr="${_rnr:-$skip_uhr_extn_in_rnr}"
+	local _elr_tx _elr_rx
+	json_get_var _elr_tx elr_tx
+	json_get_var _elr_rx elr_rx
+	_elr_tx="${_elr_tx:-$elr_tx}"
+	_elr_rx="${_elr_rx:-$elr_rx}"
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_dl_drain_time
 	json_for_each_item append_smd_partner smd_partner
 	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
@@ -1844,6 +1853,10 @@ mac80211_hostapd_setup_bss() {
 			append hostapd_cfg "skip_uhr_extn_in_probe_resp=$_probe" "$N"
 		[ -n "$_rnr" ] && \
 			append hostapd_cfg "skip_uhr_extn_in_rnr=$_rnr" "$N"
+		[ -n "$_elr_tx" ] && \
+			append hostapd_cfg "bss_uhr_elr_tx=$_elr_tx" "$N"
+		[ -n "$_elr_rx" ] && \
+			append hostapd_cfg "bss_uhr_elr_rx=$_elr_rx" "$N"
 
 		if [ -n "$mld" ]; then
 			config_get mld_macaddr "$mld" mld_macaddr
