@@ -581,6 +581,7 @@ hostapd_common_add_bss_config() {
 	config_add_int pmksa_caching_privacy
 	config_add_int report_connection_failures
 	config_add_int eppke_unauth
+	config_add_int macaddr_acl
 }
 
 hostapd_set_vlan_file() {
@@ -903,7 +904,7 @@ hostapd_set_bss_options() {
 		rsnxe_capab_mask \
 		sae_pw_id_num sae_pw_id_key sae_password \
 		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
-		report_connection_failures eppke_unauth rsn_override_mlo_compat rsn_override_omit_rsnxe
+		report_connection_failures eppke_unauth rsn_override_mlo_compat rsn_override_omit_rsnxe macaddr_acl
 
 
 	json_get_values sae_groups sae_groups
@@ -1245,7 +1246,7 @@ hostapd_set_bss_options() {
 				json_for_each_item append_auth_server auth_server
 				[ -n "$ownip" ] && append bss_conf "own_ip_addr=$ownip" "$N"
 				[ -n "$radius_client_addr" ] && append bss_conf "radius_client_addr=$radius_client_addr" "$N"
-				append bss_conf "macaddr_acl=2" "$N"
+				[ -n "$macaddr_acl" ] && append bss_conf "macaddr_acl=$macaddr_acl" "$N"
 			}
 		;;
 	esac
