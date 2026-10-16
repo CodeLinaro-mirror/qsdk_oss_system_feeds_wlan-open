@@ -200,6 +200,7 @@ hostapd_common_add_device_config() {
 
 	config_add_int airtime_mode
 	config_add_int mbssid
+	config_add_boolean cck_rx_support
 
 	config_add_boolean mqtt_enabled
 	config_add_string mqtt_broker_host
@@ -850,6 +851,7 @@ hostapd_set_bss_options() {
 	local var="$1"
 	local phy="$2"
 	local vif="$3"
+	local cck_rx_5g_supp=0
 
 	wireless_vif_parse_encryption
 
@@ -906,6 +908,13 @@ hostapd_set_bss_options() {
 		sae_pw_id_num sae_pw_id_key sae_password \
 		eppk assoc_frame_encryption eap_using_authentication_frames pmksa_caching_privacy \
 		report_connection_failures eppke_unauth rsn_override_mlo_compat rsn_override_omit_rsnxe macaddr_acl
+
+	case "$band" in
+		5g|5gl|5gh)
+			[ "$cck_rx_support" = "1" ] && cck_rx_5g_supp=1
+			;;
+	esac
+	[ "$cck_rx_5g_supp" = "1" ] && append "$var" "cck_rx_5g_supp=1" "$N"
 
 
 	json_get_values sae_groups sae_groups

@@ -3268,7 +3268,7 @@ drv_mac80211_setup() {
 	json_select config
 	json_get_vars \
 		radio phy macaddr path \
-		country chanbw distance band\
+		country chanbw distance band cck_rx_support:0\
 		txpower \
 		rxantenna txantenna antenna_gain\
 		frag rts beacon_int:100 htmode \
