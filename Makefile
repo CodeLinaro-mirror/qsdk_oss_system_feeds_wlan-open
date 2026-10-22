@@ -491,9 +491,12 @@ define Build/PreCompile
 endef
 
 else
-  ifeq ($(CONFIG_TARGET_echo),y)
-  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)/ipq/telemetry_agent/inc/ -Wall"
-   MAKE_OPTS:= \
+ifeq ($(CONFIG_TARGET_echo),y)
+ifeq ($(CONFIG_PACKAGE_EXT_IPA_OFFLOAD),y)
+  C_DEFINES+= -DCPTCFG_EXT_IPA_OFFLOAD
+endif
+  EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include -I$(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/include/uapi"
+  MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
 	KLIB_BUILD="$(LINUX_DIR)" \
@@ -502,7 +505,7 @@ else
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
 	KBUILD_LDFLAGS_MODULE_PREREQ= \
 	CFLAGS="-DPLATFORM_SDX $(C_DEFINES)"
-  else
+else
   EXTRA_MAKE_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) $(C_DEFINES) -I$(STAGING_DIR)/usr/include/qca-nss-drv -I$(STAGING_DIR)/usr/include/qca-nss-ppe -I$(STAGING_DIR)/usr/include/qca-nss-clients -I$(TOPDIR)/$(WLAN_SRCPREFIX)qca-wifi/telemetry_agent/inc/ -Wall"
 
   MAKE_OPTS:= \
@@ -513,7 +516,7 @@ else
 	KLIB=$(TARGET_MODULES_DIR) \
 	KERNEL_SUBLEVEL=$(lastword $(subst ., ,$(KERNEL_PATCHVER))) \
 	KBUILD_LDFLAGS_MODULE_PREREQ=
-  endif
+endif
 endif
 
 define ConfigVars

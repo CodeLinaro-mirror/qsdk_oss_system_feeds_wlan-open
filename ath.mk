@@ -267,6 +267,7 @@ define KernelPackage/ath12k/config
 
 	config PACKAGE_EXT_IPA_OFFLOAD
 		bool "Enable IPA Offload"
+		default y if TARGET_echo
 		default n
 		depends on PACKAGE_kmod-ath12k
 		help
