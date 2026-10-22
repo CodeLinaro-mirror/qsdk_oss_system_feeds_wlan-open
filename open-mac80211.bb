@@ -153,6 +153,7 @@ def get_soc_target(d):
     soc_targets = (
         'ipq807x', 'ipq60xx', 'ipq50xx', 'ipq95xx', 'ipq53xx',
         'ipq54xx', 'ipq52xx', 'ipq96xx',
+        'echo',
     )
 
     for soc in soc_targets:
