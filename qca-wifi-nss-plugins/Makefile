@@ -38,6 +38,9 @@ else
 	  +PACKAGE_kmod-ath12k:kmod-ath12k
 endif
  FILES:=$(PKG_BUILD_DIR)/qca-wifi-nss-plugins.ko
+ifneq ($(CONFIG_TARGET_echo),y)
+ AUTOLOAD:=$(call AutoProbe,qca-wifi-nss-plugins)
+endif
 endef
 
 define KernelPackage/qca-wifi-nss-plugins/Description

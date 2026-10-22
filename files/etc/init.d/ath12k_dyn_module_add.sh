@@ -45,7 +45,15 @@ load_dynamic_modules()
 
 		ID=$(cat "$pci_dev/device" 2>/dev/null) || continue
 		if [ "xx${ID}" = "xx0x1113" ] || [ "xx${ID}" = "xx0x1114" ]; then
-			echo "ath12k_wifi8" >> "$ath12k_config_file"
+			case "$board_name" in
+				*echo*)
+					# ath12k_wifi8 is loaded later by ath12k_wifi8_deferred_load.sh
+					# once the modem/IPA uC (remoteproc0) is ready.
+					;;
+				*)
+					echo "ath12k_wifi8" >> "$ath12k_config_file"
+					;;
+			esac
 			break
 		fi
 	done
