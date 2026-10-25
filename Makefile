@@ -254,6 +254,8 @@ endef
 define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
+  AUTOLOAD:=$(call AutoProbe,mac80211)
+  MODPARAMS.mac80211:=mmeshsim=1
   # +kmod-crypto-cmac is a runtime only dependency of net/mac80211/aes_cmac.c
 ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
