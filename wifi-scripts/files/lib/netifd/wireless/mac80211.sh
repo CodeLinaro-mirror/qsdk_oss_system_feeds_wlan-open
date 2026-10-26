@@ -527,6 +527,7 @@ drv_mac80211_init_iface_config() {
 	config_add_boolean he_400ns_sgi_supp
 	config_add_boolean he_2xltf_160_80p80_supp
 	config_add_boolean mbssid_tx_bss
+	config_add_boolean vht_11ng
 
 	#atf
 	config_add_boolean commitatf
@@ -1685,7 +1686,7 @@ mac80211_hostapd_setup_bss() {
 	_elr_rx="${_elr_rx:-$elr_rx}"
 	json_get_vars smd_ap smd_identifier smd_timeout smd_dl_data smd_max_peer_apmlds smd_type smd_dl_drain_time
 	json_for_each_item append_smd_partner smd_partner
-	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp
+	json_get_vars vht_mcs_10_11_supp vht_mcs_10_11_nq2q_peer_supp he_400ns_sgi_supp he_2xltf_160_80p80_supp vht_11ng
 	json_get_vars mapc_cotdma_enable
 	json_get_vars mbssid_tx_bss
 
@@ -1809,6 +1810,10 @@ mac80211_hostapd_setup_bss() {
 
 	if [ -n "$enable_dscp_policy_capa" ]; then
 		append hostapd_cfg "enable_dscp_policy_capa=$enable_dscp_policy_capa" "$N"
+	fi
+
+	if [ -n "$vht_11ng" ]; then
+		append hostapd_cfg "vht_11ng=$vht_11ng" "$N"
 	fi
 
 	if [ -n "$vht_mcs_10_11_supp" ]; then
