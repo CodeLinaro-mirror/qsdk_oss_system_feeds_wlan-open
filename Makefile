@@ -683,13 +683,6 @@ ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	$(CP) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/qcn_extns/ipa/dp_ipa_fse.h $(STAGING_DIR)/usr/include/ipa/wifi8/
 	$(INSTALL_DIR) $(1)/lib/modules/$(UNAME_VERSION)
 	$(SIGN_KEY) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko
-ifeq ($(CONFIG_TARGET_sdx85),y)
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/ipam.ko $(1)/lib/modules/
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/gsim.ko $(1)/lib/modules/
-else ifeq ($(CONFIG_TARGET_echo),y)
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/ipa/ipam.ko $(1)/lib/modules/
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/../dataipa-1.0/drivers/platform/msm/gsi/gsim.ko $(1)/lib/modules/
-endif
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath.ko $(1)/lib/modules/$(UNAME_VERSION)
 
 	# Export ath.ko to bin/targets

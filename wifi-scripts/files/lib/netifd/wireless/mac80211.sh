@@ -501,7 +501,7 @@ drv_mac80211_init_iface_config() {
 
 	config_add_boolean wds powersave enable
 	config_add_string wds_bridge mld
-	config_add_int maxassoc extap_max_clients
+	config_add_int maxassoc
 	config_add_int max_listen_int
 	config_add_int dtim_period
 	config_add_int start_disabled
@@ -3027,7 +3027,7 @@ mac80211_setup_vif() {
 	json_get_var ifname _ifname
 	json_get_var macaddr _macaddr
 	json_get_var default_macaddr _default_macaddr
-	json_get_vars mode wds extap extap_max_clients powersave mld ssid vap_submode monitor_flags
+	json_get_vars mode wds extap powersave mld ssid vap_submode monitor_flags
 
 	if mac80211_mlo_link_disabled "$mld" "$device"; then
 		json_select ..
@@ -3042,7 +3042,6 @@ mac80211_setup_vif() {
 	set_default powersave 0
 	set_default wds 0
 	set_default extap 0
-	set_default extap_max_clients 0
 
 	case "$mode" in
 		mesh)
