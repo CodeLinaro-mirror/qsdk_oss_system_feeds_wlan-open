@@ -456,6 +456,14 @@ config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS
 
 C_DEFINES=
 
+ifndef QCN_IE
+QCN_IE := 1
+endif
+
+ifeq ($(strip $(QCN_IE)),1)
+	C_DEFINES+= -DQCN_IE=1
+endif
+
 ifeq ($(BUILD_VARIANT),smallbuffers)
 	C_DEFINES+= -DCONFIG_ATH10K_SMALLBUFFERS
 endif
