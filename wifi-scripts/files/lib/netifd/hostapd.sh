@@ -1533,6 +1533,10 @@ hostapd_set_bss_options() {
 		esac
 	fi
 
+	if [ -n "$security_profiles" ]; then
+		append bss_conf "group_mgmt_cipher=BIP-GMAC-256" "$N"
+	fi
+
 	_macfile="/var/run/hostapd-$ifname.maclist"
 	case "$macfilter" in
 		allow)
@@ -2078,8 +2082,13 @@ wpa_supplicant_add_network() {
 		smd_ptk_mode smd_enabled smd_id \
 		wds_ie \
 		allow_3addr_mc \
-		security_profiles \
 		pmksa_privacy
+
+	json_get_values security_profiles security_profiles
+
+	local security_profiles_global=
+	[ -n "$security_profiles" ] && [ "$security_profiles" -ge 0 ] 2>/dev/null && \
+		security_profiles_global="security_profiles=1"
 
 	case "$auth_type" in
 		sae*|ft-sae*|owe|eap2|eap192|eap-eap192)
@@ -2489,6 +2498,8 @@ wpa_supplicant_add_network() {
 
 	[ -n "$cip_padding_delay" ] && append network_data "cip_padding_delay=$cip_padding_delay" "$N$T"
 
+	[ -n "$security_profiles" ] && append network_data "security_profiles=$security_profiles" "$N$T"
+
 	[ -n "$pmksa_privacy" ] && append network_data "pmksa_privacy=$pmksa_privacy" "$N$T"
 
 	local ppe_vp_type=
@@ -2527,6 +2538,7 @@ ppe_vp=$ppe_vp_type
 $freq_list
 $update_config
 ignore_old_scan_res=1
+$security_profiles_global
 network={
 	$scan_ssid
 	ssid="$ssid"
